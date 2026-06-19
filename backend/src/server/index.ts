@@ -1,38 +1,82 @@
-import express from 'express';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { fileURLToPath } from 'node:url';
 
 const app = express();
 const port = Number(process.env.PORT ?? 4273);
 const appName = 'Maintenance Command Center';
 const version = '0.1.0';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
+const dataDir = path.resolve(__dirname, '../../data');
+const dbPath = path.join(dataDir, 'mcc.sqlite');
+const isProd = process.env.NODE_ENV === 'production';
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toString('hex');
+if (!process.env.SESSION_SECRET) console.warn('WARNING: SESSION_SECRET is not set. Using a temporary development secret; set SESSION_SECRET in production.');
+fs.mkdirSync(dataDir, { recursive: true });
+app.use(express.json({ limit: '50kb' }));
 
-app.get('/api/health', (_request, response) => {
-  response.json({
-    ok: true,
-    app: appName,
-    port,
-  });
-});
+type Role = 'Admin' | 'Manager' | 'Maintenance Tech 3' | 'Maintenance Tech 2' | 'Maintenance Tech 1';
+const roles: Role[] = ['Maintenance Tech 1', 'Maintenance Tech 2', 'Maintenance Tech 3', 'Manager', 'Admin'];
+const roleRank = (role: Role) => roles.indexOf(role);
+const canManageRole = (actor: Role, target: Role) => roleRank(actor) >= roleRank(target);
+const passwordOk = (p: string) => p.length >= 10 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[^A-Za-z0-9]/.test(p);
+const now = () => new Date().toISOString();
+const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-app.get('/api/version', (_request, response) => {
-  response.json({
-    app: appName,
-    version,
-    environment: process.env.NODE_ENV ?? 'local',
-  });
-});
+function sh(sql: string): string { return execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' }); }
+function esc(v: unknown): string { return String(v ?? '').replaceAll("'", "''"); }
+function all<T>(sql: string): T[] { const out = sh(sql).trim(); return out ? JSON.parse(out) as T[] : []; }
+function one<T>(sql: string): T | undefined { return all<T>(sql)[0]; }
+function run(sql: string) { execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }); }
+function initDb() {
+  run(`PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
+CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);`);
+}
+initDb();
 
+interface User { id:number; full_name:string; email:string; role:Role; password_hash:string; force_password_change:number; disabled:number; temp_password_expires_at?:string; created_by_user_id?:number; created_at:string; updated_at:string; last_login_at?:string }
+interface AuthRequest extends Request { user?: User; sessionId?: string }
+const publicUser = (u: User) => ({ id:u.id, fullName:u.full_name, email:u.email, role:u.role, forcePasswordChange:!!u.force_password_change, disabled:!!u.disabled, createdByUserId:u.created_by_user_id ?? null, createdAt:u.created_at, updatedAt:u.updated_at, lastLoginAt:u.last_login_at ?? null });
+const userCount = () => one<{count:number}>('SELECT COUNT(*) as count FROM users')?.count ?? 0;
+const findUserByEmail = (email: string) => one<User>(`SELECT * FROM users WHERE lower(email)=lower('${esc(email)}')`);
+const findUserById = (id: number) => one<User>(`SELECT * FROM users WHERE id=${Number(id)}`);
+
+function hashPassword(password: string) { const salt = crypto.randomBytes(16).toString('hex'); const hash = crypto.scryptSync(password, salt, 64).toString('hex'); return `scrypt$${salt}$${hash}`; }
+function verifyPassword(password: string, stored: string) { const [, salt, hash] = stored.split('$'); const candidate = crypto.scryptSync(password, salt, 64); return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), candidate); }
+function sign(id: string) { return `${id}.${crypto.createHmac('sha256', sessionSecret).update(id).digest('hex')}`; }
+function unsign(cookie?: string) { if (!cookie) return; const [id, sig] = cookie.split('.'); if (!id || !sig) return; return sign(id) === cookie ? id : undefined; }
+function cookie(req: Request, name: string) { return req.headers.cookie?.split(';').map(x=>x.trim()).find(x=>x.startsWith(`${name}=`))?.split('=').slice(1).join('='); }
+function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run(`INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES ('${id}',${userId},'${exp}','${now()}')`); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); }
+function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) run(`DELETE FROM sessions WHERE id='${esc(req.sessionId)}'`); res.clearCookie('mcc_session', { path: '/' }); }
+function audit(req: Request, action: string, targetType?: string, targetId?: string|number, details: Record<string, unknown> = {}) { const u = (req as AuthRequest).user; run(`INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (${u?.id ?? 'NULL'},'${esc(u?.email ?? '')}','${esc(action)}','${esc(targetType ?? '')}','${esc(targetId ?? '')}','${esc(JSON.stringify(details))}','${esc(req.ip)}','${esc(req.get('user-agent') ?? '')}','${now()}')`); }
+function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; createdBy?: number|null}) { const t=now(); run(`INSERT INTO users (full_name,email,role,password_hash,force_password_change,created_by_user_id,created_at,updated_at) VALUES ('${esc(input.fullName)}','${esc(input.email)}','${esc(input.role)}','${esc(hashPassword(input.password))}',${input.force?1:0},${input.createdBy ?? 'NULL'},'${t}','${t}')`); return findUserByEmail(input.email)!.id; }
+const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
+function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
+
+function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>(`SELECT user_id FROM sessions WHERE id='${esc(sid)}' AND expires_at > '${now()}'`); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = permission==='dashboard.view' || (['users.view','users.create','users.edit','users.disable','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)) || (permission==='settings.view'&&userMgmt); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+
+app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
+app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
+app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(req,'mcc_session')); const u=sid ? one<User>(`SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.id='${esc(sid)}' AND s.expires_at > '${now()}'`) : undefined; res.json({ setupRequired:userCount()===0, user: u && !u.disabled ? publicUser(u) : null }); });
+app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true}); res.json({ok:true}); });
+app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); run(`UPDATE users SET last_login_at='${now()}', updated_at=updated_at WHERE id=${u.id}`); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:now()})}); });
+app.post('/api/auth/logout', requireAuth, (req:AuthRequest,res)=>{ audit(req,'logout','user',req.user!.id); clearSession(req,res); res.json({ok:true}); });
+app.post('/api/auth/forgot-password',(req,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(forgotHits,key,3,60*60*1000)) return res.status(429).json({error:'Too many reset requests. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(u&&!u.disabled){ const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`; run(`UPDATE users SET password_hash='${esc(hashPassword(temp))}', force_password_change=1, temp_password_expires_at='${tempExpiry()}', updated_at='${now()}' WHERE id=${u.id}`); audit(req,'password reset request','user',u.id); if(process.env.SMTP_HOST&&process.env.SMTP_PORT&&process.env.SMTP_FROM) console.log(`SMTP configured; send temporary MCC password to ${u.email}.`); else console.log(`MCC password reset requested for ${u.email}, but SMTP is not configured. Temporary password is not exposed to the browser.`); }
+ res.json({ok:true,message:'If the email matches an account, password reset instructions will be sent.'}); });
+app.post('/api/auth/change-password', requireAuth, (req:AuthRequest,res)=>{ const {currentPassword,newPassword,confirmPassword}=req.body; const u=req.user!; if(!verifyPassword(currentPassword??'',u.password_hash)) return res.status(400).json({error:'Current password is incorrect.'}); if(newPassword!==confirmPassword||!passwordOk(newPassword)) return res.status(400).json({error:'New password must match and meet complexity rules.'}); if(verifyPassword(newPassword,u.password_hash)) return res.status(400).json({error:'New password cannot match the temporary/current password.'}); run(`UPDATE users SET password_hash='${esc(hashPassword(newPassword))}', force_password_change=0, temp_password_expires_at=NULL, updated_at='${now()}' WHERE id=${u.id}`); audit(req,'password change','user',u.id); res.json({ok:true}); });
+app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{ const max=roleRank(req.user!.role); res.json({users: all<User>(`SELECT * FROM users WHERE ${max}=4 OR role IN (${roles.slice(0,max+1).map(r=>`'${r}'`).join(',')}) ORDER BY full_name`).map(publicUser)}); });
+app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{ const role=req.body.role as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot create that role.'}); if(!passwordOk(req.body.temporaryPassword??'')) return res.status(400).json({error:'Temporary password must meet complexity rules.'}); const id=createUser({fullName:req.body.fullName,email:req.body.email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id}); audit(req,'user create','user',id,{role}); res.status(201).json({user:publicUser(findUserById(id)!)}); });
+app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target||!canManageRole(req.user!.role,target.role)) return res.status(404).json({error:'User not found.'}); const role=(req.body.role??target.role) as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'}); run(`UPDATE users SET full_name='${esc(req.body.fullName??target.full_name)}', email='${esc(req.body.email??target.email)}', role='${esc(role)}', updated_at='${now()}' WHERE id=${target.id}`); audit(req,'user update','user',target.id); res.json({user:publicUser(findUserById(target.id)!)}); });
+for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target||!canManageRole(req.user!.role,target.role)) return res.status(404).json({error:'User not found.'}); run(`UPDATE users SET disabled=${action==='disable'?1:0}, updated_at='${now()}' WHERE id=${target.id}`); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUser(findUserById(target.id)!)}); });
+app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.use(express.static(frontendDistPath));
-
-app.get('*', (_request, response) => {
-  response.sendFile(path.join(frontendDistPath, 'index.html'));
-});
-
-app.listen(port, () => {
-  console.log(`${appName} running at http://localhost:${port}`);
-});
+app.get('*', (_req,res)=>res.sendFile(path.join(frontendDistPath,'index.html')));
+app.listen(port,()=>console.log(`${appName} running at http://localhost:${port}`));

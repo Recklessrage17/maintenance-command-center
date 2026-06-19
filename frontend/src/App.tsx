@@ -1,39 +1,29 @@
-import { useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { DashboardPage } from './modules/dashboard/DashboardPage';
-import { InventoryPage } from './modules/inventory/InventoryPage';
-import { PreventiveMaintenancePage } from './modules/preventive-maintenance/PreventiveMaintenancePage';
-import { AssetsPage } from './modules/assets/AssetsPage';
-import { WorkOrdersPage } from './modules/work-orders/WorkOrdersPage';
-import { RequisitionsPage } from './modules/requisitions/RequisitionsPage';
-import { VendorsPage } from './modules/vendors/VendorsPage';
-import { LocationsPage } from './modules/locations/LocationsPage';
-import { DocumentsPage } from './modules/documents/DocumentsPage';
-import { ReportsPage } from './modules/reports/ReportsPage';
 import { SettingsPage } from './modules/settings/SettingsPage';
+import { UsersPage } from './modules/users/UsersPage';
 
-const pages: Record<MccSection, JSX.Element> = {
-  dashboard: <DashboardPage />,
-  inventory: <InventoryPage />,
-  preventiveMaintenance: <PreventiveMaintenancePage />,
-  assets: <AssetsPage />,
-  workOrders: <WorkOrdersPage />,
-  requisitions: <RequisitionsPage />,
-  vendors: <VendorsPage />,
-  locations: <LocationsPage />,
-  documents: <DocumentsPage />,
-  reports: <ReportsPage />,
-  settings: <SettingsPage />,
-};
-
+type User = { id:number; fullName:string; email:string; role:string; forcePasswordChange:boolean };
+type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
+const pages: Record<MccSection, JSX.Element> = { dashboard: <DashboardPage />, settings: <SettingsPage />, users: <UsersPage /> };
+async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
+function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:React.ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
+function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }
 function App() {
-  const [activeSection, setActiveSection] = useState<MccSection>('dashboard');
-
-  return (
-    <MccLayout activeSection={activeSection} onSectionChange={setActiveSection}>
-      {pages[activeSection]}
-    </MccLayout>
-  );
+  const [mode,setMode]=useState<AuthMode>('loading'); const [user,setUser]=useState<User|null>(null); const [activeSection,setActiveSection]=useState<MccSection>('dashboard');
+  const refresh=()=>api('/api/auth/status').then(d=>{setUser(d.user); setMode(d.setupRequired?'setup':d.user?.forcePasswordChange?'change':d.user?'app':'login');}).catch(()=>setMode('login'));
+  useEffect(()=>{ refresh(); },[]);
+  const permissions=useMemo(()=>({canManageUsers: !!user && user.role !== 'Maintenance Tech 1'}),[user]);
+  if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
+  if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
+  if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;
+  if(mode==='forgot') return <Forgot onBack={()=>setMode('login')} />;
+  if(mode==='change') return <Change onDone={refresh} />;
+  return <MccLayout activeSection={activeSection} onSectionChange={setActiveSection} user={user!} canManageUsers={permissions.canManageUsers} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}>{pages[activeSection]}</MccLayout>;
 }
-
+function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{await api('/api/auth/setup-first-admin',{method:'POST',body:JSON.stringify({fullName,email,password,confirmPassword})});setMsg('First Admin created. Please log in.'); setTimeout(onDone,800);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="First Admin Setup" eyebrow="MCC security foundation"><form onSubmit={submit} className="auth-form"><Field label="Full name" value={fullName} onChange={setFullName}/><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword}/><Field label="Confirm password" type="password" value={confirmPassword} onChange={setConfirm}/><p className="form-help">Minimum 10 characters with uppercase, lowercase, number, and special character.</p><button className="primary-button">Create First Admin</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
+function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) { const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{const d=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})});onLogin(d.user);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="MCC Login" eyebrow="JBT command center"><form onSubmit={submit} className="auth-form"><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password"/><button className="primary-button">Log In</button><button type="button" className="link-button" onClick={onForgot}>Forgot Password</button>{msg&&<p className="form-message error">{msg}</p>}</form></AuthCard> }
+function Forgot({onBack}:{onBack:()=>void}) { const [email,setEmail]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{const d=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});setMsg(d.message);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="Forgot Password" eyebrow="Secure reset"><form onSubmit={submit} className="auth-form"><Field label="Email" value={email} onChange={setEmail}/><button className="primary-button">Request Reset</button><button type="button" className="link-button" onClick={onBack}>Back to Login</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
+function Change({onDone}:{onDone:()=>void}) { const [currentPassword,setCurrent]=useState(''),[newPassword,setNew]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{await api('/api/auth/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword,confirmPassword})});onDone();}catch(err){setMsg((err as Error).message)}} return <AuthCard title="Change Password Required" eyebrow="Temporary credential"><form onSubmit={submit} className="auth-form"><Field label="Temporary/current password" type="password" value={currentPassword} onChange={setCurrent}/><Field label="New password" type="password" value={newPassword} onChange={setNew}/><Field label="Confirm new password" type="password" value={confirmPassword} onChange={setConfirm}/><button className="primary-button">Save New Password</button>{msg&&<p className="form-message error">{msg}</p>}</form></AuthCard> }
 export default App;
