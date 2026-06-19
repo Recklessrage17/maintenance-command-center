@@ -39,10 +39,3 @@ button { font: inherit; }
   .mcc-main { padding: 18px; }
   .mcc-header { align-items: flex-start; flex-direction: column; }
 }
-.dashboard-section { display: grid; gap: 16px; }
-.section-heading-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
-.section-heading-row h3 { margin: 0; color: #f3fbff; font-size: 1.2rem; }
-.status-dot { border: 1px solid rgba(71, 219, 255, 0.28); border-radius: 999px; padding: 9px 13px; font-size: 0.88rem; font-weight: 800; white-space: nowrap; }
-.status-dot.online, .status-online { color: #7fffd4; }
-.status-dot.online { background: rgba(18, 128, 105, 0.24); }
-.status-dot.offline { color: #ffd08a; background: rgba(140, 84, 20, 0.24); }
