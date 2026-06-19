@@ -8,7 +8,8 @@
     "start": "node dist/server/index.js"
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "maintenance-command-center": "file:.."
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
