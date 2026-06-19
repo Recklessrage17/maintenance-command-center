@@ -1,33 +1,4 @@
-﻿# Dependencies
 node_modules/
 dist/
-build/
-.vite/
-
-# Environment
-.env
-.env.local
-.env.production
-
-# Database files
-backend/data/*.db
-backend/data/*.db-wal
-backend/data/*.db-shm
-
-# Generated backups
-backend/backups/*
-!backend/backups/.gitkeep
-
-# Logs
-*.log
-logs/
-update-status.json
-update-log.txt
-backend/update-status.json
-backend/update-log.txt
-
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
+*.tsbuildinfo
+npm-debug.log*

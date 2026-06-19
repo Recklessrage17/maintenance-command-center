@@ -1,0 +1,14 @@
+{
+  "name": "maintenance-command-center",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Maintenance Command Center website shell.",
+  "scripts": {
+    "install:all": "npm install --prefix frontend && npm install --prefix backend",
+    "build": "npm run build --prefix frontend && npm run build --prefix backend",
+    "start": "npm start --prefix backend"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
