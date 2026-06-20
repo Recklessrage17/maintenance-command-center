@@ -4,7 +4,7 @@ import { DashboardPage } from './modules/dashboard/DashboardPage';
 import { SettingsPage } from './modules/settings/SettingsPage';
 import { UsersPage } from './modules/users/UsersPage';
 
-type User = { id:number; fullName:string; email:string; role:string; forcePasswordChange:boolean };
+type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; forcePasswordChange:boolean };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
 const pages: Record<MccSection, JSX.Element> = { dashboard: <DashboardPage />, settings: <SettingsPage />, users: <UsersPage /> };
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
