@@ -2,21 +2,31 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import express, { type NextFunction, type Request, type Response } from 'express';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+import express, { type NextFunction, type Request, type Response } from 'express';
 
-const app = express();
-const port = Number(process.env.PORT ?? 4273);
-const appName = 'Maintenance Command Center';
-const version = '0.1.0';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const repoRootPath = path.resolve(__dirname, '../../..');
+const rootEnvPath = path.join(repoRootPath, '.env');
+if (fs.existsSync(rootEnvPath)) {
+  dotenv.populate(process.env, dotenv.parse(fs.readFileSync(rootEnvPath)), { override: false });
+}
+
+const app = express();
+const requestedPort = Number(process.env.PORT ?? 4273);
+// MCC must not bind the MIT3 port.
+const port = requestedPort === 4173 ? 4273 : requestedPort;
+const appName = 'Maintenance Command Center';
+const version = '0.1.0';
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
 const dataDir = path.resolve(__dirname, '../../data');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
+const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
+const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_FROM);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toString('hex');
-if (!process.env.SESSION_SECRET) console.warn('WARNING: SESSION_SECRET is not set. Using a temporary development secret; set SESSION_SECRET in production.');
 fs.mkdirSync(dataDir, { recursive: true });
 app.use(express.json({ limit: '50kb' }));
 
@@ -70,7 +80,7 @@ app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(r
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true}); res.json({ok:true}); });
 app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [now(),u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:now()})}); });
 app.post('/api/auth/logout', requireAuth, (req:AuthRequest,res)=>{ audit(req,'logout','user',req.user!.id); clearSession(req,res); res.json({ok:true}); });
-app.post('/api/auth/forgot-password',(req,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(forgotHits,key,3,60*60*1000)) return res.status(429).json({error:'Too many reset requests. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(u&&!u.disabled){ const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`; run('UPDATE users SET password_hash=?, force_password_change=1, temp_password_expires_at=?, updated_at=? WHERE id=?', [hashPassword(temp),tempExpiry(),now(),u.id]); audit(req,'password reset request','user',u.id); if(process.env.SMTP_HOST&&process.env.SMTP_PORT&&process.env.SMTP_FROM) console.log(`SMTP configured; send temporary MCC password to ${u.email}.`); else console.log(`MCC password reset requested for ${u.email}, but SMTP is not configured. Temporary password is not exposed to the browser.`); }
+app.post('/api/auth/forgot-password',(req,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(forgotHits,key,3,60*60*1000)) return res.status(429).json({error:'Too many reset requests. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(u&&!u.disabled){ const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`; run('UPDATE users SET password_hash=?, force_password_change=1, temp_password_expires_at=?, updated_at=? WHERE id=?', [hashPassword(temp),tempExpiry(),now(),u.id]); audit(req,'password reset request','user',u.id); console.log(`MCC password reset requested. SMTP configured: ${smtpConfigured ? 'yes' : 'no'}.`); }
  res.json({ok:true,message:'If the email matches an account, password reset instructions will be sent.'}); });
 app.post('/api/auth/change-password', requireAuth, (req:AuthRequest,res)=>{ const {currentPassword,newPassword,confirmPassword}=req.body; const u=req.user!; if(!verifyPassword(currentPassword??'',u.password_hash)) return res.status(400).json({error:'Current password is incorrect.'}); if(newPassword!==confirmPassword||!passwordOk(newPassword)) return res.status(400).json({error:'New password must match and meet complexity rules.'}); if(verifyPassword(newPassword,u.password_hash)) return res.status(400).json({error:'New password cannot match the temporary/current password.'}); run('UPDATE users SET password_hash=?, force_password_change=0, temp_password_expires_at=NULL, updated_at=? WHERE id=?', [hashPassword(newPassword),now(),u.id]); audit(req,'password change','user',u.id); res.json({ok:true}); });
 app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{ const max=roleRank(req.user!.role); const manageableRoles = roles.slice(0,max+1); const placeholders = manageableRoles.map(() => '?').join(','); res.json({users: all<User>(`SELECT * FROM users WHERE ?=4 OR role IN (${placeholders}) ORDER BY full_name`, [max,...manageableRoles]).map(publicUser)}); });
@@ -80,4 +90,8 @@ for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${a
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.use(express.static(frontendDistPath));
 app.get('*', (_req,res)=>res.sendFile(path.join(frontendDistPath,'index.html')));
-app.listen(port,()=>console.log(`${appName} running at http://localhost:${port}`));
+app.listen(port,()=>{
+  console.log(`${appName} running at http://localhost:${port}`);
+  console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);
+  console.log(`SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
+});
