@@ -38,9 +38,12 @@ type PartsResponse = {
   vendors?: LookupOption[];
 };
 
-type FilterMode = 'all' | 'low' | 'requisition';
+type FilterMode = 'all' | 'low' | 'requisition' | 'hasLink' | 'noLink';
 type ModalMode = 'add' | 'edit';
 type Notice = { kind: 'success' | 'error'; text: string };
+type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'status';
+type SortDirection = 'asc' | 'desc';
+type PageSize = 50 | 100 | 250 | 'all';
 
 type PartForm = {
   partNumber: string;
@@ -63,6 +66,7 @@ const blankForm: PartForm = {
 };
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
+const pageSizeOptions: PageSize[] = [50,100,250,'all'];
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
@@ -75,13 +79,34 @@ function isLowStock(part: InventoryPart) {
   return part.status === 'Low Stock' || part.status === 'Out of Stock';
 }
 
-function validUrl(value: string) {
+function safeHttpUrl(value: string) {
   try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '';
   } catch {
-    return false;
+    return '';
   }
+}
+
+function validUrl(value: string) {
+  return Boolean(safeHttpUrl(value));
+}
+
+function formatRefreshTime(value: Date | null) {
+  if (!value) return 'Not refreshed yet';
+  return new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',second:'2-digit'}).format(value);
+}
+
+function compareText(left: string, right: string) {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function compareParts(left: InventoryPart, right: InventoryPart, sortKey: SortKey, sortDirection: SortDirection) {
+  const multiplier = sortDirection === 'asc' ? 1 : -1;
+  const result = sortKey === 'quantity' || sortKey === 'minQuantity'
+    ? Number(left[sortKey] ?? 0) - Number(right[sortKey] ?? 0)
+    : compareText(String(left[sortKey] ?? ''), String(right[sortKey] ?? ''));
+  return result * multiplier;
 }
 
 function validateForm(form: PartForm) {
@@ -124,9 +149,14 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [writeAvailable,setWriteAvailable]=useState(false);
   const [search,setSearch]=useState('');
   const [filter,setFilter]=useState<FilterMode>('all');
+  const [sortKey,setSortKey]=useState<SortKey>('partNumber');
+  const [sortDirection,setSortDirection]=useState<SortDirection>('asc');
+  const [pageSize,setPageSize]=useState<PageSize>(100);
+  const [page,setPage]=useState(1);
   const [error,setError]=useState('');
   const [notice,setNotice]=useState<Notice|null>(null);
   const [loading,setLoading]=useState(true);
+  const [lastRefreshed,setLastRefreshed]=useState<Date|null>(null);
   const [modal,setModal]=useState<ModalMode|null>(null);
   const [editingPart,setEditingPart]=useState<InventoryPart|null>(null);
   const [form,setForm]=useState<PartForm>(blankForm);
@@ -136,7 +166,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
 
   const canWrite = writeRoles.has(userRole);
 
-  async function refresh(){
+  async function refresh(options: { notify?: boolean } = {}){
     setLoading(true);
     setError('');
     try {
@@ -147,12 +177,17 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
       setLocations(partsResponse.locations ?? []);
       setVendors(partsResponse.vendors ?? []);
       setWriteAvailable(partsResponse.writeAvailable === true);
+      const refreshedAt = new Date();
+      setLastRefreshed(refreshedAt);
+      if (options.notify) setNotice({kind:'success',text:`Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`});
     } catch (err) {
       setParts([]);
       setLocations([]);
       setVendors([]);
       setWriteAvailable(false);
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(message);
+      if (options.notify) setNotice({kind:'error',text:message});
     } finally {
       setLoading(false);
     }
@@ -163,7 +198,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const isOnline = status?.ok === true && !error;
   const writeEnabled = canWrite && isOnline && writeAvailable;
   const writeDisabledReason = !canWrite
-    ? 'Your MCC role has read-only Inventory access.'
+    ? 'View-only access.'
     : !isOnline
       ? 'MIT3 is offline or not reachable. Start MIT3 Website first.'
       : !writeAvailable
@@ -186,13 +221,64 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     return parts.filter(part=>{
       if(filter==='low'&&!isLowStock(part)) return false;
       if(filter==='requisition'&&!part.requisition&&!part.orderPlaced) return false;
+      if(filter==='hasLink'&&!safeHttpUrl(part.partInfoUrl)) return false;
+      if(filter==='noLink'&&safeHttpUrl(part.partInfoUrl)) return false;
       if(!needle) return true;
-      return [part.partNumber,part.description,part.location,part.vendor,part.status,part.requisition]
+      return [part.partNumber,part.description,part.location,part.vendor]
         .some(value=>value.toLowerCase().includes(needle));
     });
   },[filter,parts,search]);
 
+  const sortedParts = useMemo(()=>[...filteredParts].sort((left,right)=>compareParts(left,right,sortKey,sortDirection)),[filteredParts,sortDirection,sortKey]);
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(sortedParts.length / pageSize));
+  const visibleParts = useMemo(()=>{
+    if (pageSize === 'all') return sortedParts;
+    const start = (page - 1) * pageSize;
+    return sortedParts.slice(start, start + pageSize);
+  },[page,pageSize,sortedParts]);
+  const pageStart = sortedParts.length === 0 ? 0 : pageSize === 'all' ? 1 : (page - 1) * pageSize + 1;
+  const pageEnd = pageSize === 'all' ? sortedParts.length : Math.min(page * pageSize, sortedParts.length);
+  const filtersActive = filter !== 'all' || search.trim().length > 0;
+
+  useEffect(()=>{ setPage(1); },[filter,pageSize,search,sortDirection,sortKey]);
+  useEffect(()=>{ setPage(current=>Math.min(current,totalPages)); },[totalPages]);
+
+  function toggleSort(nextKey: SortKey){
+    if (sortKey === nextKey) {
+      setSortDirection(current=>current === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(nextKey);
+      setSortDirection('asc');
+    }
+  }
+
+  function sortIndicator(key: SortKey) {
+    if (sortKey !== key) return '';
+    return sortDirection === 'asc' ? 'asc' : 'desc';
+  }
+
+  function sortAria(key: SortKey): 'none' | 'ascending' | 'descending' {
+    if (sortKey !== key) return 'none';
+    return sortDirection === 'asc' ? 'ascending' : 'descending';
+  }
+
+  function renderSortHeader(key: SortKey, label: string) {
+    const state = sortIndicator(key);
+    return (
+      <button className={state ? 'sort-header active' : 'sort-header'} type="button" onClick={()=>toggleSort(key)}>
+        <span>{label}</span>
+        <span className="sort-marker">{state}</span>
+      </button>
+    );
+  }
+
+  function clearFilters(){
+    setSearch('');
+    setFilter('all');
+  }
+
   function openAdd(){
+    if (!writeEnabled) return;
     setModal('add');
     setEditingPart(null);
     setForm(blankForm);
@@ -201,6 +287,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   }
 
   function openEdit(part: InventoryPart){
+    if (!writeEnabled) return;
     setModal('edit');
     setEditingPart(part);
     setForm(formFromPart(part));
@@ -242,6 +329,8 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
 
   async function updateRequisition(part: InventoryPart, requisition: boolean){
     if (!writeEnabled || part.hasActiveRequisitionRecord) return;
+    const action = requisition ? 'mark this part for requisition' : 'clear the requisition marker for this part';
+    if (!window.confirm(`Confirm that you want to ${action} through the MIT3 API.`)) return;
     setMutatingId(part.id);
     setNotice(null);
     try {
@@ -265,11 +354,18 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         <div className="inventory-focus-title">
           <p className="eyebrow">Inventory workspace</p>
           <h2>Inventory</h2>
+          <div className="inventory-focus-meta">
+            <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
+            <span>Showing {visibleParts.length} of {sortedParts.length} parts{filtersActive ? ` (${parts.length} loaded)` : ''}</span>
+          </div>
         </div>
-        <span className={isOnline?'mit3-status-badge online':'mit3-status-badge offline'} aria-live="polite">{isOnline?'MIT3 Online':'MIT3 Offline'}</span>
+        <div className="inventory-toolbar-badges">
+          <span className={isOnline?'mit3-status-badge online':'mit3-status-badge offline'} aria-live="polite">{isOnline?'MIT3 Online':'MIT3 Offline'}</span>
+          {!canWrite&&<span className="view-only-badge">View-only access.</span>}
+        </div>
         <div className="inventory-focus-actions">
-          <button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>
-          <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={loading}>Refresh Inventory</button>
+          {canWrite&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
+          <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
           <a className="secondary-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
         </div>
       </div>
@@ -280,8 +376,8 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
           <strong>{status?.message ?? (loading ? 'Checking MIT3...' : 'MIT3 offline or not reachable')}</strong>
         </div>
         <div>
-          <span>Write bridge</span>
-          <strong>{writeEnabled ? 'Ready for MCC add/edit/requisition' : 'Guarded by role and MIT3 status'}</strong>
+          <span>Safety</span>
+          <strong>MIT3 is source of truth. MCC writes through MIT3 API.</strong>
         </div>
         <code className="inventory-url">{status?.mit3Url ?? 'http://localhost:4173'}</code>
         <div className="inventory-bridge-messages">
@@ -298,7 +394,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         <article className="mcc-card"><span>Locations / Vendors</span><strong>{summary.places}</strong><p>Unique names available.</p></article>
       </div>
 
-      {notice&&<p className={notice.kind==='error'?'form-message error':'form-message'}>{notice.text}</p>}
+      {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
 
       <section className="mcc-card inventory-table-card">
         <div className="inventory-toolbar">
@@ -311,48 +407,84 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               <button className={filter==='all'?'active':''} onClick={()=>setFilter('all')} type="button">All</button>
               <button className={filter==='low'?'active':''} onClick={()=>setFilter('low')} type="button">Low Stock</button>
               <button className={filter==='requisition'?'active':''} onClick={()=>setFilter('requisition')} type="button">Requisition</button>
+              <button className={filter==='hasLink'?'active':''} onClick={()=>setFilter('hasLink')} type="button">Has Link</button>
+              <button className={filter==='noLink'?'active':''} onClick={()=>setFilter('noLink')} type="button">No Link</button>
             </div>
+            <button className="secondary-button compact-button" type="button" onClick={clearFilters} disabled={!filtersActive}>Clear Filters</button>
+          </div>
+        </div>
+
+        <div className="inventory-table-meta">
+          <div>
+            <strong>Showing {visibleParts.length} of {sortedParts.length} parts</strong>
+            <span>{sortedParts.length ? `Rows ${pageStart}-${pageEnd}` : 'No rows'}{filtersActive ? `; ${parts.length} loaded from MIT3` : ''}</span>
+          </div>
+          <div className="inventory-pager">
+            <label className="page-size-field">
+              <span>Rows</span>
+              <select value={String(pageSize)} onChange={event=>setPageSize(event.target.value==='all'?'all':Number(event.target.value) as PageSize)}>
+                {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
+              </select>
+            </label>
+            <button className="secondary-button compact-button" type="button" onClick={()=>setPage(current=>Math.max(1,current-1))} disabled={page<=1||pageSize==='all'}>Prev</button>
+            <span className="page-count">Page {page} of {totalPages}</span>
+            <button className="secondary-button compact-button" type="button" onClick={()=>setPage(current=>Math.min(totalPages,current+1))} disabled={page>=totalPages||pageSize==='all'}>Next</button>
           </div>
         </div>
 
         <div className="table-card inventory-table-wrap">
           <table>
             <thead>
-              <tr><th>Part Number</th><th>Description</th><th>Location</th><th>Vendor</th><th>Qty</th><th>Min</th><th>Status</th><th>Link</th><th>Actions</th></tr>
+              <tr>
+                <th aria-sort={sortAria('partNumber')}>{renderSortHeader('partNumber','Part Number')}</th>
+                <th aria-sort={sortAria('description')}>{renderSortHeader('description','Description')}</th>
+                <th aria-sort={sortAria('location')}>{renderSortHeader('location','Location')}</th>
+                <th aria-sort={sortAria('vendor')}>{renderSortHeader('vendor','Vendor')}</th>
+                <th aria-sort={sortAria('quantity')}>{renderSortHeader('quantity','Qty')}</th>
+                <th aria-sort={sortAria('minQuantity')}>{renderSortHeader('minQuantity','Min')}</th>
+                <th aria-sort={sortAria('status')}>{renderSortHeader('status','Status')}</th>
+                <th>Link</th>
+                {canWrite&&<th>Actions</th>}
+              </tr>
             </thead>
             <tbody>
-              {filteredParts.map(part=>
-                <tr key={part.id}>
-                  <td>
-                    {part.partInfoUrl&&validUrl(part.partInfoUrl)
-                      ? <a className="part-number-link" href={part.partInfoUrl} target="_blank" rel="noreferrer">{part.partNumber || part.itemId || 'Open'}<span aria-hidden="true">-&gt;</span></a>
+              {visibleParts.map(part=>{
+                const partLink = safeHttpUrl(part.partInfoUrl);
+                return (
+                  <tr key={part.id}>
+                    <td>
+                      {partLink
+                        ? <a className="part-number-link" href={partLink} target="_blank" rel="noreferrer">{part.partNumber || part.itemId || 'Open'}<span aria-hidden="true">-&gt;</span></a>
                       : <span className="plain-part-number">{part.partNumber || part.itemId || '-'}</span>}
-                  </td>
-                  <td className="inventory-description-cell"><span className="inventory-description-text" title={part.description || undefined}>{part.description || '-'}</span></td>
-                  <td>{part.location || '-'}</td>
-                  <td>{part.vendor || '-'}</td>
-                  <td>{part.quantity}</td>
-                  <td>{part.minQuantity}</td>
-                  <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
-                  <td>{part.partInfoUrl&&validUrl(part.partInfoUrl)?<a className="link-badge" href={part.partInfoUrl} target="_blank" rel="noreferrer">Open</a>:<span className="muted-cell">None</span>}</td>
-                  <td>
-                    <div className="inventory-row-actions">
-                      <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
-                      <label className={part.hasActiveRequisitionRecord?'requisition-toggle disabled':'requisition-toggle'}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(part.orderPlaced || part.requisition)}
-                          disabled={!writeEnabled || part.hasActiveRequisitionRecord || mutatingId===part.id}
-                          onChange={event=>void updateRequisition(part,event.target.checked)}
-                        />
-                        <span>Req</span>
-                      </label>
-                    </div>
-                  </td>
-                </tr>
-              )}
-              {!loading&&filteredParts.length===0&&<tr><td colSpan={9} className="empty-table-cell">No inventory rows match this view.</td></tr>}
-              {loading&&<tr><td colSpan={9} className="empty-table-cell">Loading MIT3 inventory...</td></tr>}
+                    </td>
+                    <td className="inventory-description-cell"><span className="inventory-description-text" title={part.description || undefined}>{part.description || '-'}</span></td>
+                    <td>{part.location || '-'}</td>
+                    <td>{part.vendor || '-'}</td>
+                    <td>{part.quantity}</td>
+                    <td>{part.minQuantity}</td>
+                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
+                    <td>{partLink?<a className="link-badge" href={partLink} target="_blank" rel="noreferrer">Open</a>:<span className="muted-cell">None</span>}</td>
+                    {canWrite&&(
+                      <td>
+                        <div className="inventory-row-actions">
+                          <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
+                          <label className={part.hasActiveRequisitionRecord?'requisition-toggle disabled':'requisition-toggle'}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(part.orderPlaced || part.requisition)}
+                              disabled={!writeEnabled || part.hasActiveRequisitionRecord || mutatingId===part.id}
+                              onChange={event=>void updateRequisition(part,event.target.checked)}
+                            />
+                            <span>Req</span>
+                          </label>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+              {!loading&&sortedParts.length===0&&<tr><td colSpan={canWrite?9:8} className="empty-table-cell">No inventory rows match this view.</td></tr>}
+              {loading&&<tr><td colSpan={canWrite?9:8} className="empty-table-cell">Loading MIT3 inventory...</td></tr>}
             </tbody>
           </table>
         </div>

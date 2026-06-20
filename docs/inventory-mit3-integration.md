@@ -34,6 +34,31 @@ Phase 2B rules:
 - Import and export remain in MIT3 for now.
 - MCC audit logs record add, edit, requisition update, and failed write attempts without storing secrets.
 
-## Future Phase 2C
+## Phase 2C: production UI polish v1
 
-Phase 2C can add import/export and deeper native migration behavior after Phase 2B has been tested and approved.
+Phase 2C improves the MCC Inventory focus workspace for production use with larger MIT3 inventories.
+
+Phase 2C adds:
+
+- Full-width Inventory focus mode with a sticky compact toolbar.
+- Last-refreshed time and visible "showing X of Y parts" counts.
+- Client-side sorting for Part Number, Description, Location, Vendor, Qty, Min, and Status.
+- Client-side page-size controls for 50, 100, 250, or All rows.
+- Search across part number, description, location, and vendor.
+- Filters for All, Low Stock, Requisition, Has Link, and No Link.
+- Smaller table text, smaller status badges, compact link buttons, and controlled description wrapping.
+- A compact safety message that MIT3 remains the source of truth and MCC writes only through the MIT3 API.
+- Role-aware Inventory controls: Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can add, edit, and requisition when MIT3 is online; Maintenance Tech 1 remains view-only.
+
+Phase 2C rules:
+
+- MIT3 remains the source of truth.
+- MCC writes only through the MIT3 HTTP API at `http://localhost:4173`.
+- MCC does not directly touch the MIT3 database.
+- No MIT3 database files are copied.
+- No MIT3 source files are modified.
+- Import and export remain in MIT3 for now.
+
+## Future Phase 2D
+
+Phase 2D can add an import/export bridge or deeper native migration behavior after Phase 2C has been tested and approved. Any future bridge must continue to preserve the MIT3 source-of-truth boundary unless that boundary is explicitly changed and tested.
