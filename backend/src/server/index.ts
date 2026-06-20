@@ -104,12 +104,12 @@ function publicUserForActor(u: User, actor: User) {
     canDelete: canDeleteTarget(actor, u),
   };
 }
-function safeErrorMessage(error: unknown, extraSecrets: string[] = []) {
+function safeErrorMessage(error: unknown, extraSecrets: string[] = [], fallback = 'Unknown error.') {
   let message = error instanceof Error ? error.message : String(error);
   for (const secret of [process.env.SMTP_PASS, ...extraSecrets]) {
     if (secret) message = message.split(secret).join('[redacted]');
   }
-  return message.replace(/\s+/g, ' ').slice(0, 300) || 'Unknown SMTP error.';
+  return message.replace(/\s+/g, ' ').slice(0, 300) || fallback;
 }
 function smtpTransport() {
   if (!smtpConfigured) return undefined;
@@ -251,7 +251,9 @@ function normalizeMit3Parts(payload: unknown) {
     const minQuantity = numberField(item, ['minimumStockLevel', 'minimum', 'minimumStock', 'minQuantity', 'min']);
     const locationId = textField(item, ['locationId', 'location_id']);
     const vendorId = textField(item, ['vendorId', 'vendor_id']);
-    const directRequisition = booleanField(item, ['orderPlaced', 'order_placed']) ? textField(item, ['orderRequisitionId', 'order_requisition_id'], 'Requisition Made') : '';
+    const orderPlaced = booleanField(item, ['orderPlaced', 'order_placed']);
+    const activeRequisition = requisitions.get(id) ?? requisitions.get(itemId) ?? '';
+    const directRequisition = orderPlaced ? textField(item, ['orderRequisitionId', 'order_requisition_id'], 'Requisition Made') : '';
     return {
       id,
       itemId,
@@ -262,29 +264,138 @@ function normalizeMit3Parts(payload: unknown) {
       quantity,
       minQuantity,
       status: itemStatus(item, quantity, minQuantity),
-      requisition: requisitions.get(id) ?? requisitions.get(itemId) ?? directRequisition,
+      requisition: activeRequisition || directRequisition,
+      orderPlaced,
+      hasActiveRequisitionRecord: Boolean(activeRequisition),
       partInfoUrl: validWebUrl(textField(item, ['itemUrl', 'item_url', 'partInfoUrl', 'url'])),
       updatedAt: textField(item, ['updatedAt', 'updated_at'], textField(data, ['lastSavedAt'])),
     };
   });
 }
-async function fetchMit3Parts() {
+function normalizeMit3LookupOptions(records: unknown[]) {
+  return records.filter(isRecord).map(record => ({
+    id: textField(record, ['id']),
+    name: textField(record, ['name', 'title', 'label']),
+  })).filter(record => record.id && record.name);
+}
+function normalizeMit3InventoryPayload(payload: unknown) {
+  const root = isRecord(payload) ? payload : {};
+  const data = isRecord(root.data) ? root.data : root;
+  return {
+    parts: normalizeMit3Parts(data),
+    locations: normalizeMit3LookupOptions(Array.isArray(data.locations) ? data.locations : []),
+    vendors: normalizeMit3LookupOptions(Array.isArray(data.vendors) ? data.vendors : []),
+  };
+}
+async function fetchMit3AppData() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
   try {
     const response = await fetch(mit3AppDataUrl, { signal: controller.signal });
     if (!response.ok) throw new Error(`MIT3 app-data returned HTTP ${response.status}`);
     const payload = await response.json();
-    return normalizeMit3Parts(payload);
+    const root = isRecord(payload) ? payload : {};
+    const data = isRecord(root.data) ? root.data : root;
+    if (!isRecord(data) || data.app !== 'maintenance-inventory-tracker') throw new Error('MIT3 app-data shape is not supported.');
+    return data;
   } catch {
     throw new Error('MIT3 is offline or not reachable. Start MIT3 Website first.');
   } finally {
     clearTimeout(timeout);
   }
 }
+async function fetchMit3Inventory() {
+  return normalizeMit3InventoryPayload(await fetchMit3AppData());
+}
+async function writeMit3AppData(data: Record<string, unknown>) {
+  const response = await fetch(mit3AppDataUrl, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data),
+  });
+  if (response.status === 404 || response.status === 405) throw new Error('MIT3 write endpoint not available yet.');
+  if (!response.ok) {
+    const body = await response.json().catch(async () => ({error: await response.text().catch(() => '')}));
+    const message = isRecord(body) ? textField(body, ['error', 'message'], `HTTP ${response.status}`) : `HTTP ${response.status}`;
+    throw new Error(message || 'MIT3 write failed.');
+  }
+  return response.json().catch(() => ({}));
+}
+function canInventoryWrite(actor: User) {
+  return roleRank(actor.role) >= roleRank('Maintenance Tech 2');
+}
+function validateMit3PartInput(body: unknown) {
+  const input = isRecord(body) ? body : {};
+  const partNumber = textField(input, ['partNumber']);
+  if (!partNumber) throw new Error('Part Number is required.');
+  const description = textField(input, ['description']);
+  const location = textField(input, ['location']);
+  const vendor = textField(input, ['vendor']);
+  const quantity = numberField(input, ['quantity']);
+  const minQuantity = numberField(input, ['minQuantity']);
+  if (!Number.isFinite(quantity)) throw new Error('Quantity must be numeric.');
+  if (!Number.isFinite(minQuantity)) throw new Error('Minimum Quantity must be numeric.');
+  const rawUrl = textField(input, ['partInfoUrl']);
+  const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
+  if (rawUrl && !partInfoUrl) throw new Error('Part Info URL must be blank or a valid http/https URL.');
+  return {partNumber,description,location,vendor,quantity,minQuantity,partInfoUrl};
+}
+type Mit3PartInput = ReturnType<typeof validateMit3PartInput>;
+function resolveLookupId(records: unknown[], value: string, label: string) {
+  if (!value) return '';
+  const normalized = value.toLowerCase();
+  const match = records.filter(isRecord).find(record =>
+    textField(record, ['id']).toLowerCase() === normalized ||
+    textField(record, ['name', 'title', 'label']).toLowerCase() === normalized
+  );
+  if (!match) throw new Error(`MIT3 ${label} "${value}" was not found. Use an existing MIT3 ${label.toLowerCase()} or leave it blank.`);
+  return textField(match, ['id']);
+}
+function findMit3Item(items: unknown[], id: string) {
+  return items.findIndex(item => isRecord(item) && textField(item, ['id', 'itemId', 'item_id']) === id);
+}
+function normalizedMit3PartById(data: Record<string, unknown>, id: string) {
+  return normalizeMit3Parts(data).find(part => part.id === id || part.itemId === id);
+}
+function recordArray(data: Record<string, unknown>, key: string) {
+  if (!Array.isArray(data[key])) data[key] = [];
+  return data[key] as unknown[];
+}
+function applyMit3PartInput(item: Record<string, unknown>, input: Mit3PartInput, data: Record<string, unknown>, timestamp: string) {
+  const locationId = resolveLookupId(recordArray(data, 'locations'), input.location, 'Location');
+  const vendorId = resolveLookupId(recordArray(data, 'vendors'), input.vendor, 'Vendor');
+  item.name = input.description || input.partNumber;
+  item.partNumber = input.partNumber;
+  item.description = input.description;
+  item.quantityOnHand = input.quantity;
+  item.minimumStockLevel = input.minQuantity;
+  item.lowStockAlertLevel = input.minQuantity;
+  item.locationId = locationId;
+  item.vendorId = vendorId;
+  item.itemUrl = input.partInfoUrl;
+  item.updatedAt = timestamp;
+}
+function mit3InventoryErrorStatus(message: string) {
+  if (/not found/i.test(message)) return 404;
+  if (/required|numeric|valid http\/https|use an existing/i.test(message)) return 400;
+  return 503;
+}
+function sendMit3InventoryError(req: Request, res: Response, operation: string, targetId: string, error: unknown) {
+  const message = safeErrorMessage(error);
+  audit(req,'failed MIT3 write attempt','inventory',targetId,{operation,error:message});
+  res.status(mit3InventoryErrorStatus(message)).json({ok:false,error:message,mit3Url});
+}
+async function mutateMit3Inventory(req: Request, operation: string, targetId: string, mutator: (data: Record<string, unknown>) => string) {
+  const data = await fetchMit3AppData();
+  const id = mutator(data);
+  data.lastSavedAt = now();
+  await writeMit3AppData(data);
+  const part = normalizedMit3PartById(data, id);
+  return {part,id};
+}
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -314,7 +425,7 @@ app.post('/api/auth/forgot-password', async (req,res)=>{
       console.log(`MCC reset email sent successfully. messageId: ${messageId ?? 'unknown'}`);
       audit(req,'password reset email sent','user',u!.id,{messageId: messageId ?? null});
     } catch (error) {
-      const safeMessage = safeErrorMessage(error, [temp]);
+      const safeMessage = safeErrorMessage(error, [temp], 'Unknown SMTP error.');
       console.log(`MCC reset email failed: ${safeMessage}`);
       audit(req,'password reset email failed','user',u!.id,{error:safeMessage});
     }
@@ -333,9 +444,94 @@ app.get('/api/settings/network-links', requireAuth, requirePermission('settings.
 app.get('/api/inventory/mit3-status', requireAuth, requirePermission('inventory.view'), async (_req,res)=>res.json(await checkMit3Status()));
 app.get('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.view'), async (_req,res)=>{
   try {
-    res.json({ok:true,mit3Url,parts:await fetchMit3Parts()});
+    res.json({ok:true,mit3Url,writeAvailable:true,...await fetchMit3Inventory()});
   } catch (error) {
     res.status(503).json({ok:false,error:error instanceof Error ? error.message : 'MIT3 is offline or not reachable. Start MIT3 Website first.',mit3Url});
+  }
+});
+app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+  const operation = 'inventory add through MIT3';
+  try {
+    const input = validateMit3PartInput(req.body);
+    const {part,id} = await mutateMit3Inventory(req, operation, '', data => {
+      const items = recordArray(data, 'items');
+      const timestamp = now();
+      const item: Record<string, unknown> = {
+        id: `mcc-${crypto.randomUUID()}`,
+        name: input.description || input.partNumber,
+        partNumber: input.partNumber,
+        description: input.description,
+        category: 'Other',
+        quantityOnHand: input.quantity,
+        stockUnit: 'each',
+        minimumStockLevel: input.minQuantity,
+        lowStockAlertLevel: input.minQuantity,
+        locationId: '',
+        vendorId: '',
+        costEach: 0,
+        itemUrl: input.partInfoUrl,
+        notes: '',
+        imagePlaceholder: '',
+        imageDataUrl: '',
+        barcodePlaceholder: '',
+        reorderHold: false,
+        orderPlaced: false,
+        orderRequisitionId: '',
+        hiddenFromWatchList: false,
+        nonStocked: false,
+        isDemo: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      applyMit3PartInput(item, input, data, timestamp);
+      items.unshift(item);
+      return textField(item, ['id']);
+    });
+    audit(req,operation,'inventory',id,{partNumber:input.partNumber});
+    res.status(201).json({ok:true,mit3Url,part});
+  } catch (error) {
+    sendMit3InventoryError(req,res,operation,'',error);
+  }
+});
+app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+  const operation = 'inventory edit through MIT3';
+  const targetId = String(req.params.id ?? '');
+  try {
+    const input = validateMit3PartInput(req.body);
+    const {part,id} = await mutateMit3Inventory(req, operation, targetId, data => {
+      const items = recordArray(data, 'items');
+      const index = findMit3Item(items, targetId);
+      if (index < 0 || !isRecord(items[index])) throw new Error('MIT3 inventory item not found.');
+      const item = items[index];
+      applyMit3PartInput(item, input, data, now());
+      return textField(item, ['id', 'itemId', 'item_id'], targetId);
+    });
+    audit(req,operation,'inventory',id,{partNumber:input.partNumber});
+    res.json({ok:true,mit3Url,part});
+  } catch (error) {
+    sendMit3InventoryError(req,res,operation,targetId,error);
+  }
+});
+app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+  const operation = 'inventory requisition update through MIT3';
+  const targetId = String(req.params.id ?? '');
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const requisition = Boolean(input.requisition ?? input.orderPlaced);
+    const {part,id} = await mutateMit3Inventory(req, operation, targetId, data => {
+      const items = recordArray(data, 'items');
+      const index = findMit3Item(items, targetId);
+      if (index < 0 || !isRecord(items[index])) throw new Error('MIT3 inventory item not found.');
+      const item = items[index];
+      item.orderPlaced = requisition;
+      item.orderRequisitionId = requisition ? textField(item, ['orderRequisitionId'], 'MCC Requisition') : '';
+      item.updatedAt = now();
+      return textField(item, ['id', 'itemId', 'item_id'], targetId);
+    });
+    audit(req,operation,'inventory',id,{requisition});
+    res.json({ok:true,mit3Url,part});
+  } catch (error) {
+    sendMit3InventoryError(req,res,operation,targetId,error);
   }
 });
 app.use(express.static(frontendDistPath));
