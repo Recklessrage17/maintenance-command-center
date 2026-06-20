@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { DashboardPage } from './modules/dashboard/DashboardPage';
 import { InventoryPage } from './modules/inventory/InventoryPage';
+import { RequisitionsPage } from './modules/requisitions/RequisitionsPage';
 import { SettingsPage } from './modules/settings/SettingsPage';
 import { UsersPage } from './modules/users/UsersPage';
 
@@ -15,7 +16,7 @@ function App() {
   const refresh=()=>api('/api/auth/status').then(d=>{setUser(d.user); setMode(d.setupRequired?'setup':d.user?.forcePasswordChange?'change':d.user?'app':'login');}).catch(()=>setMode('login'));
   useEffect(()=>{ refresh(); },[]);
   const permissions=useMemo(()=>({canManageUsers: !!user && user.role !== 'Maintenance Tech 1'}),[user]);
-  const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} onBackToDashboard={()=>setActiveSection('dashboard')} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage /> : <DashboardPage />;
+  const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} onBackToDashboard={()=>setActiveSection('dashboard')} /> : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage /> : <DashboardPage />;
   if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;

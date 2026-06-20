@@ -137,13 +137,51 @@ If native inventory has parts, MCC shows native parts and does not require MIT3 
 
 The old MIT3 write bridge routes remain present for reference compatibility, but the MCC frontend no longer uses them for daily add/edit/requisition workflows.
 
-## Phase 2F: native MCC inventory import/export/backup tools
+## Phase 2F: native MCC requisition workflow
 
-Phase 2F adds MCC native Excel/CSV import, export, and backup tools.
+Phase 2F adds the native MCC requisition workflow. Requisitions now live in the MCC database at `backend/data/mcc.sqlite` instead of MIT3.
+
+MCC native inventory remains the daily-use inventory system. MIT3 remains backup/reference only through the MIT3 import bridge, MIT3 status card, and "Open MIT3 Inventory" reference button.
+
+MCC now owns the native requisition table:
+
+- `inventory_requisitions`
+
+Phase 2F requisition endpoints:
+
+- `GET /api/requisitions`: returns active native MCC requisitions by default and supports status filters.
+- `GET /api/requisitions/:id`: returns one native MCC requisition.
+- `GET /api/requisitions/summary`: returns requested, ordered, received, canceled, and active counts.
+- `POST /api/requisitions`: creates a requisition from a native MCC inventory part.
+- `PATCH /api/requisitions/:id/status`: marks a native MCC requisition Ordered, Received, or Canceled.
+- `PATCH /api/requisitions/:id`: updates requested quantity, WO#, and notes while the requisition is still Requested.
+
+Phase 2F requisition rules:
+
+- Requisition numbers are generated in readable yearly sequence, such as `REQ-2026-000001`.
+- Creating a requisition from inventory snapshots the native part number, description, vendor, and location into MCC.
+- Creating a requisition marks the native inventory part as requested.
+- Requested and Ordered requisitions are active.
+- Received and Canceled requisitions are closed.
+- When no active requisitions remain for a part, MCC clears that native part's requisition status.
+- If an active requisition already exists for a part, MCC warns before allowing another active requisition.
+- Canceling a requisition requires a reason.
+- Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can create and update requisitions.
+- Maintenance Tech 1 remains view-only.
+
+The Requisitions page provides MCC-native summary cards, filters, search, and status actions. The Inventory page creates native requisitions from part rows and refreshes MCC native inventory after each create.
+
+Audit entries are recorded for requisition create, status changed, ordered, received, canceled, edit, and failed requisition action events. Secrets are not logged.
+
+Future Phase 2G will add or harden native inventory import/export/backup tools.
+
+## Future Phase 2G: native MCC inventory import/export/backup tools
+
+Phase 2G is the native Excel/CSV import, export, and backup tool phase.
 
 MCC native inventory remains the daily-use inventory system. MIT3 remains available as backup/reference through the MIT3 import bridge, MIT3 status card, and "Open MIT3 Inventory" reference button.
 
-Phase 2F endpoints:
+Phase 2G endpoints:
 
 - `GET /api/inventory/native/export/csv`: exports current native inventory rows to CSV.
 - `GET /api/inventory/native/export/excel-update-template`: exports an Excel workbook using sheet `MCC Inventory Update`.
@@ -176,8 +214,6 @@ Permissions:
 
 Audit entries are recorded for CSV export, Excel update template export, blank template export, native import, backup creation, failed import, and failed backup.
 
-Restore is intentionally not included in Phase 2F.
+Restore is intentionally reserved for a later hardening pass.
 
-## Future Phase 2G
-
-Phase 2G can add restore, delete/restore archive workflows, and final MIT3 retirement mode after the native import/export/backup workflow has been used safely.
+Future native inventory work can add restore, delete/restore archive workflows, and final MIT3 retirement mode after the native import/export/backup workflow has been used safely.

@@ -61,11 +61,15 @@ CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREME
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_deleted ON inventory_parts (deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_vendors_name ON inventory_vendors (name COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS idx_inventory_locations_name ON inventory_locations (name COLLATE NOCASE);`);
+CREATE INDEX IF NOT EXISTS idx_inventory_locations_name ON inventory_locations (name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_number ON inventory_requisitions (requisition_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_part ON inventory_requisitions (inventory_part_id,status,deleted);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_status ON inventory_requisitions (status,deleted);`);
 }
 initDb();
 function migrateDb() {
@@ -397,6 +401,7 @@ function findNativePart(mit3ItemId: string, partNumber: string) {
   return undefined;
 }
 function normalizeNativePart(row: NativePartRow) {
+  const activeRequisition = activeRequisitionForPart(row.id);
   return {
     id: String(row.id),
     itemId: row.mit3_item_id || String(row.id),
@@ -407,9 +412,10 @@ function normalizeNativePart(row: NativePartRow) {
     quantity: Number(row.quantity ?? 0),
     minQuantity: Number(row.min_quantity ?? 0),
     status: row.status,
-    requisition: row.requisition,
-    orderPlaced: Boolean(row.requisition),
-    hasActiveRequisitionRecord: false,
+    requisition: activeRequisition?.status ?? row.requisition,
+    orderPlaced: Boolean(activeRequisition || row.requisition),
+    hasActiveRequisitionRecord: Boolean(activeRequisition),
+    activeRequisitionNumber: activeRequisition?.requisition_number ?? '',
     partInfoUrl: validWebUrl(row.part_info_url),
     updatedAt: row.updated_at,
     source: row.source,
@@ -850,6 +856,127 @@ function sendNativeInventoryError(req: Request, res: Response, operation: string
   audit(req,'failed inventory native write','inventory',targetId,{operation,error:message});
   res.status(nativeInventoryErrorStatus(message)).json({ok:false,error:message});
 }
+type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
+const requisitionStatuses: RequisitionStatus[] = ['Requested','Ordered','Received','Canceled'];
+const activeRequisitionStatuses: RequisitionStatus[] = ['Requested','Ordered'];
+interface RequisitionRow {
+  id: number;
+  requisition_number: string;
+  inventory_part_id: number;
+  part_number: string;
+  description: string;
+  vendor_name: string;
+  location_name: string;
+  quantity_requested: number;
+  status: RequisitionStatus;
+  requested_by_user_id: number | null;
+  requested_by_name: string;
+  requested_at: string;
+  ordered_by_user_id: number | null;
+  ordered_at: string | null;
+  received_by_user_id: number | null;
+  received_at: string | null;
+  canceled_by_user_id: number | null;
+  canceled_at: string | null;
+  cancel_reason: string;
+  work_order_number: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  deleted: number;
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+}
+function publicRequisition(row: RequisitionRow) {
+  return {
+    id: row.id,
+    requisitionNumber: row.requisition_number,
+    inventoryPartId: row.inventory_part_id,
+    partNumber: row.part_number,
+    description: row.description,
+    vendorName: row.vendor_name,
+    locationName: row.location_name,
+    quantityRequested: Number(row.quantity_requested ?? 0),
+    status: row.status,
+    requestedByUserId: row.requested_by_user_id,
+    requestedByName: row.requested_by_name,
+    requestedAt: row.requested_at,
+    orderedByUserId: row.ordered_by_user_id,
+    orderedAt: row.ordered_at,
+    receivedByUserId: row.received_by_user_id,
+    receivedAt: row.received_at,
+    canceledByUserId: row.canceled_by_user_id,
+    canceledAt: row.canceled_at,
+    cancelReason: row.cancel_reason,
+    workOrderNumber: row.work_order_number,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+function activeRequisitionForPart(partId: number) {
+  return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT requisition_number,status FROM inventory_requisitions WHERE deleted=0 AND inventory_part_id=? AND status IN ('Requested','Ordered') ORDER BY requested_at DESC, id DESC LIMIT 1`, [partId]);
+}
+function activeRequisitionCountForPart(partId: number) {
+  return one<{ count: number }>(`SELECT COUNT(*) AS count FROM inventory_requisitions WHERE deleted=0 AND inventory_part_id=? AND status IN ('Requested','Ordered')`, [partId])?.count ?? 0;
+}
+function syncPartRequisitionFlag(partId: number, timestamp = now()) {
+  const active = activeRequisitionForPart(partId);
+  run('UPDATE inventory_parts SET requisition=?, updated_at=? WHERE id=?', [active ? active.status : '',timestamp,partId]);
+}
+function requisitionNumberForTimestamp(timestamp: string) {
+  const year = timestamp.slice(0, 4);
+  const latest = one<{ requisition_number: string }>("SELECT requisition_number FROM inventory_requisitions WHERE requisition_number LIKE ? ORDER BY requisition_number DESC LIMIT 1", [`REQ-${year}-%`]);
+  let next = 1;
+  const match = latest?.requisition_number.match(/^REQ-\d{4}-(\d{6})$/);
+  if (match) next = Number(match[1]) + 1;
+  for (;;) {
+    const requisitionNumber = `REQ-${year}-${String(next).padStart(6, '0')}`;
+    const existing = one<{ id: number }>('SELECT id FROM inventory_requisitions WHERE requisition_number=?', [requisitionNumber]);
+    if (!existing) return requisitionNumber;
+    next += 1;
+  }
+}
+function requisitionById(id: number) {
+  return one<RequisitionRow>('SELECT * FROM inventory_requisitions WHERE deleted=0 AND id=?', [id]);
+}
+function validateQuantityRequested(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error('Qty requested must be a positive number.');
+  return parsed;
+}
+function requisitionList(statusFilter = '') {
+  const params: SqlParam[] = [];
+  let where = 'deleted=0';
+  const cleanStatus = statusFilter.trim();
+  if (!cleanStatus) {
+    where += " AND status IN ('Requested','Ordered')";
+  } else if (cleanStatus.toLowerCase() !== 'all') {
+    if (!requisitionStatuses.includes(cleanStatus as RequisitionStatus)) throw new Error('Unsupported requisition status filter.');
+    where += ' AND status=?';
+    params.push(cleanStatus);
+  }
+  return all<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${where} ORDER BY CASE status WHEN 'Requested' THEN 1 WHEN 'Ordered' THEN 2 WHEN 'Received' THEN 3 ELSE 4 END, requested_at DESC, id DESC`, params).map(publicRequisition);
+}
+function requisitionSummary() {
+  const count = (status: RequisitionStatus) => one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_requisitions WHERE deleted=0 AND status=?', [status])?.count ?? 0;
+  const requestedCount = count('Requested');
+  const orderedCount = count('Ordered');
+  return {
+    requestedCount,
+    orderedCount,
+    receivedCount: count('Received'),
+    canceledCount: count('Canceled'),
+    activeCount: requestedCount + orderedCount,
+  };
+}
+function sendRequisitionError(req: Request, res: Response, operation: string, targetId: string|number, error: unknown) {
+  const message = safeErrorMessage(error);
+  inventoryAudit(req,'failed requisition action','requisition',targetId,{operation,error:message});
+  audit(req,'failed requisition action','requisition',targetId,{operation,error:message});
+  const status = /not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /must|requires|required|unsupported|only/i.test(message) ? 400 : 500;
+  res.status(status).json({ok:false,error:message,activeRequisitionExists:/already exists/i.test(message)});
+}
 async function writeMit3AppData(data: Record<string, unknown>) {
   const response = await fetch(mit3AppDataUrl, {
     method: 'PUT',
@@ -987,6 +1114,138 @@ for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${a
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>res.json({localPort:port,localhostUrl:`http://localhost:${port}`,detectedLanUrls:detectedLanUrls()}));
+app.get('/api/requisitions/summary', requireAuth, (_req,res)=>res.json({ok:true,...requisitionSummary()}));
+app.get('/api/requisitions', requireAuth, (req,res)=>{
+  try {
+    res.json({ok:true,requisitions:requisitionList(queryText(req.query.status)),summary:requisitionSummary()});
+  } catch (error) {
+    res.status(400).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.get('/api/requisitions/:id', requireAuth, (req,res)=>{
+  const requisition = requisitionById(Number(req.params.id));
+  if (!requisition) return res.status(404).json({ok:false,error:'Requisition not found.'});
+  res.json({ok:true,requisition:publicRequisition(requisition)});
+});
+app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const operation = 'requisition create';
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const partId = Number(input.inventoryPartId ?? input.partId);
+    if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
+    const quantityRequested = validateQuantityRequested(input.quantityRequested ?? input.quantity);
+    const allowDuplicate = input.allowDuplicate === true;
+    const timestamp = now();
+    let requisitionId = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const part = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+FROM inventory_parts p
+LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+WHERE p.deleted=0 AND p.id=?`, [partId]);
+      if (!part) throw new Error('Native inventory part not found.');
+      if (activeRequisitionCountForPart(partId) > 0 && !allowDuplicate) throw new Error('Active requisition already exists for this part.');
+      const requisitionNumber = requisitionNumberForTimestamp(timestamp);
+      const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+        requisitionNumber,
+        part.id,
+        part.part_number,
+        part.description,
+        part.vendor_name ?? '',
+        part.location_name ?? '',
+        quantityRequested,
+        'Requested',
+        actor.id,
+        actor.full_name,
+        timestamp,
+        textField(input, ['workOrderNumber','work_order_number','workOrder']),
+        textField(input, ['notes','note']),
+        timestamp,
+        timestamp,
+      ]);
+      requisitionId = Number(result.lastInsertRowid);
+      syncPartRequisitionFlag(partId,timestamp);
+      inventoryAudit(req,'requisition create','requisition',requisitionId,{requisitionNumber,partId,partNumber:part.part_number,quantityRequested});
+      audit(req,'requisition create','requisition',requisitionId,{requisitionNumber,partId,partNumber:part.part_number,quantityRequested});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.status(201).json({ok:true,requisition:publicRequisition(requisitionById(requisitionId)!),summary:requisitionSummary()});
+  } catch (error) {
+    sendRequisitionError(req,res,operation,'',error);
+  }
+});
+app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const operation = 'requisition status changed';
+  const requisitionId = Number(req.params.id);
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const nextStatus = textField(input, ['status']) as RequisitionStatus;
+    if (!['Ordered','Received','Canceled'].includes(nextStatus)) throw new Error('Status must be Ordered, Received, or Canceled.');
+    const cancelReason = textField(input, ['cancelReason','cancel_reason']);
+    if (nextStatus === 'Canceled' && !cancelReason) throw new Error('Cancel reason is required.');
+    const timestamp = now();
+    let previousStatus = '';
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = requisitionById(requisitionId);
+      if (!existing) throw new Error('Requisition not found.');
+      previousStatus = existing.status;
+      if (nextStatus === 'Ordered') {
+        run('UPDATE inventory_requisitions SET status=?, ordered_by_user_id=?, ordered_at=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,timestamp,requisitionId]);
+      } else if (nextStatus === 'Received') {
+        run('UPDATE inventory_requisitions SET status=?, received_by_user_id=?, received_at=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,timestamp,requisitionId]);
+      } else {
+        run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,cancelReason,timestamp,requisitionId]);
+      }
+      syncPartRequisitionFlag(existing.inventory_part_id,timestamp);
+      inventoryAudit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
+      audit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
+      const specificAction = nextStatus === 'Ordered' ? 'requisition ordered' : nextStatus === 'Received' ? 'requisition received' : 'requisition canceled';
+      inventoryAudit(req,specificAction,'requisition',requisitionId,{previousStatus,nextStatus});
+      audit(req,specificAction,'requisition',requisitionId,{previousStatus,nextStatus});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,requisition:publicRequisition(requisitionById(requisitionId)!),summary:requisitionSummary()});
+  } catch (error) {
+    sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
+  }
+});
+app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const operation = 'requisition edit';
+  const requisitionId = Number(req.params.id);
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = requisitionById(requisitionId);
+      if (!existing) throw new Error('Requisition not found.');
+      if (existing.status !== 'Requested') throw new Error('Only Requested requisitions can be edited.');
+      const quantityRequested = input.quantityRequested === undefined && input.quantity === undefined ? existing.quantity_requested : validateQuantityRequested(input.quantityRequested ?? input.quantity);
+      const workOrderNumber = input.workOrderNumber === undefined && input.work_order_number === undefined ? existing.work_order_number : textField(input, ['workOrderNumber','work_order_number','workOrder']);
+      const notes = input.notes === undefined ? existing.notes : textField(input, ['notes','note']);
+      run('UPDATE inventory_requisitions SET quantity_requested=?, work_order_number=?, notes=?, updated_at=? WHERE id=?', [quantityRequested,workOrderNumber,notes,timestamp,requisitionId]);
+      inventoryAudit(req,'requisition edit','requisition',requisitionId,{quantityRequested,workOrderNumber});
+      audit(req,'requisition edit','requisition',requisitionId,{quantityRequested,workOrderNumber});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,requisition:publicRequisition(requisitionById(requisitionId)!),summary:requisitionSummary()});
+  } catch (error) {
+    sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
+  }
+});
 app.get('/api/inventory/native/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...nativeInventorySummary()}));
 app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory.view'), (req,res)=>{
   const search = queryText(req.query.search ?? req.query.q);

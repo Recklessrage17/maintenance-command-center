@@ -20,6 +20,7 @@ type InventoryPart = {
   requisition: string;
   orderPlaced: boolean;
   hasActiveRequisitionRecord: boolean;
+  activeRequisitionNumber?: string;
   partInfoUrl: string;
   updatedAt: string;
 };
@@ -87,6 +88,14 @@ type NativeFileImportSummary = {
   nativeSummary?: NativeSummary;
 };
 
+type NativeRequisitionResponse = {
+  ok: boolean;
+  requisition: {
+    id: number;
+    requisitionNumber: string;
+  };
+};
+
 type PartForm = {
   partNumber: string;
   description: string;
@@ -105,6 +114,12 @@ const blankForm: PartForm = {
   quantity: '0',
   minQuantity: '0',
   partInfoUrl: '',
+};
+
+const blankRequisitionForm = {
+  quantityRequested: '1',
+  workOrderNumber: '',
+  notes: '',
 };
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
@@ -267,12 +282,15 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [form,setForm]=useState<PartForm>(blankForm);
   const [formError,setFormError]=useState('');
   const [saving,setSaving]=useState(false);
-  const [mutatingId,setMutatingId]=useState('');
   const [importing,setImporting]=useState(false);
   const [toolsBusy,setToolsBusy]=useState('');
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
   const [fileImportSummary,setFileImportSummary]=useState<NativeFileImportSummary|null>(null);
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
+  const [requisitionPart,setRequisitionPart]=useState<InventoryPart|null>(null);
+  const [requisitionForm,setRequisitionForm]=useState(blankRequisitionForm);
+  const [requisitionError,setRequisitionError]=useState('');
+  const [requisitionSaving,setRequisitionSaving]=useState(false);
 
   const canWrite = writeRoles.has(userRole);
   const canImport = importRoles.has(userRole);
@@ -523,23 +541,55 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     }
   }
 
-  async function updateRequisition(part: InventoryPart, requisition: boolean){
+  function openRequisition(part: InventoryPart){
     if (!writeEnabled) return;
-    const action = requisition ? 'mark this part for requisition' : 'clear the requisition marker for this part';
-    if (!window.confirm(`Confirm that you want to ${action} in MCC Native Inventory.`)) return;
-    setMutatingId(part.id);
+    setRequisitionPart(part);
+    setRequisitionForm(blankRequisitionForm);
+    setRequisitionError('');
     setNotice(null);
+  }
+
+  function closeRequisition(force = false){
+    if (requisitionSaving && !force) return;
+    setRequisitionPart(null);
+    setRequisitionForm(blankRequisitionForm);
+    setRequisitionError('');
+  }
+
+  async function createRequisition(forceDuplicate = false){
+    if (!writeEnabled || !requisitionPart) return;
+    const quantity = Number(requisitionForm.quantityRequested);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setRequisitionError('Qty requested must be a positive number.');
+      return;
+    }
+    if (requisitionPart.hasActiveRequisitionRecord && !forceDuplicate && !window.confirm('Active requisition already exists for this part. Create another one?')) return;
+    setRequisitionSaving(true);
+    setRequisitionError('');
     try {
-      await api(`/api/inventory/native/parts/${encodeURIComponent(part.id)}/requisition`, {
-        method: 'PATCH',
-        body: JSON.stringify({requisition}),
+      const result = await api<NativeRequisitionResponse>('/api/requisitions', {
+        method: 'POST',
+        body: JSON.stringify({
+          inventoryPartId: Number(requisitionPart.id),
+          quantityRequested: quantity,
+          workOrderNumber: requisitionForm.workOrderNumber.trim(),
+          notes: requisitionForm.notes.trim(),
+          allowDuplicate: forceDuplicate || requisitionPart.hasActiveRequisitionRecord,
+        }),
       });
-      setNotice({kind:'success',text:'Requisition status updated in MCC Native Inventory.'});
+      closeRequisition(true);
+      setNotice({kind:'success',text:`Requisition ${result.requisition.requisitionNumber} created.`});
       await refresh();
     } catch (err) {
-      setNotice({kind:'error',text:(err as Error).message});
+      const message = (err as Error).message;
+      if (/Active requisition already exists/i.test(message) && window.confirm('Active requisition already exists for this part. Create another one?')) {
+        setRequisitionSaving(false);
+        await createRequisition(true);
+        return;
+      }
+      setRequisitionError(message);
     } finally {
-      setMutatingId('');
+      setRequisitionSaving(false);
     }
   }
 
@@ -758,21 +808,13 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                     <td>{part.vendor || '-'}</td>
                     <td>{part.quantity}</td>
                     <td>{part.minQuantity}</td>
-                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
+                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.hasActiveRequisitionRecord&&<span className="requisition-chip" title={part.activeRequisitionNumber || undefined}>REQ</span>}{!part.hasActiveRequisitionRecord&&part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
                     <td>{partLink?<a className="link-badge" href={partLink} target="_blank" rel="noreferrer">Open</a>:<span className="muted-cell">None</span>}</td>
                     {showWriteActions&&(
                       <td>
                         <div className="inventory-row-actions">
                           <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
-                          <label className="requisition-toggle">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(part.orderPlaced || part.requisition)}
-                              disabled={!writeEnabled || mutatingId===part.id}
-                              onChange={event=>void updateRequisition(part,event.target.checked)}
-                            />
-                            <span>Req</span>
-                          </label>
+                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Create Requisition</button>
                         </div>
                       </td>
                     )}
@@ -839,6 +881,51 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeModal()}>Cancel</button>
               <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':modal==='edit'?'Save Changes':'Add Part'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {requisitionPart&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeRequisition(); }}>
+          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void createRequisition(); }}>
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Create Requisition</p>
+                <h3>{requisitionPart.partNumber || 'Native inventory part'}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>closeRequisition()}>Close</button>
+            </div>
+
+            {requisitionPart.hasActiveRequisitionRecord&&<p className="form-message error">Active requisition already exists for this part.</p>}
+
+            <div className="inventory-form-grid">
+              <label className="form-field">
+                <span>Part Number</span>
+                <input value={requisitionPart.partNumber} readOnly />
+              </label>
+              <label className="form-field">
+                <span>Description</span>
+                <input value={requisitionPart.description} readOnly />
+              </label>
+              <label className="form-field">
+                <span>Qty Requested</span>
+                <input inputMode="decimal" value={requisitionForm.quantityRequested} onChange={event=>setRequisitionForm({...requisitionForm,quantityRequested:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>WO#</span>
+                <input value={requisitionForm.workOrderNumber} onChange={event=>setRequisitionForm({...requisitionForm,workOrderNumber:event.target.value})} />
+              </label>
+              <label className="form-field inventory-form-wide">
+                <span>Notes</span>
+                <textarea value={requisitionForm.notes} onChange={event=>setRequisitionForm({...requisitionForm,notes:event.target.value})} />
+              </label>
+            </div>
+
+            {requisitionError&&<p className="form-message error">{requisitionError}</p>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={()=>closeRequisition()}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Create'}</button>
             </div>
           </form>
         </div>
