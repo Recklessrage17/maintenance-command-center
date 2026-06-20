@@ -116,7 +116,7 @@ function payloadFromForm(form: PartForm) {
   };
 }
 
-export function InventoryPage({ userRole }: { userRole: string }) {
+export function InventoryPage({ userRole, onBackToDashboard }: { userRole: string; onBackToDashboard: () => void }) {
   const [status,setStatus]=useState<Mit3Status|null>(null);
   const [parts,setParts]=useState<InventoryPart[]>([]);
   const [locations,setLocations]=useState<LookupOption[]>([]);
@@ -260,39 +260,35 @@ export function InventoryPage({ userRole }: { userRole: string }) {
 
   return (
     <div className="page-stack inventory-page">
-      <div className="page-heading inventory-heading">
-        <div>
-          <p className="eyebrow">Inventory</p>
+      <div className="inventory-focus-toolbar">
+        <button className="secondary-button compact-button inventory-back-button" type="button" onClick={onBackToDashboard}>Back to Command Center</button>
+        <div className="inventory-focus-title">
+          <p className="eyebrow">Inventory workspace</p>
           <h2>Inventory</h2>
-          <p>MIT3 inventory read-only view</p>
         </div>
-        <div className="inventory-heading-actions">
+        <span className={isOnline?'mit3-status-badge online':'mit3-status-badge offline'} aria-live="polite">{isOnline?'MIT3 Online':'MIT3 Offline'}</span>
+        <div className="inventory-focus-actions">
           <button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>
           <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={loading}>Refresh Inventory</button>
+          <a className="secondary-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
         </div>
       </div>
 
-      <div className="inventory-bridge-grid">
-        <article className="mcc-card inventory-status-card">
+      <div className="inventory-bridge-strip">
+        <div>
           <span>MIT3 status</span>
           <strong>{status?.message ?? (loading ? 'Checking MIT3...' : 'MIT3 offline or not reachable')}</strong>
-          <p><span className={isOnline?'status-pill':'status-pill disabled'}>{isOnline?'Online':'Offline'}</span></p>
-          <code className="inventory-url">{status?.mit3Url ?? 'http://localhost:4173'}</code>
+        </div>
+        <div>
+          <span>Write bridge</span>
+          <strong>{writeEnabled ? 'Ready for MCC add/edit/requisition' : 'Guarded by role and MIT3 status'}</strong>
+        </div>
+        <code className="inventory-url">{status?.mit3Url ?? 'http://localhost:4173'}</code>
+        <div className="inventory-bridge-messages">
           {error&&<p className="form-message error">{error}</p>}
           {!isOnline&&<p className="form-message error">Start MIT3 Website first, then refresh this page.</p>}
-          <div className="inventory-actions">
-            <a className="primary-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
-            <button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button>
-          </div>
-        </article>
-
-        <article className="mcc-card inventory-note-card">
-          <span>Phase 2B</span>
-          <strong>Write bridge v1</strong>
-          <p>MCC writes through MIT3 API. MIT3 remains the source of truth.</p>
-          <p className="bridge-detail">Read-only table remains in MCC. Delete, import, and export still happen in MIT3.</p>
           {writeDisabledReason&&<p className="form-message error">{writeDisabledReason}</p>}
-        </article>
+        </div>
       </div>
 
       <div className="card-grid inventory-summary-grid">
@@ -332,12 +328,12 @@ export function InventoryPage({ userRole }: { userRole: string }) {
                       ? <a className="part-number-link" href={part.partInfoUrl} target="_blank" rel="noreferrer">{part.partNumber || part.itemId || 'Open'}<span aria-hidden="true">-&gt;</span></a>
                       : <span className="plain-part-number">{part.partNumber || part.itemId || '-'}</span>}
                   </td>
-                  <td>{part.description || '-'}</td>
+                  <td className="inventory-description-cell"><span className="inventory-description-text" title={part.description || undefined}>{part.description || '-'}</span></td>
                   <td>{part.location || '-'}</td>
                   <td>{part.vendor || '-'}</td>
                   <td>{part.quantity}</td>
                   <td>{part.minQuantity}</td>
-                  <td><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</td>
+                  <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
                   <td>{part.partInfoUrl&&validUrl(part.partInfoUrl)?<a className="link-badge" href={part.partInfoUrl} target="_blank" rel="noreferrer">Open</a>:<span className="muted-cell">None</span>}</td>
                   <td>
                     <div className="inventory-row-actions">
