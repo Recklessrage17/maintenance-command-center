@@ -63,6 +63,30 @@ type ImportSummary = {
   nativeSummary?: NativeSummary;
 };
 
+type BackupFile = {
+  fileName: string;
+  createdTime: string;
+  type: 'JSON' | 'CSV';
+  size: number;
+};
+
+type BackupListResponse = {
+  ok: boolean;
+  backups: BackupFile[];
+};
+
+type NativeFileImportSummary = {
+  addedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  vendorCreatedCount: number;
+  locationCreatedCount: number;
+  invalidUrlCount: number;
+  errors: string[];
+  backupFiles?: BackupFile[];
+  nativeSummary?: NativeSummary;
+};
+
 type PartForm = {
   partNumber: string;
   description: string;
@@ -102,6 +126,35 @@ async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   return data as T;
 }
 
+async function apiForm<T>(path:string, formData:FormData): Promise<T> {
+  const res=await fetch(path,{method:'POST',credentials:'include',body:formData});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || 'Request failed.');
+  return data as T;
+}
+
+function fileNameFromDisposition(disposition: string | null, fallback: string) {
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return match?.[1] ?? fallback;
+}
+
+async function downloadFile(path:string, fallbackFileName:string) {
+  const res = await fetch(path,{credentials:'include'});
+  if (!res.ok) {
+    const data = await res.json().catch(()=>({}));
+    throw new Error(data.error || 'Download failed.');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileNameFromDisposition(res.headers.get('content-disposition'), fallbackFileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function isLowStock(part: InventoryPart) {
   return part.status === 'Low Stock' || part.status === 'Out of Stock';
 }
@@ -131,6 +184,12 @@ function formatDateTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'}).format(date);
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
 }
 
 function normalizeNativeSummary(summary?: Partial<NativeSummary> | null): NativeSummary {
@@ -210,9 +269,14 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [saving,setSaving]=useState(false);
   const [mutatingId,setMutatingId]=useState('');
   const [importing,setImporting]=useState(false);
+  const [toolsBusy,setToolsBusy]=useState('');
+  const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
+  const [fileImportSummary,setFileImportSummary]=useState<NativeFileImportSummary|null>(null);
+  const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
 
   const canWrite = writeRoles.has(userRole);
   const canImport = importRoles.has(userRole);
+  const canUseInventoryTools = canWrite;
 
   async function refresh(options: { notify?: boolean } = {}){
     setLoading(true);
@@ -240,7 +304,17 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     }
   }
 
-  useEffect(()=>{ void refresh(); },[]);
+  async function loadBackups(){
+    if (!canUseInventoryTools) return;
+    try {
+      const result = await api<BackupListResponse>('/api/inventory/native/backups');
+      setBackupFiles(result.backups ?? []);
+    } catch {
+      setBackupFiles([]);
+    }
+  }
+
+  useEffect(()=>{ void refresh(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
 
   const isOnline = status?.ok === true;
   const showWriteActions = canWrite;
@@ -337,6 +411,59 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function runDownload(endpoint: string, fallbackFileName: string, successText: string){
+    if (!canUseInventoryTools || toolsBusy) return;
+    setToolsBusy(endpoint);
+    setNotice(null);
+    try {
+      await downloadFile(endpoint, fallbackFileName);
+      setNotice({kind:'success',text:successText});
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setToolsBusy('');
+    }
+  }
+
+  async function createBackup(){
+    if (!canUseInventoryTools || toolsBusy) return;
+    setToolsBusy('backup');
+    setNotice(null);
+    try {
+      const result = await api<BackupListResponse>('/api/inventory/native/backups/create',{method:'POST'});
+      setBackupFiles(result.backups ?? []);
+      await loadBackups();
+      setNotice({kind:'success',text:'MCC Native Inventory backup created.'});
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setToolsBusy('');
+    }
+  }
+
+  async function importNativeFile(){
+    if (!canUseInventoryTools || toolsBusy || !inventoryImportFile) return;
+    if (!window.confirm('MCC will create an automatic backup before importing.')) return;
+    setToolsBusy('native-import');
+    setNotice(null);
+    setFileImportSummary(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', inventoryImportFile);
+      const result = await apiForm<NativeFileImportSummary>('/api/inventory/native/import', formData);
+      setFileImportSummary(result);
+      if (result.nativeSummary) setNativeSummary(normalizeNativeSummary(result.nativeSummary));
+      await refresh();
+      await loadBackups();
+      setInventoryImportFile(null);
+      setNotice({kind:'success',text:`Native import complete: ${result.addedCount} added, ${result.updatedCount} updated, ${result.skippedCount} skipped.`});
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setToolsBusy('');
     }
   }
 
@@ -495,6 +622,63 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
             <ul>
               {importSummary.errors.slice(0,4).map((message,index)=><li key={`${message}-${index}`}>{message}</li>)}
             </ul>
+          )}
+        </section>
+      )}
+
+      {canUseInventoryTools&&(
+        <section className="mcc-card inventory-tools-card">
+          <div className="inventory-tools-heading">
+            <div>
+              <span>Inventory Tools</span>
+              <strong>Native import / export / backup</strong>
+            </div>
+            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackups()} disabled={Boolean(toolsBusy)}>Refresh Backups</button>
+          </div>
+          <div className="inventory-tools-grid">
+            <div className="inventory-tools-panel">
+              <span>Exports</span>
+              <div className="inventory-tool-actions">
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/csv',`MCC_Inventory_Export_${new Date().toISOString().slice(0,10)}.csv`,'CSV export downloaded.')} disabled={Boolean(toolsBusy)}>Export CSV</button>
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/excel-update-template',`MCC_Inventory_Update_Template_${new Date().toISOString().slice(0,10)}.xlsx`,'Excel update template downloaded.')} disabled={Boolean(toolsBusy)}>Export Excel Update Template</button>
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/blank-import-template','MCC_Inventory_Blank_Import_Template.xlsx','Blank import template downloaded.')} disabled={Boolean(toolsBusy)}>Export Blank Import Template</button>
+              </div>
+            </div>
+            <div className="inventory-tools-panel">
+              <span>Import CSV / Excel</span>
+              <div className="inventory-import-row">
+                <input type="file" accept=".csv,.xlsx" onChange={event=>setInventoryImportFile(event.target.files?.[0] ?? null)} />
+                <button className="primary-button compact-button" type="button" onClick={()=>void importNativeFile()} disabled={Boolean(toolsBusy)||!inventoryImportFile}>Import File</button>
+              </div>
+              <p className="form-message">MCC will create an automatic backup before importing.</p>
+            </div>
+            <div className="inventory-tools-panel">
+              <span>Backups</span>
+              <div className="inventory-tool-actions">
+                <button className="secondary-button compact-button" type="button" onClick={()=>void createBackup()} disabled={Boolean(toolsBusy)}>Create Backup</button>
+              </div>
+              <div className="backup-list">
+                {backupFiles.length>0
+                  ? backupFiles.slice(0,6).map(file=>(
+                    <div className="backup-row" key={`${file.fileName}-${file.size}`}>
+                      <strong>{file.fileName}</strong>
+                      <span>{file.type} / {formatFileSize(file.size)} / {formatDateTime(file.createdTime)}</span>
+                    </div>
+                  ))
+                  : <p className="form-message">No backups listed yet.</p>}
+              </div>
+            </div>
+          </div>
+          {fileImportSummary&&(
+            <div className="inventory-tool-summary" aria-live="polite">
+              <strong>{fileImportSummary.addedCount} added / {fileImportSummary.updatedCount} updated / {fileImportSummary.skippedCount} skipped</strong>
+              <span>{fileImportSummary.vendorCreatedCount} vendors created, {fileImportSummary.locationCreatedCount} locations created, {fileImportSummary.invalidUrlCount} unsafe links skipped.</span>
+              {fileImportSummary.errors.length>0&&(
+                <ul>
+                  {fileImportSummary.errors.slice(0,5).map((message,index)=><li key={`${message}-${index}`}>{message}</li>)}
+                </ul>
+              )}
+            </div>
           )}
         </section>
       )}

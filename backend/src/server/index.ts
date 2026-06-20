@@ -6,6 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import ExcelJS from 'exceljs';
+import multer from 'multer';
 import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +27,7 @@ const mit3HealthUrl = `${mit3Url}/api/health`;
 const mit3AppDataUrl = `${mit3Url}/api/app-data`;
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
 const dataDir = path.resolve(__dirname, '../../data');
+const backupsDir = path.resolve(__dirname, '../../backups');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -32,6 +35,7 @@ const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT &&
 const smtpPort = Number(process.env.SMTP_PORT ?? 587);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toString('hex');
 fs.mkdirSync(dataDir, { recursive: true });
+const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 app.use(express.json({ limit: '50kb' }));
 
 type Role = 'Admin' | 'Manager' | 'Maintenance Tech 3' | 'Maintenance Tech 2' | 'Maintenance Tech 1';
@@ -440,6 +444,317 @@ LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
 WHERE ${where.join(' AND ')}
 ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`, params).map(normalizeNativePart);
 }
+const nativeExportHeaders = ['MCC Item ID','Part Number','Description','Location','Vendor','Quantity','Minimum Quantity','Requisition','Part Info URL','Notes'] as const;
+const nativeBlankImportHeaders = nativeExportHeaders.filter(header => header !== 'MCC Item ID');
+type NativeExportHeader = typeof nativeExportHeaders[number];
+type NativeExportRecord = Record<NativeExportHeader, string | number>;
+type NativeImportRow = {
+  rowNumber: number;
+  mccItemId: string;
+  partNumber: string;
+  description: string;
+  location: string;
+  vendor: string;
+  quantity: string;
+  minQuantity: string;
+  requisition: string;
+  partInfoUrl: string;
+  notes: string;
+};
+type NativeImportSummary = {
+  addedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  vendorCreatedCount: number;
+  locationCreatedCount: number;
+  invalidUrlCount: number;
+  errors: string[];
+};
+function nativeInventoryRows() {
+  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+FROM inventory_parts p
+LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+WHERE p.deleted=0
+ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`);
+}
+function nativeExportRecord(row: NativePartRow): NativeExportRecord {
+  return {
+    'MCC Item ID': row.id,
+    'Part Number': row.part_number,
+    Description: row.description,
+    Location: row.location_name ?? '',
+    Vendor: row.vendor_name ?? '',
+    Quantity: Number(row.quantity ?? 0),
+    'Minimum Quantity': Number(row.min_quantity ?? 0),
+    Requisition: row.requisition,
+    'Part Info URL': validWebUrl(row.part_info_url),
+    Notes: row.notes,
+  };
+}
+function csvCell(value: string | number) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+function csvFromRecords(headers: readonly string[], records: NativeExportRecord[]) {
+  const lines = [headers.map(csvCell).join(',')];
+  for (const record of records) lines.push(headers.map(header => csvCell(record[header as NativeExportHeader] ?? '')).join(','));
+  return `${lines.join('\r\n')}\r\n`;
+}
+function downloadDateStamp() {
+  return new Date().toISOString().slice(0, 10);
+}
+function backupFileStamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+function sendDownload(res: Response, fileName: string, contentType: string, content: string | Buffer) {
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.send(content);
+}
+function styleInventorySheet(sheet: ExcelJS.Worksheet) {
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).alignment = { vertical: 'middle' };
+  sheet.columns.forEach(column => {
+    let maxLength = 12;
+    column.eachCell?.({ includeEmpty: true }, cell => {
+      maxLength = Math.max(maxLength, String(cell.text ?? '').length + 2);
+    });
+    column.width = Math.min(Math.max(maxLength, 12), 42);
+  });
+}
+async function workbookBuffer(sheetName: string, headers: readonly string[], records: NativeExportRecord[]) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = appName;
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.addRow([...headers]);
+  for (const record of records) sheet.addRow(headers.map(header => record[header as NativeExportHeader] ?? ''));
+  styleInventorySheet(sheet);
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
+}
+function backupInfo(filePath: string) {
+  const stat = fs.statSync(filePath);
+  const extension = path.extname(filePath).toLowerCase();
+  return {
+    fileName: path.basename(filePath),
+    createdTime: stat.birthtime.toISOString(),
+    type: extension === '.json' ? 'JSON' : 'CSV',
+    size: stat.size,
+  };
+}
+function listNativeInventoryBackups() {
+  if (!fs.existsSync(backupsDir)) return [];
+  return fs.readdirSync(backupsDir)
+    .filter(fileName => /^MCC_Native_Inventory_Backup_.+\.(json|csv)$/i.test(fileName))
+    .map(fileName => backupInfo(path.join(backupsDir, fileName)))
+    .sort((left, right) => right.createdTime.localeCompare(left.createdTime));
+}
+function createNativeInventoryBackups(reason: string) {
+  fs.mkdirSync(backupsDir, { recursive: true });
+  const rows = nativeInventoryRows();
+  const records = rows.map(nativeExportRecord);
+  const stamp = backupFileStamp();
+  const jsonPath = path.join(backupsDir, `MCC_Native_Inventory_Backup_${stamp}.json`);
+  const csvPath = path.join(backupsDir, `MCC_Native_Inventory_Backup_${stamp}.csv`);
+  fs.writeFileSync(jsonPath, JSON.stringify({
+    app: appName,
+    backupType: 'MCC Native Inventory',
+    reason,
+    createdAt: now(),
+    partCount: records.length,
+    parts: records,
+  }, null, 2));
+  fs.writeFileSync(csvPath, csvFromRecords(nativeExportHeaders, records));
+  return [backupInfo(jsonPath), backupInfo(csvPath)];
+}
+function createAndAuditNativeBackup(req: Request, reason: string) {
+  try {
+    const backups = createNativeInventoryBackups(reason);
+    inventoryAudit(req,'inventory backup create','inventory','native',{reason,files:backups.map(file => file.fileName)});
+    audit(req,'inventory backup create','inventory','native',{reason,files:backups.map(file => file.fileName)});
+    return backups;
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    inventoryAudit(req,'failed backup','inventory','native',{reason,error:message});
+    audit(req,'failed inventory backup','inventory','native',{reason,error:message});
+    throw error;
+  }
+}
+function parseCsvRows(content: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  const text = content.replace(/^\uFEFF/, '');
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (char === '"' && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        cell += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(cell.trim());
+      cell = '';
+    } else if (char === '\n') {
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (char !== '\r') {
+      cell += char;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(value => value)) rows.push(row);
+  return rows;
+}
+function normalizeImportHeader(header: string) {
+  return header.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function importRowFromRecord(record: Record<string, string>, rowNumber: number): NativeImportRow {
+  const value = (...headers: string[]) => {
+    for (const header of headers) {
+      const direct = record[header];
+      if (direct !== undefined) return direct.trim();
+      const normalized = record[normalizeImportHeader(header)];
+      if (normalized !== undefined) return normalized.trim();
+    }
+    return '';
+  };
+  return {
+    rowNumber,
+    mccItemId: value('MCC Item ID','Item ID','ID'),
+    partNumber: value('Part Number','Part No','Part','SKU'),
+    description: value('Description','Name'),
+    location: value('Location','Location Name'),
+    vendor: value('Vendor','Vendor Name'),
+    quantity: value('Quantity','Qty','Stock On Hand'),
+    minQuantity: value('Minimum Quantity','Min Quantity','Minimum','Min'),
+    requisition: value('Requisition','Requisition Status','Order Placed'),
+    partInfoUrl: value('Part Info URL','Part URL','URL'),
+    notes: value('Notes','Note'),
+  };
+}
+function importRowsFromTable(rows: string[][]) {
+  if (rows.length < 1) return [];
+  const headers = rows[0].map(header => header.trim());
+  const normalizedHeaders = headers.map(normalizeImportHeader);
+  return rows.slice(1).map((row, index) => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, columnIndex) => {
+      record[header] = row[columnIndex] ?? '';
+      record[normalizedHeaders[columnIndex]] = row[columnIndex] ?? '';
+    });
+    return importRowFromRecord(record, index + 2);
+  }).filter(row => Object.values(row).some(value => String(value).trim()));
+}
+function excelCellText(cell: ExcelJS.Cell) {
+  const value = cell.value;
+  if (value && typeof value === 'object') {
+    if ('text' in value && value.text !== undefined) return String(value.text).trim();
+    if ('result' in value && value.result !== undefined) return String(value.result).trim();
+    if ('richText' in value && Array.isArray(value.richText)) return value.richText.map(part => part.text).join('').trim();
+  }
+  return String(cell.text ?? value ?? '').trim();
+}
+async function importRowsFromExcel(buffer: Buffer) {
+  const workbook = new ExcelJS.Workbook();
+  const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+  await workbook.xlsx.load(arrayBuffer);
+  const sheet = workbook.getWorksheet('MCC Inventory Update') ?? workbook.getWorksheet('MCC Inventory Import');
+  if (!sheet) throw new Error('Excel file must include a sheet named MCC Inventory Import or MCC Inventory Update.');
+  const rows: string[][] = [];
+  const columnCount = Math.max(sheet.columnCount, nativeExportHeaders.length);
+  for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const values: string[] = [];
+    for (let columnNumber = 1; columnNumber <= columnCount; columnNumber += 1) {
+      values.push(excelCellText(row.getCell(columnNumber)));
+    }
+    if (values.some(value => value.trim())) rows.push(values);
+  }
+  return importRowsFromTable(rows);
+}
+async function parseInventoryImportFile(file: Express.Multer.File | undefined) {
+  if (!file) throw new Error('Choose a CSV or Excel file to import.');
+  const extension = path.extname(file.originalname).toLowerCase();
+  if (extension === '.csv' || file.mimetype.includes('csv')) return importRowsFromTable(parseCsvRows(file.buffer.toString('utf8')));
+  if (extension === '.xlsx') return importRowsFromExcel(file.buffer);
+  throw new Error('Import file must be CSV or .xlsx Excel format.');
+}
+function numericImportValue(value: string, label: string, rowNumber: number) {
+  if (!value.trim()) return 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Row ${rowNumber}: ${label} must be numeric.`);
+  return parsed;
+}
+function requisitionImportValue(value: string) {
+  const clean = value.trim();
+  if (!clean) return '';
+  const normalized = clean.toLowerCase();
+  if (['true','yes','y','1'].includes(normalized)) return 'Requisition Made';
+  if (['false','no','n','0'].includes(normalized)) return '';
+  return clean.slice(0, 120);
+}
+function addImportError(errors: string[], message: string) {
+  if (errors.length < 25) errors.push(message);
+}
+function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
+  const actor = (req as AuthRequest).user!;
+  const summary: NativeImportSummary = { addedCount: 0, updatedCount: 0, skippedCount: 0, vendorCreatedCount: 0, locationCreatedCount: 0, invalidUrlCount: 0, errors: [] };
+  const timestamp = now();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const row of rows) {
+      try {
+        const partNumber = row.partNumber.trim();
+        if (!partNumber) throw new Error(`Row ${row.rowNumber}: Part Number is required.`);
+        const quantity = numericImportValue(row.quantity, 'Quantity', row.rowNumber);
+        const minQuantity = numericImportValue(row.minQuantity, 'Minimum Quantity', row.rowNumber);
+        const rawUrl = row.partInfoUrl.trim();
+        const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
+        if (rawUrl && !partInfoUrl) {
+          summary.invalidUrlCount += 1;
+          addImportError(summary.errors, `Row ${row.rowNumber}: unsafe Part Info URL was skipped.`);
+        }
+        let existing = row.mccItemId.trim() ? one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND id=?', [Number(row.mccItemId)]) : undefined;
+        if (!existing) existing = findDuplicateNativePart(partNumber);
+        if (existing && findDuplicateNativePart(partNumber, existing.id)) throw new Error(`Row ${row.rowNumber}: Part Number already exists on another native inventory item.`);
+        const location = getOrCreateMccNativeLookup(req,'inventory_locations',row.location,timestamp);
+        const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',row.vendor,timestamp);
+        if (location.created) summary.locationCreatedCount += 1;
+        if (vendor.created) summary.vendorCreatedCount += 1;
+        const status = nativePartStatus(quantity, minQuantity);
+        const requisition = requisitionImportValue(row.requisition);
+        if (existing) {
+          run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.notes.trim(),'mcc',actor.id,timestamp,existing.id]);
+          summary.updatedCount += 1;
+        } else {
+          run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.notes.trim(),'mcc',null,actor.id,actor.id,timestamp,timestamp]);
+          summary.addedCount += 1;
+        }
+      } catch (error) {
+        summary.skippedCount += 1;
+        addImportError(summary.errors, safeErrorMessage(error));
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return summary;
+}
 function nativeInventorySummary() {
   return {
     totalParts: one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_parts WHERE deleted=0')?.count ?? 0,
@@ -678,6 +993,70 @@ app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory
   const requestedFilter = queryText(req.query.filter);
   const filter: NativePartFilter = ['low','requisition','hasLink','noLink'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
   res.json({ok:true,source:'mcc-native',parts:nativeParts(search,filter),summary:nativeInventorySummary()});
+});
+app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+  try {
+    const records = nativeInventoryRows().map(nativeExportRecord);
+    const fileName = `MCC_Inventory_Export_${downloadDateStamp()}.csv`;
+    inventoryAudit(req,'inventory export CSV','inventory','native',{rowCount:records.length,fileName});
+    audit(req,'inventory export CSV','inventory','native',{rowCount:records.length,fileName});
+    sendDownload(res,fileName,'text/csv; charset=utf-8',csvFromRecords(nativeExportHeaders, records));
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(500).json({ok:false,error:message});
+  }
+});
+app.get('/api/inventory/native/export/excel-update-template', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+  try {
+    const records = nativeInventoryRows().map(nativeExportRecord);
+    const fileName = `MCC_Inventory_Update_Template_${downloadDateStamp()}.xlsx`;
+    const buffer = await workbookBuffer('MCC Inventory Update', nativeExportHeaders, records);
+    inventoryAudit(req,'inventory export Excel update template','inventory','native',{rowCount:records.length,fileName});
+    audit(req,'inventory export Excel update template','inventory','native',{rowCount:records.length,fileName});
+    sendDownload(res,fileName,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer);
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(500).json({ok:false,error:message});
+  }
+});
+app.get('/api/inventory/native/export/blank-import-template', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+  try {
+    const fileName = 'MCC_Inventory_Blank_Import_Template.xlsx';
+    const buffer = await workbookBuffer('MCC Inventory Import', nativeBlankImportHeaders, []);
+    inventoryAudit(req,'inventory export blank template','inventory','native',{fileName});
+    audit(req,'inventory export blank template','inventory','native',{fileName});
+    sendDownload(res,fileName,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer);
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(500).json({ok:false,error:message});
+  }
+});
+app.get('/api/inventory/native/backups', requireAuth, requirePermission('inventory.write'), (_req,res)=>{
+  res.json({ok:true,backups:listNativeInventoryBackups()});
+});
+app.post('/api/inventory/native/backups/create', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+  try {
+    const backups = createAndAuditNativeBackup(req,'manual');
+    res.status(201).json({ok:true,backups,backupCount:backups.length});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(500).json({ok:false,error:message});
+  }
+});
+app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.write'), upload.single('file'), async (req,res)=>{
+  try {
+    const backupFiles = createAndAuditNativeBackup(req,'auto-before-import');
+    const rows = await parseInventoryImportFile(req.file);
+    const summary = importNativeInventoryRows(req, rows);
+    inventoryAudit(req,'inventory import','inventory','native',{...summary,rowCount:rows.length,backupFiles:backupFiles.map(file => file.fileName)});
+    audit(req,'inventory import','inventory','native',{...summary,rowCount:rows.length,backupFiles:backupFiles.map(file => file.fileName)});
+    res.json({ok:true,...summary,backupFiles,nativeSummary:nativeInventorySummary()});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    inventoryAudit(req,'failed import','inventory','native',{error:message});
+    audit(req,'failed inventory import','inventory','native',{error:message});
+    res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errors:[message]});
+  }
 });
 app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.write'), (req,res)=>{
   const actor = (req as AuthRequest).user!;

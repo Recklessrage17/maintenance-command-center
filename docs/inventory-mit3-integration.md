@@ -137,6 +137,47 @@ If native inventory has parts, MCC shows native parts and does not require MIT3 
 
 The old MIT3 write bridge routes remain present for reference compatibility, but the MCC frontend no longer uses them for daily add/edit/requisition workflows.
 
-## Future Phase 2F
+## Phase 2F: native MCC inventory import/export/backup tools
 
-Phase 2F will add MCC native Excel/CSV import/export and backup tools after native inventory add/edit/requisition workflows are proven.
+Phase 2F adds MCC native Excel/CSV import, export, and backup tools.
+
+MCC native inventory remains the daily-use inventory system. MIT3 remains available as backup/reference through the MIT3 import bridge, MIT3 status card, and "Open MIT3 Inventory" reference button.
+
+Phase 2F endpoints:
+
+- `GET /api/inventory/native/export/csv`: exports current native inventory rows to CSV.
+- `GET /api/inventory/native/export/excel-update-template`: exports an Excel workbook using sheet `MCC Inventory Update`.
+- `GET /api/inventory/native/export/blank-import-template`: exports a blank Excel workbook using sheet `MCC Inventory Import`.
+- `POST /api/inventory/native/import`: imports a CSV or `.xlsx` file into MCC native inventory.
+- `POST /api/inventory/native/backups/create`: creates manual JSON and CSV backups.
+- `GET /api/inventory/native/backups`: lists native inventory backup files by file name, created time, type, and size.
+
+Template columns:
+
+- Update template: `MCC Item ID`, `Part Number`, `Description`, `Location`, `Vendor`, `Quantity`, `Minimum Quantity`, `Requisition`, `Part Info URL`, `Notes`.
+- Blank import template: `Part Number`, `Description`, `Location`, `Vendor`, `Quantity`, `Minimum Quantity`, `Requisition`, `Part Info URL`, `Notes`.
+
+Import rules:
+
+- Imports automatically create JSON and CSV backups before any import rows are applied.
+- Backup files are written under `backend/backups` and should not be committed.
+- Excel imports support sheets named `MCC Inventory Import` and `MCC Inventory Update`.
+- `MCC Item ID` is used first for updates. If it is missing or does not match an active native item, Part Number is used as the fallback anti-dupe key.
+- Missing vendors and locations are created in MCC native tables.
+- Quantity and Minimum Quantity must be numeric; blank numeric fields import as `0`.
+- Requisition accepts `true/false`, `yes/no`, `y/n`, and `1/0`; existing text values can also be preserved.
+- Part Info URL values must be blank or safe `http` / `https` URLs. Local, file, mail, blob, and data URLs are skipped.
+- Import responses report `addedCount`, `updatedCount`, `skippedCount`, `vendorCreatedCount`, `locationCreatedCount`, `invalidUrlCount`, and `errors`.
+
+Permissions:
+
+- Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can import, export, and create backups.
+- Maintenance Tech 1 remains view-only.
+
+Audit entries are recorded for CSV export, Excel update template export, blank template export, native import, backup creation, failed import, and failed backup.
+
+Restore is intentionally not included in Phase 2F.
+
+## Future Phase 2G
+
+Phase 2G can add restore, delete/restore archive workflows, and final MIT3 retirement mode after the native import/export/backup workflow has been used safely.
