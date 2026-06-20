@@ -52,7 +52,16 @@ function run(sql: string, params: SqlParam[] = []) { return db.prepare(sql).run(
 function initDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, is_owner_admin INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);`);
+CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_inventory_parts_deleted ON inventory_parts (deleted);
+CREATE INDEX IF NOT EXISTS idx_inventory_vendors_name ON inventory_vendors (name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_inventory_locations_name ON inventory_locations (name COLLATE NOCASE);`);
 }
 initDb();
 function migrateDb() {
@@ -244,8 +253,9 @@ function normalizeMit3Parts(payload: unknown) {
   const vendors = Array.isArray(data.vendors) ? data.vendors : [];
   const requisitions = activeRequisitionByItem(data);
   return items.filter(isRecord).map((item, index) => {
-    const id = textField(item, ['id', 'itemId', 'item_id'], `mit3-item-${index + 1}`);
-    const itemId = textField(item, ['itemId', 'item_id', 'id'], id);
+    const mit3ItemId = textField(item, ['itemId', 'item_id', 'id']);
+    const id = mit3ItemId || `mit3-item-${index + 1}`;
+    const itemId = mit3ItemId || id;
     const partNumber = textField(item, ['partNumber', 'part_number', 'partNo', 'sku']);
     const quantity = numberField(item, ['quantityOnHand', 'stockOnHand', 'stock_on_hand', 'quantity', 'qty']);
     const minQuantity = numberField(item, ['minimumStockLevel', 'minimum', 'minimumStock', 'minQuantity', 'min']);
@@ -254,9 +264,11 @@ function normalizeMit3Parts(payload: unknown) {
     const orderPlaced = booleanField(item, ['orderPlaced', 'order_placed']);
     const activeRequisition = requisitions.get(id) ?? requisitions.get(itemId) ?? '';
     const directRequisition = orderPlaced ? textField(item, ['orderRequisitionId', 'order_requisition_id'], 'Requisition Made') : '';
+    const rawPartInfoUrl = textField(item, ['itemUrl', 'item_url', 'partInfoUrl', 'url']);
     return {
       id,
       itemId,
+      mit3ItemId,
       partNumber,
       description: textField(item, ['description', 'name', 'itemName', 'item_name'], partNumber || id),
       location: textField(item, ['location', 'locationName'], lookupName(locations, locationId)),
@@ -267,7 +279,9 @@ function normalizeMit3Parts(payload: unknown) {
       requisition: activeRequisition || directRequisition,
       orderPlaced,
       hasActiveRequisitionRecord: Boolean(activeRequisition),
-      partInfoUrl: validWebUrl(textField(item, ['itemUrl', 'item_url', 'partInfoUrl', 'url'])),
+      partInfoUrl: validWebUrl(rawPartInfoUrl),
+      rawPartInfoUrl,
+      notes: textField(item, ['notes', 'note']),
       updatedAt: textField(item, ['updatedAt', 'updated_at'], textField(data, ['lastSavedAt'])),
     };
   });
@@ -307,6 +321,141 @@ async function fetchMit3AppData() {
 async function fetchMit3Inventory() {
   return normalizeMit3InventoryPayload(await fetchMit3AppData());
 }
+
+type NormalizedMit3Part = ReturnType<typeof normalizeMit3Parts>[number];
+type NativeLookupTable = 'inventory_vendors' | 'inventory_locations';
+type NativePartFilter = 'all' | 'low' | 'requisition' | 'hasLink' | 'noLink';
+interface NativePartRow {
+  id: number;
+  mit3_item_id: string | null;
+  part_number: string;
+  description: string;
+  location_id: number | null;
+  vendor_id: number | null;
+  quantity: number;
+  min_quantity: number;
+  status: string;
+  requisition: string;
+  part_info_url: string;
+  notes: string;
+  source: string;
+  imported_from_mit3_at: string | null;
+  created_at: string;
+  updated_at: string;
+  location_name: string | null;
+  vendor_name: string | null;
+}
+function inventoryAudit(req: Request, action: string, targetType: string, targetId: string|number, details: Record<string, unknown> = {}) {
+  const u = (req as AuthRequest).user;
+  run('INSERT INTO inventory_audit (actor_user_id,action,target_type,target_id,details_json,created_at) VALUES (?,?,?,?,?,?)', [u?.id ?? null,action,targetType,String(targetId ?? ''),JSON.stringify(details),now()]);
+}
+function queryText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+function getOrCreateNativeLookup(table: NativeLookupTable, name: string, timestamp: string) {
+  const cleanName = name.trim();
+  if (!cleanName) return { id: null as number | null, created: false };
+  const existing = one<{ id: number }>(`SELECT id FROM ${table} WHERE deleted=0 AND lower(name)=lower(?) ORDER BY id LIMIT 1`, [cleanName]);
+  if (existing) {
+    run(`UPDATE ${table} SET source=?, imported_from_mit3_at=?, updated_at=? WHERE id=?`, ['MIT3 HTTP API',timestamp,timestamp,existing.id]);
+    return { id: existing.id, created: false };
+  }
+  const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'MIT3 HTTP API',timestamp,timestamp,timestamp]);
+  return { id: Number(result.lastInsertRowid), created: true };
+}
+function findNativePart(mit3ItemId: string, partNumber: string) {
+  if (mit3ItemId) {
+    const mit3Match = one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND mit3_item_id=? ORDER BY id LIMIT 1', [mit3ItemId]);
+    if (mit3Match) return mit3Match;
+  }
+  if (partNumber) {
+    return one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(part_number)=lower(?) ORDER BY id LIMIT 1', [partNumber]);
+  }
+  return undefined;
+}
+function normalizeNativePart(row: NativePartRow) {
+  return {
+    id: String(row.id),
+    itemId: row.mit3_item_id || String(row.id),
+    partNumber: row.part_number,
+    description: row.description,
+    location: row.location_name ?? '',
+    vendor: row.vendor_name ?? '',
+    quantity: Number(row.quantity ?? 0),
+    minQuantity: Number(row.min_quantity ?? 0),
+    status: row.status,
+    requisition: row.requisition,
+    orderPlaced: Boolean(row.requisition),
+    hasActiveRequisitionRecord: Boolean(row.requisition),
+    partInfoUrl: validWebUrl(row.part_info_url),
+    updatedAt: row.updated_at,
+    source: row.source,
+    importedFromMit3At: row.imported_from_mit3_at ?? '',
+  };
+}
+function nativeParts(search = '', filter: NativePartFilter = 'all') {
+  const where = ['p.deleted=0'];
+  const params: SqlParam[] = [];
+  const needle = search.trim();
+  if (needle) {
+    const like = `%${escapeLike(needle)}%`;
+    where.push('(p.part_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR p.description LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR l.name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR v.name LIKE ? ESCAPE \'\\\' COLLATE NOCASE)');
+    params.push(like,like,like,like);
+  }
+  if (filter === 'low') where.push("(p.status IN ('Low Stock','Out of Stock') OR (p.min_quantity > 0 AND p.quantity <= p.min_quantity))");
+  if (filter === 'requisition') where.push("p.requisition<>''");
+  if (filter === 'hasLink') where.push("p.part_info_url<>''");
+  if (filter === 'noLink') where.push("p.part_info_url=''");
+  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+FROM inventory_parts p
+LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+WHERE ${where.join(' AND ')}
+ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`, params).map(normalizeNativePart);
+}
+function nativeInventorySummary() {
+  return {
+    totalParts: one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_parts WHERE deleted=0')?.count ?? 0,
+    lowStockCount: one<{ count: number }>("SELECT COUNT(*) AS count FROM inventory_parts WHERE deleted=0 AND (status IN ('Low Stock','Out of Stock') OR (min_quantity > 0 AND quantity <= min_quantity))")?.count ?? 0,
+    requisitionCount: one<{ count: number }>("SELECT COUNT(*) AS count FROM inventory_parts WHERE deleted=0 AND requisition<>''")?.count ?? 0,
+    vendorCount: one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_vendors WHERE deleted=0')?.count ?? 0,
+    locationCount: one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_locations WHERE deleted=0')?.count ?? 0,
+    lastImportedFromMit3At: one<{ lastImportedFromMit3At: string | null }>('SELECT MAX(imported_from_mit3_at) AS lastImportedFromMit3At FROM inventory_parts WHERE deleted=0')?.lastImportedFromMit3At ?? null,
+  };
+}
+function importMit3Part(part: NormalizedMit3Part, actorId: number, timestamp: string) {
+  const mit3ItemId = part.mit3ItemId.trim();
+  const partNumber = part.partNumber.trim();
+  if (!mit3ItemId && !partNumber) return { imported: false, updated: false, skipped: true };
+  const location = getOrCreateNativeLookup('inventory_locations', part.location, timestamp);
+  const vendor = getOrCreateNativeLookup('inventory_vendors', part.vendor, timestamp);
+  const existing = findNativePart(mit3ItemId, partNumber);
+  const requisition = part.requisition || (part.orderPlaced ? 'Requisition Made' : '');
+  const partParams: SqlParam[] = [
+    mit3ItemId || null,
+    partNumber,
+    part.description.trim(),
+    location.id,
+    vendor.id,
+    Number(part.quantity ?? 0),
+    Number(part.minQuantity ?? 0),
+    part.status,
+    requisition,
+    part.partInfoUrl,
+    part.notes.trim(),
+    'MIT3 HTTP API',
+    timestamp,
+  ];
+  if (existing) {
+    run(`UPDATE inventory_parts SET mit3_item_id=?, part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, notes=?, source=?, imported_from_mit3_at=?, updated_by_user_id=?, updated_at=?, deleted=0, deleted_at=NULL, deleted_by_user_id=NULL WHERE id=?`, [...partParams,actorId,timestamp,existing.id]);
+    return { imported: false, updated: true, skipped: false };
+  }
+  run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [...partParams,actorId,actorId,timestamp,timestamp]);
+  return { imported: true, updated: false, skipped: false };
+}
 async function writeMit3AppData(data: Record<string, unknown>) {
   const response = await fetch(mit3AppDataUrl, {
     method: 'PUT',
@@ -323,6 +472,9 @@ async function writeMit3AppData(data: Record<string, unknown>) {
 }
 function canInventoryWrite(actor: User) {
   return roleRank(actor.role) >= roleRank('Maintenance Tech 2');
+}
+function canInventoryImport(actor: User) {
+  return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
 }
 function validateMit3PartInput(body: unknown) {
   const input = isRecord(body) ? body : {};
@@ -395,7 +547,7 @@ async function mutateMit3Inventory(req: Request, operation: string, targetId: st
 }
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -441,6 +593,66 @@ for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${a
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>res.json({localPort:port,localhostUrl:`http://localhost:${port}`,detectedLanUrls:detectedLanUrls()}));
+app.get('/api/inventory/native/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...nativeInventorySummary()}));
+app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory.view'), (req,res)=>{
+  const search = queryText(req.query.search ?? req.query.q);
+  const requestedFilter = queryText(req.query.filter);
+  const filter: NativePartFilter = ['low','requisition','hasLink','noLink'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
+  res.json({ok:true,source:'mcc-native',parts:nativeParts(search,filter),summary:nativeInventorySummary()});
+});
+app.post('/api/inventory/native/import-from-mit3', requireAuth, requirePermission('inventory.import'), async (req,res)=>{
+  const actor = (req as AuthRequest).user!;
+  try {
+    const data = await fetchMit3AppData();
+    const parts = normalizeMit3Parts(data);
+    const importedFromMit3At = now();
+    let importedCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let skippedUrlCount = 0;
+    const errors: string[] = [];
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const part of parts) {
+        if (part.rawPartInfoUrl.trim() && !part.partInfoUrl) skippedUrlCount += 1;
+        const result = importMit3Part(part, actor.id, importedFromMit3At);
+        if (result.imported) importedCount += 1;
+        if (result.updated) updatedCount += 1;
+        if (result.skipped) {
+          skippedCount += 1;
+          if (errors.length < 12) errors.push('Skipped one MIT3 item because it did not have a MIT3 item ID or part number.');
+        }
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    if (skippedUrlCount > 0) errors.push(`${skippedUrlCount} non-http Part Info URL value(s) were skipped.`);
+    const summary = nativeInventorySummary();
+    const response = {
+      ok: true,
+      importedCount,
+      updatedCount,
+      skippedCount,
+      vendorCount: summary.vendorCount,
+      locationCount: summary.locationCount,
+      skippedUrlCount,
+      errors,
+      importedFromMit3At,
+      nativeSummary: summary,
+    };
+    inventoryAudit(req,'import from MIT3','inventory','native',{importedCount,updatedCount,skippedCount,skippedUrlCount,vendorCount:summary.vendorCount,locationCount:summary.locationCount});
+    audit(req,'inventory native import from MIT3','inventory','native',{importedCount,updatedCount,skippedCount,skippedUrlCount});
+    res.json(response);
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    inventoryAudit(req,'failed import from MIT3','inventory','native',{error:message});
+    audit(req,'failed inventory native import from MIT3','inventory','native',{error:message});
+    const summary = nativeInventorySummary();
+    res.status(/MIT3 is offline|not reachable|app-data/i.test(message) ? 503 : 500).json({ok:false,error:message,importedCount:0,updatedCount:0,skippedCount:0,vendorCount:summary.vendorCount,locationCount:summary.locationCount,errors:[message],nativeSummary:summary});
+  }
+});
 app.get('/api/inventory/mit3-status', requireAuth, requirePermission('inventory.view'), async (_req,res)=>res.json(await checkMit3Status()));
 app.get('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.view'), async (_req,res)=>{
   try {

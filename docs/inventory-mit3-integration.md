@@ -59,6 +59,53 @@ Phase 2C rules:
 - No MIT3 source files are modified.
 - Import and export remain in MIT3 for now.
 
-## Future Phase 2D
+## Phase 2D: native MCC inventory database and MIT3 import
 
-Phase 2D can add an import/export bridge or deeper native migration behavior after Phase 2C has been tested and approved. Any future bridge must continue to preserve the MIT3 source-of-truth boundary unless that boundary is explicitly changed and tested.
+Phase 2D starts the move toward MCC-owned inventory while keeping MIT3 protected and untouched.
+
+MCC now owns native inventory tables in `backend/data/mcc.sqlite`:
+
+- `inventory_parts`
+- `inventory_vendors`
+- `inventory_locations`
+- `inventory_audit`
+
+Phase 2D endpoints:
+
+- `GET /api/inventory/native/summary`: returns MCC native inventory counts and the latest MIT3 import time.
+- `GET /api/inventory/native/parts`: returns normalized parts from the MCC native inventory database.
+- `POST /api/inventory/native/import-from-mit3`: imports MIT3 inventory into MCC through the MIT3 HTTP API.
+
+Phase 2D import rules:
+
+- MCC fetches MIT3 inventory through `http://localhost:4173/api/app-data`.
+- MCC does not directly read or write the MIT3 database.
+- MCC does not copy MIT3 database files.
+- MIT3 source files and MIT3 data remain unmodified.
+- Import upserts parts by MIT3 item ID first, then by part number as the fallback anti-dupe key.
+- Missing vendors and locations are created in MCC native tables.
+- `part_info_url` values are kept only when they are `http` or `https`; local, file, mail, blob, and data links are skipped.
+- Admin, Manager, and Maintenance Tech 3 users can run the import.
+- Maintenance Tech 2 and Maintenance Tech 1 users can view native inventory but cannot run the import.
+- Import activity is recorded in MCC inventory audit and MCC audit logs.
+
+Inventory Focus Mode now has two explicit source modes:
+
+- `MCC Native Inventory`: reads from MCC native inventory tables and is the future daily viewing source.
+- `MIT3 Bridge`: keeps the existing MIT3-backed view and guarded MIT3 HTTP write bridge.
+
+Default behavior:
+
+- If MCC native inventory has parts, Inventory Focus Mode opens on `MCC Native Inventory`.
+- If MCC native inventory is empty, the page shows a setup/import card: "Native MCC inventory is empty. Import from MIT3 to begin migration."
+- The "Open MIT3 Inventory" button remains available for safety and reference.
+
+For Phase 2D, MCC native inventory is read-only after import. The existing MIT3 write bridge remains in place and should not be removed yet.
+
+## Future Phase 2E
+
+Phase 2E will switch MCC add/edit/requisition workflows from the MIT3 bridge to the MCC native inventory database after native write behavior is implemented and tested safely.
+
+## Future Phase 2F
+
+Phase 2F will bring Excel/CSV import and export workflows into MCC after native inventory add/edit/requisition workflows are proven.
