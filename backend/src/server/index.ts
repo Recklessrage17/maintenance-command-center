@@ -20,6 +20,8 @@ const app = express();
 const port = 4273;
 const appName = 'Maintenance Command Center';
 const version = '0.1.0';
+const mit3Url = 'http://localhost:4173';
+const mit3HealthUrl = `${mit3Url}/api/health`;
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
 const dataDir = path.resolve(__dirname, '../../data');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
@@ -148,9 +150,31 @@ function detectedLanUrls() {
   }
   return [...urls].sort();
 }
+async function checkMit3Status() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(mit3HealthUrl, { signal: controller.signal });
+    return {
+      ok: response.ok,
+      mit3Url,
+      healthUrl: mit3HealthUrl,
+      message: response.ok ? 'MIT3 online' : 'MIT3 offline or not reachable',
+    };
+  } catch {
+    return {
+      ok: false,
+      mit3Url,
+      healthUrl: mit3HealthUrl,
+      message: 'MIT3 offline or not reachable',
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = permission==='dashboard.view' || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)) || (permission==='settings.view'&&userMgmt); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -196,6 +220,7 @@ for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${a
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>res.json({localPort:port,localhostUrl:`http://localhost:${port}`,detectedLanUrls:detectedLanUrls()}));
+app.get('/api/inventory/mit3-status', requireAuth, requirePermission('inventory.view'), async (_req,res)=>res.json(await checkMit3Status()));
 app.use(express.static(frontendDistPath));
 app.get('*', (_req,res)=>res.sendFile(path.join(frontendDistPath,'index.html')));
 app.listen(port,()=>{

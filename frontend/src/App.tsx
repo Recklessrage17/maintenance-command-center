@@ -1,12 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { DashboardPage } from './modules/dashboard/DashboardPage';
+import { InventoryPage } from './modules/inventory/InventoryPage';
 import { SettingsPage } from './modules/settings/SettingsPage';
 import { UsersPage } from './modules/users/UsersPage';
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; forcePasswordChange:boolean };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
-const pages: Record<MccSection, JSX.Element> = { dashboard: <DashboardPage />, settings: <SettingsPage />, users: <UsersPage /> };
+const pages: Record<MccSection, JSX.Element> = { dashboard: <DashboardPage />, inventory: <InventoryPage />, settings: <SettingsPage />, users: <UsersPage /> };
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
 function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:React.ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
 function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }

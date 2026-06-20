@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { RoleBadge } from '../components/RoleBadge';
 
-export type MccSection = 'dashboard' | 'users' | 'settings';
+export type MccSection = 'dashboard' | 'inventory' | 'users' | 'settings';
 const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'inventory', label: 'Inventory' },
   { id: 'users', label: 'Admin / Users', management: true },
-  { id: 'settings', label: 'Settings', management: true },
+  { id: 'settings', label: 'Settings' },
 ];
 const logoModules = import.meta.glob('../assets/jbt-usa-logo.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string | undefined>;
 const jbtLogoUrl = logoModules['../assets/jbt-usa-logo.png'];
