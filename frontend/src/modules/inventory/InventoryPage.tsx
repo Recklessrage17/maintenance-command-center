@@ -24,19 +24,12 @@ type InventoryPart = {
   updatedAt: string;
 };
 
-type LookupOption = {
-  id: string;
-  name: string;
-};
-
 type PartsResponse = {
   ok: boolean;
   mit3Url?: string;
   source?: string;
   writeAvailable?: boolean;
   parts: InventoryPart[];
-  locations?: LookupOption[];
-  vendors?: LookupOption[];
   summary?: NativeSummary;
 };
 
@@ -46,7 +39,6 @@ type Notice = { kind: 'success' | 'error'; text: string };
 type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'status';
 type SortDirection = 'asc' | 'desc';
 type PageSize = 50 | 100 | 250 | 'all';
-type SourceMode = 'native' | 'mit3';
 
 type NativeSummary = {
   totalParts: number;
@@ -117,7 +109,9 @@ function isLowStock(part: InventoryPart) {
 function safeHttpUrl(value: string) {
   try {
     const url = new URL(value.trim());
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '';
+    const host = url.hostname.toLowerCase();
+    const localHost = host === 'localhost' || host === '[::1]' || host === '::1' || host === '0.0.0.0' || host.startsWith('127.') || host.endsWith('.local');
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !localHost ? url.href : '';
   } catch {
     return '';
   }
@@ -137,10 +131,6 @@ function formatDateTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'}).format(date);
-}
-
-function sourceModeLabel(sourceMode: SourceMode) {
-  return sourceMode === 'native' ? 'MCC Native Inventory' : 'MIT3 Bridge';
 }
 
 function normalizeNativeSummary(summary?: Partial<NativeSummary> | null): NativeSummary {
@@ -200,13 +190,9 @@ function payloadFromForm(form: PartForm) {
 
 export function InventoryPage({ userRole, onBackToDashboard }: { userRole: string; onBackToDashboard: () => void }) {
   const [status,setStatus]=useState<Mit3Status|null>(null);
-  const [sourceMode,setSourceMode]=useState<SourceMode>('native');
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [importSummary,setImportSummary]=useState<ImportSummary|null>(null);
   const [parts,setParts]=useState<InventoryPart[]>([]);
-  const [locations,setLocations]=useState<LookupOption[]>([]);
-  const [vendors,setVendors]=useState<LookupOption[]>([]);
-  const [writeAvailable,setWriteAvailable]=useState(false);
   const [search,setSearch]=useState('');
   const [filter,setFilter]=useState<FilterMode>('all');
   const [sortKey,setSortKey]=useState<SortKey>('partNumber');
@@ -228,8 +214,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const canWrite = writeRoles.has(userRole);
   const canImport = importRoles.has(userRole);
 
-  async function refresh(options: { notify?: boolean; forcedSource?: SourceMode } = {}){
-    const activeSource = options.forcedSource ?? sourceMode;
+  async function refresh(options: { notify?: boolean } = {}){
     setLoading(true);
     setError('');
     try {
@@ -239,20 +224,14 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
       ]);
       if (nextStatus) setStatus(nextStatus);
       setNativeSummary(normalizeNativeSummary(nextNativeSummary));
-      const partsResponse = await api<PartsResponse>(activeSource === 'native' ? '/api/inventory/native/parts' : '/api/inventory/mit3-parts');
+      const partsResponse = await api<PartsResponse>('/api/inventory/native/parts');
       if (partsResponse.summary) setNativeSummary(normalizeNativeSummary(partsResponse.summary));
       setParts(partsResponse.parts ?? []);
-      setLocations(activeSource === 'mit3' ? partsResponse.locations ?? [] : []);
-      setVendors(activeSource === 'mit3' ? partsResponse.vendors ?? [] : []);
-      setWriteAvailable(activeSource === 'mit3' && partsResponse.writeAvailable === true);
       const refreshedAt = new Date();
       setLastRefreshed(refreshedAt);
-      if (options.notify) setNotice({kind:'success',text:`${sourceModeLabel(activeSource)} refreshed at ${formatRefreshTime(refreshedAt)}.`});
+      if (options.notify) setNotice({kind:'success',text:`MCC Native Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`});
     } catch (err) {
       setParts([]);
-      setLocations([]);
-      setVendors([]);
-      setWriteAvailable(false);
       const message = (err as Error).message;
       setError(message);
       if (options.notify) setNotice({kind:'error',text:message});
@@ -261,33 +240,24 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     }
   }
 
-  useEffect(()=>{ void refresh(); },[sourceMode]);
+  useEffect(()=>{ void refresh(); },[]);
 
   const isOnline = status?.ok === true;
-  const bridgeMode = sourceMode === 'mit3';
-  const nativeMode = sourceMode === 'native';
-  const showBridgeActions = bridgeMode && canWrite;
-  const writeEnabled = bridgeMode && canWrite && isOnline && writeAvailable;
-  const writeDisabledReason = !bridgeMode
-    ? ''
-    : !canWrite
-    ? 'View-only access.'
-    : !isOnline
-      ? 'MIT3 is offline or not reachable. Start MIT3 Website first.'
-      : !writeAvailable
-        ? 'MIT3 write endpoint not available yet.'
-        : '';
+  const showWriteActions = canWrite;
+  const writeEnabled = canWrite;
+  const writeDisabledReason = canWrite ? '' : 'View-only access.';
 
   const summary = useMemo(()=>{
-    const locationNames = new Set(parts.map(part=>part.location).filter(Boolean));
-    const vendorNames = new Set(parts.map(part=>part.vendor).filter(Boolean));
     return {
       total: parts.length,
       low: parts.filter(isLowStock).length,
       requisition: parts.filter(part=>Boolean(part.requisition || part.orderPlaced)).length,
-      places: nativeMode ? `${nativeSummary.locationCount} / ${nativeSummary.vendorCount}` : `${locationNames.size} / ${vendorNames.size}`,
+      places: `${nativeSummary.locationCount} / ${nativeSummary.vendorCount}`,
     };
-  },[nativeMode,nativeSummary.locationCount,nativeSummary.vendorCount,parts]);
+  },[nativeSummary.locationCount,nativeSummary.vendorCount,parts]);
+
+  const locationOptions = useMemo(()=>[...new Set(parts.map(part=>part.location.trim()).filter(Boolean))].sort(compareText),[parts]);
+  const vendorOptions = useMemo(()=>[...new Set(parts.map(part=>part.vendor.trim()).filter(Boolean))].sort(compareText),[parts]);
 
   const filteredParts = useMemo(()=>{
     const needle = search.trim().toLowerCase();
@@ -350,13 +320,6 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     setFilter('all');
   }
 
-  function switchSource(nextSource: SourceMode){
-    setSourceMode(nextSource);
-    setError('');
-    setNotice(null);
-    setPage(1);
-  }
-
   async function importFromMit3(){
     if (!canImport || importing) return;
     if (!window.confirm('This will copy inventory data from MIT3 into MCC. MIT3 will not be modified.')) return;
@@ -367,8 +330,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
       const result = await api<ImportSummary>('/api/inventory/native/import-from-mit3',{method:'POST'});
       setImportSummary(result);
       if (result.nativeSummary) setNativeSummary(normalizeNativeSummary(result.nativeSummary));
-      if (sourceMode !== 'native') setSourceMode('native');
-      await refresh({forcedSource:'native'});
+      await refresh();
       const skipped = result.skippedCount + Number(result.skippedUrlCount ?? 0);
       setNotice({kind:'success',text:`MIT3 import complete: ${result.importedCount} imported, ${result.updatedCount} updated${skipped ? `, ${skipped} skipped` : ''}.`});
     } catch (err) {
@@ -409,17 +371,23 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     const validation = validateForm(form);
     setFormError(validation);
     if (validation || !modal) return;
+    const partNumber = form.partNumber.trim().toLowerCase();
+    const duplicate = parts.find(part=>part.partNumber.trim().toLowerCase() === partNumber && part.id !== editingPart?.id);
+    if (duplicate) {
+      setFormError('Part Number already exists in MCC native inventory. Choose a unique Part Number before saving.');
+      return;
+    }
     setSaving(true);
     setNotice(null);
     const payload = JSON.stringify(payloadFromForm(form));
     const isEdit = modal === 'edit' && editingPart;
     try {
-      await api(isEdit ? `/api/inventory/mit3-parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/mit3-parts', {
+      await api(isEdit ? `/api/inventory/native/parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/native/parts', {
         method: isEdit ? 'PATCH' : 'POST',
         body: payload,
       });
       closeModal(true);
-      setNotice({kind:'success',text:isEdit ? 'Inventory part updated through MIT3 API.' : 'Inventory part added through MIT3 API.'});
+      setNotice({kind:'success',text:isEdit ? 'Inventory part updated in MCC Native Inventory.' : 'Inventory part added to MCC Native Inventory.'});
       await refresh();
     } catch (err) {
       setFormError((err as Error).message);
@@ -429,17 +397,17 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   }
 
   async function updateRequisition(part: InventoryPart, requisition: boolean){
-    if (!writeEnabled || part.hasActiveRequisitionRecord) return;
+    if (!writeEnabled) return;
     const action = requisition ? 'mark this part for requisition' : 'clear the requisition marker for this part';
-    if (!window.confirm(`Confirm that you want to ${action} through the MIT3 API.`)) return;
+    if (!window.confirm(`Confirm that you want to ${action} in MCC Native Inventory.`)) return;
     setMutatingId(part.id);
     setNotice(null);
     try {
-      await api(`/api/inventory/mit3-parts/${encodeURIComponent(part.id)}/requisition`, {
+      await api(`/api/inventory/native/parts/${encodeURIComponent(part.id)}/requisition`, {
         method: 'PATCH',
         body: JSON.stringify({requisition}),
       });
-      setNotice({kind:'success',text:'Requisition status updated through MIT3 API.'});
+      setNotice({kind:'success',text:'Requisition status updated in MCC Native Inventory.'});
       await refresh();
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
@@ -456,28 +424,30 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
           <p className="eyebrow">Inventory workspace</p>
           <h2>Inventory</h2>
           <div className="inventory-focus-meta">
-            <span>Source: {sourceModeLabel(sourceMode)}</span>
+            <span>Source: MCC Native Inventory</span>
             <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
             <span>Showing {visibleParts.length} of {sortedParts.length} parts{filtersActive ? ` (${parts.length} loaded)` : ''}</span>
           </div>
         </div>
         <div className="inventory-toolbar-badges">
-          <span className={nativeMode?'native-status-badge active':'native-status-badge'}>{sourceModeLabel(sourceMode)}</span>
-          <span className={isOnline?'mit3-status-badge online':'mit3-status-badge offline'} aria-live="polite">{isOnline?'MIT3 Online':'MIT3 Offline'}</span>
-          {nativeMode&&<span className="view-only-badge">Native read-only</span>}
+          <span className="native-status-badge active">MCC Native Inventory</span>
+          <span className={isOnline?'mit3-status-badge online':'mit3-status-badge offline'} aria-live="polite">{isOnline?'MIT3 Reference Online':'MIT3 Reference Offline'}</span>
+          {canWrite&&<span className="view-only-badge">Native writes active</span>}
           {!canWrite&&<span className="view-only-badge">View-only access.</span>}
         </div>
         <div className="inventory-focus-actions">
-          {showBridgeActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
+          {showWriteActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
           {canImport&&<button className="primary-button import-button" type="button" onClick={()=>void importFromMit3()} disabled={importing}>{importing?'Importing...':'Import from MIT3'}</button>}
           <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
           <a className="secondary-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
         </div>
       </div>
 
+      <div className="inventory-active-banner">MCC Native Inventory is active. MIT3 is kept as backup/reference.</div>
+
       <div className="inventory-bridge-strip inventory-migration-strip">
         <div>
-          <span>MIT3 status</span>
+          <span>MIT3 reference status</span>
           <strong>{status?.message ?? (loading ? 'Checking MIT3...' : 'MIT3 offline or not reachable')}</strong>
         </div>
         <div>
@@ -488,26 +458,22 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
           <span>Last MIT3 import</span>
           <strong>{formatDateTime(nativeSummary.lastImportedFromMit3At)}</strong>
         </div>
-        <div className="inventory-source-control">
-          <span>Current source mode</span>
-          <div className="segmented-control source-mode-control" aria-label="Inventory source mode">
-            <button className={nativeMode?'active':''} onClick={()=>switchSource('native')} type="button">MCC Native Inventory</button>
-            <button className={bridgeMode?'active':''} onClick={()=>switchSource('mit3')} type="button">MIT3 Bridge</button>
-          </div>
+        <div>
+          <span>Daily source</span>
+          <strong>MCC Native Inventory</strong>
         </div>
         <div className="inventory-bridge-messages">
           {error&&<p className="form-message error">{error}</p>}
-          {!isOnline&&bridgeMode&&<p className="form-message error">Start MIT3 Website first, then refresh this page.</p>}
-          {nativeMode&&<p className="form-message">MCC native inventory is the daily viewing source for this mode. Add/edit still stays on the MIT3 Bridge for Phase 2D.</p>}
+          {!isOnline&&<p className="form-message">MIT3 is offline or not reachable. MCC Native Inventory still works after import.</p>}
           {writeDisabledReason&&<p className="form-message error">{writeDisabledReason}</p>}
         </div>
       </div>
 
-      {nativeMode&&nativeSummary.totalParts===0&&!loading&&(
+      {nativeSummary.totalParts===0&&!loading&&(
         <section className="mcc-card inventory-setup-card">
           <div>
-            <span>Phase 2D setup</span>
-            <strong>Native MCC inventory is empty. Import from MIT3 to begin migration.</strong>
+            <span>Phase 2E setup</span>
+            <strong>MCC Native Inventory is empty. Import from MIT3 to begin daily native use.</strong>
             <p>This copies inventory through the MIT3 HTTP API. MIT3 data is not modified.</p>
           </div>
           <div className="inventory-setup-actions">
@@ -534,7 +500,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
       )}
 
       <div className="card-grid inventory-summary-grid">
-        <article className="mcc-card"><span>Total Parts</span><strong>{summary.total}</strong><p>Loaded from {sourceModeLabel(sourceMode)}.</p></article>
+        <article className="mcc-card"><span>Total Parts</span><strong>{summary.total}</strong><p>Loaded from MCC Native Inventory.</p></article>
         <article className="mcc-card"><span>Low Stock / Watch Items</span><strong>{summary.low}</strong><p>Low or out of stock.</p></article>
         <article className="mcc-card"><span>Requisition Items</span><strong>{summary.requisition}</strong><p>Active or marked requisition.</p></article>
         <article className="mcc-card"><span>Locations / Vendors</span><strong>{summary.places}</strong><p>Unique names available.</p></article>
@@ -563,7 +529,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         <div className="inventory-table-meta">
           <div>
             <strong>Showing {visibleParts.length} of {sortedParts.length} parts</strong>
-            <span>{sortedParts.length ? `Rows ${pageStart}-${pageEnd}` : 'No rows'}{filtersActive ? `; ${parts.length} loaded from ${sourceModeLabel(sourceMode)}` : ''}</span>
+            <span>{sortedParts.length ? `Rows ${pageStart}-${pageEnd}` : 'No rows'}{filtersActive ? `; ${parts.length} loaded from MCC Native Inventory` : ''}</span>
           </div>
           <div className="inventory-pager">
             <label className="page-size-field">
@@ -590,7 +556,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                 <th aria-sort={sortAria('minQuantity')}>{renderSortHeader('minQuantity','Min')}</th>
                 <th aria-sort={sortAria('status')}>{renderSortHeader('status','Status')}</th>
                 <th>Link</th>
-                {showBridgeActions&&<th>Actions</th>}
+                {showWriteActions&&<th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -610,15 +576,15 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                     <td>{part.minQuantity}</td>
                     <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
                     <td>{partLink?<a className="link-badge" href={partLink} target="_blank" rel="noreferrer">Open</a>:<span className="muted-cell">None</span>}</td>
-                    {showBridgeActions&&(
+                    {showWriteActions&&(
                       <td>
                         <div className="inventory-row-actions">
                           <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
-                          <label className={part.hasActiveRequisitionRecord?'requisition-toggle disabled':'requisition-toggle'}>
+                          <label className="requisition-toggle">
                             <input
                               type="checkbox"
                               checked={Boolean(part.orderPlaced || part.requisition)}
-                              disabled={!writeEnabled || part.hasActiveRequisitionRecord || mutatingId===part.id}
+                              disabled={!writeEnabled || mutatingId===part.id}
                               onChange={event=>void updateRequisition(part,event.target.checked)}
                             />
                             <span>Req</span>
@@ -629,8 +595,8 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                   </tr>
                 );
               })}
-              {!loading&&sortedParts.length===0&&<tr><td colSpan={showBridgeActions?9:8} className="empty-table-cell">No inventory rows match this view.</td></tr>}
-              {loading&&<tr><td colSpan={showBridgeActions?9:8} className="empty-table-cell">Loading {sourceModeLabel(sourceMode)}...</td></tr>}
+              {!loading&&sortedParts.length===0&&<tr><td colSpan={showWriteActions?9:8} className="empty-table-cell">No inventory rows match this view.</td></tr>}
+              {loading&&<tr><td colSpan={showWriteActions?9:8} className="empty-table-cell">Loading MCC Native Inventory...</td></tr>}
             </tbody>
           </table>
         </div>
@@ -658,11 +624,11 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               </label>
               <label className="form-field">
                 <span>Location</span>
-                <input list="mit3-location-options" value={form.location} onChange={event=>setForm({...form,location:event.target.value})} />
+                <input list="native-location-options" value={form.location} onChange={event=>setForm({...form,location:event.target.value})} />
               </label>
               <label className="form-field">
                 <span>Vendor</span>
-                <input list="mit3-vendor-options" value={form.vendor} onChange={event=>setForm({...form,vendor:event.target.value})} />
+                <input list="native-vendor-options" value={form.vendor} onChange={event=>setForm({...form,vendor:event.target.value})} />
               </label>
               <label className="form-field">
                 <span>Quantity</span>
@@ -678,11 +644,11 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               </label>
             </div>
 
-            <datalist id="mit3-location-options">
-              {locations.map(option=><option key={option.id} value={option.name} />)}
+            <datalist id="native-location-options">
+              {locationOptions.map(name=><option key={name} value={name} />)}
             </datalist>
-            <datalist id="mit3-vendor-options">
-              {vendors.map(option=><option key={option.id} value={option.name} />)}
+            <datalist id="native-vendor-options">
+              {vendorOptions.map(name=><option key={name} value={name} />)}
             </datalist>
 
             {formError&&<p className="form-message error">{formError}</p>}

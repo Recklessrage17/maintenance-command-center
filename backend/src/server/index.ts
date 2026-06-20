@@ -208,9 +208,13 @@ function booleanField(record: Record<string, unknown>, keys: string[]) {
   return false;
 }
 function validWebUrl(value: string) {
+  const raw = value.trim();
+  if (!raw) return '';
   try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const localHost = host === 'localhost' || host === '[::1]' || host === '::1' || host === '0.0.0.0' || host.startsWith('127.') || host.endsWith('.local');
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !localHost ? url.toString() : '';
   } catch {
     return '';
   }
@@ -366,6 +370,18 @@ function getOrCreateNativeLookup(table: NativeLookupTable, name: string, timesta
   const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'MIT3 HTTP API',timestamp,timestamp,timestamp]);
   return { id: Number(result.lastInsertRowid), created: true };
 }
+function getOrCreateMccNativeLookup(req: Request, table: NativeLookupTable, name: string, timestamp: string) {
+  const cleanName = name.trim();
+  if (!cleanName) return { id: null as number | null, created: false };
+  const existing = one<{ id: number }>(`SELECT id FROM ${table} WHERE deleted=0 AND lower(name)=lower(?) ORDER BY id LIMIT 1`, [cleanName]);
+  if (existing) return { id: existing.id, created: false };
+  const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'mcc',null,timestamp,timestamp]);
+  const id = Number(result.lastInsertRowid);
+  const isVendor = table === 'inventory_vendors';
+  inventoryAudit(req,isVendor ? 'vendor auto-create' : 'location auto-create',isVendor ? 'vendor' : 'location',id,{name:cleanName});
+  audit(req,isVendor ? 'inventory vendor auto-create' : 'inventory location auto-create',isVendor ? 'inventory_vendor' : 'inventory_location',id,{name:cleanName});
+  return { id, created: true };
+}
 function findNativePart(mit3ItemId: string, partNumber: string) {
   if (mit3ItemId) {
     const mit3Match = one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND mit3_item_id=? ORDER BY id LIMIT 1', [mit3ItemId]);
@@ -389,12 +405,20 @@ function normalizeNativePart(row: NativePartRow) {
     status: row.status,
     requisition: row.requisition,
     orderPlaced: Boolean(row.requisition),
-    hasActiveRequisitionRecord: Boolean(row.requisition),
+    hasActiveRequisitionRecord: false,
     partInfoUrl: validWebUrl(row.part_info_url),
     updatedAt: row.updated_at,
     source: row.source,
     importedFromMit3At: row.imported_from_mit3_at ?? '',
   };
+}
+function nativePartById(id: number) {
+  const row = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+FROM inventory_parts p
+LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+WHERE p.deleted=0 AND p.id=?`, [id]);
+  return row ? normalizeNativePart(row) : undefined;
 }
 function nativeParts(search = '', filter: NativePartFilter = 'all') {
   const where = ['p.deleted=0'];
@@ -455,6 +479,61 @@ function importMit3Part(part: NormalizedMit3Part, actorId: number, timestamp: st
   }
   run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [...partParams,actorId,actorId,timestamp,timestamp]);
   return { imported: true, updated: false, skipped: false };
+}
+function safePartInfoUrl(value: string) {
+  return validWebUrl(value);
+}
+function numericInput(input: Record<string, unknown>, key: string, label: string, fallback = 0) {
+  const value = input[key];
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  const parsed = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(parsed)) throw new Error(`${label} must be numeric.`);
+  return parsed;
+}
+function nativePartStatus(quantity: number, minQuantity: number) {
+  if (quantity <= 0) return 'Out of Stock';
+  if (minQuantity > 0 && quantity <= minQuantity) return 'Low Stock';
+  return 'In Stock';
+}
+function validateNativePartInput(body: unknown) {
+  const input = isRecord(body) ? body : {};
+  const partNumber = textField(input, ['partNumber']);
+  if (!partNumber) throw new Error('Part Number is required.');
+  const description = textField(input, ['description']);
+  const location = textField(input, ['location']);
+  const vendor = textField(input, ['vendor']);
+  const quantity = numericInput(input, 'quantity', 'Quantity');
+  const minQuantity = numericInput(input, 'minQuantity', 'Minimum Quantity');
+  const rawUrl = textField(input, ['partInfoUrl']);
+  const partInfoUrl = rawUrl ? safePartInfoUrl(rawUrl) : '';
+  if (rawUrl && !partInfoUrl) throw new Error('Part Info URL must be blank or a valid http/https URL.');
+  return {partNumber,description,location,vendor,quantity,minQuantity,partInfoUrl,status:nativePartStatus(quantity,minQuantity)};
+}
+type NativePartInput = ReturnType<typeof validateNativePartInput>;
+function findDuplicateNativePart(partNumber: string, excludeId?: number) {
+  if (!partNumber) return undefined;
+  return excludeId
+    ? one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(part_number)=lower(?) AND id<>? ORDER BY id LIMIT 1', [partNumber,excludeId])
+    : one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(part_number)=lower(?) ORDER BY id LIMIT 1', [partNumber]);
+}
+function nativeRequisitionFromInput(body: unknown) {
+  const input = isRecord(body) ? body : {};
+  const value = input.requisition ?? input.orderPlaced;
+  if (value === false || value === 0 || String(value).toLowerCase() === 'false') return '';
+  if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 120);
+  return value ? textField(input, ['status','label'], 'Requisition Made').slice(0, 120) : '';
+}
+function nativeInventoryErrorStatus(message: string) {
+  if (/not found/i.test(message)) return 404;
+  if (/already exists/i.test(message)) return 409;
+  if (/required|numeric|valid http\/https/i.test(message)) return 400;
+  return 500;
+}
+function sendNativeInventoryError(req: Request, res: Response, operation: string, targetId: string|number, error: unknown) {
+  const message = safeErrorMessage(error);
+  inventoryAudit(req,'failed native write','inventory',targetId,{operation,error:message});
+  audit(req,'failed inventory native write','inventory',targetId,{operation,error:message});
+  res.status(nativeInventoryErrorStatus(message)).json({ok:false,error:message});
 }
 async function writeMit3AppData(data: Record<string, unknown>) {
   const response = await fetch(mit3AppDataUrl, {
@@ -599,6 +678,87 @@ app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory
   const requestedFilter = queryText(req.query.filter);
   const filter: NativePartFilter = ['low','requisition','hasLink','noLink'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
   res.json({ok:true,source:'mcc-native',parts:nativeParts(search,filter),summary:nativeInventorySummary()});
+});
+app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+  const actor = (req as AuthRequest).user!;
+  const operation = 'native part create';
+  try {
+    const input: NativePartInput = validateNativePartInput(req.body);
+    const timestamp = now();
+    let partId = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (findDuplicateNativePart(input.partNumber)) throw new Error('Part Number already exists in MCC native inventory.');
+      const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
+      const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
+      const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,'',input.partInfoUrl,'','mcc',null,actor.id,actor.id,timestamp,timestamp]);
+      partId = Number(result.lastInsertRowid);
+      inventoryAudit(req,'native part create','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
+      audit(req,'inventory native part create','inventory',partId,{partNumber:input.partNumber});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.status(201).json({ok:true,source:'mcc-native',part:nativePartById(partId),summary:nativeInventorySummary()});
+  } catch (error) {
+    sendNativeInventoryError(req,res,operation,'',error);
+  }
+});
+app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+  const actor = (req as AuthRequest).user!;
+  const operation = 'native part edit';
+  const partId = Number(req.params.id);
+  try {
+    if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
+    const input: NativePartInput = validateNativePartInput(req.body);
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND id=?', [partId]);
+      if (!existing) throw new Error('Native inventory part not found.');
+      if (findDuplicateNativePart(input.partNumber,partId)) throw new Error('Part Number already exists in MCC native inventory.');
+      const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
+      const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
+      run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, part_info_url=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.partInfoUrl,'mcc',actor.id,timestamp,partId]);
+      inventoryAudit(req,'native part edit','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
+      audit(req,'inventory native part edit','inventory',partId,{partNumber:input.partNumber});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,source:'mcc-native',part:nativePartById(partId),summary:nativeInventorySummary()});
+  } catch (error) {
+    sendNativeInventoryError(req,res,operation,Number.isFinite(partId) ? partId : String(req.params.id ?? ''),error);
+  }
+});
+app.patch('/api/inventory/native/parts/:id/requisition', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+  const actor = (req as AuthRequest).user!;
+  const operation = 'native requisition change';
+  const partId = Number(req.params.id);
+  try {
+    if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
+    const nextRequisition = nativeRequisitionFromInput(req.body);
+    const timestamp = now();
+    let previousRequisition = '';
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = one<{ id: number; requisition: string }>('SELECT id,requisition FROM inventory_parts WHERE deleted=0 AND id=?', [partId]);
+      if (!existing) throw new Error('Native inventory part not found.');
+      previousRequisition = existing.requisition ?? '';
+      run('UPDATE inventory_parts SET requisition=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?', [nextRequisition,'mcc',actor.id,timestamp,partId]);
+      inventoryAudit(req,'native requisition change','part',partId,{previousRequisition,nextRequisition});
+      audit(req,'inventory native requisition change','inventory',partId,{previousRequisition,nextRequisition});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,source:'mcc-native',part:nativePartById(partId),summary:nativeInventorySummary()});
+  } catch (error) {
+    sendNativeInventoryError(req,res,operation,Number.isFinite(partId) ? partId : String(req.params.id ?? ''),error);
+  }
 });
 app.post('/api/inventory/native/import-from-mit3', requireAuth, requirePermission('inventory.import'), async (req,res)=>{
   const actor = (req as AuthRequest).user!;

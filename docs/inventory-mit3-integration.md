@@ -102,10 +102,41 @@ Default behavior:
 
 For Phase 2D, MCC native inventory is read-only after import. The existing MIT3 write bridge remains in place and should not be removed yet.
 
-## Future Phase 2E
+## Phase 2E: native MCC inventory add/edit/requisition
 
-Phase 2E will switch MCC add/edit/requisition workflows from the MIT3 bridge to the MCC native inventory database after native write behavior is implemented and tested safely.
+Phase 2E switches daily inventory write workflows to the MCC native database.
+
+MCC native inventory is now the daily-use inventory system after import. Add, edit, and requisition actions write to `backend/data/mcc.sqlite` through MCC native inventory endpoints:
+
+- `POST /api/inventory/native/parts`: creates a native MCC inventory part.
+- `PATCH /api/inventory/native/parts/:id`: updates a native MCC inventory part.
+- `PATCH /api/inventory/native/parts/:id/requisition`: updates native MCC requisition status.
+
+Phase 2E rules:
+
+- MIT3 is backup/reference after import, not the daily write source.
+- MCC does not directly read or write the MIT3 database.
+- MCC does not copy MIT3 database files.
+- MIT3 source files and MIT3 data remain unmodified.
+- The MIT3 import remains available for migration and reference.
+- The "Open MIT3 Inventory" reference button and MIT3 status card remain available.
+- Add/edit/requisition permissions are Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2.
+- Maintenance Tech 1 remains view-only.
+- Missing native MCC vendors and locations are created when a part is added or edited.
+- Part Info URL values must be blank or safe `http` / `https` URLs. Local, file, mail, blob, and data URLs are rejected.
+- Hard delete is not included in this phase.
+- Native inventory audit entries record part create, part edit, requisition change, failed native writes, and vendor/location auto-create events.
+
+Inventory Focus Mode now defaults to and remains on `MCC Native Inventory`. MIT3 appears only as:
+
+- `Import from MIT3`
+- `Open MIT3 Inventory`
+- MIT3 status/reference information
+
+If native inventory has parts, MCC shows native parts and does not require MIT3 to be running. If native inventory is empty, MCC shows the MIT3 import setup card.
+
+The old MIT3 write bridge routes remain present for reference compatibility, but the MCC frontend no longer uses them for daily add/edit/requisition workflows.
 
 ## Future Phase 2F
 
-Phase 2F will bring Excel/CSV import and export workflows into MCC after native inventory add/edit/requisition workflows are proven.
+Phase 2F will add MCC native Excel/CSV import/export and backup tools after native inventory add/edit/requisition workflows are proven.
