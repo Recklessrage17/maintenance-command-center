@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,7 @@ const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
 const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_FROM);
+const smtpPort = Number(process.env.SMTP_PORT ?? 587);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toString('hex');
 fs.mkdirSync(dataDir, { recursive: true });
 app.use(express.json({ limit: '50kb' }));
@@ -56,7 +58,7 @@ interface User { id:number; full_name:string; email:string; role:Role; password_
 interface AuthRequest extends Request { user?: User; sessionId?: string }
 const publicUser = (u: User) => ({ id:u.id, fullName:u.full_name, email:u.email, role:u.role, forcePasswordChange:!!u.force_password_change, disabled:!!u.disabled, createdByUserId:u.created_by_user_id ?? null, createdAt:u.created_at, updatedAt:u.updated_at, lastLoginAt:u.last_login_at ?? null });
 const userCount = () => one<{count:number}>('SELECT COUNT(*) as count FROM users')?.count ?? 0;
-const findUserByEmail = (email: string) => one<User>('SELECT * FROM users WHERE lower(email)=lower(?)', [email]);
+const findUserByEmail = (email: string) => one<User>('SELECT * FROM users WHERE lower(email)=lower(?)', [email.trim()]);
 const findUserById = (id: number) => one<User>('SELECT * FROM users WHERE id=?', [Number(id)]);
 
 function hashPassword(password: string) { const salt = crypto.randomBytes(16).toString('hex'); const hash = crypto.scryptSync(password, salt, 64).toString('hex'); return `scrypt$${salt}$${hash}`; }
@@ -70,6 +72,44 @@ function audit(req: Request, action: string, targetType?: string, targetId?: str
 function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
+function safeErrorMessage(error: unknown, extraSecrets: string[] = []) {
+  let message = error instanceof Error ? error.message : String(error);
+  for (const secret of [process.env.SMTP_PASS, ...extraSecrets]) {
+    if (secret) message = message.split(secret).join('[redacted]');
+  }
+  return message.replace(/\s+/g, ' ').slice(0, 300) || 'Unknown SMTP error.';
+}
+function smtpTransport() {
+  if (!smtpConfigured) return undefined;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST!,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: {
+      user: process.env.SMTP_USER!,
+      pass: process.env.SMTP_PASS!,
+    },
+  });
+}
+async function sendResetEmail(user: User, temporaryPassword: string, expiresAt: string) {
+  const transporter = smtpTransport();
+  if (!transporter) throw new Error('SMTP is not configured.');
+  const info = await transporter.sendMail({
+    from: process.env.SMTP_FROM!,
+    to: user.email,
+    subject: 'MCC password reset',
+    text: [
+      'A temporary password was created for your Maintenance Command Center account.',
+      '',
+      `Temporary password: ${temporaryPassword}`,
+      `Expires: ${expiresAt}`,
+      '',
+      'After logging in, you will be required to choose a new password.',
+      'If you did not request this reset, contact an MCC administrator.',
+    ].join('\n'),
+  });
+  return info.messageId;
+}
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
 function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = permission==='dashboard.view' || (['users.view','users.create','users.edit','users.disable','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)) || (permission==='settings.view'&&userMgmt); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
@@ -80,8 +120,36 @@ app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(r
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true}); res.json({ok:true}); });
 app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [now(),u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:now()})}); });
 app.post('/api/auth/logout', requireAuth, (req:AuthRequest,res)=>{ audit(req,'logout','user',req.user!.id); clearSession(req,res); res.json({ok:true}); });
-app.post('/api/auth/forgot-password',(req,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(forgotHits,key,3,60*60*1000)) return res.status(429).json({error:'Too many reset requests. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(u&&!u.disabled){ const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`; run('UPDATE users SET password_hash=?, force_password_change=1, temp_password_expires_at=?, updated_at=? WHERE id=?', [hashPassword(temp),tempExpiry(),now(),u.id]); audit(req,'password reset request','user',u.id); console.log(`MCC password reset requested. SMTP configured: ${smtpConfigured ? 'yes' : 'no'}.`); }
- res.json({ok:true,message:'If the email matches an account, password reset instructions will be sent.'}); });
+app.post('/api/auth/forgot-password', async (req,res)=>{
+  const requestedEmail = String(req.body.email ?? '').trim();
+  const key=`${req.ip}:${requestedEmail.toLowerCase()}`;
+  if(limited(forgotHits,key,3,60*60*1000)) return res.status(429).json({error:'Too many reset requests. Try again later.'});
+
+  console.log('MCC forgot password requested.');
+  const u=findUserByEmail(requestedEmail);
+  const activeUser = Boolean(u && !u.disabled);
+  console.log(`MCC forgot password matching active user found: ${activeUser ? 'yes' : 'no'}`);
+  console.log(`MCC forgot password SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
+  audit(req,'password reset request','user',activeUser ? u!.id : '',{matchingActiveUser:activeUser,smtpConfigured});
+
+  if(activeUser){
+    const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`;
+    const expiresAt=tempExpiry();
+    run('UPDATE users SET password_hash=?, force_password_change=1, temp_password_expires_at=?, updated_at=? WHERE id=?', [hashPassword(temp),expiresAt,now(),u!.id]);
+    console.log('MCC reset email send attempted.');
+    try {
+      const messageId = await sendResetEmail(u!, temp, expiresAt);
+      console.log(`MCC reset email sent successfully. messageId: ${messageId ?? 'unknown'}`);
+      audit(req,'password reset email sent','user',u!.id,{messageId: messageId ?? null});
+    } catch (error) {
+      const safeMessage = safeErrorMessage(error, [temp]);
+      console.log(`MCC reset email failed: ${safeMessage}`);
+      audit(req,'password reset email failed','user',u!.id,{error:safeMessage});
+    }
+  }
+
+  res.json({ok:true,message:'If the email matches an account, password reset instructions will be sent.'});
+});
 app.post('/api/auth/change-password', requireAuth, (req:AuthRequest,res)=>{ const {currentPassword,newPassword,confirmPassword}=req.body; const u=req.user!; if(!verifyPassword(currentPassword??'',u.password_hash)) return res.status(400).json({error:'Current password is incorrect.'}); if(newPassword!==confirmPassword||!passwordOk(newPassword)) return res.status(400).json({error:'New password must match and meet complexity rules.'}); if(verifyPassword(newPassword,u.password_hash)) return res.status(400).json({error:'New password cannot match the temporary/current password.'}); run('UPDATE users SET password_hash=?, force_password_change=0, temp_password_expires_at=NULL, updated_at=? WHERE id=?', [hashPassword(newPassword),now(),u.id]); audit(req,'password change','user',u.id); res.json({ok:true}); });
 app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{ const max=roleRank(req.user!.role); const manageableRoles = roles.slice(0,max+1); const placeholders = manageableRoles.map(() => '?').join(','); res.json({users: all<User>(`SELECT * FROM users WHERE ?=4 OR role IN (${placeholders}) ORDER BY full_name`, [max,...manageableRoles]).map(publicUser)}); });
 app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{ const role=req.body.role as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot create that role.'}); if(!passwordOk(req.body.temporaryPassword??'')) return res.status(400).json({error:'Temporary password must meet complexity rules.'}); const id=createUser({fullName:req.body.fullName,email:req.body.email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id}); audit(req,'user create','user',id,{role}); res.status(201).json({user:publicUser(findUserById(id)!)}); });

@@ -10,11 +10,13 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
-    "maintenance-command-center": "file:.."
+    "maintenance-command-center": "file:..",
+    "nodemailer": "^9.0.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
+    "@types/nodemailer": "^8.0.1",
     "typescript": "^5.7.3"
   },
   "engines": {
