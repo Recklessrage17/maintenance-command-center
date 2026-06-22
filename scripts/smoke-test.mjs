@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
 const baseUrl = process.env.MCC_SMOKE_URL ?? 'http://127.0.0.1:4273';
@@ -63,10 +63,14 @@ async function assertSourceWiring() {
   assert(prints.includes('Documents / Prints'), 'Building Prints/Documents page placeholder heading is missing.');
 }
 
-const server = spawn('npm', ['start'], {
+const isWindows = process.platform === 'win32';
+const npmCommand = 'npm';
+const server = spawn(npmCommand, ['start'], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, HOST: '127.0.0.1' },
-  detached: true,
+  detached: !isWindows,
+  shell: isWindows,
+  windowsHide: isWindows,
 });
 
 let serverOutput = '';
@@ -89,7 +93,8 @@ try {
 } finally {
   if (server.pid) {
     try {
-      process.kill(-server.pid, 'SIGTERM');
+      if (isWindows) spawnSync('taskkill', ['/pid', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+      else process.kill(-server.pid, 'SIGTERM');
     } catch {
       server.kill('SIGTERM');
     }

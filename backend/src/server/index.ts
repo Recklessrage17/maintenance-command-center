@@ -991,34 +991,55 @@ function wrapPdfText(value: string, max = 78) {
   if (line) lines.push(line);
   return lines.length ? lines : [''];
 }
-function buildSimplePdf(lines: string[]) {
-  const pageWidth = 612;
-  const pageHeight = 792;
+type PdfPage = { width: number; height: number; content: string };
+type RequisitionPdfItem = {partNumber:string;description:string;locationName:string;quantityRequested:number;unitCost?:number|null;supplierPartNumber?:string;dueDate?:string;notes?:string;unitOfMeasure?:string};
+type RequisitionTemplateKind = 'under-100' | 'over-100';
+type TemplateFieldKey = 'poNo' | 'poInitiator' | 'shipVia' | 'poClass' | 'requestDate' | 'vendorName' | 'vendorAddress' | 'confirmedWith' | 'assetNo' | 'moldNo' | 'equipmentNo' | 'partNo' | 'jobNo' | 'initials' | 'tsNo' | 'codeNo' | 'workOrderNo' | 'comments' | 'departmentManager' | 'requisitionedBy' | 'authorizedBy' | 'taxExempt' | 'materialCert' | 'fob';
+type RequisitionTemplateConfig = {
+  kind: RequisitionTemplateKind;
+  sheetName: string;
+  usedRange: string;
+  printArea: string;
+  title: string;
+  defaultRowHeight: number;
+  rowHeights: Record<number, number>;
+  columnWidths: number[];
+  formX: number;
+  formY: number;
+  formW: number;
+  formH: number;
+  titleRange: string;
+  labels: Array<{range: string; text: string; size?: number; align?: 'left' | 'center' | 'right'}>;
+  fields: Record<TemplateFieldKey, string>;
+  itemRows: {start: number; end: number};
+  itemColumns: {quantity: string; unitOfMeasure: string; itemNumber: string; description: string; dueDate: string; unitPrice: string; totalPrice: string};
+  vendorTotalRange: string;
+};
+
+function buildPdfDocument(pdfPages: PdfPage[]) {
   const objects: string[] = [];
-  const pages: number[] = [];
-  for (let i = 0; i < lines.length; i += 54) {
-    const chunk = lines.slice(i, i + 54);
-    let content = 'BT\n/F1 10 Tf\n14 TL\n';
-    content += `50 ${pageHeight - 54} Td\n`;
-    chunk.forEach((line, index) => {
-      content += `${index === 0 ? '' : 'T* '}(${pdfEscape(line)}) Tj\n`;
-    });
-    content += 'ET\n';
+  const pageObjectNumbers: number[] = [];
+  for (const page of pdfPages) {
+    const content = page.content;
     const contentObjectNumber = objects.length + 1;
     objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}endstream`);
     const pageObjectNumber = objects.length + 1;
-    objects.push(`<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 0 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
-    pages.push(pageObjectNumber);
+    objects.push(`<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 0 0 R /F2 0 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
+    pageObjectNumbers.push(pageObjectNumber);
   }
-  const fontObjectNumber = objects.length + 1;
+  const regularFontObjectNumber = objects.length + 1;
   objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const boldFontObjectNumber = objects.length + 1;
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
   const pagesObjectNumber = objects.length + 1;
-  objects.push(`<< /Type /Pages /Kids [${pages.map(n=>`${n} 0 R`).join(' ')}] /Count ${pages.length} >>`);
+  objects.push(`<< /Type /Pages /Kids [${pageObjectNumbers.map(n=>`${n} 0 R`).join(' ')}] /Count ${pageObjectNumbers.length} >>`);
   const catalogObjectNumber = objects.length + 1;
   objects.push(`<< /Type /Catalog /Pages ${pagesObjectNumber} 0 R >>`);
-  const patched = objects.map((object, index) => {
-    const n = index + 1;
-    return object.replaceAll('/Parent 0 0 R', `/Parent ${pagesObjectNumber} 0 R`).replaceAll('/F1 0 0 R', `/F1 ${fontObjectNumber} 0 R`);
+  const patched = objects.map((object) => {
+    return object
+      .replaceAll('/Parent 0 0 R', `/Parent ${pagesObjectNumber} 0 R`)
+      .replaceAll('/F1 0 0 R', `/F1 ${regularFontObjectNumber} 0 R`)
+      .replaceAll('/F2 0 0 R', `/F2 ${boldFontObjectNumber} 0 R`);
   });
   const parts = ['%PDF-1.4\n'];
   const offsets: number[] = [0];
@@ -1032,40 +1053,323 @@ function buildSimplePdf(lines: string[]) {
   parts.push(`trailer\n<< /Size ${patched.length + 1} /Root ${catalogObjectNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
   return Buffer.from(parts.join(''));
 }
-function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; requisitionType?: string; header?: Record<string, unknown>; items: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number;unitCost?:number|null;supplierPartNumber?:string;dueDate?:string;notes?:string}> }) {
+
+function pdfNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/,'').replace(/\.$/,'');
+}
+
+function columnNameToNumber(name: string) {
+  return name.split('').reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0);
+}
+
+function parseCellRef(ref: string) {
+  const match = /^([A-Z]+)(\d+)$/.exec(ref.trim());
+  if (!match) throw new Error(`Invalid cell reference: ${ref}`);
+  return { column: columnNameToNumber(match[1]), row: Number(match[2]) };
+}
+
+function parseRangeRef(ref: string) {
+  const [startRef, endRef = startRef] = ref.split(':');
+  const start = parseCellRef(startRef);
+  const end = parseCellRef(endRef);
+  return {
+    startColumn: Math.min(start.column, end.column),
+    endColumn: Math.max(start.column, end.column),
+    startRow: Math.min(start.row, end.row),
+    endRow: Math.max(start.row, end.row),
+  };
+}
+
+function makeRequisitionTemplateGeometry(config: RequisitionTemplateConfig) {
+  const print = parseRangeRef(config.printArea);
+  const rowHeights = new Map<number, number>();
+  for (let row = print.startRow; row <= print.endRow; row += 1) rowHeights.set(row, config.rowHeights[row] ?? config.defaultRowHeight);
+  const totalHeight = [...rowHeights.values()].reduce((sum, height) => sum + height, 0);
+  const totalWidth = config.columnWidths.slice(0, print.endColumn).reduce((sum, width) => sum + width, 0);
+  const scaleY = config.formH / totalHeight;
+  const scaleX = config.formW / totalWidth;
+  const xEdges = [config.formX];
+  for (let index = 0; index < print.endColumn; index += 1) xEdges.push(xEdges[index] + config.columnWidths[index] * scaleX);
+  const yEdges = [config.formY];
+  for (let row = print.startRow; row <= print.endRow; row += 1) yEdges.push(yEdges[yEdges.length - 1] + (rowHeights.get(row) ?? config.defaultRowHeight) * scaleY);
+  const box = (range: string) => {
+    const parsed = parseRangeRef(range);
+    const left = xEdges[parsed.startColumn - 1];
+    const right = xEdges[parsed.endColumn];
+    const top = yEdges[parsed.startRow - print.startRow];
+    const bottom = yEdges[parsed.endRow - print.startRow + 1];
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  };
+  const rowBox = (row: number, startColumn: number, endColumn: number) => {
+    const left = xEdges[startColumn - 1];
+    const right = xEdges[endColumn];
+    const top = yEdges[row - print.startRow];
+    const bottom = yEdges[row - print.startRow + 1];
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  };
+  return { print, box, rowBox };
+}
+
+function fitText(text: string, maxWidth: number, size: number) {
+  const value = text.replace(/\s+/g, ' ').trim();
+  if (!value) return '';
+  const maxChars = Math.max(1, Math.floor(maxWidth / (size * 0.52)));
+  return value.length <= maxChars ? value : `${value.slice(0, Math.max(1, maxChars - 1))}...`;
+}
+
+function wrapTextToBox(text: string, maxWidth: number, size: number, maxLines: number) {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!words.length) return [''];
+  const maxChars = Math.max(4, Math.floor(maxWidth / (size * 0.52)));
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > maxChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  if (lines.length > maxLines) {
+    const visible = lines.slice(0, maxLines);
+    visible[visible.length - 1] = fitText(`${visible[visible.length - 1]} ...`, maxWidth, size);
+    return visible;
+  }
+  return lines;
+}
+
+function pdfRect(box: {x:number;y:number;width:number;height:number}, pageHeight: number, options: {stroke?: string; fill?: string; width?: number} = {}) {
+  const y = pageHeight - box.y - box.height;
+  const width = options.width ?? 0.45;
+  const color = options.stroke ?? '0 0 0';
+  const fill = options.fill;
+  if (fill) return `${fill} rg ${color} RG ${pdfNumber(width)} w ${pdfNumber(box.x)} ${pdfNumber(y)} ${pdfNumber(box.width)} ${pdfNumber(box.height)} re B\n`;
+  return `${color} RG ${pdfNumber(width)} w ${pdfNumber(box.x)} ${pdfNumber(y)} ${pdfNumber(box.width)} ${pdfNumber(box.height)} re S\n`;
+}
+
+function pdfText(text: string, box: {x:number;y:number;width:number;height:number}, pageHeight: number, options: {size?: number; bold?: boolean; align?: 'left'|'center'|'right'; valign?: 'top'|'middle'|'bottom'; maxLines?: number; color?: string} = {}) {
+  const size = options.size ?? 8;
+  const align = options.align ?? 'left';
+  const maxLines = options.maxLines ?? 1;
+  const lines = maxLines > 1 ? wrapTextToBox(text, box.width - 4, size, maxLines) : [fitText(text, box.width - 4, size)];
+  const lineHeight = size * 1.15;
+  const totalLineHeight = lines.length * lineHeight;
+  const yTop = options.valign === 'bottom'
+    ? box.y + box.height - totalLineHeight - 2
+    : options.valign === 'middle'
+      ? box.y + Math.max(1, (box.height - totalLineHeight) / 2)
+      : box.y + 2;
+  let content = `${options.color ?? '0 0 0'} rg BT\n/${options.bold ? 'F2' : 'F1'} ${pdfNumber(size)} Tf\n`;
+  lines.forEach((line, index) => {
+    const estimatedWidth = line.length * size * 0.52;
+    const x = align === 'right' ? box.x + box.width - estimatedWidth - 2 : align === 'center' ? box.x + (box.width - estimatedWidth) / 2 : box.x + 2;
+    const y = pageHeight - (yTop + index * lineHeight + size);
+    content += `1 0 0 1 ${pdfNumber(x)} ${pdfNumber(y)} Tm (${pdfEscape(line)}) Tj\n`;
+  });
+  content += 'ET\n';
+  return content;
+}
+
+const under100Template: RequisitionTemplateConfig = {
+  kind: 'under-100',
+  sheetName: 'PURCHASE ORDER under $100',
+  usedRange: 'A1:P37',
+  printArea: 'A1:N37',
+  title: 'PURCHASE ORDER REQUISITION Under $100.00',
+  defaultRowHeight: 12.75,
+  rowHeights: {4:15.75,10:13.5,15:15.75,16:15.75,17:15.75,18:16.5,20:16.5,21:13.5,22:40.5,23:48.75},
+  columnWidths: [6.28515625,16.28515625,13.85546875,9.140625,9.140625,9.140625,9.140625,9.140625,9.140625,9.140625,9.140625,9.140625,9.140625,9.140625],
+  formX: 36,
+  formY: 28,
+  formW: 720,
+  formH: 542,
+  titleRange: 'A4:N4',
+  labels: [
+    {range:'B6:B6',text:'P.O. No.:'},{range:'F6:F6',text:'P.O. Initiator:'},{range:'K6:K6',text:'Ship Via:'},
+    {range:'B8:B8',text:'P.O. Class:'},{range:'F8:F8',text:'Tax Exempt ?:'},{range:'K8:K8',text:'F.O.B.:'},
+    {range:'B10:B10',text:'Req. Date:'},{range:'F10:F10',text:'Material Cert?:'},{range:'M11:N11',text:'Tooling Orders ONLY',align:'center',size:7},
+    {range:'B12:B12',text:'Vendor Name:'},{range:'B13:B13',text:'(Address & Phone No.'},{range:'B14:B14',text:'ONLY if new vendor)'},
+    {range:'F12:F12',text:'Confirmed With:'},{range:'F15:F15',text:'Asset No.:'},{range:'J16:J16',text:'Initials'},
+    {range:'B18:B18',text:'Work Order No.:'},{range:'F18:G18',text:'Equipment No.:'},{range:'L13:L13',text:'Part No.:'},
+    {range:'L14:L14',text:'Job No.:'},{range:'L15:L15',text:'Mold No.:'},{range:'L16:L16',text:'T/S No.:'},{range:'L17:L17',text:'Code No.:'},
+    {range:'A20:A21',text:'Quantity',align:'center'},{range:'B20:B20',text:'Unit of',align:'center'},{range:'B21:B21',text:'Measure',align:'center'},
+    {range:'C20:C20',text:'Item',align:'center'},{range:'C21:C21',text:'Number',align:'center'},{range:'D20:I21',text:'Item Description/Revision',align:'center'},
+    {range:'J20:K20',text:'Due',align:'center'},{range:'J21:K21',text:'Date',align:'center'},{range:'L20:L20',text:'Unit',align:'center'},
+    {range:'L21:L21',text:'Price',align:'center'},{range:'M20:M20',text:'Total',align:'center'},{range:'M21:M21',text:'Price',align:'center'},
+    {range:'B34:B34',text:'COMMENTS:'},{range:'L35:N35',text:'DEPARTMENT  MANAGER',align:'center',size:7},{range:'G37:I37',text:'REQUISITIONED',align:'center',size:7},{range:'L37:N37',text:'AUTHORIZED BY:',align:'center',size:7},
+  ],
+  fields: {
+    poNo:'C6:D6', poInitiator:'G6:I6', shipVia:'L6:N6', poClass:'C8:D8', taxExempt:'G8:I8', fob:'L8:N8',
+    requestDate:'C10:D10', materialCert:'G10:I10', vendorName:'C12:D12', vendorAddress:'C13:D14', confirmedWith:'G12:I12',
+    assetNo:'G15:H15', moldNo:'M15:N15', equipmentNo:'H18:J18', partNo:'M13:N13', jobNo:'M14:N14', initials:'K16:K16',
+    tsNo:'M16:N16', codeNo:'M17:N17', workOrderNo:'C18:E18', comments:'C34:I34', departmentManager:'L34:N34',
+    requisitionedBy:'F36:I36', authorizedBy:'L36:N36',
+  },
+  itemRows: {start: 22, end: 32},
+  itemColumns: {quantity:'A',unitOfMeasure:'B',itemNumber:'C',description:'D:I',dueDate:'J:K',unitPrice:'L',totalPrice:'M:N'},
+  vendorTotalRange: 'N20:N21',
+};
+
+const over100Template: RequisitionTemplateConfig = {
+  kind: 'over-100',
+  sheetName: 'Sheet1',
+  usedRange: 'A1:S39',
+  printArea: 'A1:P40',
+  title: 'PURCHASE ORDER REQUISITION',
+  defaultRowHeight: 12.75,
+  rowHeights: {5:15,6:12.75,9:12.95,11:13.5,13:15,14:15,15:15,16:15,17:15,18:15,19:15.75,21:14.1,22:14.1,23:54.75,24:64.5,25:45.75,26:27.75,27:33,28:44.25,29:17.1,30:17.1,31:17.1,32:17.1,33:27.75,34:29.25,36:50.25},
+  columnWidths: [4.140625,8,10.7109375,23.140625,7.28515625,6,10.28515625,9.42578125,9.42578125,2.7109375,4.7109375,8.7109375,10.28515625,6.5703125,8.28515625,11],
+  formX: 30,
+  formY: 24,
+  formW: 732,
+  formH: 550,
+  titleRange: 'C5:O5',
+  labels: [
+    {range:'C7:C7',text:'P.O. No.:'},{range:'G7:G7',text:'P.O. Initiator:'},{range:'L7:L7',text:'Ship Via:'},
+    {range:'C9:C9',text:'P.O. Class:'},{range:'G9:G9',text:'Tax Exempt ?:'},{range:'L9:L9',text:'F.O.B.:'},
+    {range:'C11:C11',text:'Req. Date:'},{range:'G11:G11',text:'Material Cert?:'},{range:'N12:O12',text:'Tooling Orders ONLY',align:'center',size:7},
+    {range:'C13:C13',text:'Vendor Name:'},{range:'C14:C14',text:'(Address & Phone No.'},{range:'C15:C15',text:'ONLY if new vendor)'},
+    {range:'G13:G13',text:'Confirmed With:'},{range:'G16:G16',text:'Asset No.:'},{range:'K17:K17',text:'Initials'},
+    {range:'C19:C19',text:'Work Order No.:'},{range:'E19:F19',text:'Equipment No.:'},{range:'M14:M14',text:'Part No.:'},
+    {range:'M15:M15',text:'Job No.:'},{range:'M16:M16',text:'Mold No.:'},{range:'M17:M17',text:'T/S No.:'},{range:'M18:M18',text:'Code No.:'},
+    {range:'B21:B22',text:'Quantity',align:'center'},{range:'C21:C21',text:'Unit of',align:'center'},{range:'C22:C22',text:'Measure',align:'center'},
+    {range:'D21:D21',text:'Item',align:'center'},{range:'D22:D22',text:'Number',align:'center'},{range:'E21:J22',text:'Item Description/Revision',align:'center'},
+    {range:'K21:L21',text:'Due',align:'center'},{range:'K22:L22',text:'Date',align:'center'},{range:'M21:M21',text:'Unit',align:'center'},
+    {range:'M22:M22',text:'Price',align:'center'},{range:'N21:N21',text:'Total',align:'center'},{range:'N22:N22',text:'Price',align:'center'},
+    {range:'C36:C36',text:'COMMENTS:'},{range:'M37:O37',text:'DEPARTMENT  MANAGER',align:'center',size:7},{range:'H39:J39',text:'REQUISITIONED',align:'center',size:7},{range:'M39:O39',text:'AUTHORIZED BY:',align:'center',size:7},
+  ],
+  fields: {
+    poNo:'D7:E7', poInitiator:'H7:J7', shipVia:'M7:O7', poClass:'D9:E9', taxExempt:'H9:J9', fob:'M9:O9',
+    requestDate:'D11:E11', materialCert:'H11:J11', vendorName:'D13:E13', vendorAddress:'D14:E16', confirmedWith:'H13:J13',
+    assetNo:'H16:I16', moldNo:'N16:O16', equipmentNo:'G19:H19', partNo:'N14:O14', jobNo:'N15:O15', initials:'L17:L17',
+    tsNo:'N17:O17', codeNo:'N18:O18', workOrderNo:'D19:D19', comments:'D36:J36', departmentManager:'M36:O36',
+    requisitionedBy:'G38:J38', authorizedBy:'M38:O38',
+  },
+  itemRows: {start: 23, end: 34},
+  itemColumns: {quantity:'B',unitOfMeasure:'C',itemNumber:'D',description:'E:J',dueDate:'K:L',unitPrice:'M',totalPrice:'N:O'},
+  vendorTotalRange: 'O21:O22',
+};
+
+function templateForRequisitionType(type: RequisitionTemplateKind) {
+  return type === 'over-100' ? over100Template : under100Template;
+}
+
+function money(value: number) {
+  return value ? `$${value.toFixed(2)}` : '';
+}
+
+function normalizedRequisitionType(rawType: string, total: number): RequisitionTemplateKind {
+  const clean = rawType.toLowerCase();
+  if (clean.includes('over')) return 'over-100';
+  if (clean.includes('under')) return 'under-100';
+  return total >= 100 ? 'over-100' : 'under-100';
+}
+
+function columnRangeForRow(columnRange: string, row: number) {
+  const [start, end = start] = columnRange.split(':');
+  return `${start}${row}:${end}${row}`;
+}
+
+function buildRequisitionPage(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; header: Record<string, unknown>; items: RequisitionPdfItem[]; pageItems: RequisitionPdfItem[]; pageIndex: number; pageCount: number; total: number; template: RequisitionTemplateConfig }) {
+  const pageWidth = 792;
+  const pageHeight = 612;
+  const { template } = input;
+  const geometry = makeRequisitionTemplateGeometry(template);
+  const field = (keys: string[], fallback = '') => textField(input.header, keys, fallback);
+  const date = field(['requestDate']) || new Date(input.createdAt).toLocaleDateString('en-US');
+  const fieldValues: Record<TemplateFieldKey, string> = {
+    poNo: field(['poNo'], input.requisitionNumber),
+    poInitiator: field(['poInitiator']),
+    shipVia: field(['shipVia']),
+    poClass: field(['poClass']),
+    requestDate: date,
+    vendorName: field(['vendorName'], input.vendor || 'Unknown Vendor'),
+    vendorAddress: field(['vendorAddress']),
+    confirmedWith: field(['confirmedWith']),
+    assetNo: field(['assetNo']),
+    moldNo: field(['moldNo']),
+    equipmentNo: field(['equipmentNo']),
+    partNo: field(['partNo']),
+    jobNo: field(['jobNo']),
+    initials: field(['initials']),
+    tsNo: field(['tsNo']),
+    codeNo: field(['codeNo']),
+    workOrderNo: field(['workOrderNo']),
+    comments: field(['comments'], input.notes || ''),
+    departmentManager: field(['departmentManager']),
+    requisitionedBy: field(['requisitionedBy'], input.requestedBy || ''),
+    authorizedBy: field(['authorizedBy']),
+    taxExempt: field(['taxExempt'], 'No'),
+    materialCert: field(['materialCert'], 'No'),
+    fob: field(['fob'], 'Destination'),
+  };
+  let content = '';
+  const formBox = geometry.box(template.printArea);
+  content += pdfRect(formBox, pageHeight, {stroke:'0 0 0', width:0.7});
+  content += pdfText(template.title, geometry.box(template.titleRange), pageHeight, {size:12, bold:true, align:'center', valign:'middle'});
+  for (const label of template.labels) {
+    content += pdfText(label.text, geometry.box(label.range), pageHeight, {size:label.size ?? 7.5, bold:true, align:label.align ?? 'left', valign:'middle'});
+  }
+  const fieldRanges = Object.values(template.fields);
+  for (const range of fieldRanges) content += pdfRect(geometry.box(range), pageHeight, {stroke:'0.25 0.25 0.25', width:0.45});
+  content += pdfRect(geometry.box(template.vendorTotalRange), pageHeight, {stroke:'0 0 0', width:0.55});
+  for (const [key, range] of Object.entries(template.fields) as Array<[TemplateFieldKey, string]>) {
+    const box = geometry.box(range);
+    content += pdfText(fieldValues[key], box, pageHeight, {size: key === 'comments' || key === 'vendorAddress' ? 7 : 7.5, maxLines: key === 'comments' || key === 'vendorAddress' ? 3 : 1, valign:'middle'});
+  }
+  content += pdfText(money(input.total), geometry.box(template.vendorTotalRange), pageHeight, {size:8, bold:true, align:'center', valign:'middle'});
+
+  const itemStartColumn = parseRangeRef(columnRangeForRow(template.itemColumns.quantity, template.itemRows.start)).startColumn;
+  const itemEndColumn = parseRangeRef(columnRangeForRow(template.itemColumns.totalPrice, template.itemRows.end)).endColumn;
+  for (let row = template.itemRows.start - 2; row <= template.itemRows.end; row += 1) {
+    content += pdfRect(geometry.rowBox(row, itemStartColumn, itemEndColumn), pageHeight, {stroke:'0 0 0', fill: row < template.itemRows.start ? '0.92 0.92 0.92' : undefined, width:0.45});
+  }
+  for (let row = template.itemRows.start; row <= template.itemRows.end; row += 1) {
+    for (const columnRange of Object.values(template.itemColumns)) content += pdfRect(geometry.box(columnRangeForRow(columnRange, row)), pageHeight, {stroke:'0 0 0', width:0.35});
+  }
+  input.pageItems.forEach((item, offset) => {
+    const row = template.itemRows.start + offset;
+    const unitCost = Number(item.unitCost ?? 0) || 0;
+    const total = unitCost * item.quantityRequested;
+    const number = item.supplierPartNumber || item.partNumber || '';
+    const notes = item.notes ? ` Notes: ${item.notes}` : '';
+    const description = `${item.description || '-'}${notes}`;
+    const values = {
+      quantity: String(item.quantityRequested),
+      unitOfMeasure: item.unitOfMeasure || 'EA',
+      itemNumber: number,
+      description,
+      dueDate: item.dueDate || '',
+      unitPrice: money(unitCost),
+      totalPrice: money(total),
+    };
+    content += pdfText(values.quantity, geometry.box(columnRangeForRow(template.itemColumns.quantity, row)), pageHeight, {size:7, align:'center', valign:'middle'});
+    content += pdfText(values.unitOfMeasure, geometry.box(columnRangeForRow(template.itemColumns.unitOfMeasure, row)), pageHeight, {size:7, align:'center', valign:'middle'});
+    content += pdfText(values.itemNumber, geometry.box(columnRangeForRow(template.itemColumns.itemNumber, row)), pageHeight, {size:6.5, align:'center', valign:'middle'});
+    content += pdfText(values.description, geometry.box(columnRangeForRow(template.itemColumns.description, row)), pageHeight, {size:6.5, maxLines: Math.max(1, Math.floor(geometry.box(columnRangeForRow(template.itemColumns.description, row)).height / 8)), valign:'top'});
+    content += pdfText(values.dueDate, geometry.box(columnRangeForRow(template.itemColumns.dueDate, row)), pageHeight, {size:6.5, align:'center', valign:'middle'});
+    content += pdfText(values.unitPrice, geometry.box(columnRangeForRow(template.itemColumns.unitPrice, row)), pageHeight, {size:6.5, align:'right', valign:'middle'});
+    content += pdfText(values.totalPrice, geometry.box(columnRangeForRow(template.itemColumns.totalPrice, row)), pageHeight, {size:6.5, align:'right', valign:'middle'});
+  });
+  content += pdfText(`Page ${input.pageIndex + 1} of ${input.pageCount}`, {x:650,y:584,width:106,height:14}, pageHeight, {size:8, align:'right'});
+  content += pdfText(`Generated by MCC - ${template.sheetName} ${template.printArea}`, {x:36,y:584,width:360,height:14}, pageHeight, {size:6.5, color:'0.35 0.35 0.35'});
+  return { width: pageWidth, height: pageHeight, content };
+}
+
+function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; requisitionType?: string; header?: Record<string, unknown>; items: RequisitionPdfItem[] }) {
   const header = isRecord(input.header) ? input.header : {};
   const field = (keys: string[], fallback = '') => textField(header, keys, fallback);
-  const date = field(['requestDate']) || new Date(input.createdAt).toLocaleDateString('en-US');
-  const typeLabel = (input.requisitionType || field(['requisitionType'])).includes('over') ? 'OVER $100' : 'UNDER $100';
-  const lines = [
-    'MIT3 OFFICIAL REQUISITION',
-    `${typeLabel} PURCHASE REQUISITION`,
-    '============================================================',
-    `Requisition #: ${input.requisitionNumber}    Request Date: ${date}    PO No: ${field(['poNo'])}`,
-    `PO Initiator: ${field(['poInitiator'])}    Ship Via: ${field(['shipVia'])}    PO Class: ${field(['poClass'])}`,
-    `Vendor Name: ${field(['vendorName'], input.vendor || 'Unknown Vendor')}`,
-    `Vendor Address: ${field(['vendorAddress'])}`,
-    `Confirmed With: ${field(['confirmedWith'])}    Priority: ${field(['priority'])}`,
-    `Asset No: ${field(['assetNo'])}    Mold No: ${field(['moldNo'])}    Equipment No: ${field(['equipmentNo'])}`,
-    `Part No: ${field(['partNo'])}    Job No: ${field(['jobNo'])}    Initials: ${field(['initials'])}`,
-    `TS No: ${field(['tsNo'])}    Code No: ${field(['codeNo'])}    Work Order No: ${field(['workOrderNo'])}`,
-    `Tax Exempt: ${field(['taxExempt'], 'No')}    Material Cert: ${field(['materialCert'], 'No')}    FOB: ${field(['fob'], 'Destination')}`,
-    '',
-    'Qty | Supplier/Part # | Description | Due Date | Unit Cost | Est. Total | Notes',
-    '--------------------------------------------------------------------------',
-  ];
-  let total = 0;
-  for (const item of input.items) {
-    const unit = Number(item.unitCost ?? 0);
-    const extended = unit * item.quantityRequested;
-    total += extended;
-    const part = item.supplierPartNumber || item.partNumber || '-';
-    const wrapped = wrapPdfText(item.description || '-', 34);
-    lines.push(`${item.quantityRequested} | ${part} | ${wrapped[0]} | ${item.dueDate || ''} | ${unit ? unit.toFixed(2) : ''} | ${extended ? extended.toFixed(2) : ''} | ${item.notes || ''}`);
-    wrapped.slice(1).forEach(line => lines.push(`    ${line}`));
-  }
-  lines.push('--------------------------------------------------------------------------', `Estimated Total: $${total.toFixed(2)}`, '', `Comments: ${field(['comments'], input.notes || '')}`, `Department Manager: ${field(['departmentManager'])}    Requisitioned By: ${field(['requisitionedBy'], input.requestedBy || '')}    Authorized By: ${field(['authorizedBy'])}`, '', 'Generated by MCC using the MIT3 requisition workflow fields and official template mapping.');
-  return buildSimplePdf(lines);
+  const total = input.items.reduce((sum, item) => sum + (Number(item.unitCost ?? 0) || 0) * item.quantityRequested, 0);
+  const type = normalizedRequisitionType(input.requisitionType || field(['requisitionType']), total);
+  const template = templateForRequisitionType(type);
+  const itemsPerPage = template.itemRows.end - template.itemRows.start + 1;
+  const chunks: RequisitionPdfItem[][] = [];
+  for (let index = 0; index < input.items.length; index += itemsPerPage) chunks.push(input.items.slice(index, index + itemsPerPage));
+  const pages = chunks.map((pageItems, pageIndex) => buildRequisitionPage({...input, header, template, pageItems, pageIndex, pageCount: chunks.length, total}));
+  return buildPdfDocument(pages);
 }
 function requisitionById(id: number) {
   return one<RequisitionRow>('SELECT * FROM inventory_requisitions WHERE deleted=0 AND id=?', [id]);
