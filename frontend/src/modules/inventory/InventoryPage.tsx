@@ -22,6 +22,9 @@ type InventoryPart = {
   hasActiveRequisitionRecord: boolean;
   activeRequisitionNumber?: string;
   partInfoUrl: string;
+  manufacturerBrand: string;
+  unitCost: number | null;
+  supplierPartNumber: string;
   updatedAt: string;
 };
 
@@ -106,6 +109,9 @@ type PartForm = {
   quantity: string;
   minQuantity: string;
   partInfoUrl: string;
+  manufacturerBrand: string;
+  unitCost: string;
+  supplierPartNumber: string;
 };
 
 const blankForm: PartForm = {
@@ -116,6 +122,9 @@ const blankForm: PartForm = {
   quantity: '0',
   minQuantity: '0',
   partInfoUrl: '',
+  manufacturerBrand: '',
+  unitCost: '',
+  supplierPartNumber: '',
 };
 
 const blankRequisitionForm = {
@@ -237,6 +246,7 @@ function validateForm(form: PartForm) {
   if (!Number.isFinite(Number(form.quantity))) return 'Quantity must be numeric.';
   if (!Number.isFinite(Number(form.minQuantity))) return 'Minimum Quantity must be numeric.';
   if (form.partInfoUrl.trim() && !validUrl(form.partInfoUrl.trim())) return 'Part Info URL must be blank or a valid http/https URL.';
+  if (form.unitCost.trim() && (!Number.isFinite(Number(form.unitCost)) || Number(form.unitCost) < 0)) return 'Unit Cost must be blank or a number zero or greater.';
   return '';
 }
 
@@ -249,6 +259,9 @@ function formFromPart(part: InventoryPart): PartForm {
     quantity: String(part.quantity),
     minQuantity: String(part.minQuantity),
     partInfoUrl: part.partInfoUrl,
+    manufacturerBrand: part.manufacturerBrand ?? '',
+    unitCost: part.unitCost === null || part.unitCost === undefined ? '' : String(part.unitCost),
+    supplierPartNumber: part.supplierPartNumber ?? '',
   };
 }
 
@@ -306,6 +319,9 @@ function payloadFromForm(form: PartForm) {
     quantity: Number(form.quantity),
     minQuantity: Number(form.minQuantity),
     partInfoUrl: form.partInfoUrl.trim(),
+    manufacturerBrand: form.manufacturerBrand.trim(),
+    unitCost: form.unitCost.trim() ? Number(form.unitCost) : null,
+    supplierPartNumber: form.supplierPartNumber.trim(),
   };
 }
 
@@ -992,6 +1008,18 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               <label className="form-field">
                 <span>Vendor</span>
                 <input list="native-vendor-options" value={form.vendor} onChange={event=>setForm({...form,vendor:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Manufacturer / Brand</span>
+                <input value={form.manufacturerBrand} onChange={event=>setForm({...form,manufacturerBrand:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Supplier Part #</span>
+                <input value={form.supplierPartNumber} onChange={event=>setForm({...form,supplierPartNumber:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Unit Cost</span>
+                <input inputMode="decimal" value={form.unitCost} onChange={event=>setForm({...form,unitCost:event.target.value})} placeholder="Optional" />
               </label>
               <label className="form-field">
                 <span>Quantity</span>

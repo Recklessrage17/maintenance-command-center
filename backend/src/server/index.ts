@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, acto
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL, supplier_part_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
@@ -78,6 +78,11 @@ function migrateDb() {
   if (!userColumns.has('deleted')) run('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.has('deleted_at')) run('ALTER TABLE users ADD COLUMN deleted_at TEXT');
   if (!userColumns.has('deleted_by_user_id')) run('ALTER TABLE users ADD COLUMN deleted_by_user_id INTEGER');
+
+  const inventoryPartColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_parts)').map(column => column.name));
+  if (!inventoryPartColumns.has('manufacturer_brand')) run("ALTER TABLE inventory_parts ADD COLUMN manufacturer_brand TEXT NOT NULL DEFAULT ''");
+  if (!inventoryPartColumns.has('unit_cost')) run('ALTER TABLE inventory_parts ADD COLUMN unit_cost REAL');
+  if (!inventoryPartColumns.has('supplier_part_number')) run("ALTER TABLE inventory_parts ADD COLUMN supplier_part_number TEXT NOT NULL DEFAULT ''");
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -293,6 +298,9 @@ function normalizeMit3Parts(payload: unknown) {
       hasActiveRequisitionRecord: Boolean(activeRequisition),
       partInfoUrl: validWebUrl(rawPartInfoUrl),
       rawPartInfoUrl,
+      manufacturerBrand: textField(item, ['manufacturerBrand','manufacturer_brand','manufacturer','brand','make']),
+      unitCost: numberField(item, ['unitCost','unit_cost','cost','price','unitPrice','unit_price','estimatedCost','estimated_cost'], NaN),
+      supplierPartNumber: textField(item, ['supplierPartNumber','supplier_part_number','vendorPartNumber','vendor_part_number','supplierSku','supplier_sku','manufacturerPartNumber','manufacturer_part_number']),
       notes: textField(item, ['notes', 'note']),
       updatedAt: textField(item, ['updatedAt', 'updated_at'], textField(data, ['lastSavedAt'])),
     };
@@ -349,6 +357,9 @@ interface NativePartRow {
   status: string;
   requisition: string;
   part_info_url: string;
+  manufacturer_brand: string;
+  unit_cost: number | null;
+  supplier_part_number: string;
   notes: string;
   source: string;
   imported_from_mit3_at: string | null;
@@ -417,6 +428,9 @@ function normalizeNativePart(row: NativePartRow) {
     hasActiveRequisitionRecord: Boolean(activeRequisition),
     activeRequisitionNumber: activeRequisition?.requisition_number ?? '',
     partInfoUrl: validWebUrl(row.part_info_url),
+    manufacturerBrand: row.manufacturer_brand ?? '',
+    unitCost: row.unit_cost === null || row.unit_cost === undefined ? null : Number(row.unit_cost),
+    supplierPartNumber: row.supplier_part_number ?? '',
     updatedAt: row.updated_at,
     source: row.source,
     importedFromMit3At: row.imported_from_mit3_at ?? '',
@@ -450,7 +464,7 @@ LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
 WHERE ${where.join(' AND ')}
 ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`, params).map(normalizeNativePart);
 }
-const nativeExportHeaders = ['MCC Item ID','Part Number','Description','Location','Vendor','Quantity','Minimum Quantity','Requisition','Part Info URL','Notes'] as const;
+const nativeExportHeaders = ['MCC Item ID','Part Number','Description','Location','Vendor','Quantity','Minimum Quantity','Requisition','Part Info URL','Manufacturer/Brand','Unit Cost','Supplier Part Number','Notes'] as const;
 const nativeBlankImportHeaders = nativeExportHeaders.filter(header => header !== 'MCC Item ID');
 type NativeExportHeader = typeof nativeExportHeaders[number];
 type NativeExportRecord = Record<NativeExportHeader, string | number>;
@@ -465,6 +479,9 @@ type NativeImportRow = {
   minQuantity: string;
   requisition: string;
   partInfoUrl: string;
+  manufacturerBrand: string;
+  unitCost: string;
+  supplierPartNumber: string;
   notes: string;
 };
 type NativeImportSummary = {
@@ -495,6 +512,9 @@ function nativeExportRecord(row: NativePartRow): NativeExportRecord {
     'Minimum Quantity': Number(row.min_quantity ?? 0),
     Requisition: row.requisition,
     'Part Info URL': validWebUrl(row.part_info_url),
+    'Manufacturer/Brand': row.manufacturer_brand ?? '',
+    'Unit Cost': row.unit_cost === null || row.unit_cost === undefined ? '' : Number(row.unit_cost),
+    'Supplier Part Number': row.supplier_part_number ?? '',
     Notes: row.notes,
   };
 }
@@ -648,6 +668,9 @@ function importRowFromRecord(record: Record<string, string>, rowNumber: number):
     minQuantity: value('Minimum Quantity','Min Quantity','Minimum','Min'),
     requisition: value('Requisition','Requisition Status','Order Placed'),
     partInfoUrl: value('Part Info URL','Part URL','URL'),
+    manufacturerBrand: value('Manufacturer/Brand','Manufacturer','Brand','Make'),
+    unitCost: value('Unit Cost','UnitCost','Unit Price','Price','Cost','Estimated Cost'),
+    supplierPartNumber: value('Supplier Part Number','Supplier Part No','Supplier Part','Vendor Part Number','Vendor Part No','Manufacturer Part Number','Manufacturer Part No'),
     notes: value('Notes','Note'),
   };
 }
@@ -727,6 +750,7 @@ function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
         if (!partNumber) throw new Error(`Row ${row.rowNumber}: Part Number is required.`);
         const quantity = numericImportValue(row.quantity, 'Quantity', row.rowNumber);
         const minQuantity = numericImportValue(row.minQuantity, 'Minimum Quantity', row.rowNumber);
+        const unitCost = row.unitCost.trim() ? numericImportValue(row.unitCost, 'Unit Cost', row.rowNumber) : null;
         const rawUrl = row.partInfoUrl.trim();
         const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
         if (rawUrl && !partInfoUrl) {
@@ -743,10 +767,10 @@ function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
         const status = nativePartStatus(quantity, minQuantity);
         const requisition = requisitionImportValue(row.requisition);
         if (existing) {
-          run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.notes.trim(),'mcc',actor.id,timestamp,existing.id]);
+          run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.manufacturerBrand.trim(),unitCost,row.supplierPartNumber.trim(),row.notes.trim(),'mcc',actor.id,timestamp,existing.id]);
           summary.updatedCount += 1;
         } else {
-          run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.notes.trim(),'mcc',null,actor.id,actor.id,timestamp,timestamp]);
+          run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.manufacturerBrand.trim(),unitCost,row.supplierPartNumber.trim(),row.notes.trim(),'mcc',null,actor.id,actor.id,timestamp,timestamp]);
           summary.addedCount += 1;
         }
       } catch (error) {
@@ -790,15 +814,18 @@ function importMit3Part(part: NormalizedMit3Part, actorId: number, timestamp: st
     part.status,
     requisition,
     part.partInfoUrl,
+    part.manufacturerBrand.trim(),
+    Number.isFinite(part.unitCost) ? Number(part.unitCost) : null,
+    part.supplierPartNumber.trim(),
     part.notes.trim(),
     'MIT3 HTTP API',
     timestamp,
   ];
   if (existing) {
-    run(`UPDATE inventory_parts SET mit3_item_id=?, part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, notes=?, source=?, imported_from_mit3_at=?, updated_by_user_id=?, updated_at=?, deleted=0, deleted_at=NULL, deleted_by_user_id=NULL WHERE id=?`, [...partParams,actorId,timestamp,existing.id]);
+    run(`UPDATE inventory_parts SET mit3_item_id=?, part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, notes=?, source=?, imported_from_mit3_at=?, updated_by_user_id=?, updated_at=?, deleted=0, deleted_at=NULL, deleted_by_user_id=NULL WHERE id=?`, [...partParams,actorId,timestamp,existing.id]);
     return { imported: false, updated: true, skipped: false };
   }
-  run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [...partParams,actorId,actorId,timestamp,timestamp]);
+  run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [...partParams,actorId,actorId,timestamp,timestamp]);
   return { imported: true, updated: false, skipped: false };
 }
 function safePartInfoUrl(value: string) {
@@ -825,10 +852,14 @@ function validateNativePartInput(body: unknown) {
   const vendor = textField(input, ['vendor']);
   const quantity = numericInput(input, 'quantity', 'Quantity');
   const minQuantity = numericInput(input, 'minQuantity', 'Minimum Quantity');
+  const manufacturerBrand = textField(input, ['manufacturerBrand','manufacturer','brand']).slice(0, 160);
+  const unitCost = input.unitCost === undefined || input.unitCost === null || String(input.unitCost).trim() === '' ? null : numericInput(input, 'unitCost', 'Unit Cost');
+  if (unitCost !== null && unitCost < 0) throw new Error('Unit Cost must be zero or greater.');
+  const supplierPartNumber = textField(input, ['supplierPartNumber','supplierPartNo']).slice(0, 160);
   const rawUrl = textField(input, ['partInfoUrl']);
   const partInfoUrl = rawUrl ? safePartInfoUrl(rawUrl) : '';
   if (rawUrl && !partInfoUrl) throw new Error('Part Info URL must be blank or a valid http/https URL.');
-  return {partNumber,description,location,vendor,quantity,minQuantity,partInfoUrl,status:nativePartStatus(quantity,minQuantity)};
+  return {partNumber,description,location,vendor,quantity,minQuantity,manufacturerBrand,unitCost,supplierPartNumber,partInfoUrl,status:nativePartStatus(quantity,minQuantity)};
 }
 type NativePartInput = ReturnType<typeof validateNativePartInput>;
 function findDuplicateNativePart(partNumber: string, excludeId?: number) {
@@ -1100,6 +1131,10 @@ function validateMit3PartInput(body: unknown) {
   const minQuantity = numberField(input, ['minQuantity']);
   if (!Number.isFinite(quantity)) throw new Error('Quantity must be numeric.');
   if (!Number.isFinite(minQuantity)) throw new Error('Minimum Quantity must be numeric.');
+  const manufacturerBrand = textField(input, ['manufacturerBrand','manufacturer','brand']).slice(0, 160);
+  const unitCost = input.unitCost === undefined || input.unitCost === null || String(input.unitCost).trim() === '' ? null : numericInput(input, 'unitCost', 'Unit Cost');
+  if (unitCost !== null && unitCost < 0) throw new Error('Unit Cost must be zero or greater.');
+  const supplierPartNumber = textField(input, ['supplierPartNumber','supplierPartNo']).slice(0, 160);
   const rawUrl = textField(input, ['partInfoUrl']);
   const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
   if (rawUrl && !partInfoUrl) throw new Error('Part Info URL must be blank or a valid http/https URL.');
@@ -1474,7 +1509,7 @@ app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventor
       if (findDuplicateNativePart(input.partNumber)) throw new Error('Part Number already exists in MCC native inventory.');
       const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
       const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
-      const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,'',input.partInfoUrl,'','mcc',null,actor.id,actor.id,timestamp,timestamp]);
+      const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,'',input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,'','mcc',null,actor.id,actor.id,timestamp,timestamp]);
       partId = Number(result.lastInsertRowid);
       inventoryAudit(req,'native part create','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
       audit(req,'inventory native part create','inventory',partId,{partNumber:input.partNumber});
@@ -1503,7 +1538,7 @@ app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inv
       if (findDuplicateNativePart(input.partNumber,partId)) throw new Error('Part Number already exists in MCC native inventory.');
       const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
       const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
-      run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, part_info_url=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.partInfoUrl,'mcc',actor.id,timestamp,partId]);
+      run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,'mcc',actor.id,timestamp,partId]);
       inventoryAudit(req,'native part edit','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
       audit(req,'inventory native part edit','inventory',partId,{partNumber:input.partNumber});
       db.exec('COMMIT');
