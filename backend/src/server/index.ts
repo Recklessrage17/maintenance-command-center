@@ -1032,7 +1032,7 @@ function buildSimplePdf(lines: string[]) {
   parts.push(`trailer\n<< /Size ${patched.length + 1} /Root ${catalogObjectNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
   return Buffer.from(parts.join(''));
 }
-function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; items: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number;manufacturerBrand:string;supplierPartNumber:string;unitCost:number|null}> }) {
+function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; items: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number}> }) {
   const date = new Date(input.createdAt).toLocaleDateString('en-US');
   const lines = [
     'JBT / MCC MAINTENANCE DOCUMENT',
@@ -1044,24 +1044,19 @@ function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string;
     `Requested By: ${input.requestedBy || ''}`,
     '',
     'Items:',
-    'Qty | Part Number | Supplier Part # | Manufacturer/Brand | Description | Location | Unit Cost | Est. Total',
+    'Qty | Part Number | Description | Machine/Asset/Location | Unit Cost | Est. Total',
     '--------------------------------------------------------------------------',
   ];
   for (const item of input.items) {
-    const lineTotal = item.unitCost === null || item.unitCost === undefined ? null : item.unitCost * item.quantityRequested;
-    const cost = item.unitCost === null || item.unitCost === undefined ? '' : `$${item.unitCost.toFixed(2)}`;
-    const total = lineTotal === null ? '' : `$${lineTotal.toFixed(2)}`;
-    const head = `${item.quantityRequested} | ${item.partNumber || '-'} | ${item.supplierPartNumber || '-'} | ${item.manufacturerBrand || '-'} | `;
-    const tail = ` | ${item.locationName || '-'} | ${cost} | ${total}`;
-    const wrapped = wrapPdfText(item.description || '-', 48);
+    const head = `${item.quantityRequested} | ${item.partNumber || '-'} | `;
+    const tail = ` | ${item.locationName || '-'} |  | `;
+    const wrapped = wrapPdfText(item.description || '-', 58);
     lines.push(`${head}${wrapped[0]}${tail}`);
     wrapped.slice(1).forEach(line => lines.push(`    ${line}`));
   }
-  const estimatedTotal = input.items.reduce((sum, item) => item.unitCost === null || item.unitCost === undefined ? sum : sum + item.unitCost * item.quantityRequested, 0);
-  const hasEstimatedTotal = input.items.some(item => item.unitCost !== null && item.unitCost !== undefined);
-  lines.push('', `Estimated Requisition Total: ${hasEstimatedTotal ? `$${estimatedTotal.toFixed(2)}` : 'Not available'}`, '', 'Notes:');
+  lines.push('', 'Notes:');
   wrapPdfText(input.notes || '-', 90).forEach(line => lines.push(line));
-  lines.push('', 'Missing manufacturer/brand, supplier part number, or unit cost values are left blank when unavailable in MCC inventory.');
+  lines.push('', 'Manufacturer/brand and unit cost are blank when not available in MCC inventory.');
   return buildSimplePdf(lines);
 }
 
@@ -1323,7 +1318,7 @@ app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('invento
     if (!rawItems.length) throw new Error('At least one requisition item is required.');
     const timestamp = now();
     const requisitionNumber = requisitionNumberForTimestamp(timestamp);
-    const pdfItems: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number;manufacturerBrand:string;supplierPartNumber:string;unitCost:number|null}> = [];
+    const pdfItems: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number}> = [];
     const requisitionIds: number[] = [];
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -1344,7 +1339,7 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
         ]);
         requisitionIds.push(Number(result.lastInsertRowid));
         syncPartRequisitionFlag(partId,timestamp);
-        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested,manufacturerBrand:part.manufacturer_brand ?? '',supplierPartNumber:part.supplier_part_number ?? '',unitCost:part.unit_cost === null || part.unit_cost === undefined ? null : Number(part.unit_cost)});
+        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested});
       }
       inventoryAudit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
       audit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});

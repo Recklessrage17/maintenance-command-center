@@ -1066,7 +1066,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               {reviewItems.map((item,index)=>(
                 <div className="requisition-review-row" key={item.part.id}>
                   <strong>{item.part.partNumber || '-'}</strong>
-                  <span>{item.part.description || '-'} / {item.part.manufacturerBrand || 'No manufacturer'} / {item.part.supplierPartNumber || 'No supplier #'} / {item.part.unitCost === null || item.part.unitCost === undefined ? 'No cost' : `$${Number(item.part.unitCost).toFixed(2)}`} / {item.part.location || 'No location'}</span>
+                  <span>{item.part.description || '-'} / {item.part.location || 'No location'}</span>
                   <label className="form-field"><span>Qty</span><input inputMode="decimal" value={item.quantityRequested} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,quantityRequested:event.target.value}:row))} /></label>
                 </div>
               ))}
