@@ -928,7 +928,7 @@ function requisitionNumberForTimestamp(timestamp: string) {
   const year = timestamp.slice(0, 4);
   const latest = one<{ requisition_number: string }>("SELECT requisition_number FROM inventory_requisitions WHERE requisition_number LIKE ? ORDER BY requisition_number DESC LIMIT 1", [`REQ-${year}-%`]);
   let next = 1;
-  const match = latest?.requisition_number.match(/^REQ-\d{4}-(\d{6})$/);
+  const match = latest?.requisition_number.match(/^REQ-\d{4}-(\d{6})/);
   if (match) next = Number(match[1]) + 1;
   for (;;) {
     const requisitionNumber = `REQ-${year}-${String(next).padStart(6, '0')}`;
@@ -937,6 +937,98 @@ function requisitionNumberForTimestamp(timestamp: string) {
     next += 1;
   }
 }
+
+function pdfEscape(value: string) {
+  return value.replace(/[\\()]/g, match => `\\${match}`);
+}
+function safeFileToken(value: string) {
+  return (value || 'Unknown_Vendor').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'Unknown_Vendor';
+}
+function wrapPdfText(value: string, max = 78) {
+  const words = String(value || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > max && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [''];
+}
+function buildSimplePdf(lines: string[]) {
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const objects: string[] = [];
+  const pages: number[] = [];
+  for (let i = 0; i < lines.length; i += 54) {
+    const chunk = lines.slice(i, i + 54);
+    let content = 'BT\n/F1 10 Tf\n14 TL\n';
+    content += `50 ${pageHeight - 54} Td\n`;
+    chunk.forEach((line, index) => {
+      content += `${index === 0 ? '' : 'T* '}(${pdfEscape(line)}) Tj\n`;
+    });
+    content += 'ET\n';
+    const contentObjectNumber = objects.length + 1;
+    objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}endstream`);
+    const pageObjectNumber = objects.length + 1;
+    objects.push(`<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 0 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
+    pages.push(pageObjectNumber);
+  }
+  const fontObjectNumber = objects.length + 1;
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const pagesObjectNumber = objects.length + 1;
+  objects.push(`<< /Type /Pages /Kids [${pages.map(n=>`${n} 0 R`).join(' ')}] /Count ${pages.length} >>`);
+  const catalogObjectNumber = objects.length + 1;
+  objects.push(`<< /Type /Catalog /Pages ${pagesObjectNumber} 0 R >>`);
+  const patched = objects.map((object, index) => {
+    const n = index + 1;
+    return object.replaceAll('/Parent 0 0 R', `/Parent ${pagesObjectNumber} 0 R`).replaceAll('/F1 0 0 R', `/F1 ${fontObjectNumber} 0 R`);
+  });
+  const parts = ['%PDF-1.4\n'];
+  const offsets: number[] = [0];
+  for (let i = 0; i < patched.length; i += 1) {
+    offsets.push(Buffer.byteLength(parts.join('')));
+    parts.push(`${i + 1} 0 obj\n${patched[i]}\nendobj\n`);
+  }
+  const xrefOffset = Buffer.byteLength(parts.join(''));
+  parts.push(`xref\n0 ${patched.length + 1}\n0000000000 65535 f \n`);
+  for (let i = 1; i < offsets.length; i += 1) parts.push(`${String(offsets[i]).padStart(10, '0')} 00000 n \n`);
+  parts.push(`trailer\n<< /Size ${patched.length + 1} /Root ${catalogObjectNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  return Buffer.from(parts.join(''));
+}
+function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; items: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number}> }) {
+  const date = new Date(input.createdAt).toLocaleDateString('en-US');
+  const lines = [
+    'JBT / MCC MAINTENANCE DOCUMENT',
+    'INVENTORY REQUISITION',
+    '============================================================',
+    `Requisition #: ${input.requisitionNumber}`,
+    `Vendor: ${input.vendor || 'Unknown Vendor'}`,
+    `Date Created: ${date}`,
+    `Requested By: ${input.requestedBy || ''}`,
+    '',
+    'Items:',
+    'Qty | Part Number | Description | Machine/Asset/Location | Unit Cost | Est. Total',
+    '--------------------------------------------------------------------------',
+  ];
+  for (const item of input.items) {
+    const head = `${item.quantityRequested} | ${item.partNumber || '-'} | `;
+    const tail = ` | ${item.locationName || '-'} |  | `;
+    const wrapped = wrapPdfText(item.description || '-', 58);
+    lines.push(`${head}${wrapped[0]}${tail}`);
+    wrapped.slice(1).forEach(line => lines.push(`    ${line}`));
+  }
+  lines.push('', 'Notes:');
+  wrapPdfText(input.notes || '-', 90).forEach(line => lines.push(line));
+  lines.push('', 'Manufacturer/brand and unit cost are blank when not available in MCC inventory.');
+  return buildSimplePdf(lines);
+}
+
 function requisitionById(id: number) {
   return one<RequisitionRow>('SELECT * FROM inventory_requisitions WHERE deleted=0 AND id=?', [id]);
 }
@@ -1179,6 +1271,59 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
     sendRequisitionError(req,res,operation,'',error);
   }
 });
+
+app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const operation = 'vendor requisition PDF create';
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const vendorName = textField(input, ['vendorName','vendor'], 'Unknown Vendor') || 'Unknown Vendor';
+    const notes = textField(input, ['notes','note']);
+    const rawItems = Array.isArray(input.items) ? input.items : [];
+    if (!rawItems.length) throw new Error('At least one requisition item is required.');
+    const timestamp = now();
+    const requisitionNumber = requisitionNumberForTimestamp(timestamp);
+    const pdfItems: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number}> = [];
+    const requisitionIds: number[] = [];
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const rawItem of rawItems) {
+        if (!isRecord(rawItem)) throw new Error('Invalid requisition item.');
+        const partId = Number(rawItem.inventoryPartId ?? rawItem.partId ?? rawItem.id);
+        if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
+        const quantityRequested = validateQuantityRequested(rawItem.quantityRequested ?? rawItem.quantity);
+        const part = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+FROM inventory_parts p
+LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+WHERE p.deleted=0 AND p.id=?`, [partId]);
+        if (!part) throw new Error('Native inventory part not found.');
+        const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+          rawItems.length > 1 ? `${requisitionNumber}-${String(requisitionIds.length + 1).padStart(2,'0')}` : requisitionNumber,
+          part.id, part.part_number, part.description, vendorName, part.location_name ?? '', quantityRequested, 'Requested', actor.id, actor.full_name, timestamp, '', notes, timestamp, timestamp,
+        ]);
+        requisitionIds.push(Number(result.lastInsertRowid));
+        syncPartRequisitionFlag(partId,timestamp);
+        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested});
+      }
+      inventoryAudit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
+      audit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    const buffer = buildRequisitionPdf({vendor:vendorName,requisitionNumber,requestedBy:actor.full_name,createdAt:timestamp,notes,items:pdfItems});
+    const fileName = `MCC_Requisition_${safeFileToken(vendorName)}_${safeFileToken(requisitionNumber)}_${timestamp.slice(0,10)}.pdf`;
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition',`attachment; filename="${fileName}"`);
+    res.setHeader('X-Requisition-Number', requisitionNumber);
+    res.send(buffer);
+  } catch (error) {
+    sendRequisitionError(req,res,operation,'',error);
+  }
+});
+
 app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition status changed';
