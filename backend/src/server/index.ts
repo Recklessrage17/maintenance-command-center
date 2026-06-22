@@ -1032,34 +1032,142 @@ function buildSimplePdf(lines: string[]) {
   parts.push(`trailer\n<< /Size ${patched.length + 1} /Root ${catalogObjectNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
   return Buffer.from(parts.join(''));
 }
-function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; items: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number}> }) {
-  const date = new Date(input.createdAt).toLocaleDateString('en-US');
-  const lines = [
-    'JBT / MCC MAINTENANCE DOCUMENT',
-    'INVENTORY REQUISITION',
-    '============================================================',
-    `Requisition #: ${input.requisitionNumber}`,
-    `Vendor: ${input.vendor || 'Unknown Vendor'}`,
-    `Date Created: ${date}`,
-    `Requested By: ${input.requestedBy || ''}`,
-    '',
-    'Items:',
-    'Qty | Part Number | Description | Machine/Asset/Location | Unit Cost | Est. Total',
-    '--------------------------------------------------------------------------',
-  ];
-  for (const item of input.items) {
-    const head = `${item.quantityRequested} | ${item.partNumber || '-'} | `;
-    const tail = ` | ${item.locationName || '-'} |  | `;
-    const wrapped = wrapPdfText(item.description || '-', 58);
-    lines.push(`${head}${wrapped[0]}${tail}`);
-    wrapped.slice(1).forEach(line => lines.push(`    ${line}`));
-  }
-  lines.push('', 'Notes:');
-  wrapPdfText(input.notes || '-', 90).forEach(line => lines.push(line));
-  lines.push('', 'Manufacturer/brand and unit cost are blank when not available in MCC inventory.');
-  return buildSimplePdf(lines);
-}
+function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; requisitionType?: string; header?: Record<string, unknown>; items: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number;unitOfMeasure?:string;unitCost?:number|null;supplierPartNumber?:string;dueDate?:string;notes?:string}> }) {
+  const header = isRecord(input.header) ? input.header : {};
+  const field = (keys: string[], fallback = '') => textField(header, keys, fallback);
+  const isOver100 = (input.requisitionType || field(['requisitionType'])).includes('over');
+  const title = isOver100 ? 'Purchase Requisition Over $100' : 'Purchase Requisition Under $100';
+  const date = field(['requestDate']) || new Date(input.createdAt).toLocaleDateString('en-US');
+  const vendorName = field(['vendorName'], input.vendor || 'Unknown Vendor');
+  const vendorAddress = field(['vendorAddress']);
+  const itemsPerPage = 10;
+  const chunks: typeof input.items[] = [];
+  for (let index = 0; index < input.items.length; index += itemsPerPage) chunks.push(input.items.slice(index, index + itemsPerPage));
+  if (!chunks.length) chunks.push([]);
+  const pageWidth = 792;
+  const pageHeight = 612;
+  const margin = 30;
+  const right = pageWidth - margin;
+  const money = (value: number) => value ? `$${value.toFixed(2)}` : '';
+  const vendorTotal = input.items.reduce((sum,item)=>sum + item.quantityRequested * Number(item.unitCost ?? 0), 0);
+  const objects: string[] = [];
+  const pages: number[] = [];
+  const text = (x: number, y: number, value: string, size = 8) => `BT /F1 ${size} Tf ${x} ${y} Td (${pdfEscape(String(value || ''))}) Tj ET\n`;
+  const bold = (x: number, y: number, value: string, size = 8) => `BT /F2 ${size} Tf ${x} ${y} Td (${pdfEscape(String(value || ''))}) Tj ET\n`;
+  const line = (x1: number, y1: number, x2: number, y2: number) => `${x1} ${y1} m ${x2} ${y2} l S\n`;
+  const rect = (x: number, y: number, w: number, h: number) => `${x} ${y} ${w} ${h} re S\n`;
+  const fillRect = (x: number, y: number, w: number, h: number, grey = 0.92) => `${grey} g ${x} ${y} ${w} ${h} re f 0 g\n`;
+  const fieldBox = (label: string, value: string, x: number, y: number, w: number, h = 30) => {
+    const wrapped = wrapPdfText(value, Math.max(12, Math.floor(w / 5.6))).slice(0, h > 38 ? 3 : 2);
+    return `${rect(x,y,w,h)}${fillRect(x,y+h-11,w,11,0.9)}${bold(x+4,y+h-8,label,6.5)}${wrapped.map((part,i)=>text(x+4,y+h-22-(i*9),part,7)).join('')}`;
+  };
+  const rowText = (x: number, y: number, value: string, width: number, maxLines = 2) => wrapPdfText(value, Math.max(8, Math.floor(width / 4.9))).slice(0,maxLines).map((part,i)=>text(x,y-(i*8),part,6.7)).join('');
 
+  chunks.forEach((chunk,pageIndex)=>{
+    let content = '1 w\n';
+    content += fillRect(margin, pageHeight - 54, pageWidth - margin * 2, 28, isOver100 ? 0.86 : 0.9);
+    content += rect(margin, pageHeight - 54, pageWidth - margin * 2, 28);
+    content += bold(margin + 8, pageHeight - 43, 'JBT / MCC Maintenance Purchasing', 10);
+    content += bold(280, pageHeight - 43, title, 15);
+    content += text(right - 120, pageHeight - 43, `Page ${pageIndex + 1} of ${chunks.length}`, 8);
+    content += text(right - 120, pageHeight - 31, `Req #: ${input.requisitionNumber}`, 8);
+
+    // Under $100 and Over $100 share the same official MCC form structure; the title band and approval emphasis identify the selected route.
+    // The Over $100 section exposes the same purchasing fields but highlights authorization for higher-value requisitions.
+    content += fieldBox('PO No', field(['poNo']), margin, 515, 95);
+    content += fieldBox('PO Initiator', field(['poInitiator']), margin + 100, 515, 120);
+    content += fieldBox('Ship Via', field(['shipVia']), margin + 225, 515, 95);
+    content += fieldBox('PO Class', field(['poClass']), margin + 325, 515, 85);
+    content += fieldBox('Request Date', date, margin + 415, 515, 100);
+    content += fieldBox('Priority', field(['priority']), margin + 520, 515, 100);
+    content += fieldBox('Confirmed With', field(['confirmedWith']), margin + 625, 515, 107);
+
+    content += fieldBox('Vendor Name', vendorName, margin, 470, 230);
+    content += fieldBox('Vendor Address', vendorAddress, margin + 235, 470, 285, 42);
+    content += fieldBox('Tax Exempt', field(['taxExempt'], 'No'), margin + 525, 482, 65, 30);
+    content += fieldBox('Material Cert', field(['materialCert'], 'No'), margin + 595, 482, 70, 30);
+    content += fieldBox('FOB', field(['fob'], 'Destination'), margin + 670, 482, 92, 30);
+
+    content += fieldBox('Asset No', field(['assetNo']), margin, 430, 86);
+    content += fieldBox('Mold No', field(['moldNo']), margin + 91, 430, 86);
+    content += fieldBox('Equipment No', field(['equipmentNo']), margin + 182, 430, 100);
+    content += fieldBox('Part No', field(['partNo']), margin + 287, 430, 88);
+    content += fieldBox('Job No', field(['jobNo']), margin + 380, 430, 80);
+    content += fieldBox('Initials', field(['initials']), margin + 465, 430, 65);
+    content += fieldBox('TS No', field(['tsNo']), margin + 535, 430, 70);
+    content += fieldBox('Code No', field(['codeNo']), margin + 610, 430, 70);
+    content += fieldBox('WO No', field(['workOrderNo']), margin + 685, 430, 77);
+
+    const tableTop = 405;
+    const tableBottom = 178;
+    const columns = [
+      {label:'Qty', x:margin, w:38}, {label:'U/M', x:68, w:34}, {label:'Item / Part #', x:102, w:115}, {label:'Description', x:217, w:260},
+      {label:'Due Date', x:477, w:70}, {label:'Unit Price', x:547, w:70}, {label:'Total Price', x:617, w:75}, {label:'Notes', x:692, w:70},
+    ];
+    content += rect(margin, tableBottom, right - margin, tableTop - tableBottom);
+    content += fillRect(margin, tableTop - 18, right - margin, 18, 0.88);
+    for (const column of columns) {
+      content += line(column.x, tableBottom, column.x, tableTop);
+      content += bold(column.x + 3, tableTop - 12, column.label, 7);
+    }
+    content += line(right, tableBottom, right, tableTop);
+    content += line(margin, tableTop - 18, right, tableTop - 18);
+    const rowHeight = 20.9;
+    for (let row = 0; row < itemsPerPage; row += 1) {
+      const yTop = tableTop - 18 - row * rowHeight;
+      content += line(margin, yTop - rowHeight, right, yTop - rowHeight);
+      const item = chunk[row];
+      if (!item) continue;
+      const unit = Number(item.unitCost ?? 0);
+      const total = unit * item.quantityRequested;
+      const part = item.supplierPartNumber || item.partNumber || '';
+      content += text(columns[0].x + 3, yTop - 13, String(item.quantityRequested), 7);
+      content += text(columns[1].x + 3, yTop - 13, item.unitOfMeasure || 'EA', 7);
+      content += rowText(columns[2].x + 3, yTop - 10, part, columns[2].w - 6, 2);
+      content += rowText(columns[3].x + 3, yTop - 10, item.description || '', columns[3].w - 6, 2);
+      content += text(columns[4].x + 3, yTop - 13, item.dueDate || '', 7);
+      content += text(columns[5].x + 3, yTop - 13, money(unit), 7);
+      content += text(columns[6].x + 3, yTop - 13, money(total), 7);
+      content += rowText(columns[7].x + 3, yTop - 10, item.notes || '', columns[7].w - 6, 2);
+    }
+
+    content += fieldBox('Comments', field(['comments'], input.notes || ''), margin, 120, 420, 45);
+    content += fieldBox(isOver100 ? 'Department Manager Approval (Over $100)' : 'Department Manager', field(['departmentManager']), margin + 425, 135, 160, 30);
+    content += fieldBox('Requisitioned By', field(['requisitionedBy'], input.requestedBy || ''), margin + 590, 135, 172, 30);
+    content += fieldBox(isOver100 ? 'Authorized By - Required' : 'Authorized By', field(['authorizedBy']), margin + 425, 95, 337, 30);
+    content += fillRect(margin, 72, right - margin, 18, 0.9);
+    content += rect(margin, 72, right - margin, 18);
+    content += bold(margin + 8, 78, `Vendor Total: ${money(vendorTotal) || '$0.00'}`, 9);
+    content += text(margin + 190, 78, `Generated: ${new Date(input.createdAt).toLocaleString('en-US')}`, 7);
+    content += text(margin + 420, 78, isOver100 ? 'Over $100 approval route' : 'Under $100 purchasing route', 7);
+
+    const contentObjectNumber = objects.length + 1;
+    objects.push(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}endstream`);
+    const pageObjectNumber = objects.length + 1;
+    objects.push(`<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 0 0 R /F2 0 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
+    pages.push(pageObjectNumber);
+  });
+  const fontObjectNumber = objects.length + 1;
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const boldFontObjectNumber = objects.length + 1;
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+  const pagesObjectNumber = objects.length + 1;
+  objects.push(`<< /Type /Pages /Kids [${pages.map(n=>`${n} 0 R`).join(' ')}] /Count ${pages.length} >>`);
+  const catalogObjectNumber = objects.length + 1;
+  objects.push(`<< /Type /Catalog /Pages ${pagesObjectNumber} 0 R >>`);
+  const patched = objects.map(object => object.replaceAll('/Parent 0 0 R', `/Parent ${pagesObjectNumber} 0 R`).replaceAll('/F1 0 0 R', `/F1 ${fontObjectNumber} 0 R`).replaceAll('/F2 0 0 R', `/F2 ${boldFontObjectNumber} 0 R`));
+  const parts = ['%PDF-1.4\n'];
+  const offsets: number[] = [0];
+  for (let i = 0; i < patched.length; i += 1) {
+    offsets.push(Buffer.byteLength(parts.join('')));
+    parts.push(`${i + 1} 0 obj\n${patched[i]}\nendobj\n`);
+  }
+  const xrefOffset = Buffer.byteLength(parts.join(''));
+  parts.push(`xref\n0 ${patched.length + 1}\n0000000000 65535 f \n`);
+  for (let i = 1; i < offsets.length; i += 1) parts.push(`${String(offsets[i]).padStart(10, '0')} 00000 n \n`);
+  parts.push(`trailer\n<< /Size ${patched.length + 1} /Root ${catalogObjectNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  return Buffer.from(parts.join(''));
+}
 function requisitionById(id: number) {
   return one<RequisitionRow>('SELECT * FROM inventory_requisitions WHERE deleted=0 AND id=?', [id]);
 }
@@ -1314,11 +1422,13 @@ app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('invento
     const input = isRecord(req.body) ? req.body : {};
     const vendorName = textField(input, ['vendorName','vendor'], 'Unknown Vendor') || 'Unknown Vendor';
     const notes = textField(input, ['notes','note']);
+    const header = isRecord(input.header) ? input.header : {};
+    const requisitionType = textField(input, ['requisitionType']) || textField(header, ['requisitionType']);
     const rawItems = Array.isArray(input.items) ? input.items : [];
     if (!rawItems.length) throw new Error('At least one requisition item is required.');
     const timestamp = now();
     const requisitionNumber = requisitionNumberForTimestamp(timestamp);
-    const pdfItems: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number}> = [];
+    const pdfItems: Array<{partNumber:string;description:string;locationName:string;quantityRequested:number;unitOfMeasure?:string;unitCost?:number|null;supplierPartNumber?:string;dueDate?:string;notes?:string}> = [];
     const requisitionIds: number[] = [];
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -1339,7 +1449,7 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
         ]);
         requisitionIds.push(Number(result.lastInsertRowid));
         syncPartRequisitionFlag(partId,timestamp);
-        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested});
+        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested,unitOfMeasure:textField(rawItem, ['unitOfMeasure','unit']) || 'EA',unitCost:Number(rawItem.unitCost ?? part.unit_cost ?? 0) || null,supplierPartNumber:textField(rawItem, ['supplierPartNumber']) || (part.supplier_part_number ?? ''),dueDate:textField(rawItem, ['dueDate']),notes:textField(rawItem, ['notes','note'])});
       }
       inventoryAudit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
       audit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
@@ -1348,7 +1458,7 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
       db.exec('ROLLBACK');
       throw error;
     }
-    const buffer = buildRequisitionPdf({vendor:vendorName,requisitionNumber,requestedBy:actor.full_name,createdAt:timestamp,notes,items:pdfItems});
+    const buffer = buildRequisitionPdf({vendor:vendorName,requisitionNumber,requestedBy:actor.full_name,createdAt:timestamp,notes,requisitionType,header,items:pdfItems});
     const fileName = `MCC_Requisition_${safeFileToken(vendorName)}_${safeFileToken(requisitionNumber)}_${timestamp.slice(0,10)}.pdf`;
     res.setHeader('Content-Type','application/pdf');
     res.setHeader('Content-Disposition',`attachment; filename="${fileName}"`);
