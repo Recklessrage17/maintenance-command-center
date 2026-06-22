@@ -43,7 +43,11 @@ type Notice = { kind: 'success' | 'error'; text: string };
 type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'status';
 type SortDirection = 'asc' | 'desc';
 type PageSize = 50 | 100 | 250 | 'all';
-type RequisitionReviewItem = { part: InventoryPart; quantityRequested: string };
+type RequisitionReviewItem = { part: InventoryPart; quantityRequested: string; dueDate: string; notes: string };
+type RequisitionType = 'under-100' | 'over-100';
+type VendorRequisitionForm = {
+  requisitionType: RequisitionType; poNo: string; poInitiator: string; shipVia: string; poClass: string; requestDate: string; vendorName: string; vendorAddress: string; confirmedWith: string; assetNo: string; moldNo: string; equipmentNo: string; partNo: string; jobNo: string; initials: string; tsNo: string; codeNo: string; workOrderNo: string; comments: string; departmentManager: string; requisitionedBy: string; authorizedBy: string; taxExempt: 'No' | 'Yes'; materialCert: 'No' | 'Yes'; fob: 'Origin' | 'Destination'; priority: string;
+};
 type VendorRequisitionGroup = { key: string; vendorName: string; items: InventoryPart[]; requiresReview: boolean };
 
 type NativeSummary = {
@@ -132,6 +136,14 @@ const blankRequisitionForm = {
   workOrderNumber: '',
   notes: '',
 };
+
+function todayInputDate() { return new Date().toISOString().slice(0,10); }
+
+function blankVendorRequisitionForm(vendorName = '', estimatedTotal = 0): VendorRequisitionForm {
+  return {
+    requisitionType: estimatedTotal < 100 ? 'under-100' : 'over-100', poNo: '', poInitiator: '', shipVia: '', poClass: '', requestDate: todayInputDate(), vendorName, vendorAddress: '', confirmedWith: '', assetNo: '', moldNo: '', equipmentNo: '', partNo: '', jobNo: '', initials: '', tsNo: '', codeNo: '', workOrderNo: '', comments: '', departmentManager: '', requisitionedBy: '', authorizedBy: '', taxExempt: 'No', materialCert: 'No', fob: 'Destination', priority: '',
+  };
+}
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const importRoles = new Set(['Admin','Manager','Maintenance Tech 3']);
@@ -356,7 +368,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [reviewGroups,setReviewGroups]=useState<VendorRequisitionGroup[]>([]);
   const [reviewIndex,setReviewIndex]=useState(0);
   const [reviewItems,setReviewItems]=useState<RequisitionReviewItem[]>([]);
-  const [reviewNotes,setReviewNotes]=useState('');
+  const [reviewForm,setReviewForm]=useState<VendorRequisitionForm>(blankVendorRequisitionForm());
   const [requisitionError,setRequisitionError]=useState('');
   const [requisitionSaving,setRequisitionSaving]=useState(false);
 
@@ -497,7 +509,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     setReviewGroups([]);
     setReviewIndex(0);
     setReviewItems([]);
-    setReviewNotes('');
+    setReviewForm(blankVendorRequisitionForm());
   }
 
   function startSelectedRequisition() {
@@ -505,8 +517,10 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     if (!groups.length) return;
     setReviewGroups(groups);
     setReviewIndex(0);
-    setReviewItems(groups[0].items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1)})));
-    setReviewNotes('');
+    const firstItems = groups[0].items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),dueDate:'',notes:''}));
+    const estimatedTotal = firstItems.reduce((sum,item)=>sum + Number(item.quantityRequested) * Number(item.part.unitCost ?? 0), 0);
+    setReviewItems(firstItems);
+    setReviewForm(blankVendorRequisitionForm(groups[0].vendorName, estimatedTotal));
     setNotice(null);
   }
 
@@ -515,7 +529,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     setReviewGroups([]);
     setReviewIndex(0);
     setReviewItems([]);
-    setReviewNotes('');
+    setReviewForm(blankVendorRequisitionForm());
   }
 
   async function passVendorRequisition() {
@@ -529,13 +543,15 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     setRequisitionSaving(true);
     setRequisitionError('');
     try {
-      await downloadRequisitionPdf({vendorName: group.vendorName, notes: reviewNotes.trim(), items: reviewItems.map(item=>({inventoryPartId:Number(item.part.id), quantityRequested:Number(item.quantityRequested)}))}, `MCC_Requisition_${group.vendorName}.pdf`);
+      await downloadRequisitionPdf({header: reviewForm, requisitionType: reviewForm.requisitionType, vendorName: reviewForm.vendorName || group.vendorName, notes: reviewForm.comments.trim(), items: reviewItems.map(item=>({inventoryPartId:Number(item.part.id), quantityRequested:Number(item.quantityRequested), dueDate:item.dueDate, notes:item.notes, unitCost:item.part.unitCost, supplierPartNumber:item.part.supplierPartNumber}))}, `MCC_Requisition_${group.vendorName}.pdf`);
       const nextIndex = reviewIndex + 1;
       if (nextIndex < reviewGroups.length) {
         const nextGroup = reviewGroups[nextIndex];
         setReviewIndex(nextIndex);
-        setReviewItems(nextGroup.items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1)})));
-        setReviewNotes('');
+        const nextItems = nextGroup.items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),dueDate:'',notes:''}));
+        const nextTotal = nextItems.reduce((sum,item)=>sum + Number(item.quantityRequested) * Number(item.part.unitCost ?? 0), 0);
+        setReviewItems(nextItems);
+        setReviewForm(blankVendorRequisitionForm(nextGroup.vendorName, nextTotal));
         setNotice({kind:'success',text:`${group.vendorName} PDF created. Review ${nextGroup.vendorName} next.`});
       } else {
         clearSelection();
@@ -1062,20 +1078,41 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               <button className="link-button compact-button" type="button" onClick={closeReview}>Close</button>
             </div>
             {reviewGroups[reviewIndex].requiresReview&&<p className="form-message error">Unknown Vendor group requires review before PDF creation.</p>}
+            <div className="inventory-form-grid">
+              <label className="form-field"><span>Requisition Type</span><select value={reviewForm.requisitionType} onChange={event=>setReviewForm({...reviewForm,requisitionType:event.target.value as RequisitionType})}><option value="under-100">Under $100</option><option value="over-100">Over $100</option></select></label>
+              <label className="form-field"><span>Request Date</span><input type="date" value={reviewForm.requestDate} onChange={event=>setReviewForm({...reviewForm,requestDate:event.target.value})} /></label>
+              <label className="form-field"><span>PO No</span><input value={reviewForm.poNo} onChange={event=>setReviewForm({...reviewForm,poNo:event.target.value})} /></label>
+              <label className="form-field"><span>PO Initiator</span><input value={reviewForm.poInitiator} onChange={event=>setReviewForm({...reviewForm,poInitiator:event.target.value})} /></label>
+              <label className="form-field"><span>Ship Via</span><input value={reviewForm.shipVia} onChange={event=>setReviewForm({...reviewForm,shipVia:event.target.value})} /></label>
+              <label className="form-field"><span>PO Class</span><input value={reviewForm.poClass} onChange={event=>setReviewForm({...reviewForm,poClass:event.target.value})} /></label>
+              <label className="form-field"><span>Vendor Name</span><input value={reviewForm.vendorName} onChange={event=>setReviewForm({...reviewForm,vendorName:event.target.value})} /></label>
+              <label className="form-field"><span>Confirmed With</span><input value={reviewForm.confirmedWith} onChange={event=>setReviewForm({...reviewForm,confirmedWith:event.target.value})} /></label>
+              <label className="form-field inventory-form-wide"><span>Vendor Address</span><textarea value={reviewForm.vendorAddress} onChange={event=>setReviewForm({...reviewForm,vendorAddress:event.target.value})} /></label>
+              {(['assetNo','moldNo','equipmentNo','partNo','jobNo','initials','tsNo','codeNo','workOrderNo','priority'] as const).map(key=><label className="form-field" key={key}><span>{key.replace(/([A-Z])/g,' $1').replace(/^./,c=>c.toUpperCase())}</span><input value={reviewForm[key]} onChange={event=>setReviewForm({...reviewForm,[key]:event.target.value})} /></label>)}
+              <label className="form-field"><span>Tax Exempt</span><select value={reviewForm.taxExempt} onChange={event=>setReviewForm({...reviewForm,taxExempt:event.target.value as 'No'|'Yes'})}><option>No</option><option>Yes</option></select></label>
+              <label className="form-field"><span>Material Cert</span><select value={reviewForm.materialCert} onChange={event=>setReviewForm({...reviewForm,materialCert:event.target.value as 'No'|'Yes'})}><option>No</option><option>Yes</option></select></label>
+              <label className="form-field"><span>FOB</span><select value={reviewForm.fob} onChange={event=>setReviewForm({...reviewForm,fob:event.target.value as 'Origin'|'Destination'})}><option>Origin</option><option>Destination</option></select></label>
+              <label className="form-field"><span>Department Manager</span><input value={reviewForm.departmentManager} onChange={event=>setReviewForm({...reviewForm,departmentManager:event.target.value})} /></label>
+              <label className="form-field"><span>Requisitioned By</span><input value={reviewForm.requisitionedBy} onChange={event=>setReviewForm({...reviewForm,requisitionedBy:event.target.value})} /></label>
+              <label className="form-field"><span>Authorized By</span><input value={reviewForm.authorizedBy} onChange={event=>setReviewForm({...reviewForm,authorizedBy:event.target.value})} /></label>
+              <label className="form-field inventory-form-wide"><span>Comments</span><textarea value={reviewForm.comments} onChange={event=>setReviewForm({...reviewForm,comments:event.target.value})} /></label>
+            </div>
             <div className="requisition-review-list">
               {reviewItems.map((item,index)=>(
                 <div className="requisition-review-row" key={item.part.id}>
                   <strong>{item.part.partNumber || '-'}</strong>
                   <span>{item.part.description || '-'} / {item.part.location || 'No location'}</span>
                   <label className="form-field"><span>Qty</span><input inputMode="decimal" value={item.quantityRequested} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,quantityRequested:event.target.value}:row))} /></label>
+                  <label className="form-field"><span>Due Date</span><input type="date" value={item.dueDate} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,dueDate:event.target.value}:row))} /></label>
+                  <label className="form-field"><span>Line Notes</span><input value={item.notes} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,notes:event.target.value}:row))} /></label>
                 </div>
               ))}
             </div>
-            <label className="form-field"><span>Notes</span><textarea value={reviewNotes} onChange={event=>setReviewNotes(event.target.value)} /></label>
+
             {requisitionError&&<p className="form-message error">{requisitionError}</p>}
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeReview}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating PDF...':'Create PDF / Pass Requisition'}</button>
+              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Create'}</button>
             </div>
           </form>
         </div>
