@@ -229,6 +229,6 @@ Future native inventory work can add restore, delete/restore archive workflows, 
 - Fill the requisition header fields, including PO No, PO Initiator, Ship Via, PO Class, Request Date, Vendor Name/Address, Confirmed With, Asset/Mold/Equipment/Part/Job numbers, Initials, TS No, Code No, Work Order No, Comments, Department Manager, Requisitioned By, Authorized By, Tax Exempt, Material Cert, FOB, and Priority.
 - MCC pre-fills Vendor Name, Request Date, item lines, quantities from minimum/reorder quantity when available, unit cost, and supplier part number.
 - Choose **Under $100** or **Over $100** before clicking **Create**. MCC defaults this from the estimated vendor total: totals below $100 start as Under $100 and totals of $100 or more start as Over $100.
-- Item lines remain editable for quantity, unit of measure, due date, and line notes.
-- Click **Create** to generate the MCC-native official requisition PDF based on the MIT3/Excel requisition layout reference. Under $100 and Over $100 use separate title/approval routes in the backend PDF generator, and both include printable header, item, comments, signature, page number, and vendor total sections.
+- Item lines remain editable for quantity, due date, and line notes.
+- Click **Create** to generate the MIT3-style requisition PDF. Under $100 and Over $100 use the corresponding MIT3 requisition type/layout mapping on the backend PDF generator.
 - Vendor groups process one at a time. After the current vendor PDF is created and requisition history/status is saved, MCC automatically advances to the next selected vendor group. When all groups are complete, MCC clears the selection and shows a completed message.

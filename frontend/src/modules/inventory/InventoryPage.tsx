@@ -43,7 +43,7 @@ type Notice = { kind: 'success' | 'error'; text: string };
 type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'status';
 type SortDirection = 'asc' | 'desc';
 type PageSize = 50 | 100 | 250 | 'all';
-type RequisitionReviewItem = { part: InventoryPart; quantityRequested: string; unitOfMeasure: string; dueDate: string; notes: string };
+type RequisitionReviewItem = { part: InventoryPart; quantityRequested: string; dueDate: string; notes: string };
 type RequisitionType = 'under-100' | 'over-100';
 type VendorRequisitionForm = {
   requisitionType: RequisitionType; poNo: string; poInitiator: string; shipVia: string; poClass: string; requestDate: string; vendorName: string; vendorAddress: string; confirmedWith: string; assetNo: string; moldNo: string; equipmentNo: string; partNo: string; jobNo: string; initials: string; tsNo: string; codeNo: string; workOrderNo: string; comments: string; departmentManager: string; requisitionedBy: string; authorizedBy: string; taxExempt: 'No' | 'Yes'; materialCert: 'No' | 'Yes'; fob: 'Origin' | 'Destination'; priority: string;
@@ -517,7 +517,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     if (!groups.length) return;
     setReviewGroups(groups);
     setReviewIndex(0);
-    const firstItems = groups[0].items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),unitOfMeasure:'EA',dueDate:'',notes:''}));
+    const firstItems = groups[0].items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),dueDate:'',notes:''}));
     const estimatedTotal = firstItems.reduce((sum,item)=>sum + Number(item.quantityRequested) * Number(item.part.unitCost ?? 0), 0);
     setReviewItems(firstItems);
     setReviewForm(blankVendorRequisitionForm(groups[0].vendorName, estimatedTotal));
@@ -543,12 +543,12 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     setRequisitionSaving(true);
     setRequisitionError('');
     try {
-      await downloadRequisitionPdf({header: reviewForm, requisitionType: reviewForm.requisitionType, vendorName: reviewForm.vendorName || group.vendorName, notes: reviewForm.comments.trim(), items: reviewItems.map(item=>({inventoryPartId:Number(item.part.id), quantityRequested:Number(item.quantityRequested), unitOfMeasure:item.unitOfMeasure, dueDate:item.dueDate, notes:item.notes, unitCost:item.part.unitCost, supplierPartNumber:item.part.supplierPartNumber}))}, `MCC_Requisition_${group.vendorName}.pdf`);
+      await downloadRequisitionPdf({header: reviewForm, requisitionType: reviewForm.requisitionType, vendorName: reviewForm.vendorName || group.vendorName, notes: reviewForm.comments.trim(), items: reviewItems.map(item=>({inventoryPartId:Number(item.part.id), quantityRequested:Number(item.quantityRequested), dueDate:item.dueDate, notes:item.notes, unitCost:item.part.unitCost, supplierPartNumber:item.part.supplierPartNumber}))}, `MCC_Requisition_${group.vendorName}.pdf`);
       const nextIndex = reviewIndex + 1;
       if (nextIndex < reviewGroups.length) {
         const nextGroup = reviewGroups[nextIndex];
         setReviewIndex(nextIndex);
-        const nextItems = nextGroup.items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),unitOfMeasure:'EA',dueDate:'',notes:''}));
+        const nextItems = nextGroup.items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),dueDate:'',notes:''}));
         const nextTotal = nextItems.reduce((sum,item)=>sum + Number(item.quantityRequested) * Number(item.part.unitCost ?? 0), 0);
         setReviewItems(nextItems);
         setReviewForm(blankVendorRequisitionForm(nextGroup.vendorName, nextTotal));
@@ -1103,7 +1103,6 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                   <strong>{item.part.partNumber || '-'}</strong>
                   <span>{item.part.description || '-'} / {item.part.location || 'No location'}</span>
                   <label className="form-field"><span>Qty</span><input inputMode="decimal" value={item.quantityRequested} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,quantityRequested:event.target.value}:row))} /></label>
-                  <label className="form-field"><span>UOM</span><input value={item.unitOfMeasure} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,unitOfMeasure:event.target.value}:row))} /></label>
                   <label className="form-field"><span>Due Date</span><input type="date" value={item.dueDate} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,dueDate:event.target.value}:row))} /></label>
                   <label className="form-field"><span>Line Notes</span><input value={item.notes} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,notes:event.target.value}:row))} /></label>
                 </div>
