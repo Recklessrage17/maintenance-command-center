@@ -217,3 +217,22 @@ Audit entries are recorded for CSV export, Excel update template export, blank t
 Restore is intentionally reserved for a later hardening pass.
 
 Future native inventory work can add restore, delete/restore archive workflows, and final MIT3 retirement mode after the native import/export/backup workflow has been used safely.
+
+## Inventory vendor requisition PDF workflow
+
+- In the MCC Inventory table, use the checkbox beside the row Edit action to select parts for requisition.
+- Use **Select Current Page** to select the currently visible page of inventory rows when the current filter/sort/page is correct.
+- The selection panel shows the selected count and the vendor groups that will be processed.
+- Vendor grouping keeps each vendor on a separate requisition PDF. Close McMaster variations (`McMaster`, `McMaster-Carr`, and `mcmaster-carr`) are grouped as `McMaster-Carr`; close Grainger variations are grouped as `Grainger`. Other vendor names are only trimmed/case-normalized so unrelated vendors are not merged.
+- Parts with no vendor are grouped under **Unknown Vendor** and the review dialog requires confirmation before creating the PDF.
+- Click **Create Requisition** to review the first vendor group, adjust quantities, add notes, and click **Create PDF / Pass Requisition**.
+- After one vendor PDF is created, MCC automatically advances to the next selected vendor group. When all groups are complete, MCC clears the selection.
+- Each vendor PDF uses the MCC/JBT maintenance requisition document style and is named with the vendor, requisition number, and date.
+
+### Optional manufacturer, supplier part, and cost fields
+
+- MCC native inventory supports optional **Manufacturer/Brand**, **Supplier Part Number**, and **Unit Cost** fields for requisition PDFs.
+- Add or edit these fields from the Inventory add/edit form when the data is known.
+- CSV/Excel inventory import and export include `Manufacturer/Brand`, `Unit Cost`, and `Supplier Part Number` columns.
+- MIT3 imports populate these fields only when matching MIT3 item fields are exposed, such as manufacturer, brand, unit cost, cost, price, estimated cost, supplier part number, vendor part number, or manufacturer part number.
+- Vendor requisition PDFs print Manufacturer/Brand, Supplier Part Number, Unit Cost, estimated line totals, and the estimated vendor requisition total when cost data is available. Missing values remain blank and do not block PDF creation.
