@@ -1,17 +1,18 @@
 import { useState, type ReactNode } from 'react';
 import { RoleBadge } from '../components/RoleBadge';
+import jbtLogoUrl from '../assets/JBT_USA _logo.png';
 
-export type MccSection = 'dashboard' | 'inventory' | 'requisitions' | 'users' | 'settings';
+export type MccSection = 'dashboard' | 'inventory' | 'preventive-maintenance' | 'assets' | 'building-prints' | 'requisitions' | 'users' | 'settings';
 const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'inventory', label: 'Inventory' },
+  { id: 'preventive-maintenance', label: 'Preventive Maintenance' },
+  { id: 'assets', label: 'Assets' },
+  { id: 'building-prints', label: 'Building Prints' },
   { id: 'requisitions', label: 'Requisitions' },
   { id: 'users', label: 'Admin / Users', management: true },
   { id: 'settings', label: 'Settings' },
 ];
-const logoModules = import.meta.glob('../assets/jbt-usa-logo.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string | undefined>;
-const jbtLogoUrl = logoModules['../assets/jbt-usa-logo.png'];
-
 export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>!i.management||canManageUsers);
  const [logoReady,setLogoReady]=useState(Boolean(jbtLogoUrl));
