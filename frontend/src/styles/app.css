@@ -251,3 +251,14 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 760px) { .inventory-bridge-grid, .inventory-form-grid, .inventory-bridge-strip, .inventory-tools-grid, .inventory-import-row, .requisition-toolbar { grid-template-columns: 1fr; } .inventory-heading, .requisitions-heading { align-items: start; flex-direction: column; } .inventory-heading-actions { justify-content: flex-start; } .inventory-form-wide { grid-column: auto; } .inventory-focus-shell .mcc-main { padding: 10px; } .inventory-focus-toolbar { grid-template-columns: 1fr; align-items: stretch; } .inventory-toolbar-badges, .inventory-focus-actions, .inventory-setup-actions { grid-column: auto; justify-content: flex-start; } .inventory-focus-actions .primary-button, .inventory-focus-actions .secondary-button, .inventory-back-button, .inventory-setup-actions .primary-button, .inventory-setup-actions .secondary-button, .inventory-import-row .primary-button { width: 100%; } .mit3-status-badge, .native-status-badge { justify-self: start; } .inventory-summary-grid, .requisition-summary-grid { grid-template-columns: 1fr; } .inventory-table-wrap { max-height: calc(100vh - 430px); } .requisitions-table-wrap { max-height: calc(100vh - 400px); } .inventory-table-meta { align-items: flex-start; flex-direction: column; } .inventory-pager { justify-content: flex-start; } }
 @media (max-width: 700px) { .inventory-toolbar { grid-template-columns: 1fr; } .segmented-control { width: 100%; overflow-x: auto; } }
 @media (max-width: 620px) { .share-url-row { grid-template-columns: 1fr; } }
+.inventory-selection-panel { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 10px; border: 1px solid rgba(68, 215, 255, 0.22); border-radius: 10px; background: rgba(5, 61, 86, 0.26); }
+.inventory-selection-panel strong { display: block; color: #f3fbff; font-size: .88rem; }
+.inventory-selection-panel span { display: block; color: #99c7da; font-size: .78rem; font-weight: 800; }
+.inventory-selection-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.requisition-review-list { display: grid; gap: 8px; }
+.requisition-review-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 110px; gap: 10px; align-items: center; padding: 9px 10px; border: 1px solid rgba(85, 191, 236, 0.16); border-radius: 10px; background: rgba(4, 18, 34, 0.42); }
+.requisition-review-row strong { margin: 0; color: #f3fbff; font-size: .86rem; }
+.requisition-review-row span { margin: 0; color: #aac4d2; font-size: .8rem; line-height: 1.3; }
+.requisition-review-row .form-field { gap: 4px; }
+.requisition-review-row input { min-height: 34px; }
+@media (max-width: 760px) { .requisition-review-row { grid-template-columns: 1fr; } .inventory-selection-actions { justify-content: flex-start; } }

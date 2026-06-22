@@ -40,6 +40,8 @@ type Notice = { kind: 'success' | 'error'; text: string };
 type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'status';
 type SortDirection = 'asc' | 'desc';
 type PageSize = 50 | 100 | 250 | 'all';
+type RequisitionReviewItem = { part: InventoryPart; quantityRequested: string };
+type VendorRequisitionGroup = { key: string; vendorName: string; items: InventoryPart[]; requiresReview: boolean };
 
 type NativeSummary = {
   totalParts: number;
@@ -250,6 +252,51 @@ function formFromPart(part: InventoryPart): PartForm {
   };
 }
 
+function normalizeVendorKey(vendor: string) {
+  const clean = vendor.trim();
+  if (!clean) return 'unknown-vendor';
+  const compact = clean.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (compact === 'mcmaster' || compact === 'mcmastercarr') return 'mcmaster-carr';
+  if (compact === 'wwgrainger' || compact === 'grainger') return 'grainger';
+  return clean.toLowerCase().replace(/\s+/g, ' ');
+}
+
+function displayVendorName(vendor: string) {
+  const key = normalizeVendorKey(vendor);
+  if (key === 'unknown-vendor') return 'Unknown Vendor';
+  if (key === 'mcmaster-carr') return 'McMaster-Carr';
+  if (key === 'grainger') return 'Grainger';
+  return vendor.trim();
+}
+
+function groupPartsByVendor(selectedParts: InventoryPart[]): VendorRequisitionGroup[] {
+  const groups = new Map<string, VendorRequisitionGroup>();
+  for (const part of selectedParts) {
+    const key = normalizeVendorKey(part.vendor);
+    const existing = groups.get(key);
+    if (existing) existing.items.push(part);
+    else groups.set(key, { key, vendorName: displayVendorName(part.vendor), items: [part], requiresReview: key === 'unknown-vendor' });
+  }
+  return [...groups.values()].sort((left,right)=>compareText(left.vendorName,right.vendorName));
+}
+
+async function downloadRequisitionPdf(payload: unknown, fallbackFileName: string) {
+  const res = await fetch('/api/requisitions/vendor-pdf',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if (!res.ok) {
+    const data = await res.json().catch(()=>({}));
+    throw new Error(data.error || 'PDF creation failed.');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileNameFromDisposition(res.headers.get('content-disposition'), fallbackFileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function payloadFromForm(form: PartForm) {
   return {
     partNumber: form.partNumber.trim(),
@@ -289,6 +336,11 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
   const [requisitionPart,setRequisitionPart]=useState<InventoryPart|null>(null);
   const [requisitionForm,setRequisitionForm]=useState(blankRequisitionForm);
+  const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
+  const [reviewGroups,setReviewGroups]=useState<VendorRequisitionGroup[]>([]);
+  const [reviewIndex,setReviewIndex]=useState(0);
+  const [reviewItems,setReviewItems]=useState<RequisitionReviewItem[]>([]);
+  const [reviewNotes,setReviewNotes]=useState('');
   const [requisitionError,setRequisitionError]=useState('');
   const [requisitionSaving,setRequisitionSaving]=useState(false);
 
@@ -374,6 +426,10 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const pageStart = sortedParts.length === 0 ? 0 : pageSize === 'all' ? 1 : (page - 1) * pageSize + 1;
   const pageEnd = pageSize === 'all' ? sortedParts.length : Math.min(page * pageSize, sortedParts.length);
   const filtersActive = filter !== 'all' || search.trim().length > 0;
+  const selectedParts = useMemo(()=>parts.filter(part=>selectedPartIds.has(part.id)),[parts,selectedPartIds]);
+  const selectedVendorGroups = useMemo(()=>groupPartsByVendor(selectedParts),[selectedParts]);
+  const visibleSelectableIds = useMemo(()=>visibleParts.map(part=>part.id),[visibleParts]);
+  const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every(id=>selectedPartIds.has(id));
 
   useEffect(()=>{ setPage(1); },[filter,pageSize,search,sortDirection,sortKey]);
   useEffect(()=>{ setPage(current=>Math.min(current,totalPages)); },[totalPages]);
@@ -410,6 +466,71 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   function clearFilters(){
     setSearch('');
     setFilter('all');
+  }
+
+  function togglePartSelection(partId: string) {
+    setSelectedPartIds(current=>{ const next = new Set(current); next.has(partId) ? next.delete(partId) : next.add(partId); return next; });
+  }
+
+  function toggleVisibleSelection() {
+    setSelectedPartIds(current=>{ const next = new Set(current); const shouldSelect = !visibleSelectableIds.every(id=>next.has(id)); visibleSelectableIds.forEach(id=>shouldSelect ? next.add(id) : next.delete(id)); return next; });
+  }
+
+  function clearSelection() {
+    setSelectedPartIds(new Set());
+    setReviewGroups([]);
+    setReviewIndex(0);
+    setReviewItems([]);
+    setReviewNotes('');
+  }
+
+  function startSelectedRequisition() {
+    const groups = selectedVendorGroups;
+    if (!groups.length) return;
+    setReviewGroups(groups);
+    setReviewIndex(0);
+    setReviewItems(groups[0].items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1)})));
+    setReviewNotes('');
+    setNotice(null);
+  }
+
+  function closeReview() {
+    if (requisitionSaving) return;
+    setReviewGroups([]);
+    setReviewIndex(0);
+    setReviewItems([]);
+    setReviewNotes('');
+  }
+
+  async function passVendorRequisition() {
+    const group = reviewGroups[reviewIndex];
+    if (!group) return;
+    for (const item of reviewItems) {
+      const qty = Number(item.quantityRequested);
+      if (!Number.isFinite(qty) || qty <= 0) { setRequisitionError('Qty requested must be a positive number for every item.'); return; }
+    }
+    if (group.requiresReview && !window.confirm('This group has Unknown Vendor. Continue only if you reviewed the parts.')) return;
+    setRequisitionSaving(true);
+    setRequisitionError('');
+    try {
+      await downloadRequisitionPdf({vendorName: group.vendorName, notes: reviewNotes.trim(), items: reviewItems.map(item=>({inventoryPartId:Number(item.part.id), quantityRequested:Number(item.quantityRequested)}))}, `MCC_Requisition_${group.vendorName}.pdf`);
+      const nextIndex = reviewIndex + 1;
+      if (nextIndex < reviewGroups.length) {
+        const nextGroup = reviewGroups[nextIndex];
+        setReviewIndex(nextIndex);
+        setReviewItems(nextGroup.items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1)})));
+        setReviewNotes('');
+        setNotice({kind:'success',text:`${group.vendorName} PDF created. Review ${nextGroup.vendorName} next.`});
+      } else {
+        clearSelection();
+        setNotice({kind:'success',text:'All selected vendor requisition PDFs were created.'});
+        await refresh();
+      }
+    } catch (err) {
+      setRequisitionError((err as Error).message);
+    } finally {
+      setRequisitionSaving(false);
+    }
   }
 
   async function importFromMit3(){
@@ -760,6 +881,18 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
           </div>
         </div>
 
+        <div className="inventory-selection-panel">
+          <div>
+            <strong>{selectedParts.length} selected for requisition</strong>
+            <span>{selectedVendorGroups.length ? selectedVendorGroups.map(group=>`${group.vendorName} (${group.items.length})`).join(' • ') : 'No vendor groups selected.'}</span>
+          </div>
+          <div className="inventory-selection-actions">
+            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
+            <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
+            <button className="primary-button compact-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Create Requisition</button>
+          </div>
+        </div>
+
         <div className="inventory-table-meta">
           <div>
             <strong>Showing {visibleParts.length} of {sortedParts.length} parts</strong>
@@ -814,7 +947,11 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                       <td>
                         <div className="inventory-row-actions">
                           <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
-                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Create Requisition</button>
+                          <label className={writeEnabled?'requisition-toggle':'requisition-toggle disabled'}>
+                            <input type="checkbox" checked={selectedPartIds.has(part.id)} onChange={()=>togglePartSelection(part.id)} disabled={!writeEnabled} />
+                            <span>Select</span>
+                          </label>
+                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Single</button>
                         </div>
                       </td>
                     )}
@@ -881,6 +1018,36 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeModal()}>Cancel</button>
               <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':modal==='edit'?'Save Changes':'Add Part'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {reviewGroups[reviewIndex]&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReview(); }}>
+          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void passVendorRequisition(); }}>
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Vendor requisition {reviewIndex + 1} of {reviewGroups.length}</p>
+                <h3>{reviewGroups[reviewIndex].vendorName}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={closeReview}>Close</button>
+            </div>
+            {reviewGroups[reviewIndex].requiresReview&&<p className="form-message error">Unknown Vendor group requires review before PDF creation.</p>}
+            <div className="requisition-review-list">
+              {reviewItems.map((item,index)=>(
+                <div className="requisition-review-row" key={item.part.id}>
+                  <strong>{item.part.partNumber || '-'}</strong>
+                  <span>{item.part.description || '-'} / {item.part.location || 'No location'}</span>
+                  <label className="form-field"><span>Qty</span><input inputMode="decimal" value={item.quantityRequested} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,quantityRequested:event.target.value}:row))} /></label>
+                </div>
+              ))}
+            </div>
+            <label className="form-field"><span>Notes</span><textarea value={reviewNotes} onChange={event=>setReviewNotes(event.target.value)} /></label>
+            {requisitionError&&<p className="form-message error">{requisitionError}</p>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={closeReview}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating PDF...':'Create PDF / Pass Requisition'}</button>
             </div>
           </form>
         </div>
