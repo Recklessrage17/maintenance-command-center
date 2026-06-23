@@ -102,7 +102,19 @@ type NativeRequisitionResponse = {
   requisition: {
     id: number;
     requisitionNumber: string;
+    lineCount?: number;
   };
+};
+
+type RequisitionLineForm = {
+  part: InventoryPart;
+  quantityRequested: string;
+  notes: string;
+};
+
+type RequisitionHeaderForm = {
+  workOrderNumber: string;
+  notes: string;
 };
 
 type PartForm = {
@@ -131,8 +143,7 @@ const blankForm: PartForm = {
   supplierPartNumber: '',
 };
 
-const blankRequisitionForm = {
-  quantityRequested: '1',
+const blankRequisitionForm: RequisitionHeaderForm = {
   workOrderNumber: '',
   notes: '',
 };
@@ -344,7 +355,7 @@ function payloadFromForm(form: PartForm) {
   };
 }
 
-export function InventoryPage({ userRole, onBackToDashboard }: { userRole: string; onBackToDashboard: () => void }) {
+export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions }: { userRole: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [status,setStatus]=useState<Mit3Status|null>(null);
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [importSummary,setImportSummary]=useState<ImportSummary|null>(null);
@@ -370,8 +381,9 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
   const [fileImportSummary,setFileImportSummary]=useState<NativeFileImportSummary|null>(null);
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
-  const [requisitionPart,setRequisitionPart]=useState<InventoryPart|null>(null);
+  const [requisitionLines,setRequisitionLines]=useState<RequisitionLineForm[]>([]);
   const [requisitionForm,setRequisitionForm]=useState(blankRequisitionForm);
+  const [createdRequisition,setCreatedRequisition]=useState<NativeRequisitionResponse['requisition']|null>(null);
   const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
   const [reviewGroups,setReviewGroups]=useState<VendorRequisitionGroup[]>([]);
   const [reviewIndex,setReviewIndex]=useState(0);
@@ -519,11 +531,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
 
   function startSelectedRequisition() {
     if (!selectedParts.length) return;
-    if (selectedParts.length > 1) {
-      setNotice({kind:'error',text:'Create Requisition supports one selected part at a time right now.'});
-      return;
-    }
-    openRequisition(selectedParts[0]);
+    openRequisition(selectedParts);
   }
 
   function closeReview() {
@@ -696,49 +704,85 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     }
   }
 
-  function openRequisition(part: InventoryPart){
+  function openRequisition(partOrParts: InventoryPart | InventoryPart[]){
     if (!writeEnabled) return;
-    setRequisitionPart(part);
+    const nextParts = Array.isArray(partOrParts) ? partOrParts : [partOrParts];
+    const uniqueParts = [...new Map(nextParts.map(part=>[part.id,part])).values()];
+    if (!uniqueParts.length) return;
+    setRequisitionLines(uniqueParts.map(part=>({part,quantityRequested:'1',notes:''})));
     setRequisitionForm(blankRequisitionForm);
+    setCreatedRequisition(null);
     setRequisitionError('');
     setNotice(null);
   }
 
   function closeRequisition(force = false){
     if (requisitionSaving && !force) return;
-    setRequisitionPart(null);
+    setRequisitionLines([]);
     setRequisitionForm(blankRequisitionForm);
+    setCreatedRequisition(null);
     setRequisitionError('');
   }
 
-  async function createRequisition(forceDuplicate = false){
-    if (!writeEnabled || !requisitionPart) return;
-    const quantity = Number(requisitionForm.quantityRequested);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setRequisitionError('Qty requested must be a positive number.');
-      return;
+  function updateRequisitionLine(partId: string, changes: Partial<Omit<RequisitionLineForm,'part'>>){
+    setRequisitionLines(current=>current.map(line=>line.part.id===partId ? {...line,...changes} : line));
+  }
+
+  function viewCreatedRequisition() {
+    closeRequisition(true);
+    onOpenRequisitions();
+  }
+
+  async function downloadCreatedRequisition() {
+    if (!createdRequisition) return;
+    try {
+      await downloadFile(`/api/requisitions/${createdRequisition.id}/pdf`, `MCC_Requisition_${createdRequisition.requisitionNumber}.pdf`);
+      setNotice({kind:'success',text:`${createdRequisition.requisitionNumber} PDF downloaded.`});
+    } catch (err) {
+      setRequisitionError((err as Error).message);
     }
-    if (requisitionPart.hasActiveRequisitionRecord && !forceDuplicate && !window.confirm('Active requisition already exists for this part. Create another one?')) return;
+  }
+
+  async function createRequisition(forceDuplicate = false){
+    if (!writeEnabled || !requisitionLines.length) return;
+    for (const line of requisitionLines) {
+      const quantity = Number(line.quantityRequested);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        setRequisitionError('Qty requested must be a positive number for every selected part.');
+        return;
+      }
+    }
+    const hasActiveRequisition = requisitionLines.some(line=>line.part.hasActiveRequisitionRecord);
+    if (hasActiveRequisition && !forceDuplicate && !window.confirm('Active requisition already exists for one or more selected parts. Create another one?')) return;
     setRequisitionSaving(true);
     setRequisitionError('');
     try {
       const result = await api<NativeRequisitionResponse>('/api/requisitions', {
         method: 'POST',
         body: JSON.stringify({
-          inventoryPartId: Number(requisitionPart.id),
-          quantityRequested: quantity,
+          items: requisitionLines.map(line=>({
+            inventoryPartId: Number(line.part.id),
+            quantityRequested: Number(line.quantityRequested),
+            notes: line.notes.trim(),
+            unitOfMeasure: 'EA',
+            itemNumber: line.part.supplierPartNumber || line.part.partNumber,
+          })),
           workOrderNumber: requisitionForm.workOrderNumber.trim(),
           notes: requisitionForm.notes.trim(),
-          allowDuplicate: forceDuplicate || requisitionPart.hasActiveRequisitionRecord,
+          allowDuplicate: forceDuplicate || hasActiveRequisition,
         }),
       });
-      closeRequisition(true);
-      setSelectedPartIds(current=>{ const next = new Set(current); next.delete(requisitionPart.id); return next; });
+      setCreatedRequisition(result.requisition);
+      setSelectedPartIds(current=>{
+        const next = new Set(current);
+        requisitionLines.forEach(line=>next.delete(line.part.id));
+        return next;
+      });
       setNotice({kind:'success',text:`Requisition ${result.requisition.requisitionNumber} created.`});
       await refresh();
     } catch (err) {
       const message = (err as Error).message;
-      if (/Active requisition already exists/i.test(message) && window.confirm('Active requisition already exists for this part. Create another one?')) {
+      if (/Active requisition already exists/i.test(message) && window.confirm('Active requisition already exists for one or more selected parts. Create another one?')) {
         setRequisitionSaving(false);
         await createRequisition(true);
         return;
@@ -897,7 +941,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         <div className="inventory-selection-panel">
           <div>
             <strong>Selected: {selectedParts.length}</strong>
-            <span>{selectedParts.length ? selectedParts.map(part=>part.partNumber || part.itemId || 'Part').slice(0,3).join(', ') : 'Select one row to create a requisition.'}</span>
+            <span>{selectedParts.length ? selectedParts.map(part=>part.partNumber || part.itemId || 'Part').slice(0,3).join(', ') : 'Select one or more rows to create a requisition.'}</span>
           </div>
           <div className="inventory-selection-actions">
             <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
@@ -1090,47 +1134,69 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         </div>
       )}
 
-      {requisitionPart&&(
+      {(requisitionLines.length>0 || createdRequisition)&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeRequisition(); }}>
           <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void createRequisition(); }}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Create Requisition</p>
-                <h3>{requisitionPart.partNumber || 'Native inventory part'}</h3>
+                <h3>{createdRequisition ? createdRequisition.requisitionNumber : requisitionLines.length === 1 ? (requisitionLines[0].part.partNumber || 'Native inventory part') : `${requisitionLines.length} selected parts`}</h3>
               </div>
               <button className="link-button compact-button" type="button" onClick={()=>closeRequisition()}>Close</button>
             </div>
 
-            {requisitionPart.hasActiveRequisitionRecord&&<p className="form-message error">Active requisition already exists for this part.</p>}
+            {createdRequisition ? (
+              <div className="requisition-created-panel">
+                <strong>Requisition {createdRequisition.requisitionNumber} created.</strong>
+                <span>{createdRequisition.lineCount ?? requisitionLines.length} line item{(createdRequisition.lineCount ?? requisitionLines.length) === 1 ? '' : 's'} ready for PDF.</span>
+                {requisitionError&&<p className="form-message error">{requisitionError}</p>}
+                <div className="modal-actions">
+                  <button className="secondary-button" type="button" onClick={viewCreatedRequisition}>View Requisition</button>
+                  <button className="primary-button" type="button" onClick={()=>void downloadCreatedRequisition()}>Download PDF</button>
+                  <button className="secondary-button" type="button" onClick={()=>closeRequisition(true)}>Create Another</button>
+                  <button className="link-button" type="button" onClick={()=>closeRequisition(true)}>Close</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {requisitionLines.some(line=>line.part.hasActiveRequisitionRecord)&&<p className="form-message error">Active requisition already exists for one or more selected parts.</p>}
+                <div className="requisition-line-list">
+                  {requisitionLines.map(line=>(
+                    <div className="requisition-line-row" key={line.part.id}>
+                      <div className="requisition-line-main">
+                        <strong>{line.part.partNumber || line.part.itemId || '-'}</strong>
+                        <span>{line.part.description || '-'}</span>
+                        <span>{line.part.vendor || 'No vendor'} / {line.part.location || 'No location'} / {formatCurrency(line.part.unitCost)}</span>
+                      </div>
+                      <label className="form-field">
+                        <span>Qty</span>
+                        <input inputMode="decimal" value={line.quantityRequested} onChange={event=>updateRequisitionLine(line.part.id,{quantityRequested:event.target.value})} />
+                      </label>
+                      <label className="form-field requisition-line-notes">
+                        <span>Line Notes</span>
+                        <input value={line.notes} onChange={event=>updateRequisitionLine(line.part.id,{notes:event.target.value})} />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div className="inventory-form-grid">
+                  <label className="form-field">
+                    <span>WO#</span>
+                    <input value={requisitionForm.workOrderNumber} onChange={event=>setRequisitionForm({...requisitionForm,workOrderNumber:event.target.value})} />
+                  </label>
+                  <label className="form-field inventory-form-wide">
+                    <span>Notes</span>
+                    <textarea value={requisitionForm.notes} onChange={event=>setRequisitionForm({...requisitionForm,notes:event.target.value})} />
+                  </label>
+                </div>
 
-            <div className="inventory-form-grid">
-              <label className="form-field">
-                <span>Part Number</span>
-                <input value={requisitionPart.partNumber} readOnly />
-              </label>
-              <label className="form-field">
-                <span>Description</span>
-                <input value={requisitionPart.description} readOnly />
-              </label>
-              <label className="form-field">
-                <span>Qty Requested</span>
-                <input inputMode="decimal" value={requisitionForm.quantityRequested} onChange={event=>setRequisitionForm({...requisitionForm,quantityRequested:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>WO#</span>
-                <input value={requisitionForm.workOrderNumber} onChange={event=>setRequisitionForm({...requisitionForm,workOrderNumber:event.target.value})} />
-              </label>
-              <label className="form-field inventory-form-wide">
-                <span>Notes</span>
-                <textarea value={requisitionForm.notes} onChange={event=>setRequisitionForm({...requisitionForm,notes:event.target.value})} />
-              </label>
-            </div>
-
-            {requisitionError&&<p className="form-message error">{requisitionError}</p>}
-            <div className="modal-actions">
-              <button className="secondary-button" type="button" onClick={()=>closeRequisition()}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Create'}</button>
-            </div>
+                {requisitionError&&<p className="form-message error">{requisitionError}</p>}
+                <div className="modal-actions">
+                  <button className="secondary-button" type="button" onClick={()=>closeRequisition()}>Cancel</button>
+                  <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Create Requisition'}</button>
+                </div>
+              </>
+            )}
           </form>
         </div>
       )}

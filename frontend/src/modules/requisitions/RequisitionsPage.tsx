@@ -4,6 +4,21 @@ type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
 type StatusFilter = 'All' | RequisitionStatus;
 type Notice = { kind: 'success' | 'error'; text: string };
 
+type RequisitionLine = {
+  id: number;
+  inventoryPartId: number;
+  partNumber: string;
+  description: string;
+  vendorName: string;
+  locationName: string;
+  quantityRequested: number;
+  unitCost: number;
+  totalCost: number;
+  unitOfMeasure: string;
+  itemNumber: string;
+  notes: string;
+};
+
 type Requisition = {
   id: number;
   requisitionNumber: string;
@@ -13,6 +28,16 @@ type Requisition = {
   vendorName: string;
   locationName: string;
   quantityRequested: number;
+  lineCount?: number;
+  firstPartNumber?: string;
+  firstDescription?: string;
+  totalQuantity?: number;
+  totalCost?: number;
+  vendorSummary?: string;
+  locationSummary?: string;
+  partNumbers?: string[];
+  descriptions?: string[];
+  lines?: RequisitionLine[];
   status: RequisitionStatus;
   requestedByName: string;
   requestedAt: string;
@@ -84,6 +109,26 @@ function formatDateTime(value?: string | null) {
   return new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'}).format(date);
 }
 
+function formatQuantity(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+}
+
+function requisitionLineCount(requisition: Requisition) {
+  return Number(requisition.lineCount ?? requisition.lines?.length ?? 1) || 1;
+}
+
+function partNumberSummary(requisition: Requisition) {
+  const count = requisitionLineCount(requisition);
+  if (count > 1) return `Multiple items (${count})`;
+  return requisition.firstPartNumber || requisition.partNumber || '-';
+}
+
+function descriptionSummary(requisition: Requisition) {
+  const count = requisitionLineCount(requisition);
+  const first = requisition.firstDescription || requisition.description || '-';
+  return count > 1 ? `${first} + ${count - 1} more` : first;
+}
+
 function statusClass(status: RequisitionStatus) {
   return `requisition-status status-${status.toLowerCase()}`;
 }
@@ -144,6 +189,11 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
       requisition.vendorName,
       requisition.locationName,
       requisition.workOrderNumber,
+      requisition.vendorSummary ?? '',
+      requisition.locationSummary ?? '',
+      ...(requisition.partNumbers ?? []),
+      ...(requisition.descriptions ?? []),
+      ...(requisition.lines ?? []).flatMap(line=>[line.partNumber,line.description,line.vendorName,line.locationName,line.itemNumber,line.notes]),
     ].some(value=>value.toLowerCase().includes(needle)));
   },[requisitions,search]);
 
@@ -209,10 +259,13 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   async function saveEdit(event: FormEvent) {
     event.preventDefault();
     if (!editing) return;
+    const isMultiLine = requisitionLineCount(editing) > 1;
     const quantity = Number(editForm.quantityRequested);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setEditError('Qty requested must be a positive number.');
-      return;
+    if (!isMultiLine) {
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        setEditError('Qty requested must be a positive number.');
+        return;
+      }
     }
     setSaving(true);
     setEditError('');
@@ -220,7 +273,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
       await api(`/api/requisitions/${editing.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          quantityRequested: quantity,
+          ...(isMultiLine ? {} : {quantityRequested: quantity}),
           workOrderNumber: editForm.workOrderNumber,
           notes: editForm.notes,
         }),
@@ -311,11 +364,11 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
                 <tr className={requisition.deleted?'deleted-row':''} key={requisition.id}>
                   <td><strong className="req-number">{requisition.requisitionNumber}</strong></td>
                   <td><span className={statusClass(requisition.status)}>{requisition.status}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
-                  <td>{requisition.partNumber || '-'}</td>
-                  <td className="inventory-description-cell"><span className="inventory-description-text" title={requisition.description || undefined}>{requisition.description || '-'}</span></td>
-                  <td>{requisition.quantityRequested}</td>
-                  <td>{requisition.vendorName || '-'}</td>
-                  <td>{requisition.locationName || '-'}</td>
+                  <td>{partNumberSummary(requisition)}</td>
+                  <td className="inventory-description-cell"><span className="inventory-description-text" title={(requisition.descriptions ?? [requisition.description]).filter(Boolean).join(' / ') || undefined}>{descriptionSummary(requisition)}</span></td>
+                  <td>{formatQuantity(Number(requisition.totalQuantity ?? requisition.quantityRequested ?? 0))}</td>
+                  <td>{requisition.vendorSummary || requisition.vendorName || '-'}</td>
+                  <td>{requisition.locationSummary || requisition.locationName || '-'}</td>
                   <td>{requisition.workOrderNumber || '-'}</td>
                   <td>{requisition.requestedByName || '-'}</td>
                   <td>{formatDateTime(requisition.requestedAt)}</td>
@@ -351,7 +404,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
             <div className="inventory-form-grid">
               <label className="form-field">
                 <span>Qty Requested</span>
-                <input inputMode="decimal" value={editForm.quantityRequested} onChange={event=>setEditForm({...editForm,quantityRequested:event.target.value})} />
+                <input inputMode="decimal" value={editForm.quantityRequested} onChange={event=>setEditForm({...editForm,quantityRequested:event.target.value})} disabled={requisitionLineCount(editing) > 1} />
               </label>
               <label className="form-field">
                 <span>WO#</span>

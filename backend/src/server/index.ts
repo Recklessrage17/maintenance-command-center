@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCRE
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_deleted ON inventory_parts (deleted);
@@ -70,7 +71,9 @@ CREATE INDEX IF NOT EXISTS idx_inventory_vendors_name ON inventory_vendors (name
 CREATE INDEX IF NOT EXISTS idx_inventory_locations_name ON inventory_locations (name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_number ON inventory_requisitions (requisition_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_part ON inventory_requisitions (inventory_part_id,status,deleted);
-CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_status ON inventory_requisitions (status,deleted);`);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_status ON inventory_requisitions (status,deleted);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
 }
 initDb();
 function migrateDb() {
@@ -89,6 +92,9 @@ function migrateDb() {
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
   run('UPDATE inventory_requisitions SET unit_cost=0 WHERE unit_cost IS NULL');
+  db.exec(`CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -442,12 +448,15 @@ function normalizeNativePart(row: NativePartRow) {
     importedFromMit3At: row.imported_from_mit3_at ?? '',
   };
 }
-function nativePartById(id: number) {
-  const row = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+function nativePartRowById(id: number) {
+  return one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
 LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
 WHERE p.deleted=0 AND p.id=?`, [id]);
+}
+function nativePartById(id: number) {
+  const row = nativePartRowById(id);
   return row ? normalizeNativePart(row) : undefined;
 }
 function nativeParts(search = '', filter: NativePartFilter = 'all') {
@@ -926,17 +935,114 @@ interface RequisitionRow {
   deleted_at: string | null;
   deleted_by_user_id: number | null;
 }
-function publicRequisition(row: RequisitionRow) {
+interface RequisitionLineRow {
+  id: number;
+  requisition_id: number;
+  inventory_part_id: number;
+  part_number: string;
+  description: string;
+  vendor_name: string;
+  location_name: string;
+  quantity_requested: number;
+  unit_cost: number | null;
+  unit_of_measure: string;
+  item_number: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  deleted: number;
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+}
+function publicRequisitionLine(line: RequisitionLineRow) {
+  const quantityRequested = Number(line.quantity_requested ?? 0) || 0;
+  const unitCost = Number(line.unit_cost ?? 0);
+  const safeUnitCost = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0;
+  return {
+    id: line.id,
+    requisitionId: line.requisition_id,
+    inventoryPartId: line.inventory_part_id,
+    partNumber: line.part_number,
+    description: line.description,
+    vendorName: line.vendor_name,
+    locationName: line.location_name,
+    quantityRequested,
+    unitCost: safeUnitCost,
+    totalCost: quantityRequested * safeUnitCost,
+    unitOfMeasure: line.unit_of_measure || 'EA',
+    itemNumber: line.item_number || line.part_number,
+    notes: line.notes,
+    deleted: Boolean(line.deleted),
+    deletedAt: line.deleted_at,
+  };
+}
+function legacyLineFromRequisition(row: RequisitionRow): RequisitionLineRow {
+  return {
+    id: 0,
+    requisition_id: row.id,
+    inventory_part_id: row.inventory_part_id,
+    part_number: row.part_number,
+    description: row.description,
+    vendor_name: row.vendor_name,
+    location_name: row.location_name,
+    quantity_requested: row.quantity_requested,
+    unit_cost: row.unit_cost,
+    unit_of_measure: 'EA',
+    item_number: row.part_number,
+    notes: '',
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    deleted: row.deleted,
+    deleted_at: row.deleted_at,
+    deleted_by_user_id: row.deleted_by_user_id,
+  };
+}
+function requisitionLineRows(requisitionId: number, options: { includeDeleted?: boolean } = {}) {
+  return all<RequisitionLineRow>(`SELECT * FROM inventory_requisition_lines WHERE requisition_id=? ${options.includeDeleted ? '' : 'AND deleted=0'} ORDER BY id`, [requisitionId]);
+}
+function requisitionLinesForRow(row: RequisitionRow, options: { includeDeleted?: boolean } = {}) {
+  const rows = requisitionLineRows(row.id, options);
+  return rows.length ? rows : [legacyLineFromRequisition(row)];
+}
+function uniqueTextValues(values: string[]) {
+  return [...new Set(values.map(value => value.trim()).filter(Boolean))];
+}
+function summaryText(values: string[], fallback = '') {
+  const unique = uniqueTextValues(values);
+  if (unique.length === 0) return fallback;
+  if (unique.length === 1) return unique[0];
+  return `Multiple (${unique.length})`;
+}
+function uniquePositiveIds(ids: Array<number | null | undefined>) {
+  return [...new Set(ids.filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0))];
+}
+function publicRequisition(row: RequisitionRow, options: { includeDeletedLines?: boolean } = {}) {
+  const lines = requisitionLinesForRow(row, { includeDeleted: options.includeDeletedLines }).map(publicRequisitionLine);
+  const firstLine = lines[0];
+  const totalQuantity = lines.reduce((sum,line)=>sum + line.quantityRequested, 0);
+  const totalCost = lines.reduce((sum,line)=>sum + line.totalCost, 0);
+  const partNumbers = lines.map(line=>line.partNumber).filter(Boolean);
+  const descriptions = lines.map(line=>line.description).filter(Boolean);
   return {
     id: row.id,
     requisitionNumber: row.requisition_number,
-    inventoryPartId: row.inventory_part_id,
-    partNumber: row.part_number,
-    description: row.description,
-    vendorName: row.vendor_name,
-    locationName: row.location_name,
-    quantityRequested: Number(row.quantity_requested ?? 0),
-    unitCost: Number(row.unit_cost ?? 0),
+    inventoryPartId: firstLine?.inventoryPartId ?? row.inventory_part_id,
+    partNumber: firstLine?.partNumber ?? row.part_number,
+    description: firstLine?.description ?? row.description,
+    vendorName: firstLine?.vendorName ?? row.vendor_name,
+    locationName: firstLine?.locationName ?? row.location_name,
+    quantityRequested: totalQuantity || Number(row.quantity_requested ?? 0),
+    unitCost: firstLine?.unitCost ?? Number(row.unit_cost ?? 0),
+    totalCost,
+    lineCount: lines.length,
+    firstPartNumber: firstLine?.partNumber ?? row.part_number,
+    firstDescription: firstLine?.description ?? row.description,
+    totalQuantity: totalQuantity || Number(row.quantity_requested ?? 0),
+    vendorSummary: summaryText(lines.map(line=>line.vendorName), row.vendor_name),
+    locationSummary: summaryText(lines.map(line=>line.locationName), row.location_name),
+    partNumbers,
+    descriptions,
+    lines,
     status: row.status,
     requestedByUserId: row.requested_by_user_id,
     requestedByName: row.requested_by_name,
@@ -957,14 +1063,29 @@ function publicRequisition(row: RequisitionRow) {
   };
 }
 function activeRequisitionForPart(partId: number) {
-  return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT requisition_number,status FROM inventory_requisitions WHERE deleted=0 AND inventory_part_id=? AND status IN ('Requested','Ordered') ORDER BY requested_at DESC, id DESC LIMIT 1`, [partId]);
+  return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT r.requisition_number,r.status
+FROM inventory_requisitions r
+LEFT JOIN inventory_requisition_lines line ON line.requisition_id=r.id AND line.deleted=0
+WHERE r.deleted=0 AND r.status IN ('Requested','Ordered') AND (line.inventory_part_id=? OR (line.id IS NULL AND r.inventory_part_id=?))
+ORDER BY r.requested_at DESC, r.id DESC LIMIT 1`, [partId,partId]);
 }
 function activeRequisitionCountForPart(partId: number) {
-  return one<{ count: number }>(`SELECT COUNT(*) AS count FROM inventory_requisitions WHERE deleted=0 AND inventory_part_id=? AND status IN ('Requested','Ordered')`, [partId])?.count ?? 0;
+  return one<{ count: number }>(`SELECT COUNT(DISTINCT r.id) AS count
+FROM inventory_requisitions r
+LEFT JOIN inventory_requisition_lines line ON line.requisition_id=r.id AND line.deleted=0
+WHERE r.deleted=0 AND r.status IN ('Requested','Ordered') AND (line.inventory_part_id=? OR (line.id IS NULL AND r.inventory_part_id=?))`, [partId,partId])?.count ?? 0;
 }
 function syncPartRequisitionFlag(partId: number, timestamp = now()) {
   const active = activeRequisitionForPart(partId);
   run('UPDATE inventory_parts SET requisition=?, updated_at=? WHERE id=?', [active ? active.status : '',timestamp,partId]);
+}
+function requisitionPartIds(row: RequisitionRow, options: { includeDeletedLines?: boolean } = {}) {
+  const lineRows = requisitionLineRows(row.id, { includeDeleted: options.includeDeletedLines });
+  const ids = lineRows.length ? lineRows.map(line=>line.inventory_part_id) : [row.inventory_part_id];
+  return uniquePositiveIds(ids);
+}
+function syncRequisitionPartFlags(partIds: number[], timestamp = now()) {
+  for (const partId of uniquePositiveIds(partIds)) syncPartRequisitionFlag(partId, timestamp);
 }
 function requisitionNumberForTimestamp(timestamp: string) {
   const year = timestamp.slice(0, 4);
@@ -1519,9 +1640,15 @@ function drawWrappedPdfText(page: PDFPage, text: string, x: number, topY: number
   return Math.max(1, visible.length) * lineHeight;
 }
 async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
+  const lines = requisitionLinesForRow(requisition, { includeDeleted: Boolean(requisition.deleted) });
+  const vendors = uniqueTextValues(lines.map(line=>line.vendor_name));
+  const locations = uniqueTextValues(lines.map(line=>line.location_name));
+  const vendorName = vendors.length === 1 ? vendors[0] : vendors.length > 1 ? 'Multiple Vendors' : (requisition.vendor_name || 'Unknown Vendor');
+  const locationSummary = locations.length === 1 ? locations[0] : locations.length > 1 ? `Multiple locations (${locations.length})` : requisition.location_name;
   const lifecycleNotes = [
     `Status: ${requisition.status}`,
-    requisition.location_name ? `Location: ${requisition.location_name}` : '',
+    lines.length > 1 ? `Lines: ${lines.length}` : '',
+    locationSummary ? `Location: ${locationSummary}` : '',
     requisition.ordered_at ? `Ordered: ${userNameById(requisition.ordered_by_user_id) || '-'} ${formatPdfDateTime(requisition.ordered_at)}` : '',
     requisition.received_at ? `Received: ${userNameById(requisition.received_by_user_id) || '-'} ${formatPdfDateTime(requisition.received_at)}` : '',
     requisition.canceled_at ? `Canceled: ${userNameById(requisition.canceled_by_user_id) || '-'} ${formatPdfDateTime(requisition.canceled_at)}` : '',
@@ -1529,7 +1656,7 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
     requisition.notes ? `Notes: ${requisition.notes}` : '',
   ].filter(Boolean).join(' | ');
   return buildRequisitionPdf({
-    vendor: requisition.vendor_name || 'Unknown Vendor',
+    vendor: vendorName,
     requisitionNumber: requisition.requisition_number,
     requestedBy: requisition.requested_by_name,
     createdAt: requisition.requested_at,
@@ -1538,23 +1665,32 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
     header: {
       poNo: '',
       requestDate: localDateOnly(),
-      vendorName: requisition.vendor_name,
+      vendorName,
       workOrderNo: requisition.work_order_number,
       comments: lifecycleNotes,
       requisitionedBy: requisition.requested_by_name,
       taxExempt: 'No',
       materialCert: 'No',
     },
-    items: [{
-      partNumber: requisition.part_number,
-      description: requisition.description,
-      locationName: requisition.location_name,
-      quantityRequested: Number(requisition.quantity_requested ?? 0) || 0,
-      unitCost: requisitionUnitCost(requisition),
-      supplierPartNumber: requisition.part_number,
-      dueDate: isoDateOnly(requisition.requested_at),
-    }],
+    items: lines.map(line=>({
+      partNumber: line.part_number,
+      description: line.description,
+      locationName: line.location_name,
+      quantityRequested: Number(line.quantity_requested ?? 0) || 0,
+      unitCost: requisitionLineUnitCost(line),
+      supplierPartNumber: line.item_number || line.part_number,
+      dueDate: '',
+      notes: line.notes,
+      unitOfMeasure: line.unit_of_measure || 'EA',
+    })),
   });
+}
+function requisitionLineUnitCost(line: RequisitionLineRow) {
+  const snapshot = Number(line.unit_cost ?? 0);
+  if (Number.isFinite(snapshot) && snapshot > 0) return snapshot;
+  const part = one<{ unit_cost: number | null }>('SELECT unit_cost FROM inventory_parts WHERE id=?', [line.inventory_part_id]);
+  const fallback = Number(part?.unit_cost ?? 0);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
 }
 function requisitionUnitCost(requisition: RequisitionRow) {
   const snapshot = Number(requisition.unit_cost ?? 0);
@@ -1582,7 +1718,7 @@ function requisitionList(statusFilter = '', includeDeleted = false) {
     where += ' AND status=?';
     params.push(cleanStatus);
   }
-  return all<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${where} ORDER BY CASE status WHEN 'Requested' THEN 1 WHEN 'Ordered' THEN 2 WHEN 'Received' THEN 3 ELSE 4 END, requested_at DESC, id DESC`, params).map(publicRequisition);
+  return all<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${where} ORDER BY CASE status WHEN 'Requested' THEN 1 WHEN 'Ordered' THEN 2 WHEN 'Received' THEN 3 ELSE 4 END, requested_at DESC, id DESC`, params).map(row=>publicRequisition(row, { includeDeletedLines: includeDeleted }));
 }
 function requisitionSummary() {
   const count = (status: RequisitionStatus) => one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_requisitions WHERE deleted=0 AND status=?', [status])?.count ?? 0;
@@ -1783,33 +1919,53 @@ app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'),
   const operation = 'requisition create';
   try {
     const input = isRecord(req.body) ? req.body : {};
-    const partId = Number(input.inventoryPartId ?? input.partId);
-    if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
-    const quantityRequested = validateQuantityRequested(input.quantityRequested ?? input.quantity);
+    const rawItems = Array.isArray(input.items) && input.items.length ? input.items : [input];
+    const parsedItems = rawItems.map(rawItem => {
+      const item = isRecord(rawItem) ? rawItem : {};
+      const partId = Number(item.inventoryPartId ?? item.partId ?? item.id);
+      if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
+      const quantityRequested = item.quantityRequested === undefined && item.quantity === undefined ? 1 : validateQuantityRequested(item.quantityRequested ?? item.quantity);
+      return {
+        partId,
+        quantityRequested,
+        notes: textField(item, ['notes','note']).slice(0, 500),
+        unitOfMeasure: (textField(item, ['unitOfMeasure','unit','uom']) || 'EA').slice(0, 32),
+        itemNumber: textField(item, ['itemNumber','supplierPartNumber','supplierPartNo']).slice(0, 160),
+      };
+    });
+    if (!parsedItems.length) throw new Error('At least one requisition item is required.');
     const allowDuplicate = input.allowDuplicate === true;
     const timestamp = now();
     let requisitionId = 0;
+    let requisitionNumber = '';
     db.exec('BEGIN IMMEDIATE');
     try {
-      const part = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
-FROM inventory_parts p
-LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
-LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
-WHERE p.deleted=0 AND p.id=?`, [partId]);
-      if (!part) throw new Error('Native inventory part not found.');
-      if (activeRequisitionCountForPart(partId) > 0 && !allowDuplicate) throw new Error('Active requisition already exists for this part.');
-      const requisitionNumber = requisitionNumberForTimestamp(timestamp);
-      const unitCost = Number(part.unit_cost ?? 0);
-      const safeUnitCost = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0;
+      const lineInputs = parsedItems.map(item => {
+        const part = nativePartRowById(item.partId);
+        if (!part) throw new Error('Native inventory part not found.');
+        if (activeRequisitionCountForPart(item.partId) > 0 && !allowDuplicate) throw new Error('Active requisition already exists for one or more selected parts.');
+        const unitCost = Number(part.unit_cost ?? 0);
+        return {
+          ...item,
+          part,
+          unitCost: Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0,
+          itemNumber: item.itemNumber || part.supplier_part_number || part.part_number,
+        };
+      });
+      const firstLine = lineInputs[0];
+      const totalQuantity = lineInputs.reduce((sum,item)=>sum + item.quantityRequested, 0);
+      const headerVendor = summaryText(lineInputs.map(item=>item.part.vendor_name ?? ''), firstLine.part.vendor_name ?? '');
+      const headerLocation = summaryText(lineInputs.map(item=>item.part.location_name ?? ''), firstLine.part.location_name ?? '');
+      requisitionNumber = requisitionNumberForTimestamp(timestamp);
       const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
         requisitionNumber,
-        part.id,
-        part.part_number,
-        part.description,
-        part.vendor_name ?? '',
-        part.location_name ?? '',
-        quantityRequested,
-        safeUnitCost,
+        firstLine.part.id,
+        firstLine.part.part_number,
+        firstLine.part.description,
+        headerVendor,
+        headerLocation,
+        totalQuantity,
+        firstLine.unitCost,
         'Requested',
         actor.id,
         actor.full_name,
@@ -1820,9 +1976,27 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
         timestamp,
       ]);
       requisitionId = Number(result.lastInsertRowid);
-      syncPartRequisitionFlag(partId,timestamp);
-      inventoryAudit(req,'requisition create','requisition',requisitionId,{requisitionNumber,partId,partNumber:part.part_number,quantityRequested});
-      audit(req,'requisition create','requisition',requisitionId,{requisitionNumber,partId,partNumber:part.part_number,quantityRequested});
+      for (const item of lineInputs) {
+        run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+          requisitionId,
+          item.part.id,
+          item.part.part_number,
+          item.part.description,
+          item.part.vendor_name ?? '',
+          item.part.location_name ?? '',
+          item.quantityRequested,
+          item.unitCost,
+          item.unitOfMeasure || 'EA',
+          item.itemNumber,
+          item.notes,
+          timestamp,
+          timestamp,
+        ]);
+      }
+      syncRequisitionPartFlags(lineInputs.map(item=>item.part.id),timestamp);
+      const auditDetails = {requisitionNumber,lineCount:lineInputs.length,partIds:lineInputs.map(item=>item.part.id),totalQuantity};
+      inventoryAudit(req,lineInputs.length > 1 ? 'multi-line requisition create' : 'requisition create','requisition',requisitionId,auditDetails);
+      audit(req,lineInputs.length > 1 ? 'multi-line requisition create' : 'requisition create','requisition',requisitionId,auditDetails);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -1907,6 +2081,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
       const existing = requisitionById(requisitionId);
       if (!existing) throw new Error('Requisition not found.');
       previousStatus = existing.status;
+      const partIds = requisitionPartIds(existing);
       if (nextStatus === 'Ordered') {
         run('UPDATE inventory_requisitions SET status=?, ordered_by_user_id=?, ordered_at=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,timestamp,requisitionId]);
       } else if (nextStatus === 'Received') {
@@ -1914,7 +2089,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
       } else {
         run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,cancelReason,timestamp,requisitionId]);
       }
-      syncPartRequisitionFlag(existing.inventory_part_id,timestamp);
+      syncRequisitionPartFlags(partIds,timestamp);
       inventoryAudit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
       audit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
       const specificAction = nextStatus === 'Ordered' ? 'requisition ordered' : nextStatus === 'Received' ? 'requisition received' : 'requisition canceled';
@@ -1941,10 +2116,14 @@ app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.wri
       const existing = requisitionById(requisitionId);
       if (!existing) throw new Error('Requisition not found.');
       if (existing.status !== 'Requested') throw new Error('Only Requested requisitions can be edited.');
+      const lines = requisitionLineRows(requisitionId);
       const quantityRequested = input.quantityRequested === undefined && input.quantity === undefined ? existing.quantity_requested : validateQuantityRequested(input.quantityRequested ?? input.quantity);
       const workOrderNumber = input.workOrderNumber === undefined && input.work_order_number === undefined ? existing.work_order_number : textField(input, ['workOrderNumber','work_order_number','workOrder']);
       const notes = input.notes === undefined ? existing.notes : textField(input, ['notes','note']);
       run('UPDATE inventory_requisitions SET quantity_requested=?, work_order_number=?, notes=?, updated_at=? WHERE id=?', [quantityRequested,workOrderNumber,notes,timestamp,requisitionId]);
+      if (lines.length === 1 && (input.quantityRequested !== undefined || input.quantity !== undefined)) {
+        run('UPDATE inventory_requisition_lines SET quantity_requested=?, updated_at=? WHERE id=?', [quantityRequested,timestamp,lines[0].id]);
+      }
       inventoryAudit(req,'requisition edit','requisition',requisitionId,{quantityRequested,workOrderNumber});
       audit(req,'requisition edit','requisition',requisitionId,{quantityRequested,workOrderNumber});
       db.exec('COMMIT');
@@ -1973,8 +2152,10 @@ app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
     try {
       const existing = requisitionById(requisitionId);
       if (!existing) throw new Error('Requisition not found.');
+      const partIds = requisitionPartIds(existing);
       run('UPDATE inventory_requisitions SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [timestamp,actor.id,timestamp,requisitionId]);
-      syncPartRequisitionFlag(existing.inventory_part_id,timestamp);
+      run('UPDATE inventory_requisition_lines SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE requisition_id=? AND deleted=0', [timestamp,actor.id,timestamp,requisitionId]);
+      syncRequisitionPartFlags(partIds,timestamp);
       inventoryAudit(req,'requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
       audit(req,'requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
       db.exec('COMMIT');

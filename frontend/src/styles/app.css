@@ -266,4 +266,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .requisition-review-row span { margin: 0; color: #aac4d2; font-size: .8rem; line-height: 1.3; }
 .requisition-review-row .form-field { gap: 4px; }
 .requisition-review-row input { min-height: 34px; }
+.requisition-line-list { display: grid; gap: 8px; }
+.requisition-line-row { display: grid; grid-template-columns: minmax(0, 1fr) 82px minmax(150px, .55fr); gap: 9px; align-items: end; padding: 9px 10px; border: 1px solid rgba(85, 191, 236, 0.16); border-radius: 10px; background: rgba(4, 18, 34, 0.42); }
+.requisition-line-main { min-width: 0; display: grid; gap: 3px; }
+.requisition-line-main strong { margin: 0; color: #f3fbff; font-size: .86rem; line-height: 1.15; }
+.requisition-line-main span { margin: 0; color: #aac4d2; font-size: .78rem; line-height: 1.28; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.requisition-line-row .form-field { gap: 4px; }
+.requisition-line-row input { min-height: 34px; }
+.requisition-created-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(54, 229, 170, 0.26); border-radius: 10px; background: rgba(18, 97, 71, 0.24); }
+.requisition-created-panel strong { margin: 0; color: #f3fbff; font-size: 1rem; }
+.requisition-created-panel span { color: #c8f5e6; font-size: .86rem; font-weight: 800; }
 @media (max-width: 760px) { .requisition-review-row { grid-template-columns: 1fr; } .inventory-selection-actions { justify-content: flex-start; } }
+@media (max-width: 760px) { .requisition-line-row { grid-template-columns: 1fr; } }
