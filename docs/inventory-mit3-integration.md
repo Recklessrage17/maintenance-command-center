@@ -155,6 +155,8 @@ Phase 2F requisition endpoints:
 - `GET /api/requisitions/:id/pdf`: generates a clean printable PDF from the MCC native requisition record. Add `?preview=true` for inline PDF preview.
 - `GET /api/requisitions/summary`: returns requested, ordered, received, canceled, and active counts.
 - `POST /api/requisitions`: creates requisitions from one native MCC inventory part or from an `items` array of selected native MCC inventory parts, grouped by vendor, and returns the created requisition list with PDF URLs.
+- `POST /api/requisitions/preview`: creates hidden Draft requisition previews from selected native MCC inventory rows without marking inventory parts as actively requested.
+- `POST /api/requisitions/:id/pass`: passes a Draft preview into an active Requested requisition and then updates selected inventory parts with active requisition flags.
 - `PATCH /api/requisitions/:id/status`: marks a native MCC requisition Ordered, Received, or Canceled.
 - `PATCH /api/requisitions/:id`: updates requested quantity, WO#, and notes while the requisition is still Requested.
 - `DELETE /api/requisitions/:id`: soft deletes a requisition for Admin and Manager users.
@@ -163,6 +165,9 @@ Phase 2F requisition rules:
 
 - Requisition numbers are generated in readable yearly sequence, such as `REQ-2026-000001`.
 - Creating a requisition from selected inventory rows groups the selection by vendor. The same vendor stays on one requisition, different vendors create separate requisitions, and blank vendors are grouped separately as `Unknown Vendor`.
+- The Inventory page's selected-row workflow generates a PDF preview first. Required preview fields are P.O. Initiator, Requisitioned By, and Tax Exempt; Work Order No., Notes/Comments, Confirmed With, Material Cert, Ship Via, and FOB remain optional.
+- Preview requisitions are stored as Draft, are hidden from the normal Requisitions list, and do not count as active requisitions.
+- Only clicking "Pass / Create Active Req" changes a Draft preview to Requested and marks the selected native inventory parts as actively requested.
 - Each line snapshots the native part number, description, vendor, location, unit cost, item number, unit of measure, requested quantity, and line notes into MCC.
 - Older single-part requisitions that predate line records remain readable; MCC synthesizes one line from the legacy header fields when no line rows exist.
 - Creating a requisition marks each selected native inventory part as requested.
@@ -178,12 +183,13 @@ Phase 2F requisition rules:
 - Requisition PDFs are generated from the requisition header plus all line items. The table rows show quantity, unit, item/part number, description, due date when available, unit price, and total price.
 - PDF row prices use `quantity_requested * unit_cost`, and the orange total box shows the grand total across all lines.
 - Requisition PDF values are written into the official template cells with shrink-to-fit currency formatting so price, total, and description text do not cross table lines. Long item descriptions wrap to two lines and truncate with `...` when needed.
+- Requisition PDF pagination uses every available line row in the official workbook template before creating another PDF page, clears unused rows on each page, and keeps the orange total box as the grand total across all pages.
 - Delete is soft delete only: MCC sets deleted metadata and hides the requisition from the active list without physically removing the database record.
 - Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can create and update requisitions.
 - Admin and Manager can soft delete requisitions.
 - Maintenance Tech 1 remains view-only.
 
-The Requisitions page provides MCC-native summary cards, filters, multi-line search, PDF preview, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from one or more selected part rows, opens a PDF preview automatically after create, shows Cost instead of daily Link buttons, hides the Min column from the daily table, keeps requisition tracking out of the Status column, and refreshes MCC native inventory after each create.
+The Requisitions page provides MCC-native summary cards, filters, multi-line search, PDF preview, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates Draft previews from one or more selected part rows, opens a PDF preview automatically, shows Cost instead of daily Link buttons, hides the Min column from the daily table, keeps requisition tracking out of the Status column, and refreshes MCC native inventory only after the preview is passed into an active requisition.
 
 The current PDF generator uses the copied MIT3/JBT workbook templates in `backend/templates`; MIT3 remains archive/reference only and is not read at PDF generation time.
 

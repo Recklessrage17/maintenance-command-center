@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREME
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', po_initiator TEXT NOT NULL DEFAULT '', requisitioned_by_name TEXT NOT NULL DEFAULT '', tax_exempt TEXT NOT NULL DEFAULT 'No', confirmed_with TEXT NOT NULL DEFAULT '', material_cert TEXT NOT NULL DEFAULT 'No', ship_via TEXT NOT NULL DEFAULT '', fob TEXT NOT NULL DEFAULT 'Destination', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
@@ -93,7 +93,18 @@ function migrateDb() {
 
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
+  if (!requisitionColumns.has('po_initiator')) run("ALTER TABLE inventory_requisitions ADD COLUMN po_initiator TEXT NOT NULL DEFAULT ''");
+  if (!requisitionColumns.has('requisitioned_by_name')) run("ALTER TABLE inventory_requisitions ADD COLUMN requisitioned_by_name TEXT NOT NULL DEFAULT ''");
+  if (!requisitionColumns.has('tax_exempt')) run("ALTER TABLE inventory_requisitions ADD COLUMN tax_exempt TEXT NOT NULL DEFAULT 'No'");
+  if (!requisitionColumns.has('confirmed_with')) run("ALTER TABLE inventory_requisitions ADD COLUMN confirmed_with TEXT NOT NULL DEFAULT ''");
+  if (!requisitionColumns.has('material_cert')) run("ALTER TABLE inventory_requisitions ADD COLUMN material_cert TEXT NOT NULL DEFAULT 'No'");
+  if (!requisitionColumns.has('ship_via')) run("ALTER TABLE inventory_requisitions ADD COLUMN ship_via TEXT NOT NULL DEFAULT ''");
+  if (!requisitionColumns.has('fob')) run("ALTER TABLE inventory_requisitions ADD COLUMN fob TEXT NOT NULL DEFAULT 'Destination'");
   run('UPDATE inventory_requisitions SET unit_cost=0 WHERE unit_cost IS NULL');
+  run("UPDATE inventory_requisitions SET requisitioned_by_name=requested_by_name WHERE (requisitioned_by_name IS NULL OR requisitioned_by_name='') AND requested_by_name<>''");
+  run("UPDATE inventory_requisitions SET tax_exempt='No' WHERE tax_exempt IS NULL OR tax_exempt=''");
+  run("UPDATE inventory_requisitions SET material_cert='No' WHERE material_cert IS NULL OR material_cert=''");
+  run("UPDATE inventory_requisitions SET fob='Destination' WHERE fob IS NULL OR fob=''");
   db.exec(`CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
@@ -905,8 +916,8 @@ function sendNativeInventoryError(req: Request, res: Response, operation: string
   audit(req,'failed inventory native write','inventory',targetId,{operation,error:message});
   res.status(nativeInventoryErrorStatus(message)).json({ok:false,error:message});
 }
-type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
-const requisitionStatuses: RequisitionStatus[] = ['Requested','Ordered','Received','Canceled'];
+type RequisitionStatus = 'Draft' | 'Requested' | 'Ordered' | 'Received' | 'Canceled';
+const requisitionStatuses: RequisitionStatus[] = ['Draft','Requested','Ordered','Received','Canceled'];
 const activeRequisitionStatuses: RequisitionStatus[] = ['Requested','Ordered'];
 interface RequisitionRow {
   id: number;
@@ -921,6 +932,13 @@ interface RequisitionRow {
   status: RequisitionStatus;
   requested_by_user_id: number | null;
   requested_by_name: string;
+  po_initiator: string;
+  requisitioned_by_name: string;
+  tax_exempt: string;
+  confirmed_with: string;
+  material_cert: string;
+  ship_via: string;
+  fob: string;
   requested_at: string;
   ordered_by_user_id: number | null;
   ordered_at: string | null;
@@ -1055,6 +1073,13 @@ function publicRequisition(row: RequisitionRow, options: { includeDeletedLines?:
     status: row.status,
     requestedByUserId: row.requested_by_user_id,
     requestedByName: row.requested_by_name,
+    poInitiator: row.po_initiator,
+    requisitionedByName: row.requisitioned_by_name || row.requested_by_name,
+    taxExempt: row.tax_exempt || 'No',
+    confirmedWith: row.confirmed_with,
+    materialCert: row.material_cert || 'No',
+    shipVia: row.ship_via,
+    fob: row.fob || 'Destination',
     requestedAt: row.requested_at,
     orderedByUserId: row.ordered_by_user_id,
     orderedAt: row.ordered_at,
@@ -1180,7 +1205,6 @@ const pdfTemplatePaths: Record<RequisitionTemplateKind, string> = {
   'over-100': path.join(requisitionTemplateDir, 'blank-requisition-over-100.pdf'),
 };
 const officialRequisitionTemplateDir = path.join(repoRootPath, 'backend', 'templates');
-const officialRequisitionRowsPerPage = 8;
 
 type OfficialHeaderCellMap = {
   assetNo: string;
@@ -1234,6 +1258,11 @@ type XlsxRow = {
 type XlsxSheet = {
   cell: (address: string) => XlsxCell;
   row?: (rowNumber: number) => XlsxRow;
+};
+type OfficialPdfChoices = {
+  fob: string;
+  materialCert: string;
+  taxExempt: string;
 };
 
 const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCellMap> = {
@@ -1563,13 +1592,169 @@ function commandOutputMessage(output: ReturnType<typeof spawnSync>) {
   return output.status === null ? 'Process did not finish.' : `Process exited with status ${output.status}.`;
 }
 
-function tryExcelComPdfExport(xlsxPath: string, pdfPath: string) {
+function tryExcelComPdfExport(xlsxPath: string, pdfPath: string, choices: OfficialPdfChoices) {
   if (process.platform !== 'win32') return false;
   const script = `
-param([string]$XlsxPath,[string]$PdfPath)
+param(
+  [Parameter(Mandatory=$true)][string]$XlsxPath,
+  [Parameter(Mandatory=$true)][string]$PdfPath,
+  [string]$TaxExempt = "",
+  [string]$MaterialCert = "",
+  [string]$Fob = ""
+)
 $excel = $null
 $workbook = $null
+$worksheet = $null
+$workbookClosed = $false
+function Normalize-Choice([string]$value) {
+  if ($null -eq $value) { return "" }
+  return $value.Trim().ToLowerInvariant()
+}
+function Set-FormCheckbox($checkbox, [bool]$checked) {
+  $value = if ($checked) { 1 } else { -4146 }
+  try {
+    $checkbox.Value = $value
+    return $true
+  } catch {}
+  try {
+    $checkbox.ControlFormat.Value = $value
+    return $true
+  } catch {}
+  try {
+    $checkbox.OLEFormat.Object.Value = $checked
+    return $true
+  } catch {}
+  return $false
+}
+function Add-CheckboxControl($items, $seen, [string]$kind, $object, [string]$name, [string]$caption, [double]$left, [double]$top) {
+  $key = if ($name.Trim()) { $name.Trim() } else { "$kind-$left-$top-$caption" }
+  if ($seen.ContainsKey($key)) { return }
+  $seen[$key] = $true
+  $items.Add([PSCustomObject]@{
+    Kind = $kind
+    Object = $object
+    Name = $name
+    Caption = $caption
+    Left = $left
+    Top = $top
+  }) | Out-Null
+}
+function Get-CheckboxControls($worksheet) {
+  $items = New-Object System.Collections.ArrayList
+  $seen = @{}
+  try {
+    foreach ($cb in $worksheet.CheckBoxes()) {
+      $name = ""
+      $caption = ""
+      $left = 0
+      $top = 0
+      try { $name = [string]$cb.Name } catch {}
+      try { $caption = [string]$cb.Caption } catch {}
+      try { $left = [double]$cb.Left } catch {}
+      try { $top = [double]$cb.Top } catch {}
+      Add-CheckboxControl $items $seen "CheckBox" $cb $name $caption $left $top
+    }
+  } catch {}
+  try {
+    foreach ($shape in $worksheet.Shapes) {
+      $name = ""
+      $caption = ""
+      $left = 0
+      $top = 0
+      $type = $null
+      try { $name = [string]$shape.Name } catch {}
+      try { $caption = [string]$shape.TextFrame.Characters().Text } catch {}
+      try { $left = [double]$shape.Left } catch {}
+      try { $top = [double]$shape.Top } catch {}
+      try { $type = $shape.Type } catch {}
+      if ($type -eq 8 -or $name -match "Check|Box|Option" -or $caption -match "YES|NO|Origin|Destination") {
+        Add-CheckboxControl $items $seen "Shape" $shape $name $caption $left $top
+      }
+    }
+  } catch {}
+  return $items.ToArray()
+}
+function Group-CheckboxRows($items, [double]$tolerance) {
+  $rows = @()
+  foreach ($item in ($items | Sort-Object Top, Left)) {
+    $matched = $false
+    foreach ($row in $rows) {
+      if ([Math]::Abs(([double]$row.Top) - ([double]$item.Top)) -le $tolerance) {
+        $row.Items = @($row.Items + $item)
+        $matched = $true
+        break
+      }
+    }
+    if (-not $matched) {
+      $rows += [PSCustomObject]@{
+        Top = [double]$item.Top
+        Items = @($item)
+      }
+    }
+  }
+  foreach ($row in $rows) {
+    $row.Items = @($row.Items | Sort-Object Left)
+  }
+  return @($rows | Sort-Object Top)
+}
+function Get-ExactRowItems($row, [int]$expectedCount) {
+  $items = @($row.Items | Sort-Object Left)
+  if ($items.Count -eq $expectedCount) { return $items }
+  return @()
+}
+function Set-RequisitionCheckboxes($worksheet, [string]$taxExempt, [string]$materialCert, [string]$fob) {
+  $tax = Normalize-Choice $taxExempt
+  $mat = Normalize-Choice $materialCert
+  $fobChoice = Normalize-Choice $fob
+  $checkboxes = @(Get-CheckboxControls $worksheet | Sort-Object Top, Left)
+  if ($checkboxes.Count -lt 4) { return }
+  foreach ($item in $checkboxes) {
+    Set-FormCheckbox $item.Object $false | Out-Null
+  }
+  $headerBoxes = @($checkboxes | Where-Object { $_.Top -lt 260 } | Sort-Object Top, Left)
+  $taxMaterialBoxes = @(
+    $headerBoxes |
+      Where-Object {
+        ($_.Caption -match "YES|NO" -and $_.Left -gt 250 -and $_.Left -lt 540) -or
+        ($_.Left -gt 300 -and $_.Left -lt 520)
+      } |
+      Sort-Object Top, Left
+  )
+  $fobBoxes = @(
+    $headerBoxes |
+      Where-Object {
+        ($_.Caption -match "Origin|Destination") -or
+        ($_.Left -ge 520)
+      } |
+      Sort-Object Top, Left
+  )
+  $taxMaterialRows = @(Group-CheckboxRows $taxMaterialBoxes 8)
+  $fobRows = @(Group-CheckboxRows $fobBoxes 8)
+  if ($taxMaterialRows.Count -ge 2) {
+    $taxRow = @(Get-ExactRowItems $taxMaterialRows[0] 2)
+    $matRow = @(Get-ExactRowItems $taxMaterialRows[1] 2)
+    if ($taxRow.Count -eq 2) {
+      Set-FormCheckbox $taxRow[0].Object ($tax -eq "yes") | Out-Null
+      Set-FormCheckbox $taxRow[1].Object ($tax -ne "yes") | Out-Null
+    }
+    if ($matRow.Count -eq 2) {
+      Set-FormCheckbox $matRow[0].Object ($mat -eq "yes") | Out-Null
+      Set-FormCheckbox $matRow[1].Object ($mat -ne "yes") | Out-Null
+    }
+  }
+  if ($fobRows.Count -ge 2) {
+    $originRow = @(Get-ExactRowItems $fobRows[0] 1)
+    $destinationRow = @(Get-ExactRowItems $fobRows[1] 1)
+    if ($originRow.Count -eq 1) {
+      Set-FormCheckbox $originRow[0].Object ($fobChoice -eq "origin") | Out-Null
+    }
+    if ($destinationRow.Count -eq 1) {
+      Set-FormCheckbox $destinationRow[0].Object ($fobChoice -eq "destination") | Out-Null
+    }
+  }
+}
 try {
+  if (-not (Test-Path -LiteralPath $XlsxPath)) { throw "Workbook was not found: $XlsxPath" }
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = $false
   $excel.AskToUpdateLinks = $false
@@ -1577,6 +1762,8 @@ try {
   $excel.EnableEvents = $false
   $workbook = $excel.Workbooks.Open($XlsxPath, 0, $true)
   $worksheet = $workbook.Worksheets.Item(1)
+  $worksheet.Activate() | Out-Null
+  try { Set-RequisitionCheckboxes $worksheet $TaxExempt $MaterialCert $Fob } catch {}
   try {
     $worksheet.PageSetup.Zoom = $false
     $worksheet.PageSetup.FitToPagesWide = 1
@@ -1591,19 +1778,20 @@ try {
   try { $excel.CalculateFullRebuild() } catch {}
   $workbook.ExportAsFixedFormat(0, $PdfPath)
   $workbook.Close($false)
+  $workbookClosed = $true
   if (-not (Test-Path -LiteralPath $PdfPath)) { throw "PDF was not created." }
 } catch {
   [Console]::Error.WriteLine($_.Exception.Message)
   exit 1
 } finally {
-  if ($workbook -ne $null) { try { $workbook.Close($false) } catch {} }
+  if (($workbook -ne $null) -and (-not $workbookClosed)) { try { $workbook.Close($false) } catch {} }
   if ($excel -ne $null) { try { $excel.Quit() } catch {} }
   [GC]::Collect()
   [GC]::WaitForPendingFinalizers()
 }`;
   const scriptPath = path.join(path.dirname(xlsxPath), 'export-requisition-pdf.ps1');
   fs.writeFileSync(scriptPath, script);
-  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath], {
+  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath,'-TaxExempt',choices.taxExempt,'-MaterialCert',choices.materialCert,'-Fob',choices.fob], {
     encoding: 'utf8',
     timeout: 90_000,
     windowsHide: true,
@@ -1634,14 +1822,14 @@ function tryLibreOfficePdfExport(xlsxPath: string, pdfPath: string, outputDir: s
   return false;
 }
 
-function convertOfficialWorkbookToPdf(workbook: Buffer, fileNameBase: string) {
+function convertOfficialWorkbookToPdf(workbook: Buffer, fileNameBase: string, choices: OfficialPdfChoices) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcc-requisition-'));
   try {
     const safeBase = officialSafeFileBase(fileNameBase);
     const xlsxPath = path.join(tempDir, `${safeBase}.xlsx`);
     const pdfPath = path.join(tempDir, `${safeBase}.pdf`);
     fs.writeFileSync(xlsxPath, workbook);
-    const converted = tryExcelComPdfExport(xlsxPath, pdfPath) || tryLibreOfficePdfExport(xlsxPath, pdfPath, tempDir);
+    const converted = tryExcelComPdfExport(xlsxPath, pdfPath, choices) || tryLibreOfficePdfExport(xlsxPath, pdfPath, tempDir);
     if (!converted || !fs.existsSync(pdfPath)) {
       throw new Error('Official requisition PDF export failed. Microsoft Excel or LibreOffice could not convert the MIT3 workbook template.');
     }
@@ -1680,7 +1868,13 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
   const header = isRecord(input.header) ? input.header : {};
   const total = input.items.reduce((sum, item) => sum + (Number(item.unitCost ?? 0) || 0) * (Number(item.quantityRequested ?? 0) || 0), 0);
   const type = normalizedRequisitionType(input.requisitionType || textField(header, ['requisitionType']), total);
-  const chunks = chunkRequisitionItems(input.items, Math.min(officialRequisitionRowsPerPage, officialTemplateMaps[type].lineEndRow - officialTemplateMaps[type].lineStartRow + 1));
+  const rowsPerPage = officialTemplateMaps[type].lineEndRow - officialTemplateMaps[type].lineStartRow + 1;
+  const chunks = chunkRequisitionItems(input.items, rowsPerPage);
+  const choices = {
+    fob: textField(header, ['fob'], 'Destination'),
+    materialCert: textField(header, ['materialCert','material_cert'], 'No'),
+    taxExempt: textField(header, ['taxExempt','tax_exempt'], 'No'),
+  };
   const pdfPages: Buffer[] = [];
   for (let index = 0; index < chunks.length; index += 1) {
     const pageHeader = chunks.length > 1
@@ -1696,7 +1890,7 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
       vendor: input.vendor,
     });
     const pageBase = chunks.length > 1 ? `${input.requisitionNumber}-page-${index + 1}` : input.requisitionNumber;
-    pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${pageBase}`));
+    pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${pageBase}`, choices));
   }
   return mergeOfficialPdfPages(pdfPages);
 }
@@ -2151,21 +2345,26 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
     requisition.cancel_reason ? `Cancel reason: ${requisition.cancel_reason}` : '',
     requisition.notes ? `Notes: ${requisition.notes}` : '',
   ].filter(Boolean).join(' | ');
+  const requisitionedByName = requisition.requisitioned_by_name || requisition.requested_by_name;
   return buildRequisitionPdf({
     vendor: vendorName,
     requisitionNumber: requisition.requisition_number,
-    requestedBy: requisition.requested_by_name,
+    requestedBy: requisitionedByName,
     createdAt: requisition.requested_at,
     notes: lifecycleNotes,
     header: {
       poNo: '',
       requestDate: localDateOnly(),
       vendorName,
+      poInitiator: requisition.po_initiator,
+      shipVia: requisition.ship_via,
+      confirmedWith: requisition.confirmed_with,
       workOrderNo: requisition.work_order_number,
       comments: lifecycleNotes,
-      requisitionedBy: requisition.requested_by_name,
-      taxExempt: 'No',
-      materialCert: 'No',
+      requisitionedBy: requisitionedByName,
+      taxExempt: requisition.tax_exempt || 'No',
+      materialCert: requisition.material_cert || 'No',
+      fob: requisition.fob || 'Destination',
     },
     items: lines.map(line=>({
       partNumber: line.part_number,
@@ -2202,7 +2401,196 @@ function validateQuantityRequested(value: unknown) {
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error('Qty requested must be a positive number.');
   return parsed;
 }
-function requisitionList(statusFilter = '', includeDeleted = false) {
+type ParsedRequisitionItem = {
+  itemNumber: string;
+  notes: string;
+  partId: number;
+  quantityRequested: number;
+  unitOfMeasure: string;
+};
+type PreparedRequisitionLine = ParsedRequisitionItem & {
+  itemNumber: string;
+  part: NativePartRow & { location_name?: string | null; vendor_name?: string | null };
+  unitCost: number;
+};
+type RequisitionHeaderInput = {
+  confirmedWith: string;
+  fob: string;
+  materialCert: string;
+  notes: string;
+  poInitiator: string;
+  requisitionedByName: string;
+  shipVia: string;
+  taxExempt: string;
+  workOrderNumber: string;
+};
+function normalizeYesNoField(value: unknown, fieldName: string, required = false) {
+  const clean = cleanPdfText(value);
+  if (!clean) {
+    if (required) throw new Error(`${fieldName} is required.`);
+    return 'No';
+  }
+  if (/^(yes|y|true|1)$/i.test(clean)) return 'Yes';
+  if (/^(no|n|false|0)$/i.test(clean)) return 'No';
+  throw new Error(`${fieldName} must be Yes or No.`);
+}
+function normalizeFobField(value: unknown) {
+  const clean = cleanPdfText(value);
+  if (!clean) return 'Destination';
+  return /origin/i.test(clean) ? 'Origin' : 'Destination';
+}
+function parseRequisitionHeaderInput(input: Record<string, unknown>, actor: User, options: { requirePreviewFields?: boolean } = {}): RequisitionHeaderInput {
+  const requirePreviewFields = Boolean(options.requirePreviewFields);
+  const poInitiator = textField(input, ['poInitiator','po_initiator']).slice(0, 160);
+  const requisitionedByName = textField(input, ['requisitionedByName','requisitionedBy','requisitioned_by_name'], actor.full_name).slice(0, 160);
+  const taxExemptRaw = input.taxExempt ?? input.tax_exempt;
+  if (requirePreviewFields && !poInitiator) throw new Error('P.O. Initiator is required.');
+  if (requirePreviewFields && !requisitionedByName) throw new Error('Requisitioned By is required.');
+  if (requirePreviewFields && cleanPdfText(taxExemptRaw) === '') throw new Error('Tax Exempt is required.');
+  return {
+    confirmedWith: textField(input, ['confirmedWith','confirmed_with']).slice(0, 160),
+    fob: normalizeFobField(input.fob),
+    materialCert: normalizeYesNoField(input.materialCert ?? input.material_cert, 'Material Cert'),
+    notes: textField(input, ['notes','note']).slice(0, 1000),
+    poInitiator,
+    requisitionedByName,
+    shipVia: textField(input, ['shipVia','ship_via']).slice(0, 120),
+    taxExempt: normalizeYesNoField(taxExemptRaw, 'Tax Exempt', requirePreviewFields),
+    workOrderNumber: textField(input, ['workOrderNumber','work_order_number','workOrder']).slice(0, 160),
+  };
+}
+function parseRequisitionItemsInput(input: Record<string, unknown>) {
+  const rawItems = Array.isArray(input.items) && input.items.length ? input.items : [input];
+  const parsedItems = rawItems.map(rawItem => {
+    const item = isRecord(rawItem) ? rawItem : {};
+    const partId = Number(item.inventoryPartId ?? item.partId ?? item.id);
+    if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
+    const quantityRequested = item.quantityRequested === undefined && item.quantity === undefined ? 1 : validateQuantityRequested(item.quantityRequested ?? item.quantity);
+    return {
+      partId,
+      quantityRequested,
+      notes: textField(item, ['notes','note']).slice(0, 500),
+      unitOfMeasure: (textField(item, ['unitOfMeasure','unit','uom']) || 'EA').slice(0, 32),
+      itemNumber: textField(item, ['itemNumber','supplierPartNumber','supplierPartNo']).slice(0, 160),
+    };
+  });
+  if (!parsedItems.length) throw new Error('At least one requisition item is required.');
+  return parsedItems;
+}
+function prepareRequisitionLines(items: ParsedRequisitionItem[], allowDuplicate: boolean) {
+  return items.map(item => {
+    const part = nativePartRowById(item.partId);
+    if (!part) throw new Error('Native inventory part not found.');
+    if (activeRequisitionCountForPart(item.partId) > 0 && !allowDuplicate) throw new Error('Active requisition already exists for one or more selected parts.');
+    const unitCost = Number(part.unit_cost ?? 0);
+    return {
+      ...item,
+      part,
+      unitCost: Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0,
+      itemNumber: item.itemNumber || part.supplier_part_number || part.part_number,
+    };
+  });
+}
+function groupedRequisitionLines(lines: PreparedRequisitionLine[]) {
+  const vendorGroups = new Map<string, PreparedRequisitionLine[]>();
+  for (const item of lines) {
+    const key = requisitionVendorKey(item.part.vendor_name);
+    const group = vendorGroups.get(key) ?? [];
+    group.push(item);
+    vendorGroups.set(key, group);
+  }
+  return vendorGroups;
+}
+function publicCreatedRequisition(id: number) {
+  const row = requisitionById(id, { includeDeleted: true });
+  if (!row) throw new Error('Created requisition could not be loaded.');
+  const requisition = publicRequisition(row);
+  return {
+    id: requisition.id,
+    requisitionNumber: requisition.requisitionNumber,
+    vendorName: requisition.vendorSummary || requisition.vendorName || 'Unknown Vendor',
+    lineCount: requisition.lineCount,
+    status: requisition.status,
+    pdfUrl: `/api/requisitions/${requisition.id}/pdf`,
+  };
+}
+function createGroupedRequisitions(req: AuthRequest, actor: User, input: Record<string, unknown>, options: { requirePreviewFields?: boolean; status: RequisitionStatus; syncParts: boolean }) {
+  const parsedItems = parseRequisitionItemsInput(input);
+  const allowDuplicate = input.allowDuplicate === true;
+  const header = parseRequisitionHeaderInput(input, actor, { requirePreviewFields: options.requirePreviewFields });
+  const timestamp = now();
+  const createdIds: number[] = [];
+  const lineInputs = prepareRequisitionLines(parsedItems, allowDuplicate);
+  const vendorGroups = groupedRequisitionLines(lineInputs);
+
+  for (const groupLines of vendorGroups.values()) {
+    const firstLine = groupLines[0];
+    const totalQuantity = groupLines.reduce((sum,item)=>sum + item.quantityRequested, 0);
+    const headerVendor = requisitionVendorName(firstLine.part.vendor_name);
+    const headerLocation = summaryText(groupLines.map(item=>item.part.location_name ?? ''), firstLine.part.location_name ?? '');
+    const requisitionNumber = requisitionNumberForTimestamp(timestamp);
+    const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,po_initiator,requisitioned_by_name,tax_exempt,confirmed_with,material_cert,ship_via,fob,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+      requisitionNumber,
+      firstLine.part.id,
+      firstLine.part.part_number,
+      firstLine.part.description,
+      headerVendor,
+      headerLocation,
+      totalQuantity,
+      firstLine.unitCost,
+      options.status,
+      actor.id,
+      actor.full_name,
+      header.poInitiator,
+      header.requisitionedByName,
+      header.taxExempt,
+      header.confirmedWith,
+      header.materialCert,
+      header.shipVia,
+      header.fob,
+      timestamp,
+      header.workOrderNumber,
+      header.notes,
+      timestamp,
+      timestamp,
+    ]);
+    const requisitionId = Number(result.lastInsertRowid);
+    createdIds.push(requisitionId);
+    for (const item of groupLines) {
+      run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+        requisitionId,
+        item.part.id,
+        item.part.part_number,
+        item.part.description,
+        item.part.vendor_name ?? '',
+        item.part.location_name ?? '',
+        item.quantityRequested,
+        item.unitCost,
+        item.unitOfMeasure || 'EA',
+        item.itemNumber,
+        item.notes,
+        timestamp,
+        timestamp,
+      ]);
+    }
+    const auditDetails = {requisitionNumber,vendorName:headerVendor,status:options.status,lineCount:groupLines.length,partIds:groupLines.map(item=>item.part.id),totalQuantity};
+    const createAction = options.status === 'Draft'
+      ? (vendorGroups.size > 1 ? 'vendor-grouped requisition preview create' : 'requisition preview create')
+      : (vendorGroups.size > 1 ? 'vendor-grouped requisition create' : lineInputs.length > 1 ? 'requisition create from selection' : 'requisition create');
+    inventoryAudit(req,createAction,'requisition',requisitionId,auditDetails);
+    audit(req,createAction,'requisition',requisitionId,auditDetails);
+  }
+
+  if (options.syncParts) syncRequisitionPartFlags(lineInputs.map(item=>item.part.id),timestamp);
+  if (lineInputs.length > 1) {
+    const overallDetails = {requisitionIds:createdIds,vendorCount:vendorGroups.size,lineCount:lineInputs.length,partIds:lineInputs.map(item=>item.part.id),status:options.status};
+    const action = options.status === 'Draft' ? 'requisition preview from selection' : 'requisition create from selection';
+    inventoryAudit(req,action,'requisition','selection',overallDetails);
+    audit(req,action,'requisition','selection',overallDetails);
+  }
+  return createdIds.map(publicCreatedRequisition);
+}
+function requisitionList(statusFilter = '', includeDeleted = false, includeDrafts = false) {
   const params: SqlParam[] = [];
   let where = includeDeleted ? '1=1' : 'deleted=0';
   const cleanStatus = statusFilter.trim();
@@ -2212,6 +2600,8 @@ function requisitionList(statusFilter = '', includeDeleted = false) {
     if (!requisitionStatuses.includes(cleanStatus as RequisitionStatus)) throw new Error('Unsupported requisition status filter.');
     where += ' AND status=?';
     params.push(cleanStatus);
+  } else if (!includeDrafts) {
+    where += " AND status<>'Draft'";
   }
   return all<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${where} ORDER BY CASE status WHEN 'Requested' THEN 1 WHEN 'Ordered' THEN 2 WHEN 'Received' THEN 3 ELSE 4 END, requested_at DESC, id DESC`, params).map(row=>publicRequisition(row, { includeDeletedLines: includeDeleted }));
 }
@@ -2382,7 +2772,8 @@ app.get('/api/requisitions/summary', requireAuth, requirePermission('inventory.v
 app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
   try {
     const includeDeleted = canDeleteRequisitions(req.user!) && String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
-    res.json({ok:true,requisitions:requisitionList(queryText(req.query.status), includeDeleted),summary:requisitionSummary()});
+    const includeDrafts = canDeleteRequisitions(req.user!) && String(req.query.includeDrafts ?? '').toLowerCase() === 'true';
+    res.json({ok:true,requisitions:requisitionList(queryText(req.query.status), includeDeleted, includeDrafts),summary:requisitionSummary()});
   } catch (error) {
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
@@ -2422,121 +2813,74 @@ app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'),
   const operation = 'requisition create';
   try {
     const input = isRecord(req.body) ? req.body : {};
-    const rawItems = Array.isArray(input.items) && input.items.length ? input.items : [input];
-    const parsedItems = rawItems.map(rawItem => {
-      const item = isRecord(rawItem) ? rawItem : {};
-      const partId = Number(item.inventoryPartId ?? item.partId ?? item.id);
-      if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
-      const quantityRequested = item.quantityRequested === undefined && item.quantity === undefined ? 1 : validateQuantityRequested(item.quantityRequested ?? item.quantity);
-      return {
-        partId,
-        quantityRequested,
-        notes: textField(item, ['notes','note']).slice(0, 500),
-        unitOfMeasure: (textField(item, ['unitOfMeasure','unit','uom']) || 'EA').slice(0, 32),
-        itemNumber: textField(item, ['itemNumber','supplierPartNumber','supplierPartNo']).slice(0, 160),
-      };
-    });
-    if (!parsedItems.length) throw new Error('At least one requisition item is required.');
-    const allowDuplicate = input.allowDuplicate === true;
-    const timestamp = now();
-    const createdIds: number[] = [];
+    let requisitions: ReturnType<typeof publicCreatedRequisition>[] = [];
     db.exec('BEGIN IMMEDIATE');
     try {
-      const lineInputs = parsedItems.map(item => {
-        const part = nativePartRowById(item.partId);
-        if (!part) throw new Error('Native inventory part not found.');
-        if (activeRequisitionCountForPart(item.partId) > 0 && !allowDuplicate) throw new Error('Active requisition already exists for one or more selected parts.');
-        const unitCost = Number(part.unit_cost ?? 0);
-        return {
-          ...item,
-          part,
-          unitCost: Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0,
-          itemNumber: item.itemNumber || part.supplier_part_number || part.part_number,
-        };
-      });
-      const vendorGroups = new Map<string, typeof lineInputs>();
-      for (const item of lineInputs) {
-        const key = requisitionVendorKey(item.part.vendor_name);
-        const group = vendorGroups.get(key) ?? [];
-        group.push(item);
-        vendorGroups.set(key, group);
-      }
-      const workOrderNumber = textField(input, ['workOrderNumber','work_order_number','workOrder']);
-      const headerNotes = textField(input, ['notes','note']);
-      for (const groupLines of vendorGroups.values()) {
-        const firstLine = groupLines[0];
-        const totalQuantity = groupLines.reduce((sum,item)=>sum + item.quantityRequested, 0);
-        const headerVendor = requisitionVendorName(firstLine.part.vendor_name);
-        const headerLocation = summaryText(groupLines.map(item=>item.part.location_name ?? ''), firstLine.part.location_name ?? '');
-        const requisitionNumber = requisitionNumberForTimestamp(timestamp);
-        const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
-          requisitionNumber,
-          firstLine.part.id,
-          firstLine.part.part_number,
-          firstLine.part.description,
-          headerVendor,
-          headerLocation,
-          totalQuantity,
-          firstLine.unitCost,
-          'Requested',
-          actor.id,
-          actor.full_name,
-          timestamp,
-          workOrderNumber,
-          headerNotes,
-          timestamp,
-          timestamp,
-        ]);
-        const requisitionId = Number(result.lastInsertRowid);
-        createdIds.push(requisitionId);
-        for (const item of groupLines) {
-          run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
-            requisitionId,
-            item.part.id,
-            item.part.part_number,
-            item.part.description,
-            item.part.vendor_name ?? '',
-            item.part.location_name ?? '',
-            item.quantityRequested,
-            item.unitCost,
-            item.unitOfMeasure || 'EA',
-            item.itemNumber,
-            item.notes,
-            timestamp,
-            timestamp,
-          ]);
-        }
-        const auditDetails = {requisitionNumber,vendorName:headerVendor,lineCount:groupLines.length,partIds:groupLines.map(item=>item.part.id),totalQuantity};
-        const createAction = vendorGroups.size > 1 ? 'vendor-grouped requisition create' : lineInputs.length > 1 ? 'requisition create from selection' : 'requisition create';
-        inventoryAudit(req,createAction,'requisition',requisitionId,auditDetails);
-        audit(req,createAction,'requisition',requisitionId,auditDetails);
-      }
-      syncRequisitionPartFlags(lineInputs.map(item=>item.part.id),timestamp);
-      if (lineInputs.length > 1) {
-        const overallDetails = {requisitionIds:createdIds,vendorCount:vendorGroups.size,lineCount:lineInputs.length,partIds:lineInputs.map(item=>item.part.id)};
-        inventoryAudit(req,'requisition create from selection','requisition','selection',overallDetails);
-        audit(req,'requisition create from selection','requisition','selection',overallDetails);
-      }
+      requisitions = createGroupedRequisitions(req, actor, input, { status: 'Requested', syncParts: true });
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
     }
-    const requisitions = createdIds.map(id => {
-      const row = requisitionById(id);
-      if (!row) throw new Error('Created requisition could not be loaded.');
-      const requisition = publicRequisition(row);
-      return {
-        id: requisition.id,
-        requisitionNumber: requisition.requisitionNumber,
-        vendorName: requisition.vendorSummary || requisition.vendorName || 'Unknown Vendor',
-        lineCount: requisition.lineCount,
-        pdfUrl: `/api/requisitions/${requisition.id}/pdf`,
-      };
-    });
     res.status(201).json({ok:true,requisition:requisitions[0],requisitions,summary:requisitionSummary()});
   } catch (error) {
     sendRequisitionError(req,res,operation,'',error);
+  }
+});
+
+app.post('/api/requisitions/preview', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const operation = 'requisition preview create';
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    let requisitions: ReturnType<typeof publicCreatedRequisition>[] = [];
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      requisitions = createGroupedRequisitions(req, actor, input, { requirePreviewFields: true, status: 'Draft', syncParts: false });
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.status(201).json({ok:true,requisition:requisitions[0],requisitions,summary:requisitionSummary()});
+  } catch (error) {
+    sendRequisitionError(req,res,operation,'',error);
+  }
+});
+
+app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const operation = 'requisition preview pass';
+  const requisitionId = Number(req.params.id);
+  try {
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = requisitionById(requisitionId);
+      if (!existing) throw new Error('Requisition not found.');
+      if (existing.status !== 'Draft') throw new Error('Only Draft requisitions can be passed.');
+      const partIds = requisitionPartIds(existing);
+      run('UPDATE inventory_requisitions SET status=?, requested_by_user_id=?, requested_by_name=?, requested_at=?, updated_at=? WHERE id=?', [
+        'Requested',
+        actor.id,
+        actor.full_name,
+        timestamp,
+        timestamp,
+        requisitionId,
+      ]);
+      syncRequisitionPartFlags(partIds,timestamp);
+      inventoryAudit(req,'requisition preview passed','requisition',requisitionId,{previousStatus:existing.status,nextStatus:'Requested',partIds});
+      audit(req,'requisition preview passed','requisition',requisitionId,{previousStatus:existing.status,nextStatus:'Requested',partIds});
+      inventoryAudit(req,'requisition active create','requisition',requisitionId,{requisitionNumber:existing.requisition_number,partIds});
+      audit(req,'requisition active create','requisition',requisitionId,{requisitionNumber:existing.requisition_number,partIds});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,requisition:publicCreatedRequisition(requisitionId),summary:requisitionSummary()});
+  } catch (error) {
+    sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
   }
 });
 
@@ -2612,6 +2956,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
     try {
       const existing = requisitionById(requisitionId);
       if (!existing) throw new Error('Requisition not found.');
+      if (existing.status === 'Draft') throw new Error('Draft requisitions must be passed before status changes.');
       previousStatus = existing.status;
       const partIds = requisitionPartIds(existing);
       if (nextStatus === 'Ordered') {

@@ -179,7 +179,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-table-wrap th:nth-child(5), .inventory-table-wrap td:nth-child(5) { width: 68px; }
 .inventory-table-wrap th:nth-child(6), .inventory-table-wrap td:nth-child(6) { width: 92px; }
 .inventory-table-wrap th:nth-child(7), .inventory-table-wrap td:nth-child(7) { width: 150px; }
-.inventory-table-wrap th:nth-child(8), .inventory-table-wrap td:nth-child(8) { width: 140px; }
+.inventory-table-wrap th:nth-child(8), .inventory-table-wrap td:nth-child(8) { width: 112px; }
 .inventory-table-wrap td:nth-child(6), .inventory-table-wrap td:nth-child(7) { white-space: nowrap; }
 .sort-header { display: inline-flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; padding: 0; border: 0; color: #44d7ff; background: transparent; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 900; text-align: left; text-transform: uppercase; }
 .sort-header:hover, .sort-header.active { color: #bff3ff; }
@@ -198,7 +198,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-row-selected td { background: rgba(68, 215, 255, 0.075); box-shadow: inset 3px 0 0 rgba(68, 215, 255, 0.74); }
 .muted-cell { display: inline !important; margin: 0 !important; color: #7fa9bb !important; font-size: .82rem !important; }
 .empty-table-cell { color: #a9c5d6; text-align: center; padding: 24px !important; }
-.inventory-row-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; align-items: stretch; }
+.inventory-row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-items: stretch; }
 .inventory-row-actions .compact-button { width: 100%; min-height: 26px; padding: 0 6px; border-radius: 8px; font-size: .68rem; white-space: nowrap; line-height: 1.1; }
 .inventory-row-actions .compact-button.selected { color: #001523; border-color: rgba(68, 215, 255, 0.9); background: linear-gradient(135deg, #44d7ff, #3c7dff); }
 .row-requisition-note { grid-column: 1 / -1; display: inline-flex !important; justify-self: start; margin: -1px 0 0 !important; color: #bfe9ff !important; font-size: .64rem !important; font-weight: 900 !important; line-height: 1.1; text-transform: uppercase; }

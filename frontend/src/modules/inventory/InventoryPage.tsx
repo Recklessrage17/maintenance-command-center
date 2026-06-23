@@ -117,8 +117,19 @@ type RequisitionLineForm = {
   notes: string;
 };
 
+type YesNoChoice = 'No' | 'Yes';
+type RequiredYesNoChoice = '' | YesNoChoice;
+type FobChoice = 'Origin' | 'Destination';
+
 type RequisitionHeaderForm = {
+  poInitiator: string;
+  requisitionedByName: string;
+  taxExempt: RequiredYesNoChoice;
   workOrderNumber: string;
+  confirmedWith: string;
+  materialCert: YesNoChoice;
+  shipVia: string;
+  fob: FobChoice;
   notes: string;
 };
 
@@ -148,10 +159,19 @@ const blankForm: PartForm = {
   supplierPartNumber: '',
 };
 
-const blankRequisitionForm: RequisitionHeaderForm = {
-  workOrderNumber: '',
-  notes: '',
-};
+function blankRequisitionForm(userFullName = ''): RequisitionHeaderForm {
+  return {
+    poInitiator: '',
+    requisitionedByName: userFullName,
+    taxExempt: '',
+    workOrderNumber: '',
+    confirmedWith: '',
+    materialCert: 'No',
+    shipVia: '',
+    fob: 'Destination',
+    notes: '',
+  };
+}
 
 function todayInputDate() { return new Date().toISOString().slice(0,10); }
 
@@ -374,7 +394,7 @@ function payloadFromForm(form: PartForm) {
   };
 }
 
-export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions }: { userRole: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
+export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [status,setStatus]=useState<Mit3Status|null>(null);
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [importSummary,setImportSummary]=useState<ImportSummary|null>(null);
@@ -401,7 +421,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
   const [fileImportSummary,setFileImportSummary]=useState<NativeFileImportSummary|null>(null);
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
   const [requisitionLines,setRequisitionLines]=useState<RequisitionLineForm[]>([]);
-  const [requisitionForm,setRequisitionForm]=useState(blankRequisitionForm);
+  const [requisitionForm,setRequisitionForm]=useState<RequisitionHeaderForm>(()=>blankRequisitionForm(userFullName));
   const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
   const [previewRequisitions,setPreviewRequisitions]=useState<CreatedRequisition[]>([]);
   const [activePreviewId,setActivePreviewId]=useState<number|null>(null);
@@ -414,6 +434,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
   const [reviewForm,setReviewForm]=useState<VendorRequisitionForm>(blankVendorRequisitionForm());
   const [requisitionError,setRequisitionError]=useState('');
   const [requisitionSaving,setRequisitionSaving]=useState(false);
+  const [passSaving,setPassSaving]=useState(false);
 
   const canWrite = writeRoles.has(userRole);
   const canImport = importRoles.has(userRole);
@@ -766,7 +787,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
     const uniqueParts = [...new Map(nextParts.map(part=>[part.id,part])).values()];
     if (!uniqueParts.length) return;
     setRequisitionLines(uniqueParts.map(part=>({part,quantityRequested:'1',notes:''})));
-    setRequisitionForm(blankRequisitionForm);
+    setRequisitionForm(blankRequisitionForm(userFullName));
     setRequisitionError('');
     setNotice(null);
   }
@@ -774,7 +795,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
   function closeRequisition(force = false){
     if (requisitionSaving && !force) return;
     setRequisitionLines([]);
-    setRequisitionForm(blankRequisitionForm);
+    setRequisitionForm(blankRequisitionForm(userFullName));
     setRequisitionError('');
   }
 
@@ -788,7 +809,8 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
     setPreviewError('');
   }
 
-  function closePreview() {
+  function closePreview(force = false) {
+    if (passSaving && !force) return;
     setPreviewRequisitions([]);
     setActivePreviewId(null);
     setPreviewError('');
@@ -810,7 +832,29 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
     frame?.contentWindow?.print();
   }
 
-  async function createRequisition(forceDuplicate = false){
+  async function passPreviewRequisitions() {
+    if (!writeEnabled || !previewRequisitions.length || passSaving) return;
+    setPassSaving(true);
+    setPreviewError('');
+    try {
+      const passed: CreatedRequisition[] = [];
+      for (const requisition of previewRequisitions) {
+        const result = await api<NativeRequisitionResponse>(`/api/requisitions/${requisition.id}/pass`, {method: 'POST'});
+        if (result.requisition) passed.push(result.requisition);
+      }
+      if (!passed.length) throw new Error('No requisitions were passed.');
+      closePreview(true);
+      setSelectedPartIds(new Set());
+      setNotice({kind:'success',text:passed.length === 1 ? `Active requisition ${passed[0].requisitionNumber} created.` : `Created ${passed.length} active requisitions.`});
+      await refresh();
+    } catch (err) {
+      setPreviewError((err as Error).message);
+    } finally {
+      setPassSaving(false);
+    }
+  }
+
+  async function generateRequisitionPreview(forceDuplicate = false){
     if (!writeEnabled || !requisitionLines.length) return;
     for (const line of requisitionLines) {
       const quantity = Number(line.quantityRequested);
@@ -819,14 +863,35 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
         return;
       }
     }
+    if (!requisitionForm.poInitiator.trim()) {
+      setRequisitionError('P.O. Initiator is required.');
+      return;
+    }
+    if (!requisitionForm.requisitionedByName.trim()) {
+      setRequisitionError('Requisitioned By is required.');
+      return;
+    }
+    if (!requisitionForm.taxExempt) {
+      setRequisitionError('Tax Exempt is required.');
+      return;
+    }
     const hasActiveRequisition = requisitionLines.some(line=>line.part.hasActiveRequisitionRecord);
-    if (hasActiveRequisition && !forceDuplicate && !window.confirm('Active requisition already exists for one or more selected parts. Create another one?')) return;
+    if (hasActiveRequisition && !forceDuplicate && !window.confirm('Active requisition already exists for one or more selected parts. Generate another preview?')) return;
     setRequisitionSaving(true);
     setRequisitionError('');
     try {
-      const result = await api<NativeRequisitionResponse>('/api/requisitions', {
+      const result = await api<NativeRequisitionResponse>('/api/requisitions/preview', {
         method: 'POST',
         body: JSON.stringify({
+          poInitiator: requisitionForm.poInitiator.trim(),
+          requisitionedByName: requisitionForm.requisitionedByName.trim(),
+          taxExempt: requisitionForm.taxExempt,
+          workOrderNumber: requisitionForm.workOrderNumber.trim(),
+          confirmedWith: requisitionForm.confirmedWith.trim(),
+          materialCert: requisitionForm.materialCert,
+          shipVia: requisitionForm.shipVia.trim(),
+          fob: requisitionForm.fob,
+          notes: requisitionForm.notes.trim(),
           items: requisitionLines.map(line=>({
             inventoryPartId: Number(line.part.id),
             quantityRequested: Number(line.quantityRequested),
@@ -834,28 +899,20 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
             unitOfMeasure: 'EA',
             itemNumber: line.part.supplierPartNumber || line.part.partNumber,
           })),
-          workOrderNumber: requisitionForm.workOrderNumber.trim(),
-          notes: requisitionForm.notes.trim(),
           allowDuplicate: forceDuplicate || hasActiveRequisition,
         }),
       });
       const created = result.requisitions?.length ? result.requisitions : result.requisition ? [result.requisition] : [];
-      if (!created.length) throw new Error('No requisitions were created.');
+      if (!created.length) throw new Error('No requisition previews were created.');
       setRequisitionLines([]);
-      setRequisitionForm(blankRequisitionForm);
-      setSelectedPartIds(current=>{
-        const next = new Set(current);
-        requisitionLines.forEach(line=>next.delete(line.part.id));
-        return next;
-      });
+      setRequisitionForm(blankRequisitionForm(userFullName));
       openPreview(created);
-      setNotice({kind:'success',text:created.length === 1 ? `Created ${created[0].requisitionNumber}.` : `Created ${created.length} requisitions: ${created.map(requisition=>requisition.requisitionNumber).join(', ')}.`});
-      await refresh();
+      setNotice({kind:'success',text:created.length === 1 ? `Preview ready for ${created[0].requisitionNumber}.` : `Preview ready for ${created.length} requisitions.`});
     } catch (err) {
       const message = (err as Error).message;
-      if (/Active requisition already exists/i.test(message) && window.confirm('Active requisition already exists for one or more selected parts. Create another one?')) {
+      if (/Active requisition already exists/i.test(message) && window.confirm('Active requisition already exists for one or more selected parts. Generate another preview?')) {
         setRequisitionSaving(false);
-        await createRequisition(true);
+        await generateRequisitionPreview(true);
         return;
       }
       setRequisitionError(message);
@@ -1070,7 +1127,6 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
                         <div className="inventory-row-actions">
                           <button className={selectedPartIds.has(part.id) ? 'secondary-button compact-button selected' : 'secondary-button compact-button'} type="button" onClick={()=>togglePartSelection(part.id)} disabled={!writeEnabled}>{selectedPartIds.has(part.id) ? 'Selected' : 'Select'}</button>
                           <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
-                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Req</button>
                           {part.hasActiveRequisitionRecord&&<span className="row-requisition-note" title={part.activeRequisitionNumber || undefined}>Active req</span>}
                         </div>
                       </td>
@@ -1207,7 +1263,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
 
       {requisitionLines.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeRequisition(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void createRequisition(); }}>
+          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void generateRequisitionPreview(); }}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Preview Requisition</p>
@@ -1238,8 +1294,46 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
             </div>
             <div className="inventory-form-grid">
               <label className="form-field">
+                <span>P.O. Initiator *</span>
+                <input value={requisitionForm.poInitiator} onChange={event=>setRequisitionForm({...requisitionForm,poInitiator:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Requisitioned By *</span>
+                <input value={requisitionForm.requisitionedByName} onChange={event=>setRequisitionForm({...requisitionForm,requisitionedByName:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Tax Exempt *</span>
+                <select value={requisitionForm.taxExempt} onChange={event=>setRequisitionForm({...requisitionForm,taxExempt:event.target.value as RequiredYesNoChoice})}>
+                  <option value="">Select</option>
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </label>
+              <label className="form-field">
                 <span>WO#</span>
                 <input value={requisitionForm.workOrderNumber} onChange={event=>setRequisitionForm({...requisitionForm,workOrderNumber:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Confirmed With</span>
+                <input value={requisitionForm.confirmedWith} onChange={event=>setRequisitionForm({...requisitionForm,confirmedWith:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Ship Via</span>
+                <input value={requisitionForm.shipVia} onChange={event=>setRequisitionForm({...requisitionForm,shipVia:event.target.value})} />
+              </label>
+              <label className="form-field">
+                <span>Material Cert</span>
+                <select value={requisitionForm.materialCert} onChange={event=>setRequisitionForm({...requisitionForm,materialCert:event.target.value as YesNoChoice})}>
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </label>
+              <label className="form-field">
+                <span>FOB</span>
+                <select value={requisitionForm.fob} onChange={event=>setRequisitionForm({...requisitionForm,fob:event.target.value as FobChoice})}>
+                  <option value="Destination">Destination</option>
+                  <option value="Origin">Origin</option>
+                </select>
               </label>
               <label className="form-field inventory-form-wide">
                 <span>Notes</span>
@@ -1250,7 +1344,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
             {requisitionError&&<p className="form-message error">{requisitionError}</p>}
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeRequisition()}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Preview Requisition'}</button>
+              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Generating...':'Generate Preview'}</button>
             </div>
           </form>
         </div>
@@ -1264,7 +1358,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
                 <p className="eyebrow">{previewRequisitions.length === 1 ? 'Requisition preview' : `${previewRequisitions.length} requisition previews`}</p>
                 <h3 id="inventory-requisition-preview-title">{activePreviewRequisition?.requisitionNumber ?? 'Requisition PDF'}</h3>
               </div>
-              <button className="link-button compact-button" type="button" onClick={closePreview}>Close</button>
+              <button className="link-button compact-button" type="button" onClick={()=>closePreview()}>Close</button>
             </div>
             {previewRequisitions.length>1&&(
               <div className="requisition-preview-tabs" role="tablist" aria-label="Created requisitions">
@@ -1280,10 +1374,11 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
             {previewError&&<p className="form-message error">{previewError}</p>}
             {previewUrl&&<iframe id="inventory-requisition-preview-frame" className="requisition-preview-frame" title={`Preview ${activePreviewRequisition?.requisitionNumber ?? 'requisition'}`} src={previewUrl} />}
             <div className="modal-actions">
+              <button className="primary-button" type="button" onClick={()=>void passPreviewRequisitions()} disabled={passSaving||!previewRequisitions.length}>{passSaving?'Passing...':'Pass / Create Active Req'}</button>
               <button className="secondary-button" type="button" onClick={printPreviewPdf} disabled={!previewUrl}>Print</button>
-              <button className="primary-button" type="button" onClick={()=>void downloadPreviewPdf()} disabled={!activePreviewRequisition}>Download PDF</button>
+              <button className="secondary-button" type="button" onClick={()=>void downloadPreviewPdf()} disabled={!activePreviewRequisition}>Download PDF</button>
               <button className="secondary-button" type="button" onClick={onOpenRequisitions}>View Requisitions</button>
-              <button className="link-button" type="button" onClick={closePreview}>Close</button>
+              <button className="link-button" type="button" onClick={()=>closePreview()}>Close</button>
             </div>
           </div>
         </div>
