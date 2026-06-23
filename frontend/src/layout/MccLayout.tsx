@@ -16,15 +16,39 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  const navItems=baseNav.filter(i=>!i.management||canManageUsers);
  const [launcherOpen,setLauncherOpen]=useState(false);
  const launcherRef=useRef<HTMLDivElement>(null);
+ const closeTimerRef=useRef<number>();
  const inventoryFocus=activeSection==='inventory';
+
+ function clearLauncherClose() {
+   if(closeTimerRef.current){
+     window.clearTimeout(closeTimerRef.current);
+     closeTimerRef.current=undefined;
+   }
+ }
+
+ function openLauncher() {
+   clearLauncherClose();
+   setLauncherOpen(true);
+ }
+
+ function scheduleLauncherClose() {
+   clearLauncherClose();
+   closeTimerRef.current=window.setTimeout(()=>setLauncherOpen(false),420);
+ }
 
  useEffect(()=>{
    if(!launcherOpen) return;
    function onKeyDown(event: KeyboardEvent) {
-     if(event.key==='Escape') setLauncherOpen(false);
+     if(event.key==='Escape') {
+       clearLauncherClose();
+       setLauncherOpen(false);
+     }
    }
    function onPointerDown(event: PointerEvent) {
-     if(launcherRef.current&&!launcherRef.current.contains(event.target as Node)) setLauncherOpen(false);
+     if(launcherRef.current&&!launcherRef.current.contains(event.target as Node)) {
+       clearLauncherClose();
+       setLauncherOpen(false);
+     }
    }
    document.addEventListener('keydown',onKeyDown);
    document.addEventListener('pointerdown',onPointerDown);
@@ -34,25 +58,28 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
    };
  },[launcherOpen]);
 
+ useEffect(()=>()=>clearLauncherClose(),[]);
+
  function selectSection(section:MccSection) {
+   clearLauncherClose();
    onSectionChange(section);
    setLauncherOpen(false);
  }
 
  return (
    <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell':'mcc-shell command-shell'}>
-     <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef} onMouseEnter={()=>setLauncherOpen(true)} onMouseLeave={()=>setLauncherOpen(false)}>
+     <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef} onMouseEnter={openLauncher} onMouseLeave={scheduleLauncherClose}>
        <div className="mcc-brand command-brand" aria-label="JBT USA">
          <div className="mcc-brand-mark">
            <strong><span className="mcc-brand-jbt">JBT</span><span className="mcc-brand-usa">USA</span></strong>
            <span>Maintenance Command Center</span>
          </div>
        </div>
-       <button className="command-launcher-button" type="button" aria-haspopup="menu" aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onClick={()=>setLauncherOpen(current=>!current)}>
-         <span className="launcher-orb" aria-hidden="true">M</span>
+       <button className="command-launcher-button" type="button" aria-label="Open command menu" aria-haspopup="menu" aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onMouseEnter={openLauncher} onClick={()=>{clearLauncherClose(); setLauncherOpen(current=>!current);}}>
+         <span className="launcher-gear" aria-hidden="true">⚙</span>
          <span>Menu</span>
        </button>
-       <nav className="command-menu" id="command-launcher-menu" aria-label="MCC navigation">
+       <nav className="command-menu" id="command-launcher-menu" aria-label="MCC navigation" onMouseEnter={openLauncher} onMouseLeave={scheduleLauncherClose}>
          <div className="command-menu-title">
            <span>Command modules</span>
            <strong>Navigate MCC</strong>
