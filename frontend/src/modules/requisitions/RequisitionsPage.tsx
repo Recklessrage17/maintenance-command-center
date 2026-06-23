@@ -102,6 +102,19 @@ async function downloadFile(path:string, fallbackFileName:string) {
   URL.revokeObjectURL(url);
 }
 
+async function pdfObjectUrl(path:string) {
+  const res = await fetch(path,{credentials:'include'});
+  if (!res.ok) {
+    const data = await res.json().catch(()=>({}));
+    throw new Error(data.error || 'PDF preview failed.');
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
+function requisitionPdfPath(requisition: Requisition, preview = false) {
+  return `/api/requisitions/${requisition.id}/pdf${preview ? '?preview=true' : ''}`;
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return '-';
   const date = new Date(value);
@@ -154,6 +167,10 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   const [editError,setEditError]=useState('');
   const [saving,setSaving]=useState(false);
   const [showDeleted,setShowDeleted]=useState(false);
+  const [previewing,setPreviewing]=useState<Requisition|null>(null);
+  const [previewUrl,setPreviewUrl]=useState('');
+  const [previewLoading,setPreviewLoading]=useState(false);
+  const [previewError,setPreviewError]=useState('');
 
   const canWrite = writeRoles.has(userRole);
   const canDelete = deleteRoles.has(userRole);
@@ -178,6 +195,38 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   }
 
   useEffect(()=>{ void loadRequisitions(); },[]);
+  useEffect(()=>{
+    if (!previewing) {
+      setPreviewUrl('');
+      setPreviewError('');
+      setPreviewLoading(false);
+      return;
+    }
+    let disposed = false;
+    let objectUrl = '';
+    setPreviewUrl('');
+    setPreviewError('');
+    setPreviewLoading(true);
+    pdfObjectUrl(requisitionPdfPath(previewing, true))
+      .then(url=>{
+        if (disposed) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setPreviewUrl(url);
+      })
+      .catch(error=>{
+        if (!disposed) setPreviewError((error as Error).message);
+      })
+      .finally(()=>{
+        if (!disposed) setPreviewLoading(false);
+      });
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  },[previewing]);
 
   const filteredRequisitions = useMemo(()=>{
     const needle = search.trim().toLowerCase();
@@ -213,13 +262,30 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
     setBusyId(requisition.id);
     setNotice(null);
     try {
-      await downloadFile(`/api/requisitions/${requisition.id}/pdf`, `MCC_Requisition_${requisition.requisitionNumber}.pdf`);
+      await downloadFile(requisitionPdfPath(requisition), `MCC_Requisition_${requisition.requisitionNumber}.pdf`);
       setNotice({kind:'success',text:`${requisition.requisitionNumber} PDF downloaded.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
       setBusyId(null);
     }
+  }
+
+  function openPreview(requisition: Requisition) {
+    setPreviewing(requisition);
+    setPreviewError('');
+    setNotice(null);
+  }
+
+  function closePreview() {
+    setPreviewing(null);
+    setPreviewError('');
+  }
+
+  function printPreview() {
+    const frame = document.getElementById('requisition-page-preview-frame') as HTMLIFrameElement | null;
+    frame?.contentWindow?.focus();
+    frame?.contentWindow?.print();
   }
 
   async function updateStatus(requisition: Requisition, status: Exclude<RequisitionStatus,'Requested'>) {
@@ -374,6 +440,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
                   <td>{formatDateTime(requisition.requestedAt)}</td>
                   <td>
                     <div className="requisition-row-actions">
+                      <button className="secondary-button compact-button" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>
                       <button className="secondary-button compact-button" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
                       {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
                       {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id}>Mark Received</button>}
@@ -421,6 +488,32 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
               <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':'Save Changes'}</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {previewing&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closePreview(); }}>
+          <div className="mcc-card requisition-preview-modal" role="dialog" aria-modal="true" aria-labelledby="requisition-page-preview-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">PDF preview</p>
+                <h3 id="requisition-page-preview-title">{previewing.requisitionNumber}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={closePreview}>Close</button>
+            </div>
+            <div className="requisition-preview-summary">
+              <strong>{previewing.vendorSummary || previewing.vendorName || 'Unknown Vendor'}</strong>
+              <span>{requisitionLineCount(previewing)} line{requisitionLineCount(previewing) === 1 ? '' : 's'} / {previewing.workOrderNumber || 'No WO#'}</span>
+            </div>
+            {previewLoading&&<div className="requisition-preview-placeholder">Loading PDF preview...</div>}
+            {previewError&&<p className="form-message error">{previewError}</p>}
+            {previewUrl&&<iframe id="requisition-page-preview-frame" className="requisition-preview-frame" title={`Preview ${previewing.requisitionNumber}`} src={previewUrl} />}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={printPreview} disabled={!previewUrl}>Print</button>
+              <button className="primary-button" type="button" onClick={()=>void downloadPdf(previewing)} disabled={busyId===previewing.id}>Download PDF</button>
+              <button className="link-button" type="button" onClick={closePreview}>Close</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

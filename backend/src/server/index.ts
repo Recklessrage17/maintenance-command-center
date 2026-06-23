@@ -1013,6 +1013,13 @@ function summaryText(values: string[], fallback = '') {
   if (unique.length === 1) return unique[0];
   return `Multiple (${unique.length})`;
 }
+function requisitionVendorKey(value: string | null | undefined) {
+  const clean = cleanPdfText(value);
+  return clean ? clean.toLowerCase().replace(/\s+/g, ' ') : 'unknown-vendor';
+}
+function requisitionVendorName(value: string | null | undefined) {
+  return cleanPdfText(value) || 'Unknown Vendor';
+}
 function uniquePositiveIds(ids: Array<number | null | undefined>) {
   return [...new Set(ids.filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0))];
 }
@@ -1423,6 +1430,15 @@ function drawTextInBox(
     page.drawText(line, { x, y: yFromTop(options.pageHeight, startTopY + index * lineHeight, size), size, font: options.font, color: pdfBlack });
   });
 }
+function clearPdfBox(page: PDFPage, box: PdfBox, pageHeight: number, insetX = 1, insetY = 1) {
+  page.drawRectangle({
+    x: box.x + insetX,
+    y: pageHeight - box.topY - box.height + insetY,
+    width: Math.max(1, box.width - insetX * 2),
+    height: Math.max(1, box.height - insetY * 2),
+    color: rgb(1, 1, 1),
+  });
+}
 function drawCurrencyInBox(
   page: PDFPage,
   value: number,
@@ -1430,11 +1446,14 @@ function drawCurrencyInBox(
   options: { font: PDFFont; pageHeight: number; paddingX?: number; size?: number }
 ) {
   const amount = Number.isFinite(value) ? value : 0;
+  // MIT3 parity: the official JBT templates include placeholder prices ($0.00 / $ -).
+  // Clear the cell interior first so MCC draws exactly one fitted price value.
+  clearPdfBox(page, box, options.pageHeight);
   drawTextInBox(page, money(amount), box, {
     align: 'right',
     font: options.font,
     maxLines: 1,
-    minSize: 5,
+    minSize: 4.2,
     paddingX: options.paddingX ?? 4,
     pageHeight: options.pageHeight,
     size: options.size ?? 6.8,
@@ -1643,7 +1662,9 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
   const lines = requisitionLinesForRow(requisition, { includeDeleted: Boolean(requisition.deleted) });
   const vendors = uniqueTextValues(lines.map(line=>line.vendor_name));
   const locations = uniqueTextValues(lines.map(line=>line.location_name));
-  const vendorName = vendors.length === 1 ? vendors[0] : vendors.length > 1 ? 'Multiple Vendors' : (requisition.vendor_name || 'Unknown Vendor');
+  const vendorName = requisitionVendorName(
+    requisition.vendor_name && !/^multiple\b/i.test(requisition.vendor_name) ? requisition.vendor_name : vendors[0]
+  );
   const locationSummary = locations.length === 1 ? locations[0] : locations.length > 1 ? `Multiple locations (${locations.length})` : requisition.location_name;
   const lifecycleNotes = [
     `Status: ${requisition.status}`,
@@ -1904,9 +1925,17 @@ app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.v
     if (!requisition) throw new Error('Requisition not found.');
     const buffer = await buildSingleRequisitionPdf(requisition);
     const fileName = `MCC_Requisition_${safeFileToken(requisition.requisition_number)}.pdf`;
-    inventoryAudit(req,'requisition PDF generated','requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
-    audit(req,'requisition PDF generated','requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
-    sendDownload(res,fileName,'application/pdf',buffer);
+    const preview = ['1','true','yes'].includes(String(req.query.preview ?? '').toLowerCase());
+    const action = preview ? 'requisition PDF preview generated' : 'requisition PDF generated';
+    inventoryAudit(req,action,'requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
+    audit(req,action,'requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
+    if (preview) {
+      res.setHeader('Content-Type','application/pdf');
+      res.setHeader('Content-Disposition',`inline; filename="${fileName}"`);
+      res.send(buffer);
+    } else {
+      sendDownload(res,fileName,'application/pdf',buffer);
+    }
   } catch (error) {
     const message = safeErrorMessage(error);
     inventoryAudit(req,'failed PDF generation','requisition',Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),{error:message});
@@ -1936,8 +1965,7 @@ app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'),
     if (!parsedItems.length) throw new Error('At least one requisition item is required.');
     const allowDuplicate = input.allowDuplicate === true;
     const timestamp = now();
-    let requisitionId = 0;
-    let requisitionNumber = '';
+    const createdIds: number[] = [];
     db.exec('BEGIN IMMEDIATE');
     try {
       const lineInputs = parsedItems.map(item => {
@@ -1952,57 +1980,87 @@ app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'),
           itemNumber: item.itemNumber || part.supplier_part_number || part.part_number,
         };
       });
-      const firstLine = lineInputs[0];
-      const totalQuantity = lineInputs.reduce((sum,item)=>sum + item.quantityRequested, 0);
-      const headerVendor = summaryText(lineInputs.map(item=>item.part.vendor_name ?? ''), firstLine.part.vendor_name ?? '');
-      const headerLocation = summaryText(lineInputs.map(item=>item.part.location_name ?? ''), firstLine.part.location_name ?? '');
-      requisitionNumber = requisitionNumberForTimestamp(timestamp);
-      const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
-        requisitionNumber,
-        firstLine.part.id,
-        firstLine.part.part_number,
-        firstLine.part.description,
-        headerVendor,
-        headerLocation,
-        totalQuantity,
-        firstLine.unitCost,
-        'Requested',
-        actor.id,
-        actor.full_name,
-        timestamp,
-        textField(input, ['workOrderNumber','work_order_number','workOrder']),
-        textField(input, ['notes','note']),
-        timestamp,
-        timestamp,
-      ]);
-      requisitionId = Number(result.lastInsertRowid);
+      const vendorGroups = new Map<string, typeof lineInputs>();
       for (const item of lineInputs) {
-        run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
-          requisitionId,
-          item.part.id,
-          item.part.part_number,
-          item.part.description,
-          item.part.vendor_name ?? '',
-          item.part.location_name ?? '',
-          item.quantityRequested,
-          item.unitCost,
-          item.unitOfMeasure || 'EA',
-          item.itemNumber,
-          item.notes,
+        const key = requisitionVendorKey(item.part.vendor_name);
+        const group = vendorGroups.get(key) ?? [];
+        group.push(item);
+        vendorGroups.set(key, group);
+      }
+      const workOrderNumber = textField(input, ['workOrderNumber','work_order_number','workOrder']);
+      const headerNotes = textField(input, ['notes','note']);
+      for (const groupLines of vendorGroups.values()) {
+        const firstLine = groupLines[0];
+        const totalQuantity = groupLines.reduce((sum,item)=>sum + item.quantityRequested, 0);
+        const headerVendor = requisitionVendorName(firstLine.part.vendor_name);
+        const headerLocation = summaryText(groupLines.map(item=>item.part.location_name ?? ''), firstLine.part.location_name ?? '');
+        const requisitionNumber = requisitionNumberForTimestamp(timestamp);
+        const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+          requisitionNumber,
+          firstLine.part.id,
+          firstLine.part.part_number,
+          firstLine.part.description,
+          headerVendor,
+          headerLocation,
+          totalQuantity,
+          firstLine.unitCost,
+          'Requested',
+          actor.id,
+          actor.full_name,
+          timestamp,
+          workOrderNumber,
+          headerNotes,
           timestamp,
           timestamp,
         ]);
+        const requisitionId = Number(result.lastInsertRowid);
+        createdIds.push(requisitionId);
+        for (const item of groupLines) {
+          run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+            requisitionId,
+            item.part.id,
+            item.part.part_number,
+            item.part.description,
+            item.part.vendor_name ?? '',
+            item.part.location_name ?? '',
+            item.quantityRequested,
+            item.unitCost,
+            item.unitOfMeasure || 'EA',
+            item.itemNumber,
+            item.notes,
+            timestamp,
+            timestamp,
+          ]);
+        }
+        const auditDetails = {requisitionNumber,vendorName:headerVendor,lineCount:groupLines.length,partIds:groupLines.map(item=>item.part.id),totalQuantity};
+        const createAction = vendorGroups.size > 1 ? 'vendor-grouped requisition create' : lineInputs.length > 1 ? 'requisition create from selection' : 'requisition create';
+        inventoryAudit(req,createAction,'requisition',requisitionId,auditDetails);
+        audit(req,createAction,'requisition',requisitionId,auditDetails);
       }
       syncRequisitionPartFlags(lineInputs.map(item=>item.part.id),timestamp);
-      const auditDetails = {requisitionNumber,lineCount:lineInputs.length,partIds:lineInputs.map(item=>item.part.id),totalQuantity};
-      inventoryAudit(req,lineInputs.length > 1 ? 'multi-line requisition create' : 'requisition create','requisition',requisitionId,auditDetails);
-      audit(req,lineInputs.length > 1 ? 'multi-line requisition create' : 'requisition create','requisition',requisitionId,auditDetails);
+      if (lineInputs.length > 1) {
+        const overallDetails = {requisitionIds:createdIds,vendorCount:vendorGroups.size,lineCount:lineInputs.length,partIds:lineInputs.map(item=>item.part.id)};
+        inventoryAudit(req,'requisition create from selection','requisition','selection',overallDetails);
+        audit(req,'requisition create from selection','requisition','selection',overallDetails);
+      }
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
     }
-    res.status(201).json({ok:true,requisition:publicRequisition(requisitionById(requisitionId)!),summary:requisitionSummary()});
+    const requisitions = createdIds.map(id => {
+      const row = requisitionById(id);
+      if (!row) throw new Error('Created requisition could not be loaded.');
+      const requisition = publicRequisition(row);
+      return {
+        id: requisition.id,
+        requisitionNumber: requisition.requisitionNumber,
+        vendorName: requisition.vendorSummary || requisition.vendorName || 'Unknown Vendor',
+        lineCount: requisition.lineCount,
+        pdfUrl: `/api/requisitions/${requisition.id}/pdf`,
+      };
+    });
+    res.status(201).json({ok:true,requisition:requisitions[0],requisitions,summary:requisitionSummary()});
   } catch (error) {
     sendRequisitionError(req,res,operation,'',error);
   }

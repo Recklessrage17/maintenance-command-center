@@ -97,13 +97,18 @@ type NativeFileImportSummary = {
   nativeSummary?: NativeSummary;
 };
 
+type CreatedRequisition = {
+  id: number;
+  requisitionNumber: string;
+  vendorName: string;
+  lineCount: number;
+  pdfUrl: string;
+};
+
 type NativeRequisitionResponse = {
   ok: boolean;
-  requisition: {
-    id: number;
-    requisitionNumber: string;
-    lineCount?: number;
-  };
+  requisition?: CreatedRequisition;
+  requisitions?: CreatedRequisition[];
 };
 
 type RequisitionLineForm = {
@@ -202,6 +207,20 @@ async function downloadFile(path:string, fallbackFileName:string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+async function pdfObjectUrl(path:string) {
+  const res = await fetch(path,{credentials:'include'});
+  if (!res.ok) {
+    const data = await res.json().catch(()=>({}));
+    throw new Error(data.error || 'PDF preview failed.');
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
+function previewPdfPath(requisition: CreatedRequisition) {
+  const separator = requisition.pdfUrl.includes('?') ? '&' : '?';
+  return `${requisition.pdfUrl}${separator}preview=true`;
 }
 
 function isLowStock(part: InventoryPart) {
@@ -383,8 +402,12 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
   const [requisitionLines,setRequisitionLines]=useState<RequisitionLineForm[]>([]);
   const [requisitionForm,setRequisitionForm]=useState(blankRequisitionForm);
-  const [createdRequisition,setCreatedRequisition]=useState<NativeRequisitionResponse['requisition']|null>(null);
   const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
+  const [previewRequisitions,setPreviewRequisitions]=useState<CreatedRequisition[]>([]);
+  const [activePreviewId,setActivePreviewId]=useState<number|null>(null);
+  const [previewUrl,setPreviewUrl]=useState('');
+  const [previewLoading,setPreviewLoading]=useState(false);
+  const [previewError,setPreviewError]=useState('');
   const [reviewGroups,setReviewGroups]=useState<VendorRequisitionGroup[]>([]);
   const [reviewIndex,setReviewIndex]=useState(0);
   const [reviewItems,setReviewItems]=useState<RequisitionReviewItem[]>([]);
@@ -475,9 +498,42 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
   const selectedParts = useMemo(()=>parts.filter(part=>selectedPartIds.has(part.id)),[parts,selectedPartIds]);
   const visibleSelectableIds = useMemo(()=>visibleParts.map(part=>part.id),[visibleParts]);
   const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every(id=>selectedPartIds.has(id));
+  const activePreviewRequisition = useMemo(()=>previewRequisitions.find(requisition=>requisition.id===activePreviewId) ?? previewRequisitions[0] ?? null,[activePreviewId,previewRequisitions]);
 
   useEffect(()=>{ setPage(1); },[filter,pageSize,search,sortDirection,sortKey]);
   useEffect(()=>{ setPage(current=>Math.min(current,totalPages)); },[totalPages]);
+  useEffect(()=>{
+    if (!activePreviewRequisition) {
+      setPreviewUrl('');
+      setPreviewError('');
+      setPreviewLoading(false);
+      return;
+    }
+    let disposed = false;
+    let objectUrl = '';
+    setPreviewUrl('');
+    setPreviewError('');
+    setPreviewLoading(true);
+    pdfObjectUrl(previewPdfPath(activePreviewRequisition))
+      .then(url=>{
+        if (disposed) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setPreviewUrl(url);
+      })
+      .catch(error=>{
+        if (!disposed) setPreviewError((error as Error).message);
+      })
+      .finally(()=>{
+        if (!disposed) setPreviewLoading(false);
+      });
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  },[activePreviewRequisition]);
 
   function toggleSort(nextKey: SortKey){
     if (sortKey === nextKey) {
@@ -711,7 +767,6 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
     if (!uniqueParts.length) return;
     setRequisitionLines(uniqueParts.map(part=>({part,quantityRequested:'1',notes:''})));
     setRequisitionForm(blankRequisitionForm);
-    setCreatedRequisition(null);
     setRequisitionError('');
     setNotice(null);
   }
@@ -720,7 +775,6 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
     if (requisitionSaving && !force) return;
     setRequisitionLines([]);
     setRequisitionForm(blankRequisitionForm);
-    setCreatedRequisition(null);
     setRequisitionError('');
   }
 
@@ -728,19 +782,32 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
     setRequisitionLines(current=>current.map(line=>line.part.id===partId ? {...line,...changes} : line));
   }
 
-  function viewCreatedRequisition() {
-    closeRequisition(true);
-    onOpenRequisitions();
+  function openPreview(requisitions: CreatedRequisition[]) {
+    setPreviewRequisitions(requisitions);
+    setActivePreviewId(requisitions[0]?.id ?? null);
+    setPreviewError('');
   }
 
-  async function downloadCreatedRequisition() {
-    if (!createdRequisition) return;
+  function closePreview() {
+    setPreviewRequisitions([]);
+    setActivePreviewId(null);
+    setPreviewError('');
+  }
+
+  async function downloadPreviewPdf(requisition = activePreviewRequisition) {
+    if (!requisition) return;
     try {
-      await downloadFile(`/api/requisitions/${createdRequisition.id}/pdf`, `MCC_Requisition_${createdRequisition.requisitionNumber}.pdf`);
-      setNotice({kind:'success',text:`${createdRequisition.requisitionNumber} PDF downloaded.`});
+      await downloadFile(requisition.pdfUrl, `MCC_Requisition_${requisition.requisitionNumber}.pdf`);
+      setNotice({kind:'success',text:`${requisition.requisitionNumber} PDF downloaded.`});
     } catch (err) {
-      setRequisitionError((err as Error).message);
+      setPreviewError((err as Error).message);
     }
+  }
+
+  function printPreviewPdf() {
+    const frame = document.getElementById('inventory-requisition-preview-frame') as HTMLIFrameElement | null;
+    frame?.contentWindow?.focus();
+    frame?.contentWindow?.print();
   }
 
   async function createRequisition(forceDuplicate = false){
@@ -772,13 +839,17 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
           allowDuplicate: forceDuplicate || hasActiveRequisition,
         }),
       });
-      setCreatedRequisition(result.requisition);
+      const created = result.requisitions?.length ? result.requisitions : result.requisition ? [result.requisition] : [];
+      if (!created.length) throw new Error('No requisitions were created.');
+      setRequisitionLines([]);
+      setRequisitionForm(blankRequisitionForm);
       setSelectedPartIds(current=>{
         const next = new Set(current);
         requisitionLines.forEach(line=>next.delete(line.part.id));
         return next;
       });
-      setNotice({kind:'success',text:`Requisition ${result.requisition.requisitionNumber} created.`});
+      openPreview(created);
+      setNotice({kind:'success',text:created.length === 1 ? `Created ${created[0].requisitionNumber}.` : `Created ${created.length} requisitions: ${created.map(requisition=>requisition.requisitionNumber).join(', ')}.`});
       await refresh();
     } catch (err) {
       const message = (err as Error).message;
@@ -946,7 +1017,7 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
           <div className="inventory-selection-actions">
             <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
             <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
-            <button className="primary-button compact-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Create Requisition</button>
+            <button className="primary-button compact-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
           </div>
         </div>
 
@@ -1134,70 +1205,87 @@ export function InventoryPage({ userRole, onBackToDashboard, onOpenRequisitions 
         </div>
       )}
 
-      {(requisitionLines.length>0 || createdRequisition)&&(
+      {requisitionLines.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeRequisition(); }}>
           <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void createRequisition(); }}>
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">Create Requisition</p>
-                <h3>{createdRequisition ? createdRequisition.requisitionNumber : requisitionLines.length === 1 ? (requisitionLines[0].part.partNumber || 'Native inventory part') : `${requisitionLines.length} selected parts`}</h3>
+                <p className="eyebrow">Preview Requisition</p>
+                <h3>{requisitionLines.length === 1 ? (requisitionLines[0].part.partNumber || 'Native inventory part') : `${requisitionLines.length} selected parts`}</h3>
               </div>
               <button className="link-button compact-button" type="button" onClick={()=>closeRequisition()}>Close</button>
             </div>
 
-            {createdRequisition ? (
-              <div className="requisition-created-panel">
-                <strong>Requisition {createdRequisition.requisitionNumber} created.</strong>
-                <span>{createdRequisition.lineCount ?? requisitionLines.length} line item{(createdRequisition.lineCount ?? requisitionLines.length) === 1 ? '' : 's'} ready for PDF.</span>
-                {requisitionError&&<p className="form-message error">{requisitionError}</p>}
-                <div className="modal-actions">
-                  <button className="secondary-button" type="button" onClick={viewCreatedRequisition}>View Requisition</button>
-                  <button className="primary-button" type="button" onClick={()=>void downloadCreatedRequisition()}>Download PDF</button>
-                  <button className="secondary-button" type="button" onClick={()=>closeRequisition(true)}>Create Another</button>
-                  <button className="link-button" type="button" onClick={()=>closeRequisition(true)}>Close</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {requisitionLines.some(line=>line.part.hasActiveRequisitionRecord)&&<p className="form-message error">Active requisition already exists for one or more selected parts.</p>}
-                <div className="requisition-line-list">
-                  {requisitionLines.map(line=>(
-                    <div className="requisition-line-row" key={line.part.id}>
-                      <div className="requisition-line-main">
-                        <strong>{line.part.partNumber || line.part.itemId || '-'}</strong>
-                        <span>{line.part.description || '-'}</span>
-                        <span>{line.part.vendor || 'No vendor'} / {line.part.location || 'No location'} / {formatCurrency(line.part.unitCost)}</span>
-                      </div>
-                      <label className="form-field">
-                        <span>Qty</span>
-                        <input inputMode="decimal" value={line.quantityRequested} onChange={event=>updateRequisitionLine(line.part.id,{quantityRequested:event.target.value})} />
-                      </label>
-                      <label className="form-field requisition-line-notes">
-                        <span>Line Notes</span>
-                        <input value={line.notes} onChange={event=>updateRequisitionLine(line.part.id,{notes:event.target.value})} />
-                      </label>
-                    </div>
-                  ))}
-                </div>
-                <div className="inventory-form-grid">
+            {requisitionLines.some(line=>line.part.hasActiveRequisitionRecord)&&<p className="form-message error">Active requisition already exists for one or more selected parts.</p>}
+            <div className="requisition-line-list">
+              {requisitionLines.map(line=>(
+                <div className="requisition-line-row" key={line.part.id}>
+                  <div className="requisition-line-main">
+                    <strong>{line.part.partNumber || line.part.itemId || '-'}</strong>
+                    <span>{line.part.description || '-'}</span>
+                    <span>{line.part.vendor || 'No vendor'} / {line.part.location || 'No location'} / {formatCurrency(line.part.unitCost)}</span>
+                  </div>
                   <label className="form-field">
-                    <span>WO#</span>
-                    <input value={requisitionForm.workOrderNumber} onChange={event=>setRequisitionForm({...requisitionForm,workOrderNumber:event.target.value})} />
+                    <span>Qty</span>
+                    <input inputMode="decimal" value={line.quantityRequested} onChange={event=>updateRequisitionLine(line.part.id,{quantityRequested:event.target.value})} />
                   </label>
-                  <label className="form-field inventory-form-wide">
-                    <span>Notes</span>
-                    <textarea value={requisitionForm.notes} onChange={event=>setRequisitionForm({...requisitionForm,notes:event.target.value})} />
+                  <label className="form-field requisition-line-notes">
+                    <span>Line Notes</span>
+                    <input value={line.notes} onChange={event=>updateRequisitionLine(line.part.id,{notes:event.target.value})} />
                   </label>
                 </div>
+              ))}
+            </div>
+            <div className="inventory-form-grid">
+              <label className="form-field">
+                <span>WO#</span>
+                <input value={requisitionForm.workOrderNumber} onChange={event=>setRequisitionForm({...requisitionForm,workOrderNumber:event.target.value})} />
+              </label>
+              <label className="form-field inventory-form-wide">
+                <span>Notes</span>
+                <textarea value={requisitionForm.notes} onChange={event=>setRequisitionForm({...requisitionForm,notes:event.target.value})} />
+              </label>
+            </div>
 
-                {requisitionError&&<p className="form-message error">{requisitionError}</p>}
-                <div className="modal-actions">
-                  <button className="secondary-button" type="button" onClick={()=>closeRequisition()}>Cancel</button>
-                  <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Create Requisition'}</button>
-                </div>
-              </>
-            )}
+            {requisitionError&&<p className="form-message error">{requisitionError}</p>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={()=>closeRequisition()}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={requisitionSaving}>{requisitionSaving?'Creating...':'Preview Requisition'}</button>
+            </div>
           </form>
+        </div>
+      )}
+
+      {previewRequisitions.length>0&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closePreview(); }}>
+          <div className="mcc-card requisition-preview-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-requisition-preview-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">{previewRequisitions.length === 1 ? 'Requisition preview' : `${previewRequisitions.length} requisition previews`}</p>
+                <h3 id="inventory-requisition-preview-title">{activePreviewRequisition?.requisitionNumber ?? 'Requisition PDF'}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={closePreview}>Close</button>
+            </div>
+            {previewRequisitions.length>1&&(
+              <div className="requisition-preview-tabs" role="tablist" aria-label="Created requisitions">
+                {previewRequisitions.map(requisition=>(
+                  <button className={requisition.id===activePreviewRequisition?.id?'active':''} key={requisition.id} type="button" onClick={()=>setActivePreviewId(requisition.id)}>
+                    <strong>{requisition.requisitionNumber}</strong>
+                    <span>{requisition.vendorName || 'Unknown Vendor'} / {requisition.lineCount} line{requisition.lineCount === 1 ? '' : 's'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {previewLoading&&<div className="requisition-preview-placeholder">Loading PDF preview...</div>}
+            {previewError&&<p className="form-message error">{previewError}</p>}
+            {previewUrl&&<iframe id="inventory-requisition-preview-frame" className="requisition-preview-frame" title={`Preview ${activePreviewRequisition?.requisitionNumber ?? 'requisition'}`} src={previewUrl} />}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={printPreviewPdf} disabled={!previewUrl}>Print</button>
+              <button className="primary-button" type="button" onClick={()=>void downloadPreviewPdf()} disabled={!activePreviewRequisition}>Download PDF</button>
+              <button className="secondary-button" type="button" onClick={onOpenRequisitions}>View Requisitions</button>
+              <button className="link-button" type="button" onClick={closePreview}>Close</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
