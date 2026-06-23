@@ -1,14 +1,14 @@
 import { type ReactNode } from 'react';
 import { RoleBadge } from '../components/RoleBadge';
 
-export type MccSection = 'dashboard' | 'inventory' | 'preventive-maintenance' | 'assets' | 'building-prints' | 'requisitions' | 'users' | 'settings';
+export type MccSection = 'dashboard' | 'inventory' | 'requisitions' | 'machine-library' | 'equipment-library' | 'facility-info' | 'users' | 'settings';
 const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'inventory', label: 'Inventory' },
-  { id: 'preventive-maintenance', label: 'Preventive Maintenance' },
-  { id: 'assets', label: 'Assets' },
-  { id: 'building-prints', label: 'Building Prints' },
   { id: 'requisitions', label: 'Requisitions' },
+  { id: 'machine-library', label: 'Machine Library' },
+  { id: 'equipment-library', label: 'Equipment Library' },
+  { id: 'facility-info', label: 'Facility Info' },
   { id: 'users', label: 'Admin / Users', management: true },
   { id: 'settings', label: 'Settings' },
 ];

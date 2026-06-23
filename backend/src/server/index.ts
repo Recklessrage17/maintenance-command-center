@@ -191,12 +191,20 @@ async function sendResetEmail(user: User, temporaryPassword: string, expiresAt: 
 }
 function detectedLanUrls() {
   const urls = new Set<string>();
-  for (const interfaces of Object.values(os.networkInterfaces())) {
+  for (const [name, interfaces] of Object.entries(os.networkInterfaces())) {
+    if (isVirtualNetworkInterface(name)) continue;
     for (const entry of interfaces ?? []) {
-      if (entry.family === 'IPv4' && !entry.internal) urls.add(`http://${entry.address}:${port}`);
+      if (entry.family === 'IPv4' && !entry.internal && isUsableLanIpv4(entry.address)) urls.add(`http://${entry.address}:${port}`);
     }
   }
-  return [...urls].sort();
+  return [...urls];
+}
+function isVirtualNetworkInterface(name: string) {
+  return /docker|hyper-v|loopback|npcap|virtual|virtualbox|vmware|vEthernet|wsl/i.test(name);
+}
+function isUsableLanIpv4(address: string) {
+  if (address === '127.0.0.1' || address.startsWith('127.') || address.startsWith('169.254.')) return false;
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(address);
 }
 async function checkMit3Status() {
   const controller = new AbortController();
@@ -2770,7 +2778,15 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:A
 for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
-app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>res.json({localPort:port,localhostUrl:`http://localhost:${port}`,detectedLanUrls:detectedLanUrls()}));
+app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>{
+  const lanUrls = detectedLanUrls();
+  res.json({
+    localPort: port,
+    localhostUrl: `http://localhost:${port}`,
+    detectedLanUrls: lanUrls,
+    primaryLanUrl: lanUrls[0] ?? null,
+  });
+});
 app.get('/api/requisitions/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...requisitionSummary()}));
 app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
   try {

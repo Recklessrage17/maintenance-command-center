@@ -39,16 +39,16 @@ async function assertSourceWiring() {
     readFile('frontend/src/layout/MccLayout.tsx', 'utf8'),
     readFile('frontend/src/App.tsx', 'utf8'),
     readFile('frontend/src/modules/inventory/InventoryPage.tsx', 'utf8'),
-    readFile('frontend/src/modules/preventive-maintenance/PreventiveMaintenancePage.tsx', 'utf8'),
-    readFile('frontend/src/modules/assets/AssetsPage.tsx', 'utf8'),
-    readFile('frontend/src/modules/documents/DocumentsPage.tsx', 'utf8'),
+    readFile('frontend/src/modules/machine-library/MachineLibraryPage.tsx', 'utf8'),
+    readFile('frontend/src/modules/equipment-library/EquipmentLibraryPage.tsx', 'utf8'),
+    readFile('frontend/src/modules/facility-info/FacilityInfoPage.tsx', 'utf8'),
   ]);
 
   const requiredTabs = [
     ['Inventory', "'inventory'", 'InventoryPage'],
-    ['Preventive Maintenance', "'preventive-maintenance'", 'PreventiveMaintenancePage'],
-    ['Assets', "'assets'", 'AssetsPage'],
-    ['Building Prints', "'building-prints'", 'DocumentsPage'],
+    ['Machine Library', "'machine-library'", 'MachineLibraryPage'],
+    ['Equipment Library', "'equipment-library'", 'EquipmentLibraryPage'],
+    ['Facility Info', "'facility-info'", 'FacilityInfoPage'],
   ];
 
   for (const [label, sectionId, component] of requiredTabs) {
@@ -58,9 +58,9 @@ async function assertSourceWiring() {
   }
 
   assert(inventory.includes('InventoryPage'), 'Inventory page module did not load for smoke inspection.');
-  assert(pm.includes('Preventive Maintenance'), 'Preventive Maintenance page placeholder heading is missing.');
-  assert(assets.includes('Assets'), 'Assets page placeholder heading is missing.');
-  assert(prints.includes('Documents / Prints'), 'Building Prints/Documents page placeholder heading is missing.');
+  assert(pm.includes('Production machine records, PMs, parts, and documents.'), 'Machine Library page shell is missing.');
+  assert(assets.includes('Auxiliary and support equipment records, PMs, parts, and documents.'), 'Equipment Library page shell is missing.');
+  assert(prints.includes('Building prints, facility documents, and plant reference information.'), 'Facility Info page shell is missing.');
 }
 
 const isWindows = process.platform === 'win32';
