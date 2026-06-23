@@ -432,7 +432,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [requisitionLines,setRequisitionLines]=useState<RequisitionLineForm[]>([]);
   const [requisitionForm,setRequisitionForm]=useState<RequisitionHeaderForm>(()=>blankRequisitionForm(userFullName));
   const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
-  const [selectionToolsOpen,setSelectionToolsOpen]=useState(false);
   const [previewRequisitions,setPreviewRequisitions]=useState<CreatedRequisition[]>([]);
   const [activePreviewId,setActivePreviewId]=useState<number|null>(null);
   const [previewUrl,setPreviewUrl]=useState('');
@@ -515,8 +514,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     const start = (page - 1) * pageSize;
     return sortedParts.slice(start, start + pageSize);
   },[page,pageSize,sortedParts]);
-  const visibleRangeStart = sortedParts.length === 0 ? 0 : pageSize === 'all' ? 1 : (page - 1) * pageSize + 1;
-  const visibleRangeEnd = pageSize === 'all' ? sortedParts.length : Math.min(sortedParts.length, page * pageSize);
   const filtersActive = filter !== 'all' || search.trim().length > 0;
   const selectedParts = useMemo(()=>parts.filter(part=>selectedPartIds.has(part.id)),[parts,selectedPartIds]);
   const visibleSelectableIds = useMemo(()=>visibleParts.map(part=>part.id),[visibleParts]);
@@ -529,7 +526,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     setPage(1);
   },[filter,pageSize,search,sortDirection,sortKey]);
   useEffect(()=>{ setPage(current=>Math.min(current,totalPages)); },[totalPages]);
-  useEffect(()=>{ if (selectedParts.length) setSelectionToolsOpen(true); },[selectedParts.length]);
   useEffect(()=>{
     const container = tableScrollRef.current;
     const target = pendingScrollTargetRef.current;
@@ -975,13 +971,32 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
           <h2>Inventory</h2>
           <div className="inventory-focus-meta">
             <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
-            {selectedParts.length>0&&<span>Selected: {selectedParts.length}</span>}
+            <span>Selected: {selectedParts.length}</span>
           </div>
         </div>
         <div className="inventory-focus-actions">
           {showWriteActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
           {canUseInventoryTools&&<button className={toolsOpen?'secondary-button inventory-tools-toggle active':'secondary-button inventory-tools-toggle'} type="button" onClick={()=>setToolsOpen(current=>!current)} aria-expanded={toolsOpen} aria-controls="inventory-tools-panel"><span aria-hidden="true">&#9881;</span><span>Tools</span></button>}
           <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
+          <label className="top-select-field">
+            <span>Filter</span>
+            <select value={filter} onChange={event=>{ const value = event.target.value; setFilter(value === 'clear' ? 'all' : value as FilterMode); }} aria-label="Inventory filter">
+              {filterOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+              <option value="clear">Clear Filter</option>
+            </select>
+          </label>
+          <label className="top-select-field rows-select-field">
+            <span>Rows</span>
+            <select value={String(pageSize)} onChange={event=>setPageSize(event.target.value==='all'?'all':Number(event.target.value) as PageSize)}>
+              {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
+            </select>
+          </label>
+          <div className="top-pager" aria-label="Inventory pagination">
+            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
+            <span className="page-count">Page {page} of {totalPages}</span>
+            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
+          </div>
+          <button className="primary-button preview-requisition-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
         </div>
       </div>
 
@@ -1091,29 +1106,10 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             <span>Search inventory</span>
             <input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Part number, description, location, vendor..." />
           </label>
-          <div className="inventory-toolbar-actions">
-            <label className="filter-select-field">
-              <span>Filter</span>
-              <select value={filter} onChange={event=>setFilter(event.target.value as FilterMode)} aria-label="Inventory filter">
-                {filterOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <button className="secondary-button compact-button" type="button" onClick={clearFilters} disabled={!filtersActive}>Clear Filters</button>
-          </div>
-        </div>
-
-        <div className="inventory-table-meta">
-          <span className="result-count">{visibleRangeStart}-{visibleRangeEnd} of {sortedParts.length}</span>
-          <div className="inventory-pager">
-            <label className="page-size-field">
-              <span>Rows</span>
-              <select value={String(pageSize)} onChange={event=>setPageSize(event.target.value==='all'?'all':Number(event.target.value) as PageSize)}>
-                {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
-              </select>
-            </label>
-            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
-            <span className="page-count">{page} / {totalPages}</span>
-            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
+          <div className="inventory-search-tools">
+            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
+            <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
+            {filtersActive&&<button className="link-button compact-button" type="button" onClick={clearFilters}>Clear Search / Filter</button>}
           </div>
         </div>
 
@@ -1159,20 +1155,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             </tbody>
           </table>
         </div>
-
-        <details className="inventory-selection-panel" open={selectionToolsOpen} onToggle={event=>setSelectionToolsOpen(event.currentTarget.open)}>
-          <summary>
-            <div>
-              <strong>Selection Tools</strong>
-              <span>{selectedParts.length ? `${selectedParts.length} selected: ${selectedParts.map(part=>part.partNumber || part.itemId || 'Part').slice(0,3).join(', ')}` : 'No rows selected.'}</span>
-            </div>
-          </summary>
-          <div className="inventory-selection-actions">
-            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
-            <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
-            <button className="primary-button compact-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
-          </div>
-        </details>
       </section>
 
       {modal&&(

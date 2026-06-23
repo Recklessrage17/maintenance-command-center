@@ -1419,7 +1419,7 @@ function officialSetCompactHeaderCellValue(sheet: XlsxSheet, address: string, va
   const wrappedValue = officialWrapTextByLength(value, maxLineLength, 1);
   cell.value(wrappedValue);
   try {
-    cell.style?.({ fontSize: 7.8, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
+    cell.style?.({ fontSize: 7.2, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
   } catch {
     // Header field tuning only; the value should still export if the template rejects style changes.
   }
@@ -1551,16 +1551,25 @@ function officialWriteGrandTotal(sheet: XlsxSheet, grandTotalCell: string, total
 }
 
 function officialAdjustUnder100HeaderSpacing(sheet: XlsxSheet, type: RequisitionTemplateKind) {
-  if (type !== 'under-100') return;
   try {
-    sheet.row?.(12).height?.(18);
-    sheet.row?.(13).height?.(18);
-    sheet.row?.(14).height?.(18);
-    sheet.row?.(18).height?.(18);
-    sheet.row?.(19).height?.(20);
+    if (type === 'under-100') {
+      sheet.row?.(6).height?.(20);
+      sheet.row?.(12).height?.(20);
+      sheet.row?.(13).height?.(18);
+      sheet.row?.(14).height?.(18);
+      sheet.row?.(18).height?.(18);
+      sheet.row?.(19).height?.(20);
+    } else {
+      sheet.row?.(7).height?.(20);
+      sheet.row?.(13).height?.(20);
+      sheet.row?.(14).height?.(18);
+      sheet.row?.(15).height?.(18);
+      sheet.row?.(19).height?.(19);
+    }
   } catch {
     // Keep original template layout if row height changes are rejected.
   }
+  if (type !== 'under-100') return;
   try {
     sheet.cell('B13').style?.({ fontSize: 7, shrinkToFit: true, verticalAlignment: 'center' });
     sheet.cell('B14').style?.({ fontSize: 7, shrinkToFit: true, verticalAlignment: 'center' });
