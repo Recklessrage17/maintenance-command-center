@@ -40,7 +40,7 @@ type PartsResponse = {
 type FilterMode = 'all' | 'low' | 'requisition' | 'hasLink' | 'noLink';
 type ModalMode = 'add' | 'edit';
 type Notice = { kind: 'success' | 'error'; text: string };
-type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'status';
+type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'minQuantity' | 'unitCost' | 'status';
 type SortDirection = 'asc' | 'desc';
 type PageSize = 50 | 100 | 250 | 'all';
 type RequisitionReviewItem = { part: InventoryPart; quantityRequested: string; dueDate: string; notes: string };
@@ -230,6 +230,13 @@ function formatFileSize(bytes: number) {
   return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
 }
 
+const currencyFormatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' });
+
+function formatCurrency(value: number | null | undefined) {
+  const parsed = Number(value ?? 0);
+  return currencyFormatter.format(Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+}
+
 function normalizeNativeSummary(summary?: Partial<NativeSummary> | null): NativeSummary {
   return {
     totalParts: Number(summary?.totalParts ?? 0),
@@ -247,7 +254,7 @@ function compareText(left: string, right: string) {
 
 function compareParts(left: InventoryPart, right: InventoryPart, sortKey: SortKey, sortDirection: SortDirection) {
   const multiplier = sortDirection === 'asc' ? 1 : -1;
-  const result = sortKey === 'quantity' || sortKey === 'minQuantity'
+  const result = sortKey === 'quantity' || sortKey === 'minQuantity' || sortKey === 'unitCost'
     ? Number(left[sortKey] ?? 0) - Number(right[sortKey] ?? 0)
     : compareText(String(left[sortKey] ?? ''), String(right[sortKey] ?? ''));
   return result * multiplier;
@@ -332,7 +339,7 @@ function payloadFromForm(form: PartForm) {
     minQuantity: Number(form.minQuantity),
     partInfoUrl: form.partInfoUrl.trim(),
     manufacturerBrand: form.manufacturerBrand.trim(),
-    unitCost: form.unitCost.trim() ? Number(form.unitCost) : null,
+    unitCost: form.unitCost.trim() ? Number(form.unitCost) : 0,
     supplierPartNumber: form.supplierPartNumber.trim(),
   };
 }
@@ -955,28 +962,24 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                 <th aria-sort={sortAria('vendor')}>{renderSortHeader('vendor','Vendor')}</th>
                 <th aria-sort={sortAria('quantity')}>{renderSortHeader('quantity','Qty')}</th>
                 <th aria-sort={sortAria('minQuantity')}>{renderSortHeader('minQuantity','Min')}</th>
+                <th aria-sort={sortAria('unitCost')}>{renderSortHeader('unitCost','Cost')}</th>
                 <th aria-sort={sortAria('status')}>{renderSortHeader('status','Status')}</th>
-                <th>Link</th>
                 {showWriteActions&&<th>Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {visibleParts.map(part=>{
-                const partLink = safeHttpUrl(part.partInfoUrl);
-                return (
+              {visibleParts.map(part=>(
                   <tr key={part.id}>
                     <td>
-                      {partLink
-                        ? <a className="part-number-link" href={partLink} target="_blank" rel="noreferrer">{part.partNumber || part.itemId || 'Open'}<span aria-hidden="true">-&gt;</span></a>
-                      : <span className="plain-part-number">{part.partNumber || part.itemId || '-'}</span>}
+                      <span className="plain-part-number">{part.partNumber || part.itemId || '-'}</span>
                     </td>
                     <td className="inventory-description-cell"><span className="inventory-description-text" title={part.description || undefined}>{part.description || '-'}</span></td>
                     <td>{part.location || '-'}</td>
                     <td>{part.vendor || '-'}</td>
                     <td>{part.quantity}</td>
                     <td>{part.minQuantity}</td>
+                    <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
                     <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.hasActiveRequisitionRecord&&<span className="requisition-chip" title={part.activeRequisitionNumber || undefined}>REQ</span>}{!part.hasActiveRequisitionRecord&&part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
-                    <td>{partLink?<a className="link-badge" href={partLink} target="_blank" rel="noreferrer">Open</a>:<span className="muted-cell">None</span>}</td>
                     {showWriteActions&&(
                       <td>
                         <div className="inventory-row-actions">
@@ -985,13 +988,12 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                             <input type="checkbox" checked={selectedPartIds.has(part.id)} onChange={()=>togglePartSelection(part.id)} disabled={!writeEnabled} />
                             <span>Select</span>
                           </label>
-                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Single</button>
+                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Create Requisition</button>
                         </div>
                       </td>
                     )}
                   </tr>
-                );
-              })}
+              ))}
               {!loading&&sortedParts.length===0&&<tr><td colSpan={showWriteActions?9:8} className="empty-table-cell">No inventory rows match this view.</td></tr>}
               {loading&&<tr><td colSpan={showWriteActions?9:8} className="empty-table-cell">Loading MCC Native Inventory...</td></tr>}
             </tbody>

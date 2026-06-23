@@ -42,7 +42,7 @@ Phase 2C adds:
 
 - Full-width Inventory focus mode with a sticky compact toolbar.
 - Last-refreshed time and visible "showing X of Y parts" counts.
-- Client-side sorting for Part Number, Description, Location, Vendor, Qty, Min, and Status.
+- Client-side sorting for Part Number, Description, Location, Vendor, Qty, Min, Cost, and Status.
 - Client-side page-size controls for 50, 100, 250, or All rows.
 - Search across part number, description, location, and vendor.
 - Filters for All, Low Stock, Requisition, Has Link, and No Link.
@@ -119,7 +119,7 @@ Phase 2E rules:
 - MCC does not copy MIT3 database files.
 - MIT3 source files and MIT3 data remain unmodified.
 - The MIT3 import remains available for migration and reference.
-- The "Open MIT3 Inventory" reference button and MIT3 status card remain available.
+- The "Open MIT3 Inventory" reference link remains available inside Inventory Tools for migration/reference use.
 - Add/edit/requisition permissions are Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2.
 - Maintenance Tech 1 remains view-only.
 - Missing native MCC vendors and locations are created when a part is added or edited.
@@ -161,7 +161,7 @@ Phase 2F requisition endpoints:
 Phase 2F requisition rules:
 
 - Requisition numbers are generated in readable yearly sequence, such as `REQ-2026-000001`.
-- Creating a requisition from inventory snapshots the native part number, description, vendor, and location into MCC.
+- Creating a requisition from inventory snapshots the native part number, description, vendor, location, and unit cost into MCC.
 - Creating a requisition marks the native inventory part as requested.
 - Requested and Ordered requisitions are active.
 - Received and Canceled requisitions are closed.
@@ -169,12 +169,13 @@ Phase 2F requisition rules:
 - If an active requisition already exists for a part, MCC warns before allowing another active requisition.
 - Canceling a requisition requires a reason.
 - Requisition PDFs are generated from MCC native requisition records, not MIT3 records, and use professional filenames such as `MCC_Requisition_REQ-2026-000001.pdf`.
+- Requisition PDFs fill Unit Price and Total Price from the requisition unit-cost snapshot. Older requisitions without a cost snapshot fall back to the current native inventory part cost; missing or invalid costs print as `$0.00`.
 - Delete is soft delete only: MCC sets deleted metadata and hides the requisition from the active list without physically removing the database record.
 - Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can create and update requisitions.
 - Admin and Manager can soft delete requisitions.
 - Maintenance Tech 1 remains view-only.
 
-The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows and refreshes MCC native inventory after each create.
+The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows, shows Cost instead of daily Link buttons, and refreshes MCC native inventory after each create.
 
 Audit entries are recorded for requisition create, status changed, ordered, received, canceled, edit, PDF generated, soft deleted, failed PDF generation, failed delete, and failed requisition action events. Secrets are not logged.
 
@@ -197,8 +198,8 @@ Phase 2G endpoints:
 
 Template columns:
 
-- Update template: `MCC Item ID`, `Part Number`, `Description`, `Location`, `Vendor`, `Quantity`, `Minimum Quantity`, `Requisition`, `Part Info URL`, `Notes`.
-- Blank import template: `Part Number`, `Description`, `Location`, `Vendor`, `Quantity`, `Minimum Quantity`, `Requisition`, `Part Info URL`, `Notes`.
+- Update template: `MCC Item ID`, `Part Number`, `Description`, `Location`, `Vendor`, `Quantity`, `Minimum Quantity`, `Requisition`, `Part Info URL`, `Manufacturer/Brand`, `Unit Cost`, `Supplier Part Number`, `Notes`.
+- Blank import template: `Part Number`, `Description`, `Location`, `Vendor`, `Quantity`, `Minimum Quantity`, `Requisition`, `Part Info URL`, `Manufacturer/Brand`, `Unit Cost`, `Supplier Part Number`, `Notes`.
 
 Import rules:
 
@@ -207,7 +208,8 @@ Import rules:
 - Excel imports support sheets named `MCC Inventory Import` and `MCC Inventory Update`.
 - `MCC Item ID` is used first for updates. If it is missing or does not match an active native item, Part Number is used as the fallback anti-dupe key.
 - Missing vendors and locations are created in MCC native tables.
-- Quantity and Minimum Quantity must be numeric; blank numeric fields import as `0`.
+- Quantity, Minimum Quantity, and Unit Cost must be numeric; blank numeric fields import as `0`.
+- Unit Cost is exported in CSV, Excel templates, JSON backups, and CSV backups.
 - Requisition accepts `true/false`, `yes/no`, `y/n`, and `1/0`; existing text values can also be preserved.
 - Part Info URL values must be blank or safe `http` / `https` URLs. Local, file, mail, blob, and data URLs are skipped.
 - Import responses report `addedCount`, `updatedCount`, `skippedCount`, `vendorCreatedCount`, `locationCreatedCount`, `invalidUrlCount`, and `errors`.
@@ -232,6 +234,8 @@ Inventory Focus Mode keeps the daily toolbar focused on normal work:
 - Add Part
 - Inventory Tools settings button
 - Refresh Inventory
+
+The main daily toolbar no longer shows the noisy native/MIT3 status badges, and the daily table no longer includes a Link column. Part Info URL data is still available through add/edit and import/export, while `Open MIT3 Inventory` is kept only inside the Inventory Tools panel under MIT3 reference/migration.
 
 Inventory import/export/backup tools are hidden behind the Inventory Tools settings button instead of always being visible.
 

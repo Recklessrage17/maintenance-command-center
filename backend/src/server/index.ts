@@ -60,9 +60,9 @@ CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, acto
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL, supplier_part_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_deleted ON inventory_parts (deleted);
@@ -82,8 +82,13 @@ function migrateDb() {
 
   const inventoryPartColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_parts)').map(column => column.name));
   if (!inventoryPartColumns.has('manufacturer_brand')) run("ALTER TABLE inventory_parts ADD COLUMN manufacturer_brand TEXT NOT NULL DEFAULT ''");
-  if (!inventoryPartColumns.has('unit_cost')) run('ALTER TABLE inventory_parts ADD COLUMN unit_cost REAL');
+  if (!inventoryPartColumns.has('unit_cost')) run('ALTER TABLE inventory_parts ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
   if (!inventoryPartColumns.has('supplier_part_number')) run("ALTER TABLE inventory_parts ADD COLUMN supplier_part_number TEXT NOT NULL DEFAULT ''");
+  run('UPDATE inventory_parts SET unit_cost=0 WHERE unit_cost IS NULL');
+
+  const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
+  if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
+  run('UPDATE inventory_requisitions SET unit_cost=0 WHERE unit_cost IS NULL');
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -430,7 +435,7 @@ function normalizeNativePart(row: NativePartRow) {
     activeRequisitionNumber: activeRequisition?.requisition_number ?? '',
     partInfoUrl: validWebUrl(row.part_info_url),
     manufacturerBrand: row.manufacturer_brand ?? '',
-    unitCost: row.unit_cost === null || row.unit_cost === undefined ? null : Number(row.unit_cost),
+    unitCost: Number(row.unit_cost ?? 0),
     supplierPartNumber: row.supplier_part_number ?? '',
     updatedAt: row.updated_at,
     source: row.source,
@@ -514,7 +519,7 @@ function nativeExportRecord(row: NativePartRow): NativeExportRecord {
     Requisition: row.requisition,
     'Part Info URL': validWebUrl(row.part_info_url),
     'Manufacturer/Brand': row.manufacturer_brand ?? '',
-    'Unit Cost': row.unit_cost === null || row.unit_cost === undefined ? '' : Number(row.unit_cost),
+    'Unit Cost': Number(row.unit_cost ?? 0),
     'Supplier Part Number': row.supplier_part_number ?? '',
     Notes: row.notes,
   };
@@ -751,7 +756,8 @@ function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
         if (!partNumber) throw new Error(`Row ${row.rowNumber}: Part Number is required.`);
         const quantity = numericImportValue(row.quantity, 'Quantity', row.rowNumber);
         const minQuantity = numericImportValue(row.minQuantity, 'Minimum Quantity', row.rowNumber);
-        const unitCost = row.unitCost.trim() ? numericImportValue(row.unitCost, 'Unit Cost', row.rowNumber) : null;
+        const unitCost = row.unitCost.trim() ? numericImportValue(row.unitCost, 'Unit Cost', row.rowNumber) : 0;
+        if (unitCost < 0) throw new Error(`Row ${row.rowNumber}: Unit Cost must be zero or greater.`);
         const rawUrl = row.partInfoUrl.trim();
         const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
         if (rawUrl && !partInfoUrl) {
@@ -816,7 +822,7 @@ function importMit3Part(part: NormalizedMit3Part, actorId: number, timestamp: st
     requisition,
     part.partInfoUrl,
     part.manufacturerBrand.trim(),
-    Number.isFinite(part.unitCost) ? Number(part.unitCost) : null,
+    Number.isFinite(part.unitCost) ? Math.max(0, Number(part.unitCost)) : 0,
     part.supplierPartNumber.trim(),
     part.notes.trim(),
     'MIT3 HTTP API',
@@ -854,8 +860,8 @@ function validateNativePartInput(body: unknown) {
   const quantity = numericInput(input, 'quantity', 'Quantity');
   const minQuantity = numericInput(input, 'minQuantity', 'Minimum Quantity');
   const manufacturerBrand = textField(input, ['manufacturerBrand','manufacturer','brand']).slice(0, 160);
-  const unitCost = input.unitCost === undefined || input.unitCost === null || String(input.unitCost).trim() === '' ? null : numericInput(input, 'unitCost', 'Unit Cost');
-  if (unitCost !== null && unitCost < 0) throw new Error('Unit Cost must be zero or greater.');
+  const unitCost = input.unitCost === undefined || input.unitCost === null || String(input.unitCost).trim() === '' ? 0 : numericInput(input, 'unitCost', 'Unit Cost');
+  if (unitCost < 0) throw new Error('Unit Cost must be zero or greater.');
   const supplierPartNumber = textField(input, ['supplierPartNumber','supplierPartNo']).slice(0, 160);
   const rawUrl = textField(input, ['partInfoUrl']);
   const partInfoUrl = rawUrl ? safePartInfoUrl(rawUrl) : '';
@@ -900,6 +906,7 @@ interface RequisitionRow {
   vendor_name: string;
   location_name: string;
   quantity_requested: number;
+  unit_cost: number | null;
   status: RequisitionStatus;
   requested_by_user_id: number | null;
   requested_by_name: string;
@@ -929,6 +936,7 @@ function publicRequisition(row: RequisitionRow) {
     vendorName: row.vendor_name,
     locationName: row.location_name,
     quantityRequested: Number(row.quantity_requested ?? 0),
+    unitCost: Number(row.unit_cost ?? 0),
     status: row.status,
     requestedByUserId: row.requested_by_user_id,
     requestedByName: row.requested_by_name,
@@ -1047,13 +1055,13 @@ const over100Positions: StampPositions = {
   poInitiator: { x: 394, topY: 96 },
   shipVia: { x: 525, topY: 96 },
   poClass: { x: 220, topY: 113 },
-  taxExemptYes: { x: 401, topY: 113 },
-  taxExemptNo: { x: 441, topY: 113 },
-  fobOrigin: { x: 535, topY: 113 },
-  fobDestination: { x: 535, topY: 126 },
+  taxExemptYes: { x: 401, topY: 111 },
+  taxExemptNo: { x: 441, topY: 111 },
+  fobOrigin: { x: 535, topY: 111 },
+  fobDestination: { x: 535, topY: 124 },
   reqDate: { x: 220, topY: 130 },
-  materialCertYes: { x: 401, topY: 129 },
-  materialCertNo: { x: 441, topY: 129 },
+  materialCertYes: { x: 401, topY: 127 },
+  materialCertNo: { x: 441, topY: 127 },
   vendorName: { x: 220, topY: 148 },
   confirmedWith: { x: 394, topY: 148 },
   vendorAddressLine1: { x: 220, topY: 158 },
@@ -1103,13 +1111,13 @@ const under100Positions: StampPositions = {
   poInitiator: { x: 374, topY: 133 },
   shipVia: { x: 600, topY: 133 },
   poClass: { x: 170, topY: 156 },
-  taxExemptYes: { x: 381, topY: 154 },
-  taxExemptNo: { x: 433, topY: 154 },
-  fobOrigin: { x: 612, topY: 153 },
-  fobDestination: { x: 612, topY: 171 },
+  taxExemptYes: { x: 381, topY: 151 },
+  taxExemptNo: { x: 433, topY: 151 },
+  fobOrigin: { x: 612, topY: 150 },
+  fobDestination: { x: 612, topY: 168 },
   reqDate: { x: 170, topY: 180 },
-  materialCertYes: { x: 381, topY: 176 },
-  materialCertNo: { x: 433, topY: 176 },
+  materialCertYes: { x: 381, topY: 173 },
+  materialCertNo: { x: 433, topY: 173 },
   vendorName: { x: 170, topY: 203 },
   confirmedWith: { x: 374, topY: 203 },
   vendorAddressLine1: { x: 170, topY: 215 },
@@ -1487,11 +1495,18 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
       description: requisition.description,
       locationName: requisition.location_name,
       quantityRequested: Number(requisition.quantity_requested ?? 0) || 0,
-      unitCost: 0,
+      unitCost: requisitionUnitCost(requisition),
       supplierPartNumber: requisition.part_number,
       dueDate: isoDateOnly(requisition.requested_at),
     }],
   });
+}
+function requisitionUnitCost(requisition: RequisitionRow) {
+  const snapshot = Number(requisition.unit_cost ?? 0);
+  if (Number.isFinite(snapshot) && snapshot > 0) return snapshot;
+  const part = one<{ unit_cost: number | null }>('SELECT unit_cost FROM inventory_parts WHERE id=?', [requisition.inventory_part_id]);
+  const fallback = Number(part?.unit_cost ?? 0);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
 }
 function requisitionById(id: number, options: { includeDeleted?: boolean } = {}) {
   return one<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${options.includeDeleted ? '1=1' : 'deleted=0'} AND id=?`, [id]);
@@ -1729,7 +1744,9 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
       if (!part) throw new Error('Native inventory part not found.');
       if (activeRequisitionCountForPart(partId) > 0 && !allowDuplicate) throw new Error('Active requisition already exists for this part.');
       const requisitionNumber = requisitionNumberForTimestamp(timestamp);
-      const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+      const unitCost = Number(part.unit_cost ?? 0);
+      const safeUnitCost = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0;
+      const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
         requisitionNumber,
         part.id,
         part.part_number,
@@ -1737,6 +1754,7 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
         part.vendor_name ?? '',
         part.location_name ?? '',
         quantityRequested,
+        safeUnitCost,
         'Requested',
         actor.id,
         actor.full_name,
@@ -1789,13 +1807,15 @@ LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
 LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
 WHERE p.deleted=0 AND p.id=?`, [partId]);
         if (!part) throw new Error('Native inventory part not found.');
-        const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
+        const rawUnitCost = Number(rawItem.unitCost ?? part.unit_cost ?? 0);
+        const unitCost = Number.isFinite(rawUnitCost) && rawUnitCost >= 0 ? rawUnitCost : 0;
+        const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
           rawItems.length > 1 ? `${requisitionNumber}-${String(requisitionIds.length + 1).padStart(2,'0')}` : requisitionNumber,
-          part.id, part.part_number, part.description, vendorName, part.location_name ?? '', quantityRequested, 'Requested', actor.id, actor.full_name, timestamp, '', notes, timestamp, timestamp,
+          part.id, part.part_number, part.description, vendorName, part.location_name ?? '', quantityRequested, unitCost, 'Requested', actor.id, actor.full_name, timestamp, '', notes, timestamp, timestamp,
         ]);
         requisitionIds.push(Number(result.lastInsertRowid));
         syncPartRequisitionFlag(partId,timestamp);
-        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested,unitCost:Number(rawItem.unitCost ?? part.unit_cost ?? 0) || null,supplierPartNumber:textField(rawItem, ['supplierPartNumber']) || (part.supplier_part_number ?? ''),dueDate:textField(rawItem, ['dueDate']),notes:textField(rawItem, ['notes','note'])});
+        pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested,unitCost,supplierPartNumber:textField(rawItem, ['supplierPartNumber']) || (part.supplier_part_number ?? ''),dueDate:textField(rawItem, ['dueDate']),notes:textField(rawItem, ['notes','note'])});
       }
       inventoryAudit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
       audit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});

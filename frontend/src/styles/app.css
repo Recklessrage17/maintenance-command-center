@@ -176,7 +176,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .page-size-field select { width: auto; min-width: 76px; min-height: 32px; padding: 0 28px 0 10px; border-radius: 9px; font-size: .8rem; }
 .page-count { min-height: 30px; align-items: center; padding: 0 4px; white-space: nowrap; }
 .inventory-table-wrap { max-height: calc(100vh - 366px); overflow: auto; border-radius: 10px; }
-.inventory-table-wrap table { min-width: 1180px; table-layout: fixed; }
+.inventory-table-wrap table { min-width: 1160px; table-layout: fixed; }
 .inventory-table-wrap th { position: sticky; top: 0; z-index: 2; background: rgba(5, 22, 40, 0.98); box-shadow: 0 1px 0 rgba(85, 191, 236, 0.24); }
 .inventory-table-wrap th, .inventory-table-wrap td { padding: 8px 10px; font-size: .82rem; vertical-align: top; }
 .inventory-table-wrap th { font-size: .7rem; letter-spacing: .06em; }
@@ -185,9 +185,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-table-wrap th:nth-child(3), .inventory-table-wrap td:nth-child(3) { width: 140px; }
 .inventory-table-wrap th:nth-child(4), .inventory-table-wrap td:nth-child(4) { width: 150px; }
 .inventory-table-wrap th:nth-child(5), .inventory-table-wrap td:nth-child(5), .inventory-table-wrap th:nth-child(6), .inventory-table-wrap td:nth-child(6) { width: 68px; }
-.inventory-table-wrap th:nth-child(7), .inventory-table-wrap td:nth-child(7) { width: 150px; }
-.inventory-table-wrap th:nth-child(8), .inventory-table-wrap td:nth-child(8) { width: 82px; }
-.inventory-table-wrap th:nth-child(9), .inventory-table-wrap td:nth-child(9) { width: 120px; }
+.inventory-table-wrap th:nth-child(7), .inventory-table-wrap td:nth-child(7) { width: 92px; }
+.inventory-table-wrap th:nth-child(8), .inventory-table-wrap td:nth-child(8) { width: 150px; }
+.inventory-table-wrap th:nth-child(9), .inventory-table-wrap td:nth-child(9) { width: 140px; }
 .inventory-table-wrap td:nth-child(7), .inventory-table-wrap td:nth-child(8) { white-space: nowrap; }
 .sort-header { display: inline-flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; padding: 0; border: 0; color: #44d7ff; background: transparent; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 900; text-align: left; text-transform: uppercase; }
 .sort-header:hover, .sort-header.active { color: #bff3ff; }
@@ -200,14 +200,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .part-number-link { padding: 4px 8px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 .link-badge { padding: 4px 8px; font-size: .76rem; }
 .part-number-link span { display: inline !important; margin: 0 !important; color: inherit !important; font-size: .82rem !important; }
+.inventory-cost-cell { color: #dff7ff; font-weight: 900; }
 .inventory-status-stack { display: flex; align-items: flex-start; gap: 5px; flex-wrap: nowrap; max-width: 100%; overflow: hidden; }
 .inventory-status-stack .status-pill { padding: 4px 7px; font-size: .68rem; line-height: 1.1; }
 .requisition-chip { display: inline-flex !important; width: fit-content; margin: 0 !important; padding: 4px 7px; border: 1px solid rgba(255, 211, 111, 0.52); border-radius: 999px; color: #fff2c2 !important; background: rgba(91, 70, 19, 0.48); font-size: .68rem !important; font-weight: 900 !important; line-height: 1.1; }
 .muted-cell { display: inline !important; margin: 0 !important; color: #7fa9bb !important; font-size: .82rem !important; }
 .empty-table-cell { color: #a9c5d6; text-align: center; padding: 24px !important; }
-.inventory-row-actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
-.inventory-row-actions .compact-button { min-height: 30px; padding: 0 9px; font-size: .76rem; }
-.requisition-toggle { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 8px; border: 1px solid rgba(68, 215, 255, 0.32); border-radius: 999px; color: #dff7ff; background: rgba(5, 61, 86, 0.36); font-size: .74rem; font-weight: 900; white-space: nowrap; }
+.inventory-row-actions { display: grid; gap: 6px; align-items: stretch; }
+.inventory-row-actions .compact-button { width: 100%; min-height: 30px; padding: 0 9px; font-size: .74rem; white-space: normal; line-height: 1.1; }
+.requisition-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: 100%; min-height: 30px; padding: 0 8px; border: 1px solid rgba(68, 215, 255, 0.32); border-radius: 999px; color: #dff7ff; background: rgba(5, 61, 86, 0.36); font-size: .74rem; font-weight: 900; white-space: nowrap; }
 .requisition-toggle input { width: 16px; min-height: 16px; accent-color: #44d7ff; }
 .requisition-toggle span { margin: 0 !important; color: inherit !important; font-size: .74rem !important; }
 .requisition-toggle.disabled { color: #8db9ce; border-color: rgba(143, 205, 233, 0.22); background: rgba(7, 25, 45, 0.58); }
