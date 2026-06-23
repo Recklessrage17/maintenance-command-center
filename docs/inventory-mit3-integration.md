@@ -176,7 +176,7 @@ Phase 2F requisition rules:
 - Admin and Manager can soft delete requisitions.
 - Maintenance Tech 1 remains view-only.
 
-The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows, shows Cost instead of daily Link buttons, hides the Min column from the daily table, and refreshes MCC native inventory after each create.
+The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows, shows Cost instead of daily Link buttons, hides the Min column from the daily table, keeps requisition tracking out of the Status column, and refreshes MCC native inventory after each create.
 
 The current PDF generator uses a recreated coordinate mapping over the JBT requisition form PDF. A future hardening pass can switch to a direct JBT Excel/PDF template stored under `backend/templates` if the real template file is provided.
 
@@ -238,7 +238,7 @@ Inventory Focus Mode keeps the daily toolbar focused on normal work:
 - Inventory Tools settings button
 - Refresh Inventory
 
-The main daily toolbar no longer shows the noisy native/MIT3 status badges, and the daily table no longer includes Link or Min columns. Part Info URL data is still available through add/edit and import/export, while `Open MIT3 Inventory` is kept only inside the Inventory Tools panel under MIT3 reference/migration. Minimum Quantity remains stored in MCC, editable in Add/Edit, exported/imported in templates, and used for low-stock alert logic.
+The main daily toolbar no longer shows the noisy native/MIT3 status badges or migration/reference banner, and the daily table no longer includes Link or Min columns. Part Info URL data is still available through add/edit and import/export, while `Open MIT3 Inventory` is kept only inside the Inventory Tools panel under MIT3 reference/migration. Minimum Quantity remains stored in MCC, editable in Add/Edit, exported/imported in templates, and used for low-stock alert logic.
 
 Inventory import/export/backup tools are hidden behind the Inventory Tools settings button instead of always being visible.
 
@@ -256,16 +256,14 @@ The Inventory Tools panel contains:
 
 MIT3 is backup/reference only. It is not shown in the main daily Inventory toolbar, and the main toolbar no longer shows the old MCC Native Inventory, MIT3 Reference Offline, or Native writes active badges.
 
-## Inventory vendor requisition PDF workflow
+## Inventory row selection and requisition workflow
 
-- Use **Select Current Page** to select the currently visible page of inventory rows when the current filter/sort/page is correct.
-- The selection panel shows the selected count and the vendor groups that will be processed.
-- Vendor grouping keeps each vendor on a separate requisition PDF. Close McMaster variations (`McMaster`, `McMaster-Carr`, and `mcmaster-carr`) are grouped as `McMaster-Carr`; close Grainger variations are grouped as `Grainger`. Other vendor names are only trimmed/case-normalized so unrelated vendors are not merged.
-- Parts with no vendor are grouped under **Unknown Vendor** and the review dialog requires confirmation before creating the PDF.
-- Click **Create Requisition** to open the first vendor group in the MIT3-style Create Requisition form.
-- Fill the requisition header fields, including PO No, PO Initiator, Ship Via, PO Class, Request Date, Vendor Name/Address, Confirmed With, Asset/Mold/Equipment/Part/Job numbers, Initials, TS No, Code No, Work Order No, Comments, Department Manager, Requisitioned By, Authorized By, Tax Exempt, Material Cert, FOB, and Priority.
-- MCC pre-fills Vendor Name, Request Date, item lines, quantities from minimum/reorder quantity when available, unit cost, and supplier part number.
-- Choose **Under $100** or **Over $100** before clicking **Create**. MCC defaults this from the estimated vendor total: totals below $100 start as Under $100 and totals of $100 or more start as Over $100.
-- Item lines remain editable for quantity, due date, and line notes.
-- Click **Create** to generate the MIT3-style requisition PDF. Under $100 and Over $100 use the corresponding MIT3 requisition type/layout mapping on the backend PDF generator.
-- Vendor groups process one at a time. After the current vendor PDF is created and requisition history/status is saved, MCC automatically advances to the next selected vendor group. When all groups are complete, MCC clears the selection and shows a completed message.
+- Each writable daily inventory row has compact `Select`, `Edit`, and `Req` actions.
+- Selected rows are subtly highlighted, and the selection panel shows the selected count.
+- `Select Current Page` and `Clear Selection` are available for fast selection cleanup.
+- The daily `Create Requisition` button opens the native MCC requisition modal when exactly one part is selected.
+- If more than one part is selected, MCC shows: `Create Requisition supports one selected part at a time right now.`
+- The `Req` row action opens the same native requisition modal for that part.
+- The native requisition modal includes readonly Part Number and Description, Qty Requested, optional WO#, and optional Notes.
+- Created requisitions are stored in MCC native requisition records and appear on the Requisitions page.
+- If a selected part has an active requisition, Inventory shows only a subtle `Active req` note in Actions; the Status column remains reserved for stock status.

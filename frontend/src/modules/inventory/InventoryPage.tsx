@@ -422,10 +422,8 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
 
   useEffect(()=>{ void refresh(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
 
-  const isOnline = status?.ok === true;
   const showWriteActions = canWrite;
   const writeEnabled = canWrite;
-  const writeDisabledReason = canWrite ? '' : 'View-only access.';
 
   const summary = useMemo(()=>{
     return {
@@ -463,7 +461,6 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const pageEnd = pageSize === 'all' ? sortedParts.length : Math.min(page * pageSize, sortedParts.length);
   const filtersActive = filter !== 'all' || search.trim().length > 0;
   const selectedParts = useMemo(()=>parts.filter(part=>selectedPartIds.has(part.id)),[parts,selectedPartIds]);
-  const selectedVendorGroups = useMemo(()=>groupPartsByVendor(selectedParts),[selectedParts]);
   const visibleSelectableIds = useMemo(()=>visibleParts.map(part=>part.id),[visibleParts]);
   const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every(id=>selectedPartIds.has(id));
 
@@ -504,6 +501,10 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
     setFilter('all');
   }
 
+  function togglePartSelection(partId: string) {
+    setSelectedPartIds(current=>{ const next = new Set(current); next.has(partId) ? next.delete(partId) : next.add(partId); return next; });
+  }
+
   function toggleVisibleSelection() {
     setSelectedPartIds(current=>{ const next = new Set(current); const shouldSelect = !visibleSelectableIds.every(id=>next.has(id)); visibleSelectableIds.forEach(id=>shouldSelect ? next.add(id) : next.delete(id)); return next; });
   }
@@ -517,15 +518,12 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   }
 
   function startSelectedRequisition() {
-    const groups = selectedVendorGroups;
-    if (!groups.length) return;
-    setReviewGroups(groups);
-    setReviewIndex(0);
-    const firstItems = groups[0].items.map(part=>({part,quantityRequested:String(part.minQuantity > 0 ? part.minQuantity : 1),dueDate:'',notes:''}));
-    const estimatedTotal = firstItems.reduce((sum,item)=>sum + Number(item.quantityRequested) * Number(item.part.unitCost ?? 0), 0);
-    setReviewItems(firstItems);
-    setReviewForm(blankVendorRequisitionForm(groups[0].vendorName, estimatedTotal));
-    setNotice(null);
+    if (!selectedParts.length) return;
+    if (selectedParts.length > 1) {
+      setNotice({kind:'error',text:'Create Requisition supports one selected part at a time right now.'});
+      return;
+    }
+    openRequisition(selectedParts[0]);
   }
 
   function closeReview() {
@@ -735,6 +733,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         }),
       });
       closeRequisition(true);
+      setSelectedPartIds(current=>{ const next = new Set(current); next.delete(requisitionPart.id); return next; });
       setNotice({kind:'success',text:`Requisition ${result.requisition.requisitionNumber} created.`});
       await refresh();
     } catch (err) {
@@ -758,9 +757,9 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
           <p className="eyebrow">Inventory workspace</p>
           <h2>Inventory</h2>
           <div className="inventory-focus-meta">
-            <span>Source: MCC Native Inventory</span>
             <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
             <span>Showing {visibleParts.length} of {sortedParts.length} parts{filtersActive ? ` (${parts.length} loaded)` : ''}</span>
+            {selectedParts.length>0&&<span>Selected: {selectedParts.length}</span>}
           </div>
         </div>
         <div className="inventory-focus-actions">
@@ -770,31 +769,8 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         </div>
       </div>
 
-      <div className="inventory-active-banner">MCC Native Inventory is active. MIT3 is kept as backup/reference.</div>
-
-      <div className="inventory-bridge-strip inventory-migration-strip">
-        <div>
-          <span>MIT3 reference status</span>
-          <strong>{status?.message ?? (loading ? 'Checking MIT3...' : 'MIT3 offline or not reachable')}</strong>
-        </div>
-        <div>
-          <span>Native inventory count</span>
-          <strong>{nativeSummary.totalParts} parts</strong>
-        </div>
-        <div>
-          <span>Last MIT3 import</span>
-          <strong>{formatDateTime(nativeSummary.lastImportedFromMit3At)}</strong>
-        </div>
-        <div>
-          <span>Daily source</span>
-          <strong>MCC Native Inventory</strong>
-        </div>
-        <div className="inventory-bridge-messages">
-          {error&&<p className="form-message error">{error}</p>}
-          {!isOnline&&<p className="form-message">MIT3 is offline or not reachable. MCC Native Inventory still works after import.</p>}
-          {writeDisabledReason&&<p className="form-message error">{writeDisabledReason}</p>}
-        </div>
-      </div>
+      {error&&<p className="form-message inventory-toast error">{error}</p>}
+      {!canWrite&&<p className="form-message inventory-toast error">View-only access.</p>}
 
       {nativeSummary.totalParts===0&&!loading&&(
         <section className="mcc-card inventory-setup-card">
@@ -920,8 +896,8 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
 
         <div className="inventory-selection-panel">
           <div>
-            <strong>{selectedParts.length} selected for requisition</strong>
-            <span>{selectedVendorGroups.length ? selectedVendorGroups.map(group=>`${group.vendorName} (${group.items.length})`).join(' • ') : 'No vendor groups selected.'}</span>
+            <strong>Selected: {selectedParts.length}</strong>
+            <span>{selectedParts.length ? selectedParts.map(part=>part.partNumber || part.itemId || 'Part').slice(0,3).join(', ') : 'Select one row to create a requisition.'}</span>
           </div>
           <div className="inventory-selection-actions">
             <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
@@ -964,7 +940,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
             </thead>
             <tbody>
               {visibleParts.map(part=>(
-                  <tr key={part.id}>
+                  <tr key={part.id} className={selectedPartIds.has(part.id) ? 'inventory-row-selected' : undefined}>
                     <td>
                       <span className="plain-part-number">{part.partNumber || part.itemId || '-'}</span>
                     </td>
@@ -973,12 +949,14 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
                     <td>{part.vendor || '-'}</td>
                     <td>{part.quantity}</td>
                     <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
-                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span>{part.hasActiveRequisitionRecord&&<span className="requisition-chip" title={part.activeRequisitionNumber || undefined}>REQ</span>}{!part.hasActiveRequisitionRecord&&part.requisition&&<span className="requisition-chip">{part.requisition}</span>}</div></td>
+                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span></div></td>
                     {showWriteActions&&(
                       <td>
                         <div className="inventory-row-actions">
+                          <button className={selectedPartIds.has(part.id) ? 'secondary-button compact-button selected' : 'secondary-button compact-button'} type="button" onClick={()=>togglePartSelection(part.id)} disabled={!writeEnabled}>{selectedPartIds.has(part.id) ? 'Selected' : 'Select'}</button>
                           <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
-                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Create Requisition</button>
+                          <button className="secondary-button compact-button" type="button" onClick={()=>openRequisition(part)} disabled={!writeEnabled}>Req</button>
+                          {part.hasActiveRequisitionRecord&&<span className="row-requisition-note" title={part.activeRequisitionNumber || undefined}>Active req</span>}
                         </div>
                       </td>
                     )}
