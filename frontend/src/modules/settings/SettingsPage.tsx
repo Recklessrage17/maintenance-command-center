@@ -21,8 +21,8 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
   }
   return (
     <div className="share-url-row">
-      <code>{url}</code>
-      <button className="secondary-button compact-button" onClick={()=>{void copy();}}>Copy</button>
+      <code title={url}>{url}</code>
+      <button className="secondary-button compact-button" type="button" aria-label={`Copy ${url}`} onClick={()=>{void copy();}}>Copy</button>
     </div>
   );
 }
@@ -46,7 +46,7 @@ export function SettingsPage() {
   },[]);
 
   return (
-    <div className="page-stack">
+    <div className="page-stack settings-page">
       <div className="page-heading">
         <p className="eyebrow">Settings</p>
         <h2>MCC Settings</h2>
