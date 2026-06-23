@@ -24,8 +24,8 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .mcc-nav { display: grid; gap: 8px; }
 .mcc-nav-button { min-height: 40px; border: 1px solid rgba(92, 180, 220, 0.2); border-radius: 12px; color: #cfeeff; background: rgba(10, 32, 55, 0.72); text-align: left; padding: 0 14px; cursor: pointer; font-size: .9rem; }
 .mcc-nav-button:hover, .mcc-nav-button.active { border-color: #34c8ff; background: rgba(0, 153, 219, 0.22); box-shadow: 0 0 0 1px rgba(52, 200, 255, 0.16) inset; }
-.command-launcher { position: fixed; top: 14px; left: 14px; z-index: 30; display: grid; gap: 10px; width: 62px; }
-.command-launcher.open::after { content: ""; position: absolute; left: 62px; top: 0; width: 22px; height: min(420px, calc(100vh - 28px)); }
+.command-launcher { position: fixed; top: 14px; left: 14px; z-index: 30; display: grid; grid-template-columns: 62px 62px; align-items: start; gap: 10px; width: 134px; }
+.command-launcher.open::after { content: ""; position: absolute; left: 134px; top: 0; width: 22px; height: min(420px, calc(100vh - 28px)); }
 .command-brand { width: 62px; min-height: 64px; margin: 0; padding: 8px 0 8px 13px; border-radius: 0; }
 .command-brand::before { top: 7px; bottom: 7px; width: 6px; }
 .command-brand::after { left: 9px; right: 2px; bottom: 3px; }
@@ -39,7 +39,7 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .launcher-gear { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(68, 215, 255, 0.42); color: #dff7ff; background: radial-gradient(circle, rgba(68, 215, 255, 0.24), rgba(6, 67, 98, 0.72)); box-shadow: 0 0 22px rgba(68, 215, 255, 0.22); font-size: 1.28rem; font-weight: 900; line-height: 1; transform: rotate(0deg); transition: transform .28s ease, color .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .command-launcher-button:hover .launcher-gear { color: #ffffff; border-color: rgba(68, 215, 255, 0.78); box-shadow: 0 0 26px rgba(68, 215, 255, 0.34); transform: rotate(150deg); }
 .command-launcher.open .launcher-gear { color: #36e5aa; border-color: rgba(54, 229, 170, 0.62); box-shadow: 0 0 28px rgba(54, 229, 170, 0.22); transform: rotate(150deg); }
-.command-menu { position: absolute; top: 0; left: 76px; width: min(300px, calc(100vw - 104px)); max-height: calc(100vh - 28px); overflow: auto; display: grid; gap: 12px; padding: 14px; border: 1px solid rgba(68, 215, 255, 0.28); border-radius: 20px; background: rgba(4, 18, 34, 0.96); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42), 0 0 40px rgba(68, 215, 255, 0.12); backdrop-filter: blur(14px); opacity: 0; pointer-events: none; transform: translateX(-8px) scale(.98); transform-origin: left top; transition: opacity .16s ease, transform .16s ease; }
+.command-menu { position: absolute; top: 0; left: 148px; width: min(300px, calc(100vw - 176px)); max-height: calc(100vh - 28px); overflow: auto; display: grid; gap: 12px; padding: 14px; border: 1px solid rgba(68, 215, 255, 0.28); border-radius: 20px; background: rgba(4, 18, 34, 0.96); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42), 0 0 40px rgba(68, 215, 255, 0.12); backdrop-filter: blur(14px); opacity: 0; pointer-events: none; transform: translateX(-8px) scale(.98); transform-origin: left top; transition: opacity .16s ease, transform .16s ease; }
 .command-launcher.open .command-menu { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
 .command-menu-title { display: grid; gap: 3px; padding: 2px 4px 8px; border-bottom: 1px solid rgba(85, 191, 236, 0.16); }
 .command-menu-title span { color: #44d7ff; font-size: .68rem; font-weight: 900; letter-spacing: .11em; text-transform: uppercase; }
@@ -53,7 +53,7 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .command-menu-user { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid rgba(54, 229, 170, 0.2); border-radius: 14px; background: rgba(18, 97, 71, 0.18); }
 .command-menu-user strong { display: block; color: #f3fbff; font-size: .86rem; line-height: 1.2; }
 .command-menu-user .secondary-button { width: auto; }
-.mcc-main { width: 100%; min-height: 100vh; padding: 16px 18px 18px 92px; min-width: 0; }
+.mcc-main { width: 100%; min-height: 100vh; padding: 16px 18px 18px 166px; min-width: 0; }
 .mcc-header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 24px; padding: 18px; border: 1px solid rgba(77, 208, 255, 0.2); border-radius: 18px; background: rgba(5, 22, 40, 0.72); }
 .mcc-header h1, .page-heading h2 { margin: 0; }
 .mcc-header h1 { font-size: 1.45rem; line-height: 1.18; }
@@ -153,7 +153,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .module-shell-card { min-height: 0; padding: 14px 16px; border-radius: 14px; }
 .module-shell-card strong { font-size: 1.1rem; }
 .action-link { display: inline-flex; align-items: center; justify-content: center; min-width: 172px; padding: 0 16px; text-decoration: none; }
-.inventory-focus-shell .mcc-main { width: 100%; padding: 14px 16px 16px 92px; }
+.inventory-focus-shell .mcc-main { width: 100%; padding: 14px 16px 16px 166px; }
 .inventory-focus-shell .mcc-content { width: 100%; max-width: none; }
 .inventory-page { gap: 12px; }
 .inventory-focus-toolbar { position: sticky; top: 0; z-index: 10; display: grid; grid-template-columns: auto minmax(140px, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid rgba(77, 208, 255, 0.24); border-radius: 14px; background: rgba(4, 18, 34, 0.94); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24); backdrop-filter: blur(12px); }

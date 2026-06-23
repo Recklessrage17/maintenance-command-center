@@ -1416,6 +1416,26 @@ function officialSetWrappedCellValue(cell: XlsxCell, value: unknown, maxLineLeng
   return officialCountWrappedLines(wrappedValue);
 }
 
+function officialSetCompactHeaderCellValue(sheet: XlsxSheet, address: string, value: unknown, maxLineLength: number) {
+  const cell = sheet.cell(address);
+  const wrappedValue = officialWrapTextByLength(value, maxLineLength, 1);
+  cell.value(wrappedValue);
+  try {
+    cell.style?.({ fontSize: 8.5, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
+  } catch {
+    // Header field tuning only; the value should still export if the template rejects style changes.
+  }
+  const rowNumber = Number(address.match(/\d+/)?.[0] ?? 0);
+  if (rowNumber > 0) {
+    try {
+      sheet.row?.(rowNumber).height?.(18);
+    } catch {
+      // Keep original template row height if it cannot be changed.
+    }
+  }
+  return officialCountWrappedLines(wrappedValue);
+}
+
 function officialSetCellValue(sheet: XlsxSheet, address: string, value: unknown) {
   sheet.cell(address).value(value ?? '');
 }
@@ -1447,14 +1467,14 @@ function officialWriteHeader(sheet: XlsxSheet, map: OfficialHeaderCellMap, input
   const [vendorAddressLine1 = '', vendorAddressLine2 = ''] = officialHeaderContactLines(header);
 
   officialSetWrappedCellValue(sheet.cell(map.poNo), '', 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.poInitiator), textField(header, ['poInitiator']), 20, 1);
+  officialSetCompactHeaderCellValue(sheet, map.poInitiator, textField(header, ['poInitiator']), 22);
   officialSetWrappedCellValue(sheet.cell(map.shipVia), textField(header, ['shipVia']), 18, 1);
   officialSetWrappedCellValue(sheet.cell(map.poClass), textField(header, ['poClass']), 18, 1);
   officialSetCellValue(sheet, map.reqDate, officialParseDateInput(textField(header, ['requestDate','reqDate'])));
   officialSetWrappedCellValue(sheet.cell(map.vendorName), textField(header, ['vendorName'], vendor), 26, 1);
   officialSetWrappedCellValue(sheet.cell(map.vendorAddressLine1), vendorAddressLine1, 34, 1);
   officialSetWrappedCellValue(sheet.cell(map.vendorAddressLine2), vendorAddressLine2, 44, 1);
-  officialSetWrappedCellValue(sheet.cell(map.confirmedWith), textField(header, ['confirmedWith']), 22, 1);
+  officialSetCompactHeaderCellValue(sheet, map.confirmedWith, textField(header, ['confirmedWith']), 24);
   officialSetWrappedCellValue(sheet.cell(map.assetNo), textField(header, ['assetNo']), 18, 1);
   officialSetWrappedCellValue(sheet.cell(map.moldNo), textField(header, ['moldNo']), 18, 1);
   officialSetWrappedCellValue(sheet.cell(map.equipmentNo), textField(header, ['equipmentNo']), 18, 1);
