@@ -123,6 +123,7 @@ Phase 2E rules:
 - Add/edit/requisition permissions are Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2.
 - Maintenance Tech 1 remains view-only.
 - Missing native MCC vendors and locations are created when a part is added or edited.
+- Native inventory add/edit requires Part Number, Description, Vendor, and a numeric non-negative Unit Cost. Location, Manufacturer / Brand, Supplier Part #, and Part Info URL remain optional.
 - Part Info URL values must be blank or safe `http` / `https` URLs. Local, file, mail, blob, and data URLs are rejected.
 - Hard delete is not included in this phase.
 - Native inventory audit entries record part create, part edit, requisition change, failed native writes, and vendor/location auto-create events.

@@ -312,10 +312,14 @@ function compareParts(left: InventoryPart, right: InventoryPart, sortKey: SortKe
 
 function validateForm(form: PartForm) {
   if (!form.partNumber.trim()) return 'Part Number is required.';
+  if (!form.description.trim()) return 'Description is required.';
+  if (!form.vendor.trim()) return 'Vendor is required.';
+  if (!form.unitCost.trim()) return 'Unit Cost is required.';
+  if (!Number.isFinite(Number(form.unitCost))) return 'Unit Cost must be numeric.';
+  if (Number(form.unitCost) < 0) return 'Unit Cost cannot be negative.';
   if (!Number.isFinite(Number(form.quantity))) return 'Quantity must be numeric.';
   if (!Number.isFinite(Number(form.minQuantity))) return 'Minimum Quantity must be numeric.';
   if (form.partInfoUrl.trim() && !validUrl(form.partInfoUrl.trim())) return 'Part Info URL must be blank or a valid http/https URL.';
-  if (form.unitCost.trim() && (!Number.isFinite(Number(form.unitCost)) || Number(form.unitCost) < 0)) return 'Unit Cost must be blank or a number zero or greater.';
   return '';
 }
 
@@ -1175,11 +1179,11 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
             <div className="inventory-form-grid">
               <label className="form-field">
-                <span>Part Number</span>
+                <span>Part Number <b className="required-marker" aria-label="required">*</b></span>
                 <input value={form.partNumber} onChange={event=>setForm({...form,partNumber:event.target.value})} />
               </label>
               <label className="form-field">
-                <span>Description</span>
+                <span>Description <b className="required-marker" aria-label="required">*</b></span>
                 <input value={form.description} onChange={event=>setForm({...form,description:event.target.value})} />
               </label>
               <label className="form-field">
@@ -1187,7 +1191,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                 <input list="native-location-options" value={form.location} onChange={event=>setForm({...form,location:event.target.value})} />
               </label>
               <label className="form-field">
-                <span>Vendor</span>
+                <span>Vendor <b className="required-marker" aria-label="required">*</b></span>
                 <input list="native-vendor-options" value={form.vendor} onChange={event=>setForm({...form,vendor:event.target.value})} />
               </label>
               <label className="form-field">
@@ -1199,8 +1203,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                 <input value={form.supplierPartNumber} onChange={event=>setForm({...form,supplierPartNumber:event.target.value})} />
               </label>
               <label className="form-field">
-                <span>Unit Cost</span>
-                <input inputMode="decimal" value={form.unitCost} onChange={event=>setForm({...form,unitCost:event.target.value})} placeholder="Optional" />
+                <span>Unit Cost <b className="required-marker" aria-label="required">*</b></span>
+                <input inputMode="decimal" value={form.unitCost} onChange={event=>setForm({...form,unitCost:event.target.value})} placeholder="0.00" />
               </label>
               <label className="form-field">
                 <span>Quantity</span>

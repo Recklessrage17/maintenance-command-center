@@ -877,13 +877,16 @@ function validateNativePartInput(body: unknown) {
   const partNumber = textField(input, ['partNumber']);
   if (!partNumber) throw new Error('Part Number is required.');
   const description = textField(input, ['description']);
+  if (!description) throw new Error('Description is required.');
   const location = textField(input, ['location']);
   const vendor = textField(input, ['vendor']);
+  if (!vendor) throw new Error('Vendor is required.');
   const quantity = numericInput(input, 'quantity', 'Quantity');
   const minQuantity = numericInput(input, 'minQuantity', 'Minimum Quantity');
   const manufacturerBrand = textField(input, ['manufacturerBrand','manufacturer','brand']).slice(0, 160);
-  const unitCost = input.unitCost === undefined || input.unitCost === null || String(input.unitCost).trim() === '' ? 0 : numericInput(input, 'unitCost', 'Unit Cost');
-  if (unitCost < 0) throw new Error('Unit Cost must be zero or greater.');
+  if (input.unitCost === undefined || input.unitCost === null || String(input.unitCost).trim() === '') throw new Error('Unit Cost is required.');
+  const unitCost = numericInput(input, 'unitCost', 'Unit Cost');
+  if (unitCost < 0) throw new Error('Unit Cost cannot be negative.');
   const supplierPartNumber = textField(input, ['supplierPartNumber','supplierPartNo']).slice(0, 160);
   const rawUrl = textField(input, ['partInfoUrl']);
   const partInfoUrl = rawUrl ? safePartInfoUrl(rawUrl) : '';
@@ -907,7 +910,7 @@ function nativeRequisitionFromInput(body: unknown) {
 function nativeInventoryErrorStatus(message: string) {
   if (/not found/i.test(message)) return 404;
   if (/already exists/i.test(message)) return 409;
-  if (/required|numeric|valid http\/https/i.test(message)) return 400;
+  if (/required|numeric|negative|valid http\/https/i.test(message)) return 400;
   return 500;
 }
 function sendNativeInventoryError(req: Request, res: Response, operation: string, targetId: string|number, error: unknown) {

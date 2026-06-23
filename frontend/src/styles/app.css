@@ -49,6 +49,7 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .auth-card h1 { margin: 0 0 22px; font-size: clamp(1.8rem, 4vw, 2.35rem); }
 .auth-form, .user-form { display: grid; gap: 16px; }
 .form-field { display: grid; gap: 8px; color: #bfe9ff; font-size: .9rem; font-weight: 800; }
+.required-marker { color: #ff5d6c; font: inherit; font-weight: 900; line-height: 1; }
 input, select, textarea { width: 100%; min-height: 48px; border: 1px solid rgba(92, 180, 220, 0.34); border-radius: 12px; padding: 0 14px; color: #f3fbff; background: rgba(7, 25, 45, 0.92); font: inherit; font-size: .93rem; }
 textarea { min-height: 92px; padding: 12px 14px; resize: vertical; }
 .primary-button, .secondary-button, .link-button, .danger-button { min-height: 44px; border-radius: 12px; border: 1px solid rgba(52, 200, 255, 0.48); cursor: pointer; font-weight: 800; font-size: .93rem; }
