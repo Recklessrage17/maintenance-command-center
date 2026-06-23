@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type Mit3Status = {
   ok: boolean;
@@ -435,6 +435,9 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [requisitionError,setRequisitionError]=useState('');
   const [requisitionSaving,setRequisitionSaving]=useState(false);
   const [passSaving,setPassSaving]=useState(false);
+  const tableScrollRef = useRef<HTMLDivElement|null>(null);
+  const lastAutoPageAtRef = useRef(0);
+  const pendingScrollTargetRef = useRef<'top'|'bottom'|null>(null);
 
   const canWrite = writeRoles.has(userRole);
   const canImport = importRoles.has(userRole);
@@ -481,15 +484,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const showWriteActions = canWrite;
   const writeEnabled = canWrite;
 
-  const summary = useMemo(()=>{
-    return {
-      total: parts.length,
-      low: parts.filter(isLowStock).length,
-      requisition: parts.filter(part=>Boolean(part.requisition || part.orderPlaced)).length,
-      places: `${nativeSummary.locationCount} / ${nativeSummary.vendorCount}`,
-    };
-  },[nativeSummary.locationCount,nativeSummary.vendorCount,parts]);
-
   const locationOptions = useMemo(()=>[...new Set(parts.map(part=>part.location.trim()).filter(Boolean))].sort(compareText),[parts]);
   const vendorOptions = useMemo(()=>[...new Set(parts.map(part=>part.vendor.trim()).filter(Boolean))].sort(compareText),[parts]);
 
@@ -513,16 +507,31 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     const start = (page - 1) * pageSize;
     return sortedParts.slice(start, start + pageSize);
   },[page,pageSize,sortedParts]);
-  const pageStart = sortedParts.length === 0 ? 0 : pageSize === 'all' ? 1 : (page - 1) * pageSize + 1;
-  const pageEnd = pageSize === 'all' ? sortedParts.length : Math.min(page * pageSize, sortedParts.length);
   const filtersActive = filter !== 'all' || search.trim().length > 0;
   const selectedParts = useMemo(()=>parts.filter(part=>selectedPartIds.has(part.id)),[parts,selectedPartIds]);
   const visibleSelectableIds = useMemo(()=>visibleParts.map(part=>part.id),[visibleParts]);
   const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every(id=>selectedPartIds.has(id));
   const activePreviewRequisition = useMemo(()=>previewRequisitions.find(requisition=>requisition.id===activePreviewId) ?? previewRequisitions[0] ?? null,[activePreviewId,previewRequisitions]);
 
-  useEffect(()=>{ setPage(1); },[filter,pageSize,search,sortDirection,sortKey]);
+  useEffect(()=>{
+    pendingScrollTargetRef.current = null;
+    tableScrollRef.current?.scrollTo({top:0});
+    setPage(1);
+  },[filter,pageSize,search,sortDirection,sortKey]);
   useEffect(()=>{ setPage(current=>Math.min(current,totalPages)); },[totalPages]);
+  useEffect(()=>{
+    const container = tableScrollRef.current;
+    const target = pendingScrollTargetRef.current;
+    if (!container || !target) return;
+    pendingScrollTargetRef.current = null;
+    window.requestAnimationFrame(()=>{
+      if (target === 'bottom') {
+        container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight - 36);
+      } else {
+        container.scrollTop = 0;
+      }
+    });
+  },[page,visibleParts.length]);
   useEffect(()=>{
     if (!activePreviewRequisition) {
       setPreviewUrl('');
@@ -596,6 +605,31 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
   function toggleVisibleSelection() {
     setSelectedPartIds(current=>{ const next = new Set(current); const shouldSelect = !visibleSelectableIds.every(id=>next.has(id)); visibleSelectableIds.forEach(id=>shouldSelect ? next.add(id) : next.delete(id)); return next; });
+  }
+
+  function moveInventoryPage(direction: 'next'|'previous', scrollTarget: 'top'|'bottom') {
+    if (pageSize === 'all') return;
+    pendingScrollTargetRef.current = scrollTarget;
+    setPage(current=>direction === 'next' ? Math.min(totalPages,current + 1) : Math.max(1,current - 1));
+  }
+
+  function handleInventoryTableScroll(event: UIEvent<HTMLDivElement>) {
+    if (pageSize === 'all' || totalPages <= 1) return;
+    const container = event.currentTarget;
+    if (container.scrollHeight <= container.clientHeight + 8) return;
+    const now = Date.now();
+    if (now - lastAutoPageAtRef.current < 850) return;
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom <= 96 && page < totalPages) {
+      lastAutoPageAtRef.current = now;
+      moveInventoryPage('next','top');
+      return;
+    }
+    if (container.scrollTop <= 32 && page > 1) {
+      lastAutoPageAtRef.current = now;
+      moveInventoryPage('previous','bottom');
+    }
   }
 
   function clearSelection() {
@@ -930,7 +964,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
           <h2>Inventory</h2>
           <div className="inventory-focus-meta">
             <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
-            <span>Showing {visibleParts.length} of {sortedParts.length} parts{filtersActive ? ` (${parts.length} loaded)` : ''}</span>
             {selectedParts.length>0&&<span>Selected: {selectedParts.length}</span>}
           </div>
         </div>
@@ -1039,13 +1072,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         </section>
       )}
 
-      <div className="card-grid inventory-summary-grid">
-        <article className="mcc-card"><span>Total Parts</span><strong>{summary.total}</strong><p>Loaded from MCC Native Inventory.</p></article>
-        <article className="mcc-card"><span>Low Stock / Watch Items</span><strong>{summary.low}</strong><p>Low or out of stock.</p></article>
-        <article className="mcc-card"><span>Requisition Items</span><strong>{summary.requisition}</strong><p>Active or marked requisition.</p></article>
-        <article className="mcc-card"><span>Locations / Vendors</span><strong>{summary.places}</strong><p>Unique names available.</p></article>
-      </div>
-
       {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
 
       <section className="mcc-card inventory-table-card">
@@ -1079,10 +1105,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         </div>
 
         <div className="inventory-table-meta">
-          <div>
-            <strong>Showing {visibleParts.length} of {sortedParts.length} parts</strong>
-            <span>{sortedParts.length ? `Rows ${pageStart}-${pageEnd}` : 'No rows'}{filtersActive ? `; ${parts.length} loaded from MCC Native Inventory` : ''}</span>
-          </div>
           <div className="inventory-pager">
             <label className="page-size-field">
               <span>Rows</span>
@@ -1090,13 +1112,13 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                 {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
               </select>
             </label>
-            <button className="secondary-button compact-button" type="button" onClick={()=>setPage(current=>Math.max(1,current-1))} disabled={page<=1||pageSize==='all'}>Prev</button>
+            <button className="secondary-button compact-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
             <span className="page-count">Page {page} of {totalPages}</span>
-            <button className="secondary-button compact-button" type="button" onClick={()=>setPage(current=>Math.min(totalPages,current+1))} disabled={page>=totalPages||pageSize==='all'}>Next</button>
+            <button className="secondary-button compact-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
           </div>
         </div>
 
-        <div className="table-card inventory-table-wrap">
+        <div className="table-card inventory-table-wrap" ref={tableScrollRef} onScroll={handleInventoryTableScroll}>
           <table>
             <thead>
               <tr>

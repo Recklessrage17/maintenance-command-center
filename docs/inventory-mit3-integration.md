@@ -271,12 +271,13 @@ MIT3 is backup/reference only. It is not shown in the main daily Inventory toolb
 
 ## Inventory row selection and requisition workflow
 
-- Each writable daily inventory row has compact `Select`, `Edit`, and `Req` actions.
-- Selected rows are subtly highlighted, and the selection panel shows the selected count.
+- Each writable daily inventory row has compact `Select` and `Edit` actions.
+- The daily Inventory view keeps the search, filters, selection panel, pager, and full-width table visible without the former summary card group.
+- Selected rows are subtly highlighted, and the selection panel shows the selected count plus a short selected-part preview.
 - `Select Current Page` and `Clear Selection` are available for fast selection cleanup.
 - The daily `Preview Requisition` button opens the native MCC requisition modal when one or more parts are selected.
-- The `Req` row action opens the same native requisition modal for a quick single-line requisition.
 - The native requisition modal lists the selected parts with requested quantity inputs and optional line notes, plus optional WO# and header notes.
 - Created requisitions are stored as one MCC native requisition header per vendor with one or more line records and appear on the Requisitions page.
 - After requisitions are created, MCC automatically opens a PDF preview modal. Multi-vendor selections show one preview tab per requisition, and the preview includes Print, Download PDF, and Close actions.
 - If a selected part has an active requisition, Inventory shows only a subtle `Active req` note in Actions; the Status column remains reserved for stock status.
+- The Inventory table keeps manual Previous/Next paging and also auto-advances one page at a time when the user scrolls near the bottom of the table, or goes back one page when scrolling near the top. Auto paging is throttled to avoid rapid flipping.
