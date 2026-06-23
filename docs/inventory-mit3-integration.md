@@ -45,7 +45,7 @@ Phase 2C adds:
 - Client-side sorting for Part Number, Description, Location, Vendor, Qty, Cost, and Status.
 - Client-side page-size controls for 50, 100, 250, or All rows.
 - Search across part number, description, location, and vendor.
-- Filters for All, Low Stock, Requisition, Has Link, and No Link.
+- Filter dropdown for All, Low Stock, and Requisition.
 - Smaller table text, smaller status badges, compact link buttons, and controlled description wrapping.
 - A compact safety message that MIT3 remains the source of truth and MCC writes only through the MIT3 API.
 - Role-aware Inventory controls: Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can add, edit, and requisition when MIT3 is online; Maintenance Tech 1 remains view-only.

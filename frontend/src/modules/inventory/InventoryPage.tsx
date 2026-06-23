@@ -37,7 +37,7 @@ type PartsResponse = {
   summary?: NativeSummary;
 };
 
-type FilterMode = 'all' | 'low' | 'requisition' | 'hasLink' | 'noLink';
+type FilterMode = 'all' | 'low' | 'requisition';
 type ModalMode = 'add' | 'edit';
 type Notice = { kind: 'success' | 'error'; text: string };
 type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'unitCost' | 'status';
@@ -184,6 +184,11 @@ function blankVendorRequisitionForm(vendorName = '', estimatedTotal = 0): Vendor
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const importRoles = new Set(['Admin','Manager','Maintenance Tech 3']);
 const pageSizeOptions: PageSize[] = [50,100,250,'all'];
+const filterOptions: { label: string; value: FilterMode }[] = [
+  { label: 'All', value: 'all' },
+  { label: 'Low Stock', value: 'low' },
+  { label: 'Requisition', value: 'requisition' },
+];
 const emptyNativeSummary: NativeSummary = {
   totalParts: 0,
   lowStockCount: 0,
@@ -427,6 +432,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [requisitionLines,setRequisitionLines]=useState<RequisitionLineForm[]>([]);
   const [requisitionForm,setRequisitionForm]=useState<RequisitionHeaderForm>(()=>blankRequisitionForm(userFullName));
   const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
+  const [selectionToolsOpen,setSelectionToolsOpen]=useState(false);
   const [previewRequisitions,setPreviewRequisitions]=useState<CreatedRequisition[]>([]);
   const [activePreviewId,setActivePreviewId]=useState<number|null>(null);
   const [previewUrl,setPreviewUrl]=useState('');
@@ -496,8 +502,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     return parts.filter(part=>{
       if(filter==='low'&&!isLowStock(part)) return false;
       if(filter==='requisition'&&!part.requisition&&!part.orderPlaced) return false;
-      if(filter==='hasLink'&&!safeHttpUrl(part.partInfoUrl)) return false;
-      if(filter==='noLink'&&safeHttpUrl(part.partInfoUrl)) return false;
       if(!needle) return true;
       return [part.partNumber,part.description,part.location,part.vendor]
         .some(value=>value.toLowerCase().includes(needle));
@@ -511,6 +515,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     const start = (page - 1) * pageSize;
     return sortedParts.slice(start, start + pageSize);
   },[page,pageSize,sortedParts]);
+  const visibleRangeStart = sortedParts.length === 0 ? 0 : pageSize === 'all' ? 1 : (page - 1) * pageSize + 1;
+  const visibleRangeEnd = pageSize === 'all' ? sortedParts.length : Math.min(sortedParts.length, page * pageSize);
   const filtersActive = filter !== 'all' || search.trim().length > 0;
   const selectedParts = useMemo(()=>parts.filter(part=>selectedPartIds.has(part.id)),[parts,selectedPartIds]);
   const visibleSelectableIds = useMemo(()=>visibleParts.map(part=>part.id),[visibleParts]);
@@ -523,6 +529,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     setPage(1);
   },[filter,pageSize,search,sortDirection,sortKey]);
   useEffect(()=>{ setPage(current=>Math.min(current,totalPages)); },[totalPages]);
+  useEffect(()=>{ if (selectedParts.length) setSelectionToolsOpen(true); },[selectedParts.length]);
   useEffect(()=>{
     const container = tableScrollRef.current;
     const target = pendingScrollTargetRef.current;
@@ -1085,30 +1092,18 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             <input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Part number, description, location, vendor..." />
           </label>
           <div className="inventory-toolbar-actions">
-            <div className="segmented-control" aria-label="Inventory filters">
-              <button className={filter==='all'?'active':''} onClick={()=>setFilter('all')} type="button">All</button>
-              <button className={filter==='low'?'active':''} onClick={()=>setFilter('low')} type="button">Low Stock</button>
-              <button className={filter==='requisition'?'active':''} onClick={()=>setFilter('requisition')} type="button">Requisition</button>
-              <button className={filter==='hasLink'?'active':''} onClick={()=>setFilter('hasLink')} type="button">Has Link</button>
-              <button className={filter==='noLink'?'active':''} onClick={()=>setFilter('noLink')} type="button">No Link</button>
-            </div>
+            <label className="filter-select-field">
+              <span>Filter</span>
+              <select value={filter} onChange={event=>setFilter(event.target.value as FilterMode)} aria-label="Inventory filter">
+                {filterOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
             <button className="secondary-button compact-button" type="button" onClick={clearFilters} disabled={!filtersActive}>Clear Filters</button>
           </div>
         </div>
 
-        <div className="inventory-selection-panel">
-          <div>
-            <strong>Selected: {selectedParts.length}</strong>
-            <span>{selectedParts.length ? selectedParts.map(part=>part.partNumber || part.itemId || 'Part').slice(0,3).join(', ') : 'Select one or more rows to create a requisition.'}</span>
-          </div>
-          <div className="inventory-selection-actions">
-            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
-            <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
-            <button className="primary-button compact-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
-          </div>
-        </div>
-
         <div className="inventory-table-meta">
+          <span className="result-count">{visibleRangeStart}-{visibleRangeEnd} of {sortedParts.length}</span>
           <div className="inventory-pager">
             <label className="page-size-field">
               <span>Rows</span>
@@ -1116,9 +1111,9 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                 {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
               </select>
             </label>
-            <button className="secondary-button compact-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
-            <span className="page-count">Page {page} of {totalPages}</span>
-            <button className="secondary-button compact-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
+            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
+            <span className="page-count">{page} / {totalPages}</span>
+            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
           </div>
         </div>
 
@@ -1164,6 +1159,20 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             </tbody>
           </table>
         </div>
+
+        <details className="inventory-selection-panel" open={selectionToolsOpen} onToggle={event=>setSelectionToolsOpen(event.currentTarget.open)}>
+          <summary>
+            <div>
+              <strong>Selection Tools</strong>
+              <span>{selectedParts.length ? `${selectedParts.length} selected: ${selectedParts.map(part=>part.partNumber || part.itemId || 'Part').slice(0,3).join(', ')}` : 'No rows selected.'}</span>
+            </div>
+          </summary>
+          <div className="inventory-selection-actions">
+            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
+            <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
+            <button className="primary-button compact-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
+          </div>
+        </details>
       </section>
 
       {modal&&(

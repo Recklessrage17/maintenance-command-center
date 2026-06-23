@@ -377,7 +377,7 @@ async function fetchMit3Inventory() {
 
 type NormalizedMit3Part = ReturnType<typeof normalizeMit3Parts>[number];
 type NativeLookupTable = 'inventory_vendors' | 'inventory_locations';
-type NativePartFilter = 'all' | 'low' | 'requisition' | 'hasLink' | 'noLink';
+type NativePartFilter = 'all' | 'low' | 'requisition';
 interface NativePartRow {
   id: number;
   mit3_item_id: string | null;
@@ -491,8 +491,6 @@ function nativeParts(search = '', filter: NativePartFilter = 'all') {
   }
   if (filter === 'low') where.push("(p.status IN ('Low Stock','Out of Stock') OR (p.min_quantity > 0 AND p.quantity <= p.min_quantity))");
   if (filter === 'requisition') where.push("p.requisition<>''");
-  if (filter === 'hasLink') where.push("p.part_info_url<>''");
-  if (filter === 'noLink') where.push("p.part_info_url=''");
   return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
@@ -1421,17 +1419,9 @@ function officialSetCompactHeaderCellValue(sheet: XlsxSheet, address: string, va
   const wrappedValue = officialWrapTextByLength(value, maxLineLength, 1);
   cell.value(wrappedValue);
   try {
-    cell.style?.({ fontSize: 8.5, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
+    cell.style?.({ fontSize: 7.8, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
   } catch {
     // Header field tuning only; the value should still export if the template rejects style changes.
-  }
-  const rowNumber = Number(address.match(/\d+/)?.[0] ?? 0);
-  if (rowNumber > 0) {
-    try {
-      sheet.row?.(rowNumber).height?.(18);
-    } catch {
-      // Keep original template row height if it cannot be changed.
-    }
   }
   return officialCountWrappedLines(wrappedValue);
 }
@@ -1563,11 +1553,11 @@ function officialWriteGrandTotal(sheet: XlsxSheet, grandTotalCell: string, total
 function officialAdjustUnder100HeaderSpacing(sheet: XlsxSheet, type: RequisitionTemplateKind) {
   if (type !== 'under-100') return;
   try {
-    sheet.row?.(12).height?.(17);
-    sheet.row?.(13).height?.(17);
-    sheet.row?.(14).height?.(17);
-    sheet.row?.(18).height?.(17);
-    sheet.row?.(19).height?.(19);
+    sheet.row?.(12).height?.(18);
+    sheet.row?.(13).height?.(18);
+    sheet.row?.(14).height?.(18);
+    sheet.row?.(18).height?.(18);
+    sheet.row?.(19).height?.(20);
   } catch {
     // Keep original template layout if row height changes are rejected.
   }
@@ -3091,7 +3081,7 @@ app.get('/api/inventory/native/summary', requireAuth, requirePermission('invento
 app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory.view'), (req,res)=>{
   const search = queryText(req.query.search ?? req.query.q);
   const requestedFilter = queryText(req.query.filter);
-  const filter: NativePartFilter = ['low','requisition','hasLink','noLink'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
+  const filter: NativePartFilter = ['low','requisition'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
   res.json({ok:true,source:'mcc-native',parts:nativeParts(search,filter),summary:nativeInventorySummary()});
 });
 app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inventory.write'), (req,res)=>{
