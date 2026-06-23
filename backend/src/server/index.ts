@@ -1093,7 +1093,7 @@ const over100Positions: StampPositions = {
   comments: { x: 220, topY: 507 },
   departmentManager: { x: 525, topY: 507 },
   requisitionedBy: { x: 356, topY: 557 },
-  requisitionedByBox: { x: 355, topY: 556, width: 118, height: 12 },
+  requisitionedByBox: { x: 355, topY: 545, width: 118, height: 12 },
   authorizedBy: { x: 525, topY: 557 },
 };
 
@@ -1149,7 +1149,7 @@ const under100Positions: StampPositions = {
   comments: { x: 170, topY: 518 },
   departmentManager: { x: 598, topY: 524 },
   requisitionedBy: { x: 327, topY: 546 },
-  requisitionedByBox: { x: 327, topY: 546, width: 181, height: 12 },
+  requisitionedByBox: { x: 327, topY: 534, width: 181, height: 12 },
   authorizedBy: { x: 598, topY: 546 },
 };
 
@@ -1182,6 +1182,11 @@ function formatRequisitionDate(value: string | undefined) {
 function isoDateOnly(value: string | null | undefined) {
   if (!value) return '';
   return value.slice(0, 10);
+}
+function localDateOnly(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 function cleanPdfText(value: unknown) {
@@ -1284,6 +1289,16 @@ function getVendorContactLines(header: Record<string, unknown>) {
 function drawLineTableHeaders(_page: PDFPage, _positions: StampPositions, _boldFont: PDFFont, _pageHeight: number) {
   // The JBT templates already include table headers. Keep normal output clean.
 }
+function polishUnder100TemplateLabels(page: PDFPage, boldFont: PDFFont, regularFont: PDFFont, pageHeight: number) {
+  const white = rgb(1, 1, 1);
+
+  page.drawRectangle({ x: 55, y: pageHeight - 123, width: 156, height: 25, color: white });
+  page.drawText('REQUISITION Under $100.00', { x: 61, y: yFromTop(pageHeight, 111, 10.5), size: 10.5, font: boldFont, color: pdfBlack });
+  page.drawLine({ start: { x: 61, y: yFromTop(pageHeight, 125, 0) }, end: { x: 201, y: yFromTop(pageHeight, 125, 0) }, thickness: 0.8, color: pdfBlack });
+
+  page.drawRectangle({ x: 323, y: pageHeight - 140, width: 54, height: 15, color: white });
+  page.drawText('P.O. Initiator', { x: 324, y: yFromTop(pageHeight, 135, 8.5), size: 8.5, font: regularFont, color: pdfBlack });
+}
 
 function stampHeader(input: {
   boldFont: PDFFont;
@@ -1299,13 +1314,13 @@ function stampHeader(input: {
 }) {
   const { boldFont, header, notes, page, pageHeight, positions, regularFont } = input;
   const draw = (text: string | number | undefined | null, point: PdfPoint, options: { maxLength?: number; maxWidth?: number; size?: number } = {}) =>
-    drawTextSafe(page, text, point.x, point.topY, { font: regularFont, pageHeight, ...options });
+    drawTextSafe(page, text, point.x, point.topY - 7, { font: regularFont, pageHeight, ...options });
   const [vendorAddressLine1 = '', vendorAddressLine2 = ''] = getVendorContactLines(header);
   const fob = cleanPdfText(textField(header, ['fob'])).toLowerCase();
   const taxExempt = cleanPdfText(textField(header, ['taxExempt'], 'No')).toLowerCase();
   const materialCert = cleanPdfText(textField(header, ['materialCert'], 'No')).toLowerCase();
 
-  draw(textField(header, ['poNo'], input.requisitionNumber), positions.poNo, { maxLength: 20 });
+  draw(textField(header, ['poNo']), positions.poNo, { maxLength: 20 });
   draw(textField(header, ['poInitiator']), positions.poInitiator, { maxLength: 28 });
   draw(textField(header, ['shipVia']), positions.shipVia, { maxLength: 24 });
   draw(textField(header, ['poClass']), positions.poClass, { maxLength: 20 });
@@ -1323,7 +1338,7 @@ function stampHeader(input: {
   draw(textField(header, ['codeNo']), positions.codeNo, { maxLength: 18 });
   draw(textField(header, ['workOrderNo']), positions.workOrderNo, { maxLength: 24 });
   draw(textField(header, ['equipmentNo']), positions.equipmentNo, { maxLength: 24 });
-  drawTextInBox(page, getHeaderComments(header, notes), { x: positions.comments.x, topY: positions.comments.topY - 3, width: 330, height: 28 }, { font: regularFont, pageHeight, size: 7, maxLines: 2, vertical: 'top' });
+  drawTextInBox(page, getHeaderComments(header, notes), { x: positions.comments.x, topY: positions.comments.topY - 11, width: 330, height: 28 }, { font: regularFont, pageHeight, size: 7, maxLines: 2, vertical: 'top' });
   draw(textField(header, ['departmentManager']), positions.departmentManager, { maxLength: 28 });
   drawTextInBox(page, textField(header, ['requisitionedBy'], input.requestedBy), positions.requisitionedByBox, { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
   draw(textField(header, ['authorizedBy']), positions.authorizedBy, { maxLength: 28 });
@@ -1386,10 +1401,11 @@ async function buildRequisitionPdf(input: { vendor: string; requisitionNumber: s
     const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
+    if (type === 'under-100') polishUnder100TemplateLabels(page, boldFont, regularFont, height);
     drawLineTableHeaders(page, positions, boldFont, height);
     stampHeader({ page, regularFont, boldFont, positions, header, notes: input.notes, vendor: input.vendor, requestedBy: input.requestedBy, requisitionNumber: input.requisitionNumber, pageHeight: height });
     stampLineItems({ page, regularFont, positions, items: pageItems, pageHeight: height });
-    drawTextInBox(page, money(total), positions.vendorTotalBox, { align: 'right', font: boldFont, size: 8, pageHeight: height, maxLines: 1 });
+    if (total > 0) drawTextInBox(page, money(total), positions.vendorTotalBox, { align: 'right', font: boldFont, size: 8, pageHeight: height, maxLines: 1 });
 
     const [copiedPage] = await mergedPdf.copyPages(pdfDoc, [0]);
     mergedPdf.addPage(copiedPage);
@@ -1457,8 +1473,8 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
     notes: lifecycleNotes,
     requisitionType: 'under-100',
     header: {
-      poNo: requisition.requisition_number,
-      requestDate: isoDateOnly(requisition.requested_at),
+      poNo: '',
+      requestDate: localDateOnly(),
       vendorName: requisition.vendor_name,
       workOrderNo: requisition.work_order_number,
       comments: lifecycleNotes,
