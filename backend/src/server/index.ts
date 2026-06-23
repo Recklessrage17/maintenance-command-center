@@ -978,6 +978,7 @@ function safeFileToken(value: string) {
 type RequisitionPdfItem = {partNumber:string;description:string;locationName:string;quantityRequested:number;unitCost?:number|null;supplierPartNumber?:string;dueDate?:string;notes?:string;unitOfMeasure?:string};
 type RequisitionTemplateKind = 'under-100' | 'over-100';
 type PdfPoint = { x: number; topY: number };
+type PdfBox = { x: number; topY: number; width: number; height: number };
 type StampPositions = {
   assetNo: PdfPoint;
   authorizedBy: PdfPoint;
@@ -999,6 +1000,16 @@ type StampPositions = {
   lineTotalPriceX: number;
   lineUnitPriceX: number;
   lineUnitX: number;
+  lineBoxes: {
+    quantity: PdfBox;
+    unit: PdfBox;
+    itemNumber: PdfBox;
+    description: PdfBox;
+    dueDate: PdfBox;
+    unitPrice: PdfBox;
+    totalPrice: PdfBox;
+  };
+  lineRowTopYs: number[];
   materialCertNo: PdfPoint;
   materialCertYes: PdfPoint;
   maxLineRows: number;
@@ -1017,7 +1028,9 @@ type StampPositions = {
   vendorAddressLine1: PdfPoint;
   vendorAddressLine2: PdfPoint;
   vendorName: PdfPoint;
+  requisitionedByBox: PdfBox;
   vendorTotal: PdfPoint;
+  vendorTotalBox: PdfBox;
   workOrderNo: PdfPoint;
 };
 
@@ -1065,18 +1078,79 @@ const over100Positions: StampPositions = {
   lineDueDateX: 486,
   lineUnitPriceX: 535,
   lineTotalPriceX: 570,
+  lineBoxes: {
+    quantity: { x: 147, topY: 238, width: 30, height: 35 },
+    unit: { x: 178, topY: 238, width: 39, height: 35 },
+    itemNumber: { x: 218, topY: 238, width: 86, height: 35 },
+    description: { x: 306, topY: 238, width: 167, height: 35 },
+    dueDate: { x: 475, topY: 238, width: 49, height: 35 },
+    unitPrice: { x: 525, topY: 238, width: 37, height: 35 },
+    totalPrice: { x: 563, topY: 238, width: 55, height: 35 },
+  },
+  lineRowTopYs: [238, 274, 316, 346, 365, 386, 416, 428, 440, 452, 464, 482],
   vendorTotal: { x: 628, topY: 229 },
+  vendorTotalBox: { x: 589, topY: 220, width: 30, height: 16 },
   comments: { x: 220, topY: 507 },
   departmentManager: { x: 525, topY: 507 },
   requisitionedBy: { x: 356, topY: 557 },
+  requisitionedByBox: { x: 355, topY: 556, width: 118, height: 12 },
   authorizedBy: { x: 525, topY: 557 },
 };
 
 const under100Positions: StampPositions = {
   ...over100Positions,
-  lineStartTopY: 248,
-  lineRowHeight: 20,
+  poNo: { x: 170, topY: 133 },
+  poInitiator: { x: 374, topY: 133 },
+  shipVia: { x: 600, topY: 133 },
+  poClass: { x: 170, topY: 156 },
+  taxExemptYes: { x: 381, topY: 154 },
+  taxExemptNo: { x: 433, topY: 154 },
+  fobOrigin: { x: 612, topY: 153 },
+  fobDestination: { x: 612, topY: 171 },
+  reqDate: { x: 170, topY: 180 },
+  materialCertYes: { x: 381, topY: 176 },
+  materialCertNo: { x: 433, topY: 176 },
+  vendorName: { x: 170, topY: 203 },
+  confirmedWith: { x: 374, topY: 203 },
+  vendorAddressLine1: { x: 170, topY: 215 },
+  vendorAddressLine2: { x: 170, topY: 227 },
+  partNo: { x: 643, topY: 216 },
+  jobNo: { x: 643, topY: 228 },
+  assetNo: { x: 374, topY: 238 },
+  moldNo: { x: 643, topY: 240 },
+  initials: { x: 509, topY: 249 },
+  tsNo: { x: 643, topY: 253 },
+  codeNo: { x: 643, topY: 266 },
+  workOrderNo: { x: 170, topY: 276 },
+  equipmentNo: { x: 419, topY: 276 },
+  tableHeaderTopY: 299,
+  lineStartTopY: 326,
+  lineRowHeight: 12,
   maxLineRows: 10,
+  lineQuantityX: 58,
+  lineUnitX: 89,
+  lineItemNumberX: 170,
+  lineDescriptionX: 238,
+  lineDueDateX: 508,
+  lineUnitPriceX: 598,
+  lineTotalPriceX: 643,
+  lineBoxes: {
+    quantity: { x: 59, topY: 326, width: 29, height: 34 },
+    unit: { x: 90, topY: 326, width: 79, height: 34 },
+    itemNumber: { x: 171, topY: 326, width: 66, height: 34 },
+    description: { x: 238, topY: 326, width: 268, height: 34 },
+    dueDate: { x: 508, topY: 326, width: 89, height: 34 },
+    unitPrice: { x: 598, topY: 326, width: 43, height: 34 },
+    totalPrice: { x: 644, topY: 326, width: 88, height: 34 },
+  },
+  lineRowTopYs: [326, 361, 403, 414, 426, 437, 449, 460, 472, 483],
+  vendorTotal: { x: 697, topY: 307 },
+  vendorTotalBox: { x: 687, topY: 306, width: 44, height: 16 },
+  comments: { x: 170, topY: 518 },
+  departmentManager: { x: 598, topY: 524 },
+  requisitionedBy: { x: 327, topY: 546 },
+  requisitionedByBox: { x: 327, topY: 546, width: 181, height: 12 },
+  authorizedBy: { x: 598, topY: 546 },
 };
 
 const positionsByType: Record<RequisitionTemplateKind, StampPositions> = {
@@ -1104,6 +1178,10 @@ function formatRequisitionDate(value: string | undefined) {
   const [year, month, day] = value.split('-').map(Number);
   if (!year || !month || !day) return value;
   return new Date(year, month - 1, day).toLocaleDateString('en-US');
+}
+function isoDateOnly(value: string | null | undefined) {
+  if (!value) return '';
+  return value.slice(0, 10);
 }
 
 function cleanPdfText(value: unknown) {
@@ -1136,6 +1214,52 @@ function drawTextSafe(
   page.drawText(finalText, { x, y: yFromTop(options.pageHeight, topY, size), size, font: options.font, color: pdfBlack });
 }
 
+function wrapPdfText(text: string, font: PDFFont, size: number, maxWidth: number, maxLines: number) {
+  const words = cleanPdfText(text).split(' ').filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(next, size) <= maxWidth) {
+      current = next;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  const visible = lines.slice(0, maxLines);
+  if (lines.length > maxLines && visible.length) {
+    visible[visible.length - 1] = shrinkToWidth(`${visible[visible.length - 1]}...`, font, size, maxWidth);
+  }
+  return visible.length ? visible : [''];
+}
+function drawTextInBox(
+  page: PDFPage,
+  text: string | number | undefined | null,
+  box: PdfBox,
+  options: { align?: 'left' | 'center' | 'right'; font: PDFFont; lineHeight?: number; maxLines?: number; pageHeight: number; paddingX?: number; size?: number; vertical?: 'middle' | 'top' }
+) {
+  const value = cleanPdfText(text);
+  if (!value) return;
+  const size = options.size ?? 8;
+  const paddingX = options.paddingX ?? 2;
+  const lineHeight = options.lineHeight ?? size + 2;
+  const maxLines = options.maxLines ?? 1;
+  const lines = wrapPdfText(value, options.font, size, Math.max(4, box.width - paddingX * 2), maxLines);
+  const blockHeight = lines.length * lineHeight;
+  const startTopY = options.vertical === 'top' ? box.topY + 2 : box.topY + Math.max(0, (box.height - blockHeight) / 2);
+  lines.forEach((line, index) => {
+    const lineWidth = options.font.widthOfTextAtSize(line, size);
+    const align = options.align ?? 'left';
+    const x = align === 'right'
+      ? box.x + box.width - paddingX - lineWidth
+      : align === 'center'
+        ? box.x + Math.max(0, (box.width - lineWidth) / 2)
+        : box.x + paddingX;
+    page.drawText(line, { x, y: yFromTop(options.pageHeight, startTopY + index * lineHeight, size), size, font: options.font, color: pdfBlack });
+  });
+}
 function drawCheckMark(page: PDFPage, selected: boolean, point: PdfPoint, font: PDFFont, pageHeight: number) {
   if (!selected) return;
   page.drawText('X', { x: point.x, y: yFromTop(pageHeight, point.topY, 8), size: 8, font, color: pdfBlack });
@@ -1157,28 +1281,8 @@ function getVendorContactLines(header: Record<string, unknown>) {
   return [contactLines[0], contactLines.slice(1).join(' | ')];
 }
 
-function drawLineTableHeaders(page: PDFPage, positions: StampPositions, boldFont: PDFFont, pageHeight: number) {
-  page.drawRectangle({
-    x: positions.lineQuantityX - 9,
-    y: pageHeight - positions.tableHeaderTopY - 17,
-    width: positions.lineTotalPriceX + 92 - positions.lineQuantityX,
-    height: 17,
-    color: pdfHeaderGray,
-    borderColor: pdfBlack,
-    borderWidth: 0.4,
-  });
-  const headers = [
-    ['Qty', positions.lineQuantityX - 2, 22],
-    ['Unit', positions.lineUnitX - 2, 24],
-    ['Item No.', positions.lineItemNumberX, 74],
-    ['Description', positions.lineDescriptionX, 160],
-    ['Due Date', positions.lineDueDateX, 44],
-    ['Unit Price', positions.lineUnitPriceX, 50],
-    ['Total Price', positions.lineTotalPriceX, 70],
-  ] as const;
-  for (const [label, x, width] of headers) {
-    drawTextSafe(page, label, x, positions.tableHeaderTopY + 4, { font: boldFont, pageHeight, size: 7, maxWidth: width });
-  }
+function drawLineTableHeaders(_page: PDFPage, _positions: StampPositions, _boldFont: PDFFont, _pageHeight: number) {
+  // The JBT templates already include table headers. Keep normal output clean.
 }
 
 function stampHeader(input: {
@@ -1197,7 +1301,7 @@ function stampHeader(input: {
   const draw = (text: string | number | undefined | null, point: PdfPoint, options: { maxLength?: number; maxWidth?: number; size?: number } = {}) =>
     drawTextSafe(page, text, point.x, point.topY, { font: regularFont, pageHeight, ...options });
   const [vendorAddressLine1 = '', vendorAddressLine2 = ''] = getVendorContactLines(header);
-  const fob = cleanPdfText(textField(header, ['fob'], 'Destination')).toLowerCase();
+  const fob = cleanPdfText(textField(header, ['fob'])).toLowerCase();
   const taxExempt = cleanPdfText(textField(header, ['taxExempt'], 'No')).toLowerCase();
   const materialCert = cleanPdfText(textField(header, ['materialCert'], 'No')).toLowerCase();
 
@@ -1219,9 +1323,9 @@ function stampHeader(input: {
   draw(textField(header, ['codeNo']), positions.codeNo, { maxLength: 18 });
   draw(textField(header, ['workOrderNo']), positions.workOrderNo, { maxLength: 24 });
   draw(textField(header, ['equipmentNo']), positions.equipmentNo, { maxLength: 24 });
-  draw(getHeaderComments(header, notes), positions.comments, { maxLength: 110, maxWidth: 330 });
+  drawTextInBox(page, getHeaderComments(header, notes), { x: positions.comments.x, topY: positions.comments.topY - 3, width: 330, height: 28 }, { font: regularFont, pageHeight, size: 7, maxLines: 2, vertical: 'top' });
   draw(textField(header, ['departmentManager']), positions.departmentManager, { maxLength: 28 });
-  draw(textField(header, ['requisitionedBy'], input.requestedBy), positions.requisitionedBy, { maxLength: 28 });
+  drawTextInBox(page, textField(header, ['requisitionedBy'], input.requestedBy), positions.requisitionedByBox, { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
   draw(textField(header, ['authorizedBy']), positions.authorizedBy, { maxLength: 28 });
 
   drawCheckMark(page, taxExempt === 'yes', positions.taxExemptYes, regularFont, pageHeight);
@@ -1241,20 +1345,23 @@ function stampLineItems(input: {
 }) {
   const { items, page, pageHeight, positions, regularFont } = input;
   items.slice(0, positions.maxLineRows).forEach((item, index) => {
-    const lineTopY = positions.lineStartTopY + index * positions.lineRowHeight;
+    const lineTopY = positions.lineRowTopYs[index] ?? positions.lineStartTopY + index * positions.lineRowHeight;
+    const nextLineTopY = positions.lineRowTopYs[index + 1];
+    const rowHeight = Math.max(10, (nextLineTopY ?? lineTopY + positions.lineRowHeight) - lineTopY);
+    const rowBox = (box: PdfBox): PdfBox => ({ ...box, topY: lineTopY, height: rowHeight });
     const unitPrice = Number(item.unitCost ?? 0) || 0;
     const quantity = Number(item.quantityRequested ?? 0) || 0;
     const itemNumber = item.supplierPartNumber || item.partNumber || '';
     const notes = cleanPdfText(item.notes);
     const description = notes ? `${item.description || '-'} - Notes: ${notes}` : item.description || '-';
 
-    drawTextSafe(page, quantity, positions.lineQuantityX, lineTopY, { font: regularFont, size: 8, pageHeight });
-    drawTextSafe(page, cleanPdfText(item.unitOfMeasure || 'EA'), positions.lineUnitX, lineTopY, { font: regularFont, size: 8, pageHeight });
-    drawTextSafe(page, itemNumber, positions.lineItemNumberX, lineTopY, { font: regularFont, maxLength: 18, pageHeight, size: 8 });
-    drawTextSafe(page, description, positions.lineDescriptionX, lineTopY, { font: regularFont, maxLength: 48, pageHeight, size: 7 });
-    drawTextSafe(page, formatRequisitionDate(item.dueDate), positions.lineDueDateX, lineTopY, { font: regularFont, size: 8, pageHeight });
-    drawTextSafe(page, money(unitPrice), positions.lineUnitPriceX, lineTopY, { font: regularFont, size: 8, pageHeight });
-    drawTextSafe(page, money(quantity * unitPrice), positions.lineTotalPriceX, lineTopY, { font: regularFont, size: 8, pageHeight });
+    drawTextInBox(page, quantity, rowBox(positions.lineBoxes.quantity), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
+    drawTextInBox(page, cleanPdfText(item.unitOfMeasure || 'EA'), rowBox(positions.lineBoxes.unit), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
+    drawTextInBox(page, itemNumber, rowBox(positions.lineBoxes.itemNumber), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
+    drawTextInBox(page, description, rowBox(positions.lineBoxes.description), { font: regularFont, pageHeight, size: 6.5, lineHeight: 7.5, maxLines: 2, vertical: 'top' });
+    drawTextInBox(page, formatRequisitionDate(item.dueDate), rowBox(positions.lineBoxes.dueDate), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
+    drawTextInBox(page, money(unitPrice), rowBox(positions.lineBoxes.unitPrice), { align: 'right', font: regularFont, pageHeight, size: 7, maxLines: 1 });
+    drawTextInBox(page, money(quantity * unitPrice), rowBox(positions.lineBoxes.totalPrice), { align: 'right', font: regularFont, pageHeight, size: 7, maxLines: 1 });
   });
 }
 
@@ -1282,7 +1389,7 @@ async function buildRequisitionPdf(input: { vendor: string; requisitionNumber: s
     drawLineTableHeaders(page, positions, boldFont, height);
     stampHeader({ page, regularFont, boldFont, positions, header, notes: input.notes, vendor: input.vendor, requestedBy: input.requestedBy, requisitionNumber: input.requisitionNumber, pageHeight: height });
     stampLineItems({ page, regularFont, positions, items: pageItems, pageHeight: height });
-    drawTextSafe(page, money(total), positions.vendorTotal.x, positions.vendorTotal.topY, { font: boldFont, size: 8, pageHeight: height, maxWidth: 78 });
+    drawTextInBox(page, money(total), positions.vendorTotalBox, { align: 'right', font: boldFont, size: 8, pageHeight: height, maxLines: 1 });
 
     const [copiedPage] = await mergedPdf.copyPages(pdfDoc, [0]);
     mergedPdf.addPage(copiedPage);
@@ -1333,67 +1440,42 @@ function drawWrappedPdfText(page: PDFPage, text: string, x: number, topY: number
   return Math.max(1, visible.length) * lineHeight;
 }
 async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([612, 792]);
-  const { width, height } = page.getSize();
-  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const jbtBlue = rgb(0.02, 0.32, 0.56);
-  const lightBlue = rgb(0.9, 0.97, 1);
-  const borderBlue = rgb(0.62, 0.78, 0.88);
-  const muted = rgb(0.32, 0.42, 0.48);
-  const margin = 42;
-
-  page.drawRectangle({ x: 0, y: height - 92, width, height: 92, color: jbtBlue });
-  page.drawText('JBT USA / Maintenance Command Center', { x: margin, y: height - 42, size: 16, font: boldFont, color: rgb(1, 1, 1) });
-  page.drawText('Maintenance Requisition', { x: margin, y: height - 66, size: 11, font: regularFont, color: lightBlue });
-  page.drawText(requisition.requisition_number, { x: width - 210, y: height - 50, size: 15, font: boldFont, color: rgb(1, 1, 1) });
-
-  const statusColor = requisition.status === 'Canceled' ? rgb(0.63, 0.18, 0.22) : requisition.status === 'Received' ? rgb(0.12, 0.45, 0.32) : rgb(0.02, 0.32, 0.56);
-  page.drawRectangle({ x: margin, y: height - 122, width: width - margin * 2, height: 24, color: rgb(0.94, 0.98, 1), borderColor: borderBlue, borderWidth: 0.8 });
-  page.drawText(`Status: ${requisition.status}`, { x: margin + 10, y: height - 115, size: 10, font: boldFont, color: statusColor });
-  page.drawText(`Generated: ${formatPdfDateTime(now())}`, { x: width - 234, y: height - 115, size: 9, font: regularFont, color: muted });
-
-  const rows: Array<[string, string, string, string]> = [
-    ['Requisition Number', requisition.requisition_number, 'Quantity Requested', String(Number(requisition.quantity_requested ?? 0))],
-    ['Part Number', requisition.part_number || '-', 'WO#', requisition.work_order_number || '-'],
-    ['Description', requisition.description || '-', 'Vendor', requisition.vendor_name || '-'],
-    ['Location', requisition.location_name || '-', 'Requested By', requisition.requested_by_name || '-'],
-    ['Requested Date/Time', formatPdfDateTime(requisition.requested_at), 'Ordered By/Date', requisition.ordered_at ? `${userNameById(requisition.ordered_by_user_id) || '-'} / ${formatPdfDateTime(requisition.ordered_at)}` : '-'],
-    ['Received By/Date', requisition.received_at ? `${userNameById(requisition.received_by_user_id) || '-'} / ${formatPdfDateTime(requisition.received_at)}` : '-', 'Canceled By/Date', requisition.canceled_at ? `${userNameById(requisition.canceled_by_user_id) || '-'} / ${formatPdfDateTime(requisition.canceled_at)}` : '-'],
-  ];
-
-  let topY = 146;
-  const colGap = 18;
-  const colWidth = (width - margin * 2 - colGap) / 2;
-  const labelSize = 7.5;
-  const valueSize = 9.5;
-  const rowGap = 13;
-  for (const row of rows) {
-    const leftHeight = drawPdfField(page, row[0], row[1], margin, topY, colWidth, { regularFont, boldFont, pageHeight: height, labelSize, valueSize, muted });
-    const rightHeight = drawPdfField(page, row[2], row[3], margin + colWidth + colGap, topY, colWidth, { regularFont, boldFont, pageHeight: height, labelSize, valueSize, muted });
-    topY += Math.max(leftHeight, rightHeight) + rowGap;
-  }
-
-  if (requisition.cancel_reason || requisition.status === 'Canceled') {
-    topY += 4;
-    topY += drawPdfSection(page, 'Cancel Reason', requisition.cancel_reason || '-', margin, topY, width - margin * 2, { regularFont, boldFont, pageHeight: height, muted });
-  }
-  topY += 4;
-  topY += drawPdfSection(page, 'Notes', requisition.notes || '-', margin, topY, width - margin * 2, { regularFont, boldFont, pageHeight: height, muted });
-
-  page.drawLine({ start: { x: margin, y: 54 }, end: { x: width - margin, y: 54 }, thickness: 0.6, color: borderBlue });
-  page.drawText('Generated from MCC native requisition records.', { x: margin, y: 36, size: 8, font: regularFont, color: muted });
-  return Buffer.from(await pdfDoc.save());
-}
-function drawPdfField(page: PDFPage, label: string, value: string, x: number, topY: number, width: number, fonts: { regularFont: PDFFont; boldFont: PDFFont; pageHeight: number; labelSize: number; valueSize: number; muted: ReturnType<typeof rgb> }) {
-  page.drawText(label.toUpperCase(), { x, y: yFromTop(fonts.pageHeight, topY, fonts.labelSize), size: fonts.labelSize, font: fonts.boldFont, color: fonts.muted });
-  return fonts.labelSize + 7 + drawWrappedPdfText(page, value, x, topY + 14, { font: fonts.regularFont, pageHeight: fonts.pageHeight, size: fonts.valueSize, maxWidth: width, lineHeight: 13, maxLines: 2 });
-}
-function drawPdfSection(page: PDFPage, label: string, value: string, x: number, topY: number, width: number, fonts: { regularFont: PDFFont; boldFont: PDFFont; pageHeight: number; muted: ReturnType<typeof rgb> }) {
-  page.drawText(label.toUpperCase(), { x, y: yFromTop(fonts.pageHeight, topY, 8), size: 8, font: fonts.boldFont, color: fonts.muted });
-  const textHeight = drawWrappedPdfText(page, value, x, topY + 16, { font: fonts.regularFont, pageHeight: fonts.pageHeight, size: 9.5, maxWidth: width, lineHeight: 13, maxLines: 6 });
-  return 16 + textHeight;
+  const lifecycleNotes = [
+    `Status: ${requisition.status}`,
+    requisition.location_name ? `Location: ${requisition.location_name}` : '',
+    requisition.ordered_at ? `Ordered: ${userNameById(requisition.ordered_by_user_id) || '-'} ${formatPdfDateTime(requisition.ordered_at)}` : '',
+    requisition.received_at ? `Received: ${userNameById(requisition.received_by_user_id) || '-'} ${formatPdfDateTime(requisition.received_at)}` : '',
+    requisition.canceled_at ? `Canceled: ${userNameById(requisition.canceled_by_user_id) || '-'} ${formatPdfDateTime(requisition.canceled_at)}` : '',
+    requisition.cancel_reason ? `Cancel reason: ${requisition.cancel_reason}` : '',
+    requisition.notes ? `Notes: ${requisition.notes}` : '',
+  ].filter(Boolean).join(' | ');
+  return buildRequisitionPdf({
+    vendor: requisition.vendor_name || 'Unknown Vendor',
+    requisitionNumber: requisition.requisition_number,
+    requestedBy: requisition.requested_by_name,
+    createdAt: requisition.requested_at,
+    notes: lifecycleNotes,
+    requisitionType: 'under-100',
+    header: {
+      poNo: requisition.requisition_number,
+      requestDate: isoDateOnly(requisition.requested_at),
+      vendorName: requisition.vendor_name,
+      workOrderNo: requisition.work_order_number,
+      comments: lifecycleNotes,
+      requisitionedBy: requisition.requested_by_name,
+      taxExempt: 'No',
+      materialCert: 'No',
+    },
+    items: [{
+      partNumber: requisition.part_number,
+      description: requisition.description,
+      locationName: requisition.location_name,
+      quantityRequested: Number(requisition.quantity_requested ?? 0) || 0,
+      unitCost: 0,
+      supplierPartNumber: requisition.part_number,
+      dueDate: isoDateOnly(requisition.requested_at),
+    }],
+  });
 }
 function requisitionById(id: number, options: { includeDeleted?: boolean } = {}) {
   return one<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${options.includeDeleted ? '1=1' : 'deleted=0'} AND id=?`, [id]);
