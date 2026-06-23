@@ -797,7 +797,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     const partNumber = form.partNumber.trim().toLowerCase();
     const duplicate = parts.find(part=>part.partNumber.trim().toLowerCase() === partNumber && part.id !== editingPart?.id);
     if (duplicate) {
-      setFormError('Part Number already exists in MCC native inventory. Choose a unique Part Number before saving.');
+      setFormError('Part Number already exists in MCC Inventory. Choose a unique Part Number before saving.');
       return;
     }
     setSaving(true);

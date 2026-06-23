@@ -47,9 +47,9 @@ export function DashboardPage() {
     const pmDueSoon = 0;
     if (openWorkOrders > 0) cards.push({ title: 'Open Work Orders', value: String(openWorkOrders), note: 'Work orders ready for maintenance action' });
     if (pmDueSoon > 0) cards.push({ title: 'PM Due Soon', value: String(pmDueSoon), note: 'Preventive maintenance due soon' });
-    if (requisitionSummary.activeCount > 0) cards.push({ title: 'Active Requisitions', value: String(requisitionSummary.activeCount), note: 'Requested plus ordered native requisitions' });
-    if (requisitionSummary.requestedCount > 0) cards.push({ title: 'Requested', value: String(requisitionSummary.requestedCount), note: 'Native requisitions waiting for order action' });
-    if (requisitionSummary.orderedCount > 0) cards.push({ title: 'Ordered', value: String(requisitionSummary.orderedCount), note: 'Native requisitions ordered, not yet received' });
+    if (requisitionSummary.activeCount > 0) cards.push({ title: 'Active Requisitions', value: String(requisitionSummary.activeCount), note: 'Requested plus ordered MCC requisitions' });
+    if (requisitionSummary.requestedCount > 0) cards.push({ title: 'Requested', value: String(requisitionSummary.requestedCount), note: 'MCC requisitions waiting for order action' });
+    if (requisitionSummary.orderedCount > 0) cards.push({ title: 'Ordered', value: String(requisitionSummary.orderedCount), note: 'MCC requisitions ordered, not yet received' });
     return cards;
   },[requisitionSummary]);
 
