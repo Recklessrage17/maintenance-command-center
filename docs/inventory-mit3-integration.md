@@ -42,7 +42,7 @@ Phase 2C adds:
 
 - Full-width Inventory focus mode with a sticky compact toolbar.
 - Last-refreshed time and visible "showing X of Y parts" counts.
-- Client-side sorting for Part Number, Description, Location, Vendor, Qty, Min, Cost, and Status.
+- Client-side sorting for Part Number, Description, Location, Vendor, Qty, Cost, and Status.
 - Client-side page-size controls for 50, 100, 250, or All rows.
 - Search across part number, description, location, and vendor.
 - Filters for All, Low Stock, Requisition, Has Link, and No Link.
@@ -170,12 +170,15 @@ Phase 2F requisition rules:
 - Canceling a requisition requires a reason.
 - Requisition PDFs are generated from MCC native requisition records, not MIT3 records, and use professional filenames such as `MCC_Requisition_REQ-2026-000001.pdf`.
 - Requisition PDFs fill Unit Price and Total Price from the requisition unit-cost snapshot. Older requisitions without a cost snapshot fall back to the current native inventory part cost; missing or invalid costs print as `$0.00`.
+- Requisition PDF values are fitted inside the recreated JBT form cells so price, total, and description text do not cross table lines.
 - Delete is soft delete only: MCC sets deleted metadata and hides the requisition from the active list without physically removing the database record.
 - Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can create and update requisitions.
 - Admin and Manager can soft delete requisitions.
 - Maintenance Tech 1 remains view-only.
 
-The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows, shows Cost instead of daily Link buttons, and refreshes MCC native inventory after each create.
+The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows, shows Cost instead of daily Link buttons, hides the Min column from the daily table, and refreshes MCC native inventory after each create.
+
+The current PDF generator uses a recreated coordinate mapping over the JBT requisition form PDF. A future hardening pass can switch to a direct JBT Excel/PDF template stored under `backend/templates` if the real template file is provided.
 
 Audit entries are recorded for requisition create, status changed, ordered, received, canceled, edit, PDF generated, soft deleted, failed PDF generation, failed delete, and failed requisition action events. Secrets are not logged.
 
@@ -235,7 +238,7 @@ Inventory Focus Mode keeps the daily toolbar focused on normal work:
 - Inventory Tools settings button
 - Refresh Inventory
 
-The main daily toolbar no longer shows the noisy native/MIT3 status badges, and the daily table no longer includes a Link column. Part Info URL data is still available through add/edit and import/export, while `Open MIT3 Inventory` is kept only inside the Inventory Tools panel under MIT3 reference/migration.
+The main daily toolbar no longer shows the noisy native/MIT3 status badges, and the daily table no longer includes Link or Min columns. Part Info URL data is still available through add/edit and import/export, while `Open MIT3 Inventory` is kept only inside the Inventory Tools panel under MIT3 reference/migration. Minimum Quantity remains stored in MCC, editable in Add/Edit, exported/imported in templates, and used for low-stock alert logic.
 
 Inventory import/export/backup tools are hidden behind the Inventory Tools settings button instead of always being visible.
 
@@ -255,7 +258,6 @@ MIT3 is backup/reference only. It is not shown in the main daily Inventory toolb
 
 ## Inventory vendor requisition PDF workflow
 
-- In the MCC Inventory table, use the checkbox beside the row Edit action to select parts for requisition.
 - Use **Select Current Page** to select the currently visible page of inventory rows when the current filter/sort/page is correct.
 - The selection panel shows the selected count and the vendor groups that will be processed.
 - Vendor grouping keeps each vendor on a separate requisition PDF. Close McMaster variations (`McMaster`, `McMaster-Carr`, and `mcmaster-carr`) are grouped as `McMaster-Carr`; close Grainger variations are grouped as `Grainger`. Other vendor names are only trimmed/case-normalized so unrelated vendors are not merged.

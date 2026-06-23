@@ -1206,10 +1206,25 @@ function truncatePdfText(text: string, maxLength: number) {
   return clean.length > maxLength ? `${clean.slice(0, Math.max(0, maxLength - 3))}...` : clean;
 }
 
+function truncateToFit(text: string, font: PDFFont, size: number, maxWidth: number, forceEllipsis = false) {
+  const clean = cleanPdfText(text);
+  if (!forceEllipsis && font.widthOfTextAtSize(clean, size) <= maxWidth) return clean;
+  const suffix = '...';
+  let value = clean.replace(/\.\.\.$/, '');
+  while (value.length > 0 && font.widthOfTextAtSize(`${value}${suffix}`, size) > maxWidth) value = value.slice(0, -1);
+  return value ? `${value}${suffix}` : '';
+}
+
+function fitTextToWidth(text: string, font: PDFFont, size: number, maxWidth: number, minSize = 5.5) {
+  let fittedSize = size;
+  while (fittedSize > minSize && font.widthOfTextAtSize(text, fittedSize) > maxWidth) {
+    fittedSize = Math.max(minSize, fittedSize - 0.25);
+  }
+  return fittedSize;
+}
+
 function shrinkToWidth(text: string, font: PDFFont, size: number, maxWidth: number) {
-  let value = text;
-  while (value.length > 0 && font.widthOfTextAtSize(value, size) > maxWidth) value = value.slice(0, -1);
-  return value.length < text.length ? `${value.slice(0, Math.max(0, value.length - 3))}...` : value;
+  return truncateToFit(text, font, size, maxWidth);
 }
 
 function drawTextSafe(
@@ -1232,6 +1247,14 @@ function wrapPdfText(text: string, font: PDFFont, size: number, maxWidth: number
   const lines: string[] = [];
   let current = '';
   for (const word of words) {
+    if (font.widthOfTextAtSize(word, size) > maxWidth) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      lines.push(truncateToFit(word, font, size, maxWidth));
+      continue;
+    }
     const next = current ? `${current} ${word}` : word;
     if (font.widthOfTextAtSize(next, size) <= maxWidth) {
       current = next;
@@ -1243,7 +1266,7 @@ function wrapPdfText(text: string, font: PDFFont, size: number, maxWidth: number
   if (current) lines.push(current);
   const visible = lines.slice(0, maxLines);
   if (lines.length > maxLines && visible.length) {
-    visible[visible.length - 1] = shrinkToWidth(`${visible[visible.length - 1]}...`, font, size, maxWidth);
+    visible[visible.length - 1] = truncateToFit(visible[visible.length - 1], font, size, maxWidth, true);
   }
   return visible.length ? visible : [''];
 }
@@ -1251,26 +1274,49 @@ function drawTextInBox(
   page: PDFPage,
   text: string | number | undefined | null,
   box: PdfBox,
-  options: { align?: 'left' | 'center' | 'right'; font: PDFFont; lineHeight?: number; maxLines?: number; pageHeight: number; paddingX?: number; size?: number; vertical?: 'middle' | 'top' }
+  options: { align?: 'left' | 'center' | 'right'; font: PDFFont; lineHeight?: number; maxLines?: number; minSize?: number; pageHeight: number; paddingX?: number; size?: number; vertical?: 'middle' | 'top' }
 ) {
   const value = cleanPdfText(text);
   if (!value) return;
-  const size = options.size ?? 8;
+  let size = options.size ?? 8;
   const paddingX = options.paddingX ?? 2;
-  const lineHeight = options.lineHeight ?? size + 2;
   const maxLines = options.maxLines ?? 1;
-  const lines = wrapPdfText(value, options.font, size, Math.max(4, box.width - paddingX * 2), maxLines);
+  const maxWidth = Math.max(4, box.width - paddingX * 2);
+  const lines = maxLines === 1
+    ? (() => {
+        size = fitTextToWidth(value, options.font, size, maxWidth, options.minSize ?? 5.5);
+        return [truncateToFit(value, options.font, size, maxWidth)];
+      })()
+    : wrapPdfText(value, options.font, size, maxWidth, maxLines);
+  const lineHeight = options.lineHeight ?? size + 2;
   const blockHeight = lines.length * lineHeight;
   const startTopY = options.vertical === 'top' ? box.topY + 2 : box.topY + Math.max(0, (box.height - blockHeight) / 2);
   lines.forEach((line, index) => {
     const lineWidth = options.font.widthOfTextAtSize(line, size);
     const align = options.align ?? 'left';
     const x = align === 'right'
-      ? box.x + box.width - paddingX - lineWidth
+      ? Math.max(box.x + paddingX, box.x + box.width - paddingX - lineWidth)
       : align === 'center'
         ? box.x + Math.max(0, (box.width - lineWidth) / 2)
         : box.x + paddingX;
     page.drawText(line, { x, y: yFromTop(options.pageHeight, startTopY + index * lineHeight, size), size, font: options.font, color: pdfBlack });
+  });
+}
+function drawCurrencyInBox(
+  page: PDFPage,
+  value: number,
+  box: PdfBox,
+  options: { font: PDFFont; pageHeight: number; paddingX?: number; size?: number }
+) {
+  const amount = Number.isFinite(value) ? value : 0;
+  drawTextInBox(page, money(amount), box, {
+    align: 'right',
+    font: options.font,
+    maxLines: 1,
+    minSize: 5,
+    paddingX: options.paddingX ?? 4,
+    pageHeight: options.pageHeight,
+    size: options.size ?? 6.8,
   });
 }
 function drawCheckMark(page: PDFPage, selected: boolean, point: PdfPoint, font: PDFFont, pageHeight: number) {
@@ -1378,13 +1424,13 @@ function stampLineItems(input: {
     const notes = cleanPdfText(item.notes);
     const description = notes ? `${item.description || '-'} - Notes: ${notes}` : item.description || '-';
 
-    drawTextInBox(page, quantity, rowBox(positions.lineBoxes.quantity), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
-    drawTextInBox(page, cleanPdfText(item.unitOfMeasure || 'EA'), rowBox(positions.lineBoxes.unit), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
-    drawTextInBox(page, itemNumber, rowBox(positions.lineBoxes.itemNumber), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
-    drawTextInBox(page, description, rowBox(positions.lineBoxes.description), { font: regularFont, pageHeight, size: 6.5, lineHeight: 7.5, maxLines: 2, vertical: 'top' });
-    drawTextInBox(page, formatRequisitionDate(item.dueDate), rowBox(positions.lineBoxes.dueDate), { align: 'center', font: regularFont, pageHeight, size: 7, maxLines: 1 });
-    drawTextInBox(page, money(unitPrice), rowBox(positions.lineBoxes.unitPrice), { align: 'right', font: regularFont, pageHeight, size: 7, maxLines: 1 });
-    drawTextInBox(page, money(quantity * unitPrice), rowBox(positions.lineBoxes.totalPrice), { align: 'right', font: regularFont, pageHeight, size: 7, maxLines: 1 });
+    drawTextInBox(page, quantity, rowBox(positions.lineBoxes.quantity), { align: 'center', font: regularFont, pageHeight, size: 7, minSize: 5.5, maxLines: 1 });
+    drawTextInBox(page, cleanPdfText(item.unitOfMeasure || 'EA'), rowBox(positions.lineBoxes.unit), { align: 'center', font: regularFont, pageHeight, size: 7, minSize: 5.5, maxLines: 1 });
+    drawTextInBox(page, itemNumber, rowBox(positions.lineBoxes.itemNumber), { align: 'center', font: regularFont, pageHeight, size: 7, minSize: 5.5, maxLines: 1 });
+    drawTextInBox(page, description, rowBox(positions.lineBoxes.description), { font: regularFont, pageHeight, size: 6.5, lineHeight: 7.5, maxLines: 2, paddingX: 3, vertical: 'top' });
+    drawTextInBox(page, formatRequisitionDate(item.dueDate), rowBox(positions.lineBoxes.dueDate), { align: 'center', font: regularFont, pageHeight, size: 7, minSize: 5.5, maxLines: 1 });
+    drawCurrencyInBox(page, unitPrice, rowBox(positions.lineBoxes.unitPrice), { font: regularFont, pageHeight, size: 6.8, paddingX: 3 });
+    drawCurrencyInBox(page, quantity * unitPrice, rowBox(positions.lineBoxes.totalPrice), { font: regularFont, pageHeight, size: 6.8, paddingX: 5 });
   });
 }
 
@@ -1413,7 +1459,16 @@ async function buildRequisitionPdf(input: { vendor: string; requisitionNumber: s
     drawLineTableHeaders(page, positions, boldFont, height);
     stampHeader({ page, regularFont, boldFont, positions, header, notes: input.notes, vendor: input.vendor, requestedBy: input.requestedBy, requisitionNumber: input.requisitionNumber, pageHeight: height });
     stampLineItems({ page, regularFont, positions, items: pageItems, pageHeight: height });
-    if (total > 0) drawTextInBox(page, money(total), positions.vendorTotalBox, { align: 'right', font: boldFont, size: 8, pageHeight: height, maxLines: 1 });
+    if (total > 0) {
+      page.drawRectangle({
+        x: positions.vendorTotalBox.x - 1,
+        y: height - positions.vendorTotalBox.topY - positions.vendorTotalBox.height + 1,
+        width: positions.vendorTotalBox.width + 2,
+        height: Math.max(2, positions.vendorTotalBox.height - 2),
+        color: rgb(1, 1, 1),
+      });
+      drawCurrencyInBox(page, total, positions.vendorTotalBox, { font: boldFont, size: 7.5, pageHeight: height, paddingX: 3 });
+    }
 
     const [copiedPage] = await mergedPdf.copyPages(pdfDoc, [0]);
     mergedPdf.addPage(copiedPage);
