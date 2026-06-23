@@ -5,7 +5,7 @@ export function PreventiveMaintenancePage() {
     <div className="page-stack">
       <div className="page-heading">
         <p className="eyebrow">Preventive Maintenance</p>
-        <h2>PM planning placeholders</h2>
+        <h2>PM planning</h2>
       </div>
       <div className="card-grid">
         {pmCards.map((card) => (

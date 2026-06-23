@@ -374,9 +374,9 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
     <div className="page-stack requisitions-page">
       <div className="page-heading requisitions-heading">
         <div>
-          <p className="eyebrow">Native MCC requisitions</p>
+          <p className="eyebrow">MCC requisitions</p>
           <h2>Requisitions</h2>
-          <p>MCC native requisitions live in the MCC database. MIT3 remains backup/reference only.</p>
+          <p>Requisitions are managed inside Maintenance Command Center.</p>
         </div>
         {!canWrite&&<span className="view-only-badge">View-only access.</span>}
       </div>

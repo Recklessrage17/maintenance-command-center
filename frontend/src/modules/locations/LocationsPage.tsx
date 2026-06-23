@@ -7,8 +7,8 @@ export function LocationsPage() {
         <p>This MCC module is ready for future maintenance department workflows.</p>
       </div>
       <article className="mcc-card wide-card">
-        <strong>Placeholder module</strong>
-        <p>No database, MIT3 integration, import/export, or update system has been added.</p>
+        <strong>Ready for location workflows</strong>
+        <p>This area is prepared for future maintenance location records.</p>
       </article>
     </div>
   );

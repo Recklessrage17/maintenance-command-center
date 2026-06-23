@@ -462,7 +462,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       setParts(partsResponse.parts ?? []);
       const refreshedAt = new Date();
       setLastRefreshed(refreshedAt);
-      if (options.notify) setNotice({kind:'success',text:`MCC Native Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`});
+      if (options.notify) setNotice({kind:'success',text:`MCC Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`});
     } catch (err) {
       setParts([]);
       const message = (err as Error).message;
@@ -692,7 +692,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
   async function importFromMit3(){
     if (!canImport || importing) return;
-    if (!window.confirm('This will copy inventory data from MIT3 into MCC. MIT3 will not be modified.')) return;
+    if (!window.confirm('This will copy legacy inventory data into MCC. The legacy system will not be modified.')) return;
     setImporting(true);
     setNotice(null);
     setError('');
@@ -702,7 +702,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       if (result.nativeSummary) setNativeSummary(normalizeNativeSummary(result.nativeSummary));
       await refresh();
       const skipped = result.skippedCount + Number(result.skippedUrlCount ?? 0);
-      setNotice({kind:'success',text:`MIT3 import complete: ${result.importedCount} imported, ${result.updatedCount} updated${skipped ? `, ${skipped} skipped` : ''}.`});
+      setNotice({kind:'success',text:`Legacy import complete: ${result.importedCount} imported, ${result.updatedCount} updated${skipped ? `, ${skipped} skipped` : ''}.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -732,7 +732,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       const result = await api<BackupListResponse>('/api/inventory/native/backups/create',{method:'POST'});
       setBackupFiles(result.backups ?? []);
       await loadBackups();
-      setNotice({kind:'success',text:'MCC Native Inventory backup created.'});
+      setNotice({kind:'success',text:'MCC Inventory backup created.'});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -810,7 +810,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         body: payload,
       });
       closeModal(true);
-      setNotice({kind:'success',text:isEdit ? 'Inventory part updated in MCC Native Inventory.' : 'Inventory part added to MCC Native Inventory.'});
+      setNotice({kind:'success',text:isEdit ? 'Inventory part updated in MCC Inventory.' : 'Inventory part added to MCC Inventory.'});
       await refresh();
     } catch (err) {
       setFormError((err as Error).message);
@@ -985,8 +985,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         <section className="mcc-card inventory-setup-card">
           <div>
             <span>Phase 2E setup</span>
-            <strong>MCC Native Inventory is empty. Import from MIT3 to begin daily native use.</strong>
-            <p>This copies inventory through the MIT3 HTTP API. MIT3 data is not modified.</p>
+            <strong>MCC Inventory is empty. Import legacy inventory to begin daily use.</strong>
+            <p>This copies inventory into Maintenance Command Center without modifying the legacy system.</p>
           </div>
           <div className="inventory-setup-actions">
             <button className="primary-button" type="button" onClick={()=>setToolsOpen(true)} disabled={!canUseInventoryTools}>Open Inventory Tools</button>
@@ -1015,7 +1015,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
           <div className="inventory-tools-heading">
             <div>
               <span>Inventory Tools</span>
-              <strong>Native import / export / backup</strong>
+              <strong>Inventory import / export / backup</strong>
             </div>
             <button className="link-button compact-button" type="button" onClick={()=>setToolsOpen(false)}>Close</button>
           </div>
@@ -1065,13 +1065,13 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               )}
             </div>
           )}
-          <div className="inventory-tools-panel inventory-tools-mit3">
-            <span>MIT3 Reference / Migration</span>
+          <div className="inventory-tools-panel inventory-tools-legacy">
+            <span>Legacy Import / Migration</span>
             <div className="inventory-tool-actions">
-              {canImport&&<button className="primary-button compact-button" type="button" onClick={()=>void importFromMit3()} disabled={importing||Boolean(toolsBusy)}>{importing?'Importing...':'Import from MIT3'}</button>}
-              <a className="secondary-button compact-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
+              {canImport&&<button className="primary-button compact-button" type="button" onClick={()=>void importFromMit3()} disabled={importing||Boolean(toolsBusy)}>{importing?'Importing...':'Import Legacy Inventory'}</button>}
+              <a className="secondary-button compact-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open Legacy Inventory</a>
             </div>
-            <p className="form-message">MIT3 is backup/reference only. MCC daily inventory remains native.</p>
+            <p className="form-message">MCC Inventory remains the daily-use system.</p>
           </div>
         </section>
       )}
@@ -1160,7 +1160,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                   </tr>
               ))}
               {!loading&&sortedParts.length===0&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">No inventory rows match this view.</td></tr>}
-              {loading&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">Loading MCC Native Inventory...</td></tr>}
+              {loading&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">Loading MCC Inventory...</td></tr>}
             </tbody>
           </table>
         </div>
