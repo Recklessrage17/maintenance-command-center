@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +11,7 @@ import ExcelJS from 'exceljs';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf-lib';
+import XlsxPopulate from 'xlsx-populate';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1177,6 +1179,527 @@ const pdfTemplatePaths: Record<RequisitionTemplateKind, string> = {
   'under-100': path.join(requisitionTemplateDir, 'blank-requisition-under-100.pdf'),
   'over-100': path.join(requisitionTemplateDir, 'blank-requisition-over-100.pdf'),
 };
+const officialRequisitionTemplateDir = path.join(repoRootPath, 'backend', 'templates');
+const officialRequisitionRowsPerPage = 8;
+
+type OfficialHeaderCellMap = {
+  assetNo: string;
+  authorizedBy: string;
+  codeNo: string;
+  comments: string;
+  confirmedWith: string;
+  departmentManager: string;
+  equipmentNo: string;
+  initials: string;
+  jobNo: string;
+  moldNo: string;
+  partNo: string;
+  poClass: string;
+  poInitiator: string;
+  poNo: string;
+  reqDate: string;
+  requisitionedBy: string;
+  shipVia: string;
+  tsNo: string;
+  vendorAddressLine1: string;
+  vendorAddressLine2: string;
+  vendorName: string;
+  workOrderNo: string;
+};
+type OfficialLineCellMap = {
+  dueDate: string;
+  itemDescription: string;
+  itemNumber: string;
+  quantity: string;
+  totalPrice: string;
+  unitOfMeasure: string;
+  unitPrice: string;
+};
+type OfficialTemplateCellMap = {
+  grandTotal: string;
+  header: OfficialHeaderCellMap;
+  line: OfficialLineCellMap;
+  lineEndRow: number;
+  lineStartRow: number;
+  templatePath: string;
+};
+type XlsxCell = {
+  formula?: (formula?: string) => string | undefined;
+  style?: (style?: Record<string, unknown>) => unknown;
+  value: (value?: unknown) => unknown;
+};
+type XlsxRow = {
+  height?: (height?: number) => unknown;
+};
+type XlsxSheet = {
+  cell: (address: string) => XlsxCell;
+  row?: (rowNumber: number) => XlsxRow;
+};
+
+const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCellMap> = {
+  'over-100': {
+    templatePath: path.join(officialRequisitionTemplateDir, 'requisition-over-100.xlsx'),
+    header: {
+      poNo: 'D7',
+      poInitiator: 'H7',
+      shipVia: 'M7',
+      poClass: 'D9',
+      reqDate: 'D11',
+      vendorName: 'D13',
+      confirmedWith: 'H13',
+      vendorAddressLine1: 'D14',
+      vendorAddressLine2: 'D15',
+      partNo: 'N14',
+      jobNo: 'N15',
+      assetNo: 'D16',
+      moldNo: 'N16',
+      initials: 'K17',
+      tsNo: 'N17',
+      codeNo: 'N18',
+      workOrderNo: 'D19',
+      equipmentNo: 'E19',
+      comments: 'D36',
+      departmentManager: 'M38',
+      requisitionedBy: 'G38',
+      authorizedBy: 'M39',
+    },
+    lineStartRow: 23,
+    lineEndRow: 34,
+    line: {
+      quantity: 'B',
+      unitOfMeasure: 'C',
+      itemNumber: 'D',
+      itemDescription: 'E',
+      dueDate: 'K',
+      unitPrice: 'M',
+      totalPrice: 'N',
+    },
+    grandTotal: 'O21',
+  },
+  'under-100': {
+    templatePath: path.join(officialRequisitionTemplateDir, 'requisition-under-100.xlsx'),
+    header: {
+      poNo: 'C6',
+      poInitiator: 'G6',
+      shipVia: 'L6',
+      poClass: 'C8',
+      reqDate: 'C10',
+      vendorName: 'C12',
+      confirmedWith: 'G12',
+      vendorAddressLine1: 'C13',
+      vendorAddressLine2: 'C14',
+      partNo: 'M13',
+      jobNo: 'M14',
+      assetNo: 'C15',
+      moldNo: 'M15',
+      initials: 'J16',
+      tsNo: 'M16',
+      codeNo: 'M17',
+      workOrderNo: 'C18',
+      equipmentNo: 'F18',
+      comments: 'C34',
+      departmentManager: 'L34',
+      requisitionedBy: 'F36',
+      authorizedBy: 'L36',
+    },
+    lineStartRow: 22,
+    lineEndRow: 31,
+    line: {
+      quantity: 'A',
+      unitOfMeasure: 'B',
+      itemNumber: 'C',
+      itemDescription: 'D',
+      dueDate: 'J',
+      unitPrice: 'L',
+      totalPrice: 'M',
+    },
+    grandTotal: 'N20',
+  },
+};
+
+function workbookOutputToBuffer(output: unknown) {
+  if (Buffer.isBuffer(output)) return output;
+  if (output instanceof ArrayBuffer) return Buffer.from(output);
+  if (ArrayBuffer.isView(output)) return Buffer.from(output.buffer, output.byteOffset, output.byteLength);
+  return Buffer.from(String(output ?? ''));
+}
+
+function officialParseDateInput(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  const [, year, month, day] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(date.getTime()) ? value : date;
+}
+
+function officialWrapTextByLength(value: unknown, maxLineLength: number, maxLines = 2) {
+  const words = cleanPdfText(value).split(' ').filter(Boolean);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+    if (nextLine.length <= maxLineLength) {
+      currentLine = nextLine;
+      continue;
+    }
+    if (currentLine) lines.push(currentLine);
+    if (word.length > maxLineLength) {
+      for (let index = 0; index < word.length; index += maxLineLength) lines.push(word.slice(index, index + maxLineLength));
+      currentLine = '';
+      continue;
+    }
+    currentLine = word;
+  }
+  if (currentLine) lines.push(currentLine);
+
+  const visible = lines.slice(0, maxLines);
+  if (lines.length > maxLines && visible.length) {
+    const last = visible[visible.length - 1].replace(/\.\.\.$/, '');
+    visible[visible.length - 1] = `${last.slice(0, Math.max(0, maxLineLength - 3))}...`;
+  }
+  return visible.length ? visible.join('\n') : '';
+}
+
+function officialCountWrappedLines(value: string) {
+  return Math.max(1, value.split(/\n/).length);
+}
+
+function officialSetWrappedCellValue(cell: XlsxCell, value: unknown, maxLineLength: number, maxLines = 2) {
+  const wrappedValue = officialWrapTextByLength(value, maxLineLength, maxLines);
+  cell.value(wrappedValue);
+  try {
+    cell.style?.({ shrinkToFit: true, verticalAlignment: 'center', wrapText: true });
+  } catch {
+    // MIT3 parity: template cells can reject style updates; the filled value is still useful.
+  }
+  return officialCountWrappedLines(wrappedValue);
+}
+
+function officialSetCellValue(sheet: XlsxSheet, address: string, value: unknown) {
+  sheet.cell(address).value(value ?? '');
+}
+
+function officialClearCellFully(cell: XlsxCell) {
+  if (typeof cell.formula === 'function') cell.formula(undefined);
+  cell.value('');
+}
+
+function officialHeaderContactLines(header: Record<string, unknown>) {
+  const contactLines = textField(header, ['vendorAddress'])
+    .split(/\r?\n/)
+    .map(line => cleanPdfText(line))
+    .filter(Boolean);
+  if (contactLines.length <= 2) return contactLines;
+  return [contactLines[0], contactLines.slice(1).join(' | ')];
+}
+
+function officialComments(header: Record<string, unknown>, notes: string) {
+  const comments = cleanPdfText(textField(header, ['comments'], notes));
+  const priority = cleanPdfText(textField(header, ['priority'])).toLowerCase();
+  if (priority !== 'high') return comments;
+  const normalized = comments.replace(/^high priority\s*-?\s*/i, '').trim();
+  return normalized ? `HIGH PRIORITY - ${normalized}` : 'HIGH PRIORITY -';
+}
+
+function officialWriteHeader(sheet: XlsxSheet, map: OfficialHeaderCellMap, input: { header: Record<string, unknown>; notes: string; requestedBy: string; vendor: string }) {
+  const { header, notes, requestedBy, vendor } = input;
+  const [vendorAddressLine1 = '', vendorAddressLine2 = ''] = officialHeaderContactLines(header);
+
+  officialSetWrappedCellValue(sheet.cell(map.poNo), '', 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.poInitiator), textField(header, ['poInitiator']), 20, 1);
+  officialSetWrappedCellValue(sheet.cell(map.shipVia), textField(header, ['shipVia']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.poClass), textField(header, ['poClass']), 18, 1);
+  officialSetCellValue(sheet, map.reqDate, officialParseDateInput(textField(header, ['requestDate','reqDate'])));
+  officialSetWrappedCellValue(sheet.cell(map.vendorName), textField(header, ['vendorName'], vendor), 26, 1);
+  officialSetWrappedCellValue(sheet.cell(map.vendorAddressLine1), vendorAddressLine1, 34, 1);
+  officialSetWrappedCellValue(sheet.cell(map.vendorAddressLine2), vendorAddressLine2, 44, 1);
+  officialSetWrappedCellValue(sheet.cell(map.confirmedWith), textField(header, ['confirmedWith']), 22, 1);
+  officialSetWrappedCellValue(sheet.cell(map.assetNo), textField(header, ['assetNo']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.moldNo), textField(header, ['moldNo']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.equipmentNo), textField(header, ['equipmentNo']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.partNo), textField(header, ['partNo']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.jobNo), textField(header, ['jobNo']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.initials), textField(header, ['initials']), 8, 1);
+  officialSetWrappedCellValue(sheet.cell(map.tsNo), textField(header, ['tsNo']), 16, 1);
+  officialSetWrappedCellValue(sheet.cell(map.codeNo), textField(header, ['codeNo']), 16, 1);
+  officialSetWrappedCellValue(sheet.cell(map.workOrderNo), textField(header, ['workOrderNo']), 18, 1);
+  officialSetWrappedCellValue(sheet.cell(map.comments), officialComments(header, notes), 72, 2);
+  officialSetWrappedCellValue(sheet.cell(map.departmentManager), textField(header, ['departmentManager']), 22, 1);
+  officialSetWrappedCellValue(sheet.cell(map.requisitionedBy), textField(header, ['requisitionedBy'], requestedBy), 22, 1);
+  officialSetWrappedCellValue(sheet.cell(map.authorizedBy), textField(header, ['authorizedBy']), 22, 1);
+}
+
+function officialLineDescription(item: RequisitionPdfItem) {
+  const notes = cleanPdfText(item.notes);
+  const description = item.description || item.partNumber || '';
+  return notes ? `${description} - Notes: ${notes}` : description;
+}
+
+function officialWriteLineRow(sheet: XlsxSheet, columns: OfficialLineCellMap, row: number, item: RequisitionPdfItem | undefined) {
+  const quantityCell = `${columns.quantity}${row}`;
+  const unitCell = `${columns.unitOfMeasure}${row}`;
+  const itemNumberCell = sheet.cell(`${columns.itemNumber}${row}`);
+  const descriptionCell = sheet.cell(`${columns.itemDescription}${row}`);
+  const dueDateCell = `${columns.dueDate}${row}`;
+  const unitPriceCell = sheet.cell(`${columns.unitPrice}${row}`);
+  const totalPriceCell = sheet.cell(`${columns.totalPrice}${row}`);
+
+  if (!item) {
+    officialClearCellFully(sheet.cell(quantityCell));
+    officialClearCellFully(sheet.cell(unitCell));
+    officialClearCellFully(itemNumberCell);
+    officialClearCellFully(descriptionCell);
+    officialClearCellFully(sheet.cell(dueDateCell));
+    officialClearCellFully(unitPriceCell);
+    officialClearCellFully(totalPriceCell);
+    return;
+  }
+
+  const quantity = Number(item.quantityRequested ?? 0) || 0;
+  const unitPrice = Number(item.unitCost ?? 0) || 0;
+  officialSetCellValue(sheet, quantityCell, quantity);
+  officialSetCellValue(sheet, unitCell, item.unitOfMeasure || 'EA');
+  const itemNumberLines = officialSetWrappedCellValue(itemNumberCell, item.supplierPartNumber || item.partNumber || '', 22, 2);
+  const descriptionLines = officialSetWrappedCellValue(descriptionCell, officialLineDescription(item), 54, 2);
+  officialSetCellValue(sheet, dueDateCell, officialParseDateInput(item.dueDate ?? ''));
+
+  if (typeof unitPriceCell.formula === 'function') unitPriceCell.formula(undefined);
+  if (typeof totalPriceCell.formula === 'function') totalPriceCell.formula(undefined);
+  unitPriceCell.value(unitPrice);
+  totalPriceCell.value(quantity * unitPrice);
+
+  try {
+    const lineCount = Math.max(itemNumberLines, descriptionLines);
+    sheet.row?.(row).height?.(Math.min(46, 20 + (lineCount - 1) * 12));
+  } catch {
+    // Keep export moving if row-height changes are rejected.
+  }
+  try {
+    unitPriceCell.style?.({ fontSize: 8, numberFormat: '$#,##0.00', shrinkToFit: true });
+    totalPriceCell.style?.({ fontSize: 8, numberFormat: '$#,##0.00', shrinkToFit: true });
+  } catch {
+    // Keep export moving if a template rejects style updates.
+  }
+}
+
+function officialWriteLineItems(sheet: XlsxSheet, map: OfficialTemplateCellMap, items: RequisitionPdfItem[]) {
+  for (let row = map.lineStartRow; row <= map.lineEndRow; row += 1) {
+    officialWriteLineRow(sheet, map.line, row, items[row - map.lineStartRow]);
+  }
+}
+
+function officialWriteGrandTotal(sheet: XlsxSheet, grandTotalCell: string, total: number) {
+  const cell = sheet.cell(grandTotalCell);
+  if (typeof cell.formula === 'function') cell.formula(undefined);
+  cell.value(Number.isFinite(total) ? total : 0);
+  try {
+    cell.style?.({ fontSize: 8, numberFormat: '$#,##0.00', shrinkToFit: true });
+  } catch {
+    // Keep export moving if the template rejects style updates.
+  }
+}
+
+function officialAdjustUnder100HeaderSpacing(sheet: XlsxSheet, type: RequisitionTemplateKind) {
+  if (type !== 'under-100') return;
+  try {
+    sheet.row?.(12).height?.(17);
+    sheet.row?.(13).height?.(17);
+    sheet.row?.(14).height?.(17);
+    sheet.row?.(18).height?.(17);
+    sheet.row?.(19).height?.(19);
+  } catch {
+    // Keep original template layout if row height changes are rejected.
+  }
+  try {
+    sheet.cell('B13').style?.({ fontSize: 7, shrinkToFit: true, verticalAlignment: 'center' });
+    sheet.cell('B14').style?.({ fontSize: 7, shrinkToFit: true, verticalAlignment: 'center' });
+  } catch {
+    // Decorative helper label update only.
+  }
+}
+
+function officialShiftUnder100TitleRight(sheet: XlsxSheet, type: RequisitionTemplateKind) {
+  if (type !== 'under-100') return;
+  const titleCell = sheet.cell('A4');
+  const currentText = String(titleCell.value() ?? '').trim();
+  if (!currentText) return;
+  if (typeof titleCell.formula === 'function') titleCell.formula(undefined);
+  titleCell.value(`  ${currentText}`);
+  try {
+    titleCell.style?.({ bold: true, horizontalAlignment: 'left', underline: true, verticalAlignment: 'center' });
+  } catch {
+    // Keep template styling if style update is not supported.
+  }
+}
+
+async function officialWorkbookBuffer(input: { header: Record<string, unknown>; items: RequisitionPdfItem[]; notes: string; requestedBy: string; total: number; type: RequisitionTemplateKind; vendor: string }) {
+  const map = officialTemplateMaps[input.type];
+  if (!fs.existsSync(map.templatePath)) throw new Error(`Official requisition workbook template is missing: ${path.basename(map.templatePath)}`);
+  // MIT3 parity: fill the official JBT XLSX template instead of redrawing price fields by PDF coordinates.
+  const workbook = await XlsxPopulate.fromFileAsync(map.templatePath);
+  const sheet = workbook.sheet(0) as XlsxSheet;
+  officialWriteHeader(sheet, map.header, input);
+  officialAdjustUnder100HeaderSpacing(sheet, input.type);
+  officialWriteLineItems(sheet, map, input.items);
+  officialWriteGrandTotal(sheet, map.grandTotal, input.total);
+  officialShiftUnder100TitleRight(sheet, input.type);
+  return workbookOutputToBuffer(await workbook.outputAsync());
+}
+
+function officialSafeFileBase(value: string) {
+  return value
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90) || 'MCC_Requisition';
+}
+
+function commandOutputMessage(output: ReturnType<typeof spawnSync>) {
+  const stderr = String(output.stderr ?? '').trim();
+  const stdout = String(output.stdout ?? '').trim();
+  if (stderr) return stderr;
+  if (stdout) return stdout;
+  return output.status === null ? 'Process did not finish.' : `Process exited with status ${output.status}.`;
+}
+
+function tryExcelComPdfExport(xlsxPath: string, pdfPath: string) {
+  if (process.platform !== 'win32') return false;
+  const script = `
+param([string]$XlsxPath,[string]$PdfPath)
+$excel = $null
+$workbook = $null
+try {
+  $excel = New-Object -ComObject Excel.Application
+  $excel.Visible = $false
+  $excel.AskToUpdateLinks = $false
+  $excel.DisplayAlerts = $false
+  $excel.EnableEvents = $false
+  $workbook = $excel.Workbooks.Open($XlsxPath, 0, $true)
+  $worksheet = $workbook.Worksheets.Item(1)
+  try {
+    $worksheet.PageSetup.Zoom = $false
+    $worksheet.PageSetup.FitToPagesWide = 1
+    $worksheet.PageSetup.FitToPagesTall = 1
+    $worksheet.PageSetup.CenterHorizontally = $true
+    $worksheet.PageSetup.CenterVertically = $false
+    $worksheet.PageSetup.LeftMargin = $excel.InchesToPoints(0.90)
+    $worksheet.PageSetup.RightMargin = $excel.InchesToPoints(0.35)
+    $worksheet.PageSetup.TopMargin = $excel.InchesToPoints(0.35)
+    $worksheet.PageSetup.BottomMargin = $excel.InchesToPoints(0.35)
+  } catch {}
+  try { $excel.CalculateFullRebuild() } catch {}
+  $workbook.ExportAsFixedFormat(0, $PdfPath)
+  $workbook.Close($false)
+  if (-not (Test-Path -LiteralPath $PdfPath)) { throw "PDF was not created." }
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+} finally {
+  if ($workbook -ne $null) { try { $workbook.Close($false) } catch {} }
+  if ($excel -ne $null) { try { $excel.Quit() } catch {} }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
+}`;
+  const scriptPath = path.join(path.dirname(xlsxPath), 'export-requisition-pdf.ps1');
+  fs.writeFileSync(scriptPath, script);
+  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath], {
+    encoding: 'utf8',
+    timeout: 90_000,
+    windowsHide: true,
+  });
+  if (output.status === 0 && fs.existsSync(pdfPath)) return true;
+  void commandOutputMessage(output);
+  return false;
+}
+
+function libreOfficeCandidates() {
+  return [
+    'soffice',
+    'libreoffice',
+    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
+  ];
+}
+
+function tryLibreOfficePdfExport(xlsxPath: string, pdfPath: string, outputDir: string) {
+  for (const candidate of libreOfficeCandidates()) {
+    const output = spawnSync(candidate, ['--headless','--convert-to','pdf','--outdir',outputDir,xlsxPath], {
+      encoding: 'utf8',
+      timeout: 90_000,
+      windowsHide: true,
+    });
+    if (output.status === 0 && fs.existsSync(pdfPath)) return true;
+  }
+  return false;
+}
+
+function convertOfficialWorkbookToPdf(workbook: Buffer, fileNameBase: string) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcc-requisition-'));
+  try {
+    const safeBase = officialSafeFileBase(fileNameBase);
+    const xlsxPath = path.join(tempDir, `${safeBase}.xlsx`);
+    const pdfPath = path.join(tempDir, `${safeBase}.pdf`);
+    fs.writeFileSync(xlsxPath, workbook);
+    const converted = tryExcelComPdfExport(xlsxPath, pdfPath) || tryLibreOfficePdfExport(xlsxPath, pdfPath, tempDir);
+    if (!converted || !fs.existsSync(pdfPath)) {
+      throw new Error('Official requisition PDF export failed. Microsoft Excel or LibreOffice could not convert the MIT3 workbook template.');
+    }
+    const pdf = fs.readFileSync(pdfPath);
+    if (!pdf.length) throw new Error('Official requisition PDF export failed. The generated PDF was empty.');
+    return pdf;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function chunkRequisitionItems(items: RequisitionPdfItem[], size: number) {
+  const chunks: RequisitionPdfItem[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks.length ? chunks : [[]];
+}
+
+async function mergeOfficialPdfPages(pdfPages: Buffer[]) {
+  if (pdfPages.length === 1) return pdfPages[0];
+  const mergedPdf = await PDFDocument.create();
+  for (const bytes of pdfPages) {
+    const sourcePdf = await PDFDocument.load(bytes);
+    const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+    copiedPages.forEach(page => mergedPdf.addPage(page));
+  }
+  const pageNumberFont = await mergedPdf.embedFont(StandardFonts.Helvetica);
+  const pages = mergedPdf.getPages();
+  pages.forEach((page, index) => {
+    const { width } = page.getSize();
+    page.drawText(`Page ${index + 1} of ${pages.length}`, { x: width - 82, y: 16, size: 7, font: pageNumberFont, color: pdfBlack });
+  });
+  return Buffer.from(await mergedPdf.save());
+}
+
+async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; requisitionType?: string; header?: Record<string, unknown>; items: RequisitionPdfItem[] }) {
+  const header = isRecord(input.header) ? input.header : {};
+  const total = input.items.reduce((sum, item) => sum + (Number(item.unitCost ?? 0) || 0) * (Number(item.quantityRequested ?? 0) || 0), 0);
+  const type = normalizedRequisitionType(input.requisitionType || textField(header, ['requisitionType']), total);
+  const chunks = chunkRequisitionItems(input.items, Math.min(officialRequisitionRowsPerPage, officialTemplateMaps[type].lineEndRow - officialTemplateMaps[type].lineStartRow + 1));
+  const pdfPages: Buffer[] = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    const pageHeader = chunks.length > 1
+      ? { ...header, comments: `${textField(header, ['comments'], input.notes).trim() || 'Maintenance inventory restock.'} Page ${index + 1} of ${chunks.length}.` }
+      : header;
+    const workbook = await officialWorkbookBuffer({
+      header: pageHeader,
+      items: chunks[index],
+      notes: input.notes,
+      requestedBy: input.requestedBy,
+      total,
+      type,
+      vendor: input.vendor,
+    });
+    const pageBase = chunks.length > 1 ? `${input.requisitionNumber}-page-${index + 1}` : input.requisitionNumber;
+    pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${pageBase}`));
+  }
+  return mergeOfficialPdfPages(pdfPages);
+}
 
 const over100Positions: StampPositions = {
   poNo: { x: 220, topY: 96 },
@@ -1575,55 +2098,7 @@ function stampLineItems(input: {
 }
 
 async function buildRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; requisitionType?: string; header?: Record<string, unknown>; items: RequisitionPdfItem[] }) {
-  const header = isRecord(input.header) ? input.header : {};
-  const field = (keys: string[], fallback = '') => textField(header, keys, fallback);
-  const total = input.items.reduce((sum, item) => sum + (Number(item.unitCost ?? 0) || 0) * item.quantityRequested, 0);
-  const type = normalizedRequisitionType(input.requisitionType || field(['requisitionType']), total);
-  const templatePath = pdfTemplatePaths[type];
-  if (!fs.existsSync(templatePath)) throw new Error(`Official requisition PDF template is missing: ${path.basename(templatePath)}`);
-  const positions = positionsByType[type];
-  const templateBytes = fs.readFileSync(templatePath);
-  const itemsPerPage = positions.maxLineRows;
-  const chunks: RequisitionPdfItem[][] = [];
-  for (let index = 0; index < input.items.length; index += itemsPerPage) chunks.push(input.items.slice(index, index + itemsPerPage));
-  const mergedPdf = await PDFDocument.create();
-
-  for (const pageItems of chunks) {
-    const pdfDoc = await PDFDocument.load(templateBytes);
-    const page = pdfDoc.getPage(0);
-    const { height } = page.getSize();
-    const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-    if (type === 'under-100') polishUnder100TemplateLabels(page, boldFont, regularFont, height);
-    drawLineTableHeaders(page, positions, boldFont, height);
-    stampHeader({ page, regularFont, boldFont, positions, header, notes: input.notes, vendor: input.vendor, requestedBy: input.requestedBy, requisitionNumber: input.requisitionNumber, pageHeight: height });
-    stampLineItems({ page, regularFont, positions, items: pageItems, pageHeight: height });
-    if (total > 0) {
-      page.drawRectangle({
-        x: positions.vendorTotalBox.x - 1,
-        y: height - positions.vendorTotalBox.topY - positions.vendorTotalBox.height + 1,
-        width: positions.vendorTotalBox.width + 2,
-        height: Math.max(2, positions.vendorTotalBox.height - 2),
-        color: rgb(1, 1, 1),
-      });
-      drawCurrencyInBox(page, total, positions.vendorTotalBox, { font: boldFont, size: 7.5, pageHeight: height, paddingX: 3 });
-    }
-
-    const [copiedPage] = await mergedPdf.copyPages(pdfDoc, [0]);
-    mergedPdf.addPage(copiedPage);
-  }
-
-  const pageNumberFont = await mergedPdf.embedFont(StandardFonts.Helvetica);
-  const pages = mergedPdf.getPages();
-  if (pages.length > 1) {
-    pages.forEach((page, index) => {
-      const { width } = page.getSize();
-      page.drawText(`Page ${index + 1} of ${pages.length}`, { x: width - 82, y: 16, size: 7, font: pageNumberFont, color: pdfBlack });
-    });
-  }
-
-  return Buffer.from(await mergedPdf.save());
+  return buildOfficialRequisitionPdf(input);
 }
 function userNameById(id: number | null) {
   if (!id) return '';
@@ -1682,7 +2157,6 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
     requestedBy: requisition.requested_by_name,
     createdAt: requisition.requested_at,
     notes: lifecycleNotes,
-    requisitionType: 'under-100',
     header: {
       poNo: '',
       requestDate: localDateOnly(),
