@@ -359,6 +359,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
   const [saving,setSaving]=useState(false);
   const [importing,setImporting]=useState(false);
   const [toolsBusy,setToolsBusy]=useState('');
+  const [toolsOpen,setToolsOpen]=useState(false);
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
   const [fileImportSummary,setFileImportSummary]=useState<NativeFileImportSummary|null>(null);
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
@@ -759,17 +760,10 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
             <span>Showing {visibleParts.length} of {sortedParts.length} parts{filtersActive ? ` (${parts.length} loaded)` : ''}</span>
           </div>
         </div>
-        <div className="inventory-toolbar-badges">
-          <span className="native-status-badge active">MCC Native Inventory</span>
-          <span className={isOnline?'mit3-status-badge online':'mit3-status-badge offline'} aria-live="polite">{isOnline?'MIT3 Reference Online':'MIT3 Reference Offline'}</span>
-          {canWrite&&<span className="view-only-badge">Native writes active</span>}
-          {!canWrite&&<span className="view-only-badge">View-only access.</span>}
-        </div>
         <div className="inventory-focus-actions">
           {showWriteActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
-          {canImport&&<button className="primary-button import-button" type="button" onClick={()=>void importFromMit3()} disabled={importing}>{importing?'Importing...':'Import from MIT3'}</button>}
+          {canUseInventoryTools&&<button className={toolsOpen?'secondary-button inventory-tools-toggle active':'secondary-button inventory-tools-toggle'} type="button" onClick={()=>setToolsOpen(current=>!current)} aria-expanded={toolsOpen} aria-controls="inventory-tools-panel"><span aria-hidden="true">&#9881;</span><span>Tools</span></button>}
           <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
-          <a className="secondary-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
         </div>
       </div>
 
@@ -807,8 +801,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
             <p>This copies inventory through the MIT3 HTTP API. MIT3 data is not modified.</p>
           </div>
           <div className="inventory-setup-actions">
-            <button className="primary-button" type="button" onClick={()=>void importFromMit3()} disabled={!canImport||importing}>{importing?'Importing...':'Import from MIT3'}</button>
-            <a className="secondary-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
+            <button className="primary-button" type="button" onClick={()=>setToolsOpen(true)} disabled={!canUseInventoryTools}>Open Inventory Tools</button>
           </div>
           {!canImport&&<p className="form-message">Admin, Manager, or Maintenance Tech 3 permission is required to run the migration import.</p>}
         </section>
@@ -829,14 +822,14 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
         </section>
       )}
 
-      {canUseInventoryTools&&(
-        <section className="mcc-card inventory-tools-card">
+      {canUseInventoryTools&&toolsOpen&&(
+        <section className="mcc-card inventory-tools-card" id="inventory-tools-panel">
           <div className="inventory-tools-heading">
             <div>
               <span>Inventory Tools</span>
               <strong>Native import / export / backup</strong>
             </div>
-            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackups()} disabled={Boolean(toolsBusy)}>Refresh Backups</button>
+            <button className="link-button compact-button" type="button" onClick={()=>setToolsOpen(false)}>Close</button>
           </div>
           <div className="inventory-tools-grid">
             <div className="inventory-tools-panel">
@@ -859,6 +852,7 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               <span>Backups</span>
               <div className="inventory-tool-actions">
                 <button className="secondary-button compact-button" type="button" onClick={()=>void createBackup()} disabled={Boolean(toolsBusy)}>Create Backup</button>
+                <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackups()} disabled={Boolean(toolsBusy)}>Refresh Backups</button>
               </div>
               <div className="backup-list">
                 {backupFiles.length>0
@@ -883,6 +877,14 @@ export function InventoryPage({ userRole, onBackToDashboard }: { userRole: strin
               )}
             </div>
           )}
+          <div className="inventory-tools-panel inventory-tools-mit3">
+            <span>MIT3 Reference / Migration</span>
+            <div className="inventory-tool-actions">
+              {canImport&&<button className="primary-button compact-button" type="button" onClick={()=>void importFromMit3()} disabled={importing||Boolean(toolsBusy)}>{importing?'Importing...':'Import from MIT3'}</button>}
+              <a className="secondary-button compact-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open MIT3 Inventory</a>
+            </div>
+            <p className="form-message">MIT3 is backup/reference only. MCC daily inventory remains native.</p>
+          </div>
         </section>
       )}
 

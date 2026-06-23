@@ -944,6 +944,8 @@ function publicRequisition(row: RequisitionRow) {
     notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deleted: Boolean(row.deleted),
+    deletedAt: row.deleted_at,
   };
 }
 function activeRequisitionForPart(partId: number) {
@@ -1297,17 +1299,113 @@ async function buildRequisitionPdf(input: { vendor: string; requisitionNumber: s
 
   return Buffer.from(await mergedPdf.save());
 }
-function requisitionById(id: number) {
-  return one<RequisitionRow>('SELECT * FROM inventory_requisitions WHERE deleted=0 AND id=?', [id]);
+function userNameById(id: number | null) {
+  if (!id) return '';
+  return one<{ full_name: string }>('SELECT full_name FROM users WHERE id=?', [id])?.full_name ?? '';
+}
+function formatPdfDateTime(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+function drawWrappedPdfText(page: PDFPage, text: string, x: number, topY: number, options: { font: PDFFont; pageHeight: number; size: number; maxWidth: number; lineHeight?: number; color?: ReturnType<typeof rgb>; maxLines?: number }) {
+  const clean = cleanPdfText(text) || '-';
+  const words = clean.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (options.font.widthOfTextAtSize(next, options.size) <= options.maxWidth) current = next;
+    else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  const maxLines = options.maxLines ?? lines.length;
+  const visible = lines.slice(0, maxLines);
+  if (lines.length > maxLines && visible.length) visible[visible.length - 1] = truncatePdfText(visible[visible.length - 1], Math.max(8, visible[visible.length - 1].length - 3));
+  const lineHeight = options.lineHeight ?? options.size + 4;
+  visible.forEach((line, index) => {
+    page.drawText(line, { x, y: yFromTop(options.pageHeight, topY + index * lineHeight, options.size), size: options.size, font: options.font, color: options.color ?? pdfBlack });
+  });
+  return Math.max(1, visible.length) * lineHeight;
+}
+async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const { width, height } = page.getSize();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const jbtBlue = rgb(0.02, 0.32, 0.56);
+  const lightBlue = rgb(0.9, 0.97, 1);
+  const borderBlue = rgb(0.62, 0.78, 0.88);
+  const muted = rgb(0.32, 0.42, 0.48);
+  const margin = 42;
+
+  page.drawRectangle({ x: 0, y: height - 92, width, height: 92, color: jbtBlue });
+  page.drawText('JBT USA / Maintenance Command Center', { x: margin, y: height - 42, size: 16, font: boldFont, color: rgb(1, 1, 1) });
+  page.drawText('Maintenance Requisition', { x: margin, y: height - 66, size: 11, font: regularFont, color: lightBlue });
+  page.drawText(requisition.requisition_number, { x: width - 210, y: height - 50, size: 15, font: boldFont, color: rgb(1, 1, 1) });
+
+  const statusColor = requisition.status === 'Canceled' ? rgb(0.63, 0.18, 0.22) : requisition.status === 'Received' ? rgb(0.12, 0.45, 0.32) : rgb(0.02, 0.32, 0.56);
+  page.drawRectangle({ x: margin, y: height - 122, width: width - margin * 2, height: 24, color: rgb(0.94, 0.98, 1), borderColor: borderBlue, borderWidth: 0.8 });
+  page.drawText(`Status: ${requisition.status}`, { x: margin + 10, y: height - 115, size: 10, font: boldFont, color: statusColor });
+  page.drawText(`Generated: ${formatPdfDateTime(now())}`, { x: width - 234, y: height - 115, size: 9, font: regularFont, color: muted });
+
+  const rows: Array<[string, string, string, string]> = [
+    ['Requisition Number', requisition.requisition_number, 'Quantity Requested', String(Number(requisition.quantity_requested ?? 0))],
+    ['Part Number', requisition.part_number || '-', 'WO#', requisition.work_order_number || '-'],
+    ['Description', requisition.description || '-', 'Vendor', requisition.vendor_name || '-'],
+    ['Location', requisition.location_name || '-', 'Requested By', requisition.requested_by_name || '-'],
+    ['Requested Date/Time', formatPdfDateTime(requisition.requested_at), 'Ordered By/Date', requisition.ordered_at ? `${userNameById(requisition.ordered_by_user_id) || '-'} / ${formatPdfDateTime(requisition.ordered_at)}` : '-'],
+    ['Received By/Date', requisition.received_at ? `${userNameById(requisition.received_by_user_id) || '-'} / ${formatPdfDateTime(requisition.received_at)}` : '-', 'Canceled By/Date', requisition.canceled_at ? `${userNameById(requisition.canceled_by_user_id) || '-'} / ${formatPdfDateTime(requisition.canceled_at)}` : '-'],
+  ];
+
+  let topY = 146;
+  const colGap = 18;
+  const colWidth = (width - margin * 2 - colGap) / 2;
+  const labelSize = 7.5;
+  const valueSize = 9.5;
+  const rowGap = 13;
+  for (const row of rows) {
+    const leftHeight = drawPdfField(page, row[0], row[1], margin, topY, colWidth, { regularFont, boldFont, pageHeight: height, labelSize, valueSize, muted });
+    const rightHeight = drawPdfField(page, row[2], row[3], margin + colWidth + colGap, topY, colWidth, { regularFont, boldFont, pageHeight: height, labelSize, valueSize, muted });
+    topY += Math.max(leftHeight, rightHeight) + rowGap;
+  }
+
+  if (requisition.cancel_reason || requisition.status === 'Canceled') {
+    topY += 4;
+    topY += drawPdfSection(page, 'Cancel Reason', requisition.cancel_reason || '-', margin, topY, width - margin * 2, { regularFont, boldFont, pageHeight: height, muted });
+  }
+  topY += 4;
+  topY += drawPdfSection(page, 'Notes', requisition.notes || '-', margin, topY, width - margin * 2, { regularFont, boldFont, pageHeight: height, muted });
+
+  page.drawLine({ start: { x: margin, y: 54 }, end: { x: width - margin, y: 54 }, thickness: 0.6, color: borderBlue });
+  page.drawText('Generated from MCC native requisition records.', { x: margin, y: 36, size: 8, font: regularFont, color: muted });
+  return Buffer.from(await pdfDoc.save());
+}
+function drawPdfField(page: PDFPage, label: string, value: string, x: number, topY: number, width: number, fonts: { regularFont: PDFFont; boldFont: PDFFont; pageHeight: number; labelSize: number; valueSize: number; muted: ReturnType<typeof rgb> }) {
+  page.drawText(label.toUpperCase(), { x, y: yFromTop(fonts.pageHeight, topY, fonts.labelSize), size: fonts.labelSize, font: fonts.boldFont, color: fonts.muted });
+  return fonts.labelSize + 7 + drawWrappedPdfText(page, value, x, topY + 14, { font: fonts.regularFont, pageHeight: fonts.pageHeight, size: fonts.valueSize, maxWidth: width, lineHeight: 13, maxLines: 2 });
+}
+function drawPdfSection(page: PDFPage, label: string, value: string, x: number, topY: number, width: number, fonts: { regularFont: PDFFont; boldFont: PDFFont; pageHeight: number; muted: ReturnType<typeof rgb> }) {
+  page.drawText(label.toUpperCase(), { x, y: yFromTop(fonts.pageHeight, topY, 8), size: 8, font: fonts.boldFont, color: fonts.muted });
+  const textHeight = drawWrappedPdfText(page, value, x, topY + 16, { font: fonts.regularFont, pageHeight: fonts.pageHeight, size: 9.5, maxWidth: width, lineHeight: 13, maxLines: 6 });
+  return 16 + textHeight;
+}
+function requisitionById(id: number, options: { includeDeleted?: boolean } = {}) {
+  return one<RequisitionRow>(`SELECT * FROM inventory_requisitions WHERE ${options.includeDeleted ? '1=1' : 'deleted=0'} AND id=?`, [id]);
 }
 function validateQuantityRequested(value: unknown) {
   const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error('Qty requested must be a positive number.');
   return parsed;
 }
-function requisitionList(statusFilter = '') {
+function requisitionList(statusFilter = '', includeDeleted = false) {
   const params: SqlParam[] = [];
-  let where = 'deleted=0';
+  let where = includeDeleted ? '1=1' : 'deleted=0';
   const cleanStatus = statusFilter.trim();
   if (!cleanStatus) {
     where += " AND status IN ('Requested','Ordered')";
@@ -1336,6 +1434,9 @@ function sendRequisitionError(req: Request, res: Response, operation: string, ta
   audit(req,'failed requisition action','requisition',targetId,{operation,error:message});
   const status = /not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /must|requires|required|unsupported|only/i.test(message) ? 400 : 500;
   res.status(status).json({ok:false,error:message,activeRequisitionExists:/already exists/i.test(message)});
+}
+function canDeleteRequisitions(actor: User) {
+  return actor.role === 'Admin' || actor.role === 'Manager';
 }
 async function writeMit3AppData(data: Record<string, unknown>) {
   const response = await fetch(mit3AppDataUrl, {
@@ -1478,18 +1579,36 @@ for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${a
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>res.json({localPort:port,localhostUrl:`http://localhost:${port}`,detectedLanUrls:detectedLanUrls()}));
-app.get('/api/requisitions/summary', requireAuth, (_req,res)=>res.json({ok:true,...requisitionSummary()}));
-app.get('/api/requisitions', requireAuth, (req,res)=>{
+app.get('/api/requisitions/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...requisitionSummary()}));
+app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
   try {
-    res.json({ok:true,requisitions:requisitionList(queryText(req.query.status)),summary:requisitionSummary()});
+    const includeDeleted = canDeleteRequisitions(req.user!) && String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
+    res.json({ok:true,requisitions:requisitionList(queryText(req.query.status), includeDeleted),summary:requisitionSummary()});
   } catch (error) {
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.get('/api/requisitions/:id', requireAuth, (req,res)=>{
+app.get('/api/requisitions/:id', requireAuth, requirePermission('inventory.view'), (req,res)=>{
   const requisition = requisitionById(Number(req.params.id));
   if (!requisition) return res.status(404).json({ok:false,error:'Requisition not found.'});
   res.json({ok:true,requisition:publicRequisition(requisition)});
+});
+app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.view'), async (req:AuthRequest,res)=>{
+  const requisitionId = Number(req.params.id);
+  try {
+    const requisition = requisitionById(requisitionId, { includeDeleted: canDeleteRequisitions(req.user!) });
+    if (!requisition) throw new Error('Requisition not found.');
+    const buffer = await buildSingleRequisitionPdf(requisition);
+    const fileName = `MCC_Requisition_${safeFileToken(requisition.requisition_number)}.pdf`;
+    inventoryAudit(req,'requisition PDF generated','requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
+    audit(req,'requisition PDF generated','requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
+    sendDownload(res,fileName,'application/pdf',buffer);
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    inventoryAudit(req,'failed PDF generation','requisition',Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),{error:message});
+    audit(req,'failed PDF generation','requisition',Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),{error:message});
+    res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
+  }
 });
 app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   const actor = req.user!;
@@ -1663,6 +1782,39 @@ app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.wri
     res.json({ok:true,requisition:publicRequisition(requisitionById(requisitionId)!),summary:requisitionSummary()});
   } catch (error) {
     sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
+  }
+});
+app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const requisitionId = Number(req.params.id);
+  const targetId = Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? '');
+  try {
+    if (!canDeleteRequisitions(actor)) {
+      inventoryAudit(req,'failed delete','requisition',targetId,{error:'Permission denied.'});
+      audit(req,'failed delete','requisition',targetId,{error:'Permission denied.'});
+      return res.status(403).json({ok:false,error:'Permission denied.'});
+    }
+    if (!Number.isInteger(requisitionId) || requisitionId <= 0) throw new Error('Requisition not found.');
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = requisitionById(requisitionId);
+      if (!existing) throw new Error('Requisition not found.');
+      run('UPDATE inventory_requisitions SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [timestamp,actor.id,timestamp,requisitionId]);
+      syncPartRequisitionFlag(existing.inventory_part_id,timestamp);
+      inventoryAudit(req,'requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+      audit(req,'requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,summary:requisitionSummary()});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    inventoryAudit(req,'failed delete','requisition',targetId,{error:message});
+    audit(req,'failed delete','requisition',targetId,{error:message});
+    res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : 500).json({ok:false,error:message});
   }
 });
 app.get('/api/inventory/native/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...nativeInventorySummary()}));

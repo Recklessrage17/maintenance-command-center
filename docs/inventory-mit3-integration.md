@@ -151,10 +151,12 @@ Phase 2F requisition endpoints:
 
 - `GET /api/requisitions`: returns active native MCC requisitions by default and supports status filters.
 - `GET /api/requisitions/:id`: returns one native MCC requisition.
+- `GET /api/requisitions/:id/pdf`: generates a clean printable PDF from the MCC native requisition record.
 - `GET /api/requisitions/summary`: returns requested, ordered, received, canceled, and active counts.
 - `POST /api/requisitions`: creates a requisition from a native MCC inventory part.
 - `PATCH /api/requisitions/:id/status`: marks a native MCC requisition Ordered, Received, or Canceled.
 - `PATCH /api/requisitions/:id`: updates requested quantity, WO#, and notes while the requisition is still Requested.
+- `DELETE /api/requisitions/:id`: soft deletes a requisition for Admin and Manager users.
 
 Phase 2F requisition rules:
 
@@ -166,12 +168,15 @@ Phase 2F requisition rules:
 - When no active requisitions remain for a part, MCC clears that native part's requisition status.
 - If an active requisition already exists for a part, MCC warns before allowing another active requisition.
 - Canceling a requisition requires a reason.
+- Requisition PDFs are generated from MCC native requisition records, not MIT3 records, and use professional filenames such as `MCC_Requisition_REQ-2026-000001.pdf`.
+- Delete is soft delete only: MCC sets deleted metadata and hides the requisition from the active list without physically removing the database record.
 - Admin, Manager, Maintenance Tech 3, and Maintenance Tech 2 can create and update requisitions.
+- Admin and Manager can soft delete requisitions.
 - Maintenance Tech 1 remains view-only.
 
-The Requisitions page provides MCC-native summary cards, filters, search, and status actions. The Inventory page creates native requisitions from part rows and refreshes MCC native inventory after each create.
+The Requisitions page provides MCC-native summary cards, filters, search, PDF downloads, status actions, and Admin/Manager soft delete. The Inventory page creates native requisitions from part rows and refreshes MCC native inventory after each create.
 
-Audit entries are recorded for requisition create, status changed, ordered, received, canceled, edit, and failed requisition action events. Secrets are not logged.
+Audit entries are recorded for requisition create, status changed, ordered, received, canceled, edit, PDF generated, soft deleted, failed PDF generation, failed delete, and failed requisition action events. Secrets are not logged.
 
 Future Phase 2G will add or harden native inventory import/export/backup tools.
 
@@ -217,6 +222,32 @@ Audit entries are recorded for CSV export, Excel update template export, blank t
 Restore is intentionally reserved for a later hardening pass.
 
 Future native inventory work can add restore, delete/restore archive workflows, and final MIT3 retirement mode after the native import/export/backup workflow has been used safely.
+
+## Inventory tools visibility
+
+Inventory Focus Mode keeps the daily toolbar focused on normal work:
+
+- Back to Command Center
+- Inventory title, refresh detail, and row count
+- Add Part
+- Inventory Tools settings button
+- Refresh Inventory
+
+Inventory import/export/backup tools are hidden behind the Inventory Tools settings button instead of always being visible.
+
+The Inventory Tools panel contains:
+
+- Export CSV
+- Export Excel Update Template
+- Export Blank Import Template
+- Import CSV / Excel
+- Create Backup
+- Refresh Backups
+- Backup list
+- Import from MIT3
+- Open MIT3 Inventory under `MIT3 Reference / Migration`
+
+MIT3 is backup/reference only. It is not shown in the main daily Inventory toolbar, and the main toolbar no longer shows the old MCC Native Inventory, MIT3 Reference Offline, or Native writes active badges.
 
 ## Inventory vendor requisition PDF workflow
 

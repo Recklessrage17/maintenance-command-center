@@ -19,6 +19,8 @@ type Requisition = {
   workOrderNumber: string;
   notes: string;
   cancelReason: string;
+  deleted: boolean;
+  deletedAt: string | null;
 };
 
 type Summary = {
@@ -42,6 +44,7 @@ type EditForm = {
 };
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
+const deleteRoles = new Set(['Admin','Manager']);
 const filters: StatusFilter[] = ['All','Requested','Ordered','Received','Canceled'];
 const emptySummary: Summary = { requestedCount: 0, orderedCount: 0, receivedCount: 0, canceledCount: 0, activeCount: 0 };
 
@@ -50,6 +53,28 @@ async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;
+}
+
+function fileNameFromDisposition(disposition: string | null, fallback: string) {
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return match?.[1] ?? fallback;
+}
+
+async function downloadFile(path:string, fallbackFileName:string) {
+  const res = await fetch(path,{credentials:'include'});
+  if (!res.ok) {
+    const data = await res.json().catch(()=>({}));
+    throw new Error(data.error || 'Download failed.');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileNameFromDisposition(res.headers.get('content-disposition'), fallbackFileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function formatDateTime(value?: string | null) {
@@ -83,14 +108,19 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   const [editForm,setEditForm]=useState<EditForm>({quantityRequested:'1',workOrderNumber:'',notes:''});
   const [editError,setEditError]=useState('');
   const [saving,setSaving]=useState(false);
+  const [showDeleted,setShowDeleted]=useState(false);
 
   const canWrite = writeRoles.has(userRole);
+  const canDelete = deleteRoles.has(userRole);
 
-  async function loadRequisitions(nextFilter = filter) {
+  async function loadRequisitions(nextFilter = filter, nextShowDeleted = showDeleted) {
     setLoading(true);
     setNotice(null);
     try {
-      const query = nextFilter === 'All' ? '?status=all' : `?status=${encodeURIComponent(nextFilter)}`;
+      const params = new URLSearchParams();
+      params.set('status', nextFilter === 'All' ? 'all' : nextFilter);
+      if (nextShowDeleted) params.set('includeDeleted', 'true');
+      const query = `?${params.toString()}`;
       const result = await api<ListResponse>(`/api/requisitions${query}`);
       setRequisitions(result.requisitions ?? []);
       setSummary(result.summary ?? emptySummary);
@@ -119,12 +149,32 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
 
   function setNextFilter(nextFilter: StatusFilter) {
     setFilter(nextFilter);
-    void loadRequisitions(nextFilter);
+    void loadRequisitions(nextFilter, showDeleted);
+  }
+
+  function toggleShowDeleted() {
+    const next = !showDeleted;
+    setShowDeleted(next);
+    void loadRequisitions(filter, next);
+  }
+
+  async function downloadPdf(requisition: Requisition) {
+    if (busyId) return;
+    setBusyId(requisition.id);
+    setNotice(null);
+    try {
+      await downloadFile(`/api/requisitions/${requisition.id}/pdf`, `MCC_Requisition_${requisition.requisitionNumber}.pdf`);
+      setNotice({kind:'success',text:`${requisition.requisitionNumber} PDF downloaded.`});
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function updateStatus(requisition: Requisition, status: Exclude<RequisitionStatus,'Requested'>) {
-    if (!canWrite || busyId) return;
-    const cancelReason = status === 'Canceled' ? window.prompt('Cancel reason is required.')?.trim() ?? '' : '';
+    if (!canWrite || requisition.deleted || busyId) return;
+    const cancelReason = status === 'Canceled' ? window.prompt('Cancel reason is required. Enter cancellation reason:')?.trim() ?? '' : '';
     if (status === 'Canceled' && !cancelReason) return;
     setBusyId(requisition.id);
     setNotice(null);
@@ -134,7 +184,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
         body: JSON.stringify({status,cancelReason}),
       });
       setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
-      await loadRequisitions();
+      await loadRequisitions(filter, showDeleted);
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -143,7 +193,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   }
 
   function openEdit(requisition: Requisition) {
-    if (!canWrite || requisition.status !== 'Requested') return;
+    if (!canWrite || requisition.deleted || requisition.status !== 'Requested') return;
     setEditing(requisition);
     setEditForm(editFormFromRequisition(requisition));
     setEditError('');
@@ -177,11 +227,27 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
       });
       closeEdit(true);
       setNotice({kind:'success',text:`${editing.requisitionNumber} updated.`});
-      await loadRequisitions();
+      await loadRequisitions(filter, showDeleted);
     } catch (err) {
       setEditError((err as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteRequisition(requisition: Requisition) {
+    if (!canDelete || requisition.deleted || busyId) return;
+    if (!window.confirm('This will hide the requisition from the active list but keep audit history.')) return;
+    setBusyId(requisition.id);
+    setNotice(null);
+    try {
+      await api(`/api/requisitions/${requisition.id}`, { method: 'DELETE' });
+      setNotice({kind:'success',text:`${requisition.requisitionNumber} hidden from the active list.`});
+      await loadRequisitions(filter, showDeleted);
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -215,6 +281,12 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
           <div className="segmented-control" aria-label="Requisition filters">
             {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" onClick={()=>setNextFilter(option)}>{option}</button>)}
           </div>
+          {canDelete&&(
+            <label className="show-deleted-toggle">
+              <input type="checkbox" checked={showDeleted} onChange={toggleShowDeleted} />
+              <span>Show Deleted</span>
+            </label>
+          )}
         </div>
 
         <div className="table-card requisitions-table-wrap">
@@ -231,14 +303,14 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
                 <th>WO#</th>
                 <th>Requested By</th>
                 <th>Requested Date</th>
-                {canWrite&&<th>Actions</th>}
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredRequisitions.map(requisition=>(
-                <tr key={requisition.id}>
+                <tr className={requisition.deleted?'deleted-row':''} key={requisition.id}>
                   <td><strong className="req-number">{requisition.requisitionNumber}</strong></td>
-                  <td><span className={statusClass(requisition.status)}>{requisition.status}</span></td>
+                  <td><span className={statusClass(requisition.status)}>{requisition.status}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
                   <td>{requisition.partNumber || '-'}</td>
                   <td className="inventory-description-cell"><span className="inventory-description-text" title={requisition.description || undefined}>{requisition.description || '-'}</span></td>
                   <td>{requisition.quantityRequested}</td>
@@ -247,20 +319,20 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
                   <td>{requisition.workOrderNumber || '-'}</td>
                   <td>{requisition.requestedByName || '-'}</td>
                   <td>{formatDateTime(requisition.requestedAt)}</td>
-                  {canWrite&&(
-                    <td>
-                      <div className="requisition-row-actions">
-                        {requisition.status==='Requested'&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
-                        {(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id}>Mark Received</button>}
-                        {(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Canceled')} disabled={busyId===requisition.id}>Cancel</button>}
-                        {requisition.status==='Requested'&&<button className="link-button compact-button" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
-                      </div>
-                    </td>
-                  )}
+                  <td>
+                    <div className="requisition-row-actions">
+                      <button className="secondary-button compact-button" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
+                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
+                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id}>Mark Received</button>}
+                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Canceled')} disabled={busyId===requisition.id}>Cancel</button>}
+                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
+                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button" type="button" onClick={()=>void deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
+                    </div>
+                  </td>
                 </tr>
               ))}
-              {!loading&&filteredRequisitions.length===0&&<tr><td colSpan={canWrite?11:10} className="empty-table-cell">No requisitions match this view.</td></tr>}
-              {loading&&<tr><td colSpan={canWrite?11:10} className="empty-table-cell">Loading requisitions...</td></tr>}
+              {!loading&&filteredRequisitions.length===0&&<tr><td colSpan={11} className="empty-table-cell">No requisitions match this view.</td></tr>}
+              {loading&&<tr><td colSpan={11} className="empty-table-cell">Loading requisitions...</td></tr>}
             </tbody>
           </table>
         </div>

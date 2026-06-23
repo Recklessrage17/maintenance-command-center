@@ -92,7 +92,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-focus-shell .mcc-main { width: 100%; padding: 14px 16px; }
 .inventory-focus-shell .mcc-content { width: 100%; max-width: none; }
 .inventory-page { gap: 12px; }
-.inventory-focus-toolbar { position: sticky; top: 0; z-index: 10; display: grid; grid-template-columns: auto minmax(140px, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid rgba(77, 208, 255, 0.24); border-radius: 14px; background: rgba(4, 18, 34, 0.94); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24); backdrop-filter: blur(12px); }
+.inventory-focus-toolbar { position: sticky; top: 0; z-index: 10; display: grid; grid-template-columns: auto minmax(140px, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid rgba(77, 208, 255, 0.24); border-radius: 14px; background: rgba(4, 18, 34, 0.94); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24); backdrop-filter: blur(12px); }
 .inventory-focus-title { min-width: 0; }
 .inventory-focus-title h2 { margin: 0; color: #fff; font-size: 1.18rem; line-height: 1.1; }
 .inventory-focus-title .eyebrow { margin-bottom: 4px; font-size: .68rem; letter-spacing: .08em; }
@@ -101,6 +101,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-focus-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .inventory-focus-actions .primary-button, .inventory-focus-actions .secondary-button { min-height: 38px; border-radius: 10px; font-size: .84rem; }
 .inventory-back-button { white-space: nowrap; }
+.inventory-tools-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; }
+.inventory-tools-toggle.active { border-color: rgba(54, 229, 170, 0.52); color: #d9ffe9; background: rgba(18, 97, 71, 0.36); }
+.inventory-tools-toggle span { margin: 0 !important; color: inherit !important; font-size: .84rem !important; }
 .mit3-status-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; width: fit-content; padding: 0 10px; border-radius: 999px; border: 1px solid rgba(143, 205, 233, 0.3); color: #dff7ff; background: rgba(7, 25, 45, 0.72); font-size: .76rem; font-weight: 900; white-space: nowrap; }
 .mit3-status-badge.online { color: #a7ffd8; border-color: rgba(54, 229, 170, 0.38); background: rgba(18, 97, 71, 0.48); }
 .mit3-status-badge.offline { color: #ffcfcb; border-color: rgba(255, 117, 138, 0.34); background: rgba(111, 52, 60, 0.52); }
@@ -146,6 +149,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-tools-panel { min-width: 0; display: grid; gap: 9px; padding: 10px; border: 1px solid rgba(85, 191, 236, 0.16); border-radius: 10px; background: rgba(4, 18, 34, 0.38); }
 .inventory-tools-panel > span { margin: 0; font-size: .72rem; text-transform: uppercase; }
 .inventory-tool-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.inventory-tools-mit3 { border-color: rgba(255, 211, 111, 0.22); background: rgba(91, 70, 19, 0.18); }
+.action-link.compact-button { min-width: 0; }
 .inventory-import-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .inventory-import-row input { min-height: 36px; padding: 6px 10px; font-size: .8rem; }
 .backup-list { display: grid; gap: 6px; max-height: 144px; overflow: auto; }
@@ -221,10 +226,13 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .requisition-summary-grid .mcc-card strong { margin-bottom: 4px; font-size: 1.14rem; }
 .requisition-summary-grid .mcc-card p { font-size: .78rem; line-height: 1.35; }
 .requisitions-table-card { min-height: 0; display: grid; gap: 12px; padding: 12px; border-radius: 12px; }
-.requisition-toolbar { display: grid; grid-template-columns: minmax(300px, 1fr) auto; gap: 12px; align-items: end; }
+.requisition-toolbar { display: grid; grid-template-columns: minmax(300px, 1fr) auto auto; gap: 12px; align-items: end; }
 .requisition-search { min-width: 0; }
+.show-deleted-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 10px; border: 1px solid rgba(85, 191, 236, 0.22); border-radius: 10px; color: #dff7ff; background: rgba(4, 18, 34, 0.54); font-size: .78rem; font-weight: 900; white-space: nowrap; }
+.show-deleted-toggle input { width: 16px; min-height: 16px; accent-color: #44d7ff; }
+.show-deleted-toggle span { margin: 0 !important; color: inherit !important; font-size: .78rem !important; }
 .requisitions-table-wrap { max-height: calc(100vh - 352px); overflow: auto; border-radius: 10px; }
-.requisitions-table-wrap table { min-width: 1320px; table-layout: fixed; }
+.requisitions-table-wrap table { min-width: 1400px; table-layout: fixed; }
 .requisitions-table-wrap th { position: sticky; top: 0; z-index: 2; background: rgba(5, 22, 40, 0.98); box-shadow: 0 1px 0 rgba(85, 191, 236, 0.24); font-size: .7rem; letter-spacing: .06em; }
 .requisitions-table-wrap th, .requisitions-table-wrap td { padding: 8px 10px; font-size: .8rem; vertical-align: top; }
 .requisitions-table-wrap th:nth-child(1), .requisitions-table-wrap td:nth-child(1) { width: 128px; }
@@ -236,9 +244,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .requisitions-table-wrap th:nth-child(8), .requisitions-table-wrap td:nth-child(8) { width: 96px; }
 .requisitions-table-wrap th:nth-child(9), .requisitions-table-wrap td:nth-child(9) { width: 130px; }
 .requisitions-table-wrap th:nth-child(10), .requisitions-table-wrap td:nth-child(10) { width: 126px; }
-.requisitions-table-wrap th:nth-child(11), .requisitions-table-wrap td:nth-child(11) { width: 170px; }
+.requisitions-table-wrap th:nth-child(11), .requisitions-table-wrap td:nth-child(11) { width: 250px; }
 .req-number { display: inline !important; margin: 0 !important; color: #f3fbff !important; font-size: .82rem !important; }
 .requisition-status { display: inline-flex; width: fit-content; padding: 4px 7px; border-radius: 999px; font-size: .68rem; font-weight: 900; line-height: 1.1; white-space: nowrap; }
+.deleted-row { opacity: .72; }
+.deleted-chip { display: inline-flex !important; width: fit-content; margin: 5px 0 0 !important; padding: 3px 6px; border: 1px solid rgba(143, 205, 233, 0.24); border-radius: 999px; color: #b9cdd8 !important; background: rgba(7, 25, 45, 0.62); font-size: .64rem !important; font-weight: 900 !important; line-height: 1.1; }
 .status-requested { color: #fff2c2; background: rgba(91, 70, 19, 0.48); border: 1px solid rgba(255, 211, 111, 0.5); }
 .status-ordered { color: #dff7ff; background: rgba(5, 61, 86, 0.48); border: 1px solid rgba(68, 215, 255, 0.38); }
 .status-received { color: #a7ffd8; background: rgba(18, 97, 71, 0.48); border: 1px solid rgba(54, 229, 170, 0.34); }
