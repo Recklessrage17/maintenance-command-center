@@ -16,12 +16,7 @@ const emptyRequisitionSummary: RequisitionSummary = {
   activeCount: 0,
 };
 
-const baseDashboardCards = [
-  { title: 'Open Work Orders', value: '0', note: 'Ready for work order module setup' },
-  { title: 'PM Due Soon', value: '0', note: 'Preventive maintenance tracking placeholder' },
-  { title: 'Inventory Alerts', value: 'Native', note: 'MCC Native Inventory is daily-use now' },
-  { title: 'Critical Assets', value: '0', note: 'Asset registry placeholder' },
-];
+type DashboardCard = { title: string; value: string; note: string };
 
 export function DashboardPage() {
   const [requisitionSummary,setRequisitionSummary]=useState<RequisitionSummary>(emptyRequisitionSummary);
@@ -46,29 +41,42 @@ export function DashboardPage() {
     return ()=>{ mounted = false; };
   },[]);
 
-  const dashboardCards = useMemo(()=>[
-    ...baseDashboardCards,
-    { title: 'Active Requisitions', value: String(requisitionSummary.activeCount), note: 'Requested plus ordered native requisitions' },
-    { title: 'Requested', value: String(requisitionSummary.requestedCount), note: 'Native requisitions waiting for order action' },
-    { title: 'Ordered', value: String(requisitionSummary.orderedCount), note: 'Native requisitions ordered, not yet received' },
-  ],[requisitionSummary]);
+  const dashboardCards = useMemo(()=>{
+    const cards: DashboardCard[] = [];
+    const openWorkOrders = 0;
+    const pmDueSoon = 0;
+    if (openWorkOrders > 0) cards.push({ title: 'Open Work Orders', value: String(openWorkOrders), note: 'Work orders ready for maintenance action' });
+    if (pmDueSoon > 0) cards.push({ title: 'PM Due Soon', value: String(pmDueSoon), note: 'Preventive maintenance due soon' });
+    if (requisitionSummary.activeCount > 0) cards.push({ title: 'Active Requisitions', value: String(requisitionSummary.activeCount), note: 'Requested plus ordered native requisitions' });
+    if (requisitionSummary.requestedCount > 0) cards.push({ title: 'Requested', value: String(requisitionSummary.requestedCount), note: 'Native requisitions waiting for order action' });
+    if (requisitionSummary.orderedCount > 0) cards.push({ title: 'Ordered', value: String(requisitionSummary.orderedCount), note: 'Native requisitions ordered, not yet received' });
+    return cards;
+  },[requisitionSummary]);
 
   return (
     <div className="page-stack">
       <div className="page-heading">
         <p className="eyebrow">Dashboard</p>
-        <h2>Maintenance overview shell</h2>
-        <p>Use this landing page as the future control room for plant maintenance activity.</p>
+        <h2>Maintenance dashboard</h2>
+        <p>Active maintenance items that need attention.</p>
       </div>
-      <div className="card-grid">
-        {dashboardCards.map((card) => (
+      {dashboardCards.length>0 ? (
+        <div className="card-grid dashboard-card-grid">
+          {dashboardCards.map((card) => (
           <article className="mcc-card" key={card.title}>
             <span>{card.title}</span>
             <strong>{card.value}</strong>
             <p>{card.note}</p>
           </article>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <article className="mcc-card dashboard-clear-card">
+          <span>All clear</span>
+          <strong>Maintenance dashboard is clear.</strong>
+          <p>No active maintenance alerts right now.</p>
+        </article>
+      )}
     </div>
   );
 }
