@@ -962,6 +962,41 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     }
   }
 
+  function renderInventoryControls(className: string, includeSelectionActions = false) {
+    return (
+      <div className={className}>
+        {showWriteActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
+        {canUseInventoryTools&&<button className={toolsOpen?'secondary-button inventory-tools-toggle active':'secondary-button inventory-tools-toggle'} type="button" onClick={()=>setToolsOpen(current=>!current)} aria-expanded={toolsOpen} aria-controls="inventory-tools-panel"><span aria-hidden="true">&#9881;</span><span>Tools</span></button>}
+        <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
+        <label className="top-select-field">
+          <span>Filter</span>
+          <select value={filter} onChange={event=>{ const value = event.target.value; setFilter(value === 'clear' ? 'all' : value as FilterMode); }} aria-label="Inventory filter">
+            {filterOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+            <option value="clear">Clear Filter</option>
+          </select>
+        </label>
+        <label className="top-select-field rows-select-field">
+          <span>Rows</span>
+          <select value={String(pageSize)} onChange={event=>setPageSize(event.target.value==='all'?'all':Number(event.target.value) as PageSize)}>
+            {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
+          </select>
+        </label>
+        <div className="top-pager" aria-label="Inventory pagination">
+          <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
+          <span className="page-count">Page {page} of {totalPages}</span>
+          <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
+        </div>
+        {includeSelectionActions&&(
+          <div className="mobile-selection-actions">
+            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!visibleParts.length}>{allVisibleSelected?'Unselect Current Page':'Select Current Page'}</button>
+            <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedParts.length}>Clear Selection</button>
+          </div>
+        )}
+        <button className="primary-button preview-requisition-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack inventory-page">
       <div className="inventory-focus-toolbar">
@@ -974,30 +1009,14 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             <span>Selected: {selectedParts.length}</span>
           </div>
         </div>
-        <div className="inventory-focus-actions">
-          {showWriteActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
-          {canUseInventoryTools&&<button className={toolsOpen?'secondary-button inventory-tools-toggle active':'secondary-button inventory-tools-toggle'} type="button" onClick={()=>setToolsOpen(current=>!current)} aria-expanded={toolsOpen} aria-controls="inventory-tools-panel"><span aria-hidden="true">&#9881;</span><span>Tools</span></button>}
-          <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
-          <label className="top-select-field">
-            <span>Filter</span>
-            <select value={filter} onChange={event=>{ const value = event.target.value; setFilter(value === 'clear' ? 'all' : value as FilterMode); }} aria-label="Inventory filter">
-              {filterOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
-              <option value="clear">Clear Filter</option>
-            </select>
-          </label>
-          <label className="top-select-field rows-select-field">
-            <span>Rows</span>
-            <select value={String(pageSize)} onChange={event=>setPageSize(event.target.value==='all'?'all':Number(event.target.value) as PageSize)}>
-              {pageSizeOptions.map(option=><option key={String(option)} value={String(option)}>{option === 'all' ? 'All' : option}</option>)}
-            </select>
-          </label>
-          <div className="top-pager" aria-label="Inventory pagination">
-            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('previous','top')} disabled={page<=1||pageSize==='all'}>Prev</button>
-            <span className="page-count">Page {page} of {totalPages}</span>
-            <button className="secondary-button compact-button pager-button" type="button" onClick={()=>moveInventoryPage('next','top')} disabled={page>=totalPages||pageSize==='all'}>Next</button>
-          </div>
-          <button className="primary-button preview-requisition-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
-        </div>
+        {renderInventoryControls('inventory-focus-actions')}
+        <details className={selectedParts.length ? 'mobile-inventory-controls has-selection' : 'mobile-inventory-controls'}>
+          <summary>
+            <span>Inventory Controls</span>
+            <strong>Selected: {selectedParts.length}</strong>
+          </summary>
+          {renderInventoryControls('mobile-inventory-control-grid', true)}
+        </details>
       </div>
 
       {error&&<p className="form-message inventory-toast error">{error}</p>}

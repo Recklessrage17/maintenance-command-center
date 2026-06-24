@@ -1264,8 +1264,15 @@ type XlsxCell = {
 type XlsxRow = {
   height?: (height?: number) => unknown;
 };
+type XlsxColumn = {
+  width?: (width?: number) => unknown;
+};
 type XlsxSheet = {
   cell: (address: string) => XlsxCell;
+  column?: (columnNameOrNumber: string | number) => XlsxColumn;
+  pageMargins?: (attributeName: string, value?: number) => unknown;
+  pageMarginsPreset?: (presetName?: string, presetAttributes?: Record<string, number>) => unknown;
+  printOptions?: (attributeName: string, attributeEnabled?: boolean) => unknown;
   row?: (rowNumber: number) => XlsxRow;
 };
 type OfficialPdfChoices = {
@@ -1550,7 +1557,43 @@ function officialWriteGrandTotal(sheet: XlsxSheet, grandTotalCell: string, total
   }
 }
 
-function officialAdjustUnder100HeaderSpacing(sheet: XlsxSheet, type: RequisitionTemplateKind) {
+function officialSetColumnWidth(sheet: XlsxSheet, column: string, width: number) {
+  try {
+    sheet.column?.(column).width?.(width);
+  } catch {
+    // Keep template column width if a workbook implementation rejects the update.
+  }
+}
+
+function officialApplyWorkbookLayout(sheet: XlsxSheet, type: RequisitionTemplateKind) {
+  try {
+    sheet.pageMarginsPreset?.('mcc-tight', { left: 0.18, right: 0.18, top: 0.42, bottom: 0.42, header: 0.15, footer: 0.15 });
+    sheet.printOptions?.('horizontalCentered', true);
+  } catch {
+    // Margin/print options are layout polish only; keep generation moving.
+  }
+
+  if (type === 'under-100') {
+    officialSetColumnWidth(sheet, 'C', 15.2);
+    officialSetColumnWidth(sheet, 'D', 10.2);
+    officialSetColumnWidth(sheet, 'E', 10.2);
+    officialSetColumnWidth(sheet, 'F', 10.6);
+    officialSetColumnWidth(sheet, 'G', 11.2);
+    officialSetColumnWidth(sheet, 'H', 11.2);
+    officialSetColumnWidth(sheet, 'L', 10.4);
+    officialSetColumnWidth(sheet, 'M', 10.4);
+    officialSetColumnWidth(sheet, 'N', 9.6);
+  } else {
+    officialSetColumnWidth(sheet, 'D', 24.6);
+    officialSetColumnWidth(sheet, 'G', 11.1);
+    officialSetColumnWidth(sheet, 'H', 11.2);
+    officialSetColumnWidth(sheet, 'I', 10.8);
+    officialSetColumnWidth(sheet, 'M', 11.4);
+    officialSetColumnWidth(sheet, 'O', 8.8);
+  }
+}
+
+function officialAdjustHeaderSpacing(sheet: XlsxSheet, type: RequisitionTemplateKind) {
   try {
     if (type === 'under-100') {
       sheet.row?.(6).height?.(20);
@@ -1598,8 +1641,9 @@ async function officialWorkbookBuffer(input: { header: Record<string, unknown>; 
   // MIT3 parity: fill the official JBT XLSX template instead of redrawing price fields by PDF coordinates.
   const workbook = await XlsxPopulate.fromFileAsync(map.templatePath);
   const sheet = workbook.sheet(0) as XlsxSheet;
+  officialApplyWorkbookLayout(sheet, input.type);
   officialWriteHeader(sheet, map.header, input);
-  officialAdjustUnder100HeaderSpacing(sheet, input.type);
+  officialAdjustHeaderSpacing(sheet, input.type);
   officialWriteLineItems(sheet, map, input.items);
   officialWriteGrandTotal(sheet, map.grandTotal, input.total);
   officialShiftUnder100TitleRight(sheet, input.type);
