@@ -7,8 +7,40 @@ type NetworkLinks = {
   primaryLanUrl: string | null;
 };
 
-async function api(path:string) {
-  const res=await fetch(path,{credentials:'include'});
+type BackupType = 'startup' | 'scheduled' | 'auto' | 'manual' | 'pre_restore';
+type BackupSummary = {
+  id: string;
+  name: string;
+  type: BackupType;
+  typeLabel: string;
+  createdAt: string;
+  sizeBytes: number;
+  databaseSizeBytes: number;
+  recordCounts: Record<string, number>;
+  includedPaths: string[];
+  notes: string;
+  restorable: boolean;
+};
+type BackupStatus = {
+  ok: boolean;
+  latestBackup: BackupSummary | null;
+  backupFolderExists: boolean;
+  backupCountsByType: Record<BackupType, number>;
+  lastBackupResult: { ok: boolean; message: string; backupId?: string; createdAt?: string };
+  nextScheduledBackupAt: string | null;
+  databaseSize: number;
+  backupHealth: string;
+  autoBackupDelaySeconds: number;
+  scheduledBackupIntervalMinutes: number;
+  permissions: {
+    canViewBackups: boolean;
+    canCreateBackup: boolean;
+    canRestoreBackup: boolean;
+  };
+};
+
+async function api(path:string, options:RequestInit={}) {
+  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data;
@@ -29,8 +61,14 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
 
 export function SettingsPage() {
   const [links,setLinks]=useState<NetworkLinks|null>(null);
+  const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
+  const [backups,setBackups]=useState<BackupSummary[]>([]);
+  const [showBackups,setShowBackups]=useState(false);
+  const [restoreTarget,setRestoreTarget]=useState<BackupSummary|null>(null);
+  const [restoreConfirmation,setRestoreConfirmation]=useState('');
   const [msg,setMsg]=useState('');
   const [loading,setLoading]=useState(false);
+  const [backupLoading,setBackupLoading]=useState(false);
   const primaryLanUrl = links?.primaryLanUrl ?? links?.detectedLanUrls[0] ?? '';
 
   function loadLinks() {
@@ -41,8 +79,61 @@ export function SettingsPage() {
       .finally(()=>setLoading(false));
   }
 
+  function loadBackupStatus() {
+    setBackupLoading(true);
+    api('/api/backup/status')
+      .then(data=>{ setBackupStatus(data); setMsg(''); })
+      .catch(e=>setMsg(e.message))
+      .finally(()=>setBackupLoading(false));
+  }
+
+  function loadBackups() {
+    setBackupLoading(true);
+    api('/api/backup/list')
+      .then(data=>{ setBackups(data.backups ?? []); setShowBackups(true); setMsg(''); })
+      .catch(e=>setMsg(e.message))
+      .finally(()=>setBackupLoading(false));
+  }
+
+  function createManualBackup() {
+    setBackupLoading(true);
+    api('/api/backup/create',{method:'POST',body:JSON.stringify({})})
+      .then(data=>{
+        setBackupStatus(data.status);
+        setMsg(`Manual backup created: ${data.backup?.name ?? 'complete'}`);
+        if (showBackups) void loadBackups();
+      })
+      .catch(e=>setMsg(e.message))
+      .finally(()=>setBackupLoading(false));
+  }
+
+  function verifyBackup(backup: BackupSummary) {
+    setBackupLoading(true);
+    api('/api/backup/verify',{method:'POST',body:JSON.stringify({backupId:backup.id})})
+      .then(data=>setMsg(data.message ?? 'Backup verified.'))
+      .catch(e=>setMsg(e.message))
+      .finally(()=>setBackupLoading(false));
+  }
+
+  function restoreBackup() {
+    if (!restoreTarget) return;
+    setBackupLoading(true);
+    api('/api/backup/restore',{method:'POST',body:JSON.stringify({backupId:restoreTarget.id,confirmation:restoreConfirmation})})
+      .then(data=>{
+        setMsg(data.message ?? 'Backup restored. Refresh MCC before continuing.');
+        setRestoreTarget(null);
+        setRestoreConfirmation('');
+        setBackups([]);
+        setShowBackups(false);
+        loadBackupStatus();
+      })
+      .catch(e=>setMsg(e.message))
+      .finally(()=>setBackupLoading(false));
+  }
+
   useEffect(()=>{
     loadLinks();
+    loadBackupStatus();
   },[]);
 
   return (
@@ -108,6 +199,120 @@ export function SettingsPage() {
 
         {msg&&<p className="form-message">{msg}</p>}
       </article>
+
+      <article className="mcc-card wide-card backup-card">
+        <div className="share-card-heading">
+          <div>
+            <span>MCC Master Backup</span>
+            <strong>Automatic database protection</strong>
+            <p>Startup, hourly, automatic write-triggered, and manual backups protect MCC data without showing private system paths.</p>
+          </div>
+          <div className="backup-action-row">
+            <button className="secondary-button compact-button" type="button" onClick={loadBackupStatus} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
+            <button className="primary-button compact-button" type="button" onClick={createManualBackup} disabled={backupLoading || !backupStatus?.permissions.canCreateBackup}>Create Manual Backup</button>
+          </div>
+        </div>
+
+        <div className="backup-status-grid">
+          <section className="backup-status-panel">
+            <span>Backup health</span>
+            <strong>{backupStatus?.backupHealth ?? 'Checking...'}</strong>
+            <p>{backupStatus?.backupFolderExists ? 'Backup storage is ready.' : 'Backup storage is not ready.'}</p>
+          </section>
+          <section className="backup-status-panel">
+            <span>Latest backup</span>
+            <strong>{backupStatus?.latestBackup ? backupStatus.latestBackup.typeLabel : 'None yet'}</strong>
+            <p>{formatDateTime(backupStatus?.latestBackup?.createdAt)}</p>
+          </section>
+          <section className="backup-status-panel">
+            <span>Live database</span>
+            <strong>{formatBytes(backupStatus?.databaseSize ?? 0)}</strong>
+            <p>Next scheduled backup: {formatDateTime(backupStatus?.nextScheduledBackupAt)}</p>
+          </section>
+        </div>
+
+        <div className="backup-count-row">
+          {(['manual','auto','scheduled','startup','pre_restore'] as BackupType[]).map(type=>(
+            <span className={`backup-type-pill ${type}`} key={type}>{typeLabel(type)}: {backupStatus?.backupCountsByType?.[type] ?? 0}</span>
+          ))}
+        </div>
+
+        <section className="network-notes backup-notes">
+          <strong>Automatic safety</strong>
+          <ul>
+            <li>Startup backup runs when MCC starts successfully.</li>
+            <li>Scheduled backup runs every {backupStatus?.scheduledBackupIntervalMinutes ?? 60} minutes while MCC is running.</li>
+            <li>Write-triggered backup waits about {backupStatus?.autoBackupDelaySeconds ?? 45} seconds after MCC data changes.</li>
+            <li>A pre-restore backup is created before any restore is applied.</li>
+          </ul>
+        </section>
+
+        <div className="backup-action-row">
+          <button className="secondary-button" type="button" onClick={loadBackups} disabled={backupLoading || !backupStatus?.permissions.canViewBackups}>{showBackups ? 'Refresh Backups' : 'View Backups'}</button>
+          {showBackups&&<button className="link-button" type="button" onClick={()=>{setShowBackups(false);setRestoreTarget(null);}}>Hide Backups</button>}
+        </div>
+
+        {showBackups&&(
+          <div className="backup-list">
+            {backups.map(backup=>(
+              <section className="backup-list-row" key={backup.id}>
+                <div>
+                  <span className={`backup-type-pill ${backup.type}`}>{backup.typeLabel}</span>
+                  <strong>{formatDateTime(backup.createdAt)}</strong>
+                  <p>{formatBytes(backup.sizeBytes)} total / {formatBytes(backup.databaseSizeBytes)} database</p>
+                  <small>{backup.notes || 'No notes'}</small>
+                </div>
+                <div className="backup-row-actions">
+                  <button className="secondary-button compact-button" type="button" onClick={()=>verifyBackup(backup)} disabled={backupLoading}>Verify</button>
+                  <button className="danger-button compact-button" type="button" onClick={()=>{setRestoreTarget(backup);setRestoreConfirmation('');}} disabled={backupLoading || !backupStatus?.permissions.canRestoreBackup || !backup.restorable}>Restore</button>
+                </div>
+              </section>
+            ))}
+            {!backups.length&&<p className="form-message">No master backups found yet.</p>}
+          </div>
+        )}
+
+        {restoreTarget&&(
+          <section className="restore-panel">
+            <span>Restore confirmation</span>
+            <strong>{restoreTarget.typeLabel} backup from {formatDateTime(restoreTarget.createdAt)}</strong>
+            <p>A pre-restore safety backup will be created before restoring. Type RESTORE MCC to continue.</p>
+            <label className="form-field">
+              <span>Confirmation</span>
+              <input value={restoreConfirmation} onChange={event=>setRestoreConfirmation(event.target.value)} placeholder="RESTORE MCC" />
+            </label>
+            <div className="backup-action-row">
+              <button className="danger-button" type="button" onClick={restoreBackup} disabled={backupLoading || restoreConfirmation !== 'RESTORE MCC'}>Restore Backup</button>
+              <button className="link-button" type="button" onClick={()=>setRestoreTarget(null)}>Cancel</button>
+            </div>
+          </section>
+        )}
+
+        {backupStatus?.lastBackupResult&&<p className={backupStatus.lastBackupResult.ok ? 'form-message' : 'form-message error'}>{backupStatus.lastBackupResult.message}</p>}
+      </article>
     </div>
   );
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'}).format(date);
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B','KB','MB','GB','TB'];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function typeLabel(type: BackupType) {
+  return type.split('_').map(part=>part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
