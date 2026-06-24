@@ -128,8 +128,8 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
          </div>
        </nav>
      </div>
-     <main className="mcc-main">
-       <section className="mcc-content">{children}</section>
+     <main className="mcc-main mcc-workspace-frame">
+       <section className="mcc-content mcc-workspace">{children}</section>
      </main>
    </div>
  );

@@ -285,9 +285,12 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
   return (
     <div className="page-stack history-page">
       <div className="page-heading history-heading">
-        <p className="eyebrow">History section</p>
-        <h2>{sectionConfig?.label ?? 'History'} History Log</h2>
-        <p>Search and export records for this MCC section only.</p>
+        <button className="secondary-button compact-button history-back-button" type="button" onClick={onBackToLanding}>Back to History Logs</button>
+        <div>
+          <p className="eyebrow">History section</p>
+          <h2>{sectionConfig?.label ?? 'History'} History Log</h2>
+          <p>Search and export records for this MCC section only.</p>
+        </div>
       </div>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}</p>}
       <section className="mcc-card history-filter-card">
