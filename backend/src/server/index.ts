@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', po_initiator TEXT NOT NULL DEFAULT '', requisitioned_by_name TEXT NOT NULL DEFAULT '', tax_exempt TEXT NOT NULL DEFAULT 'No', confirmed_with TEXT NOT NULL DEFAULT '', material_cert TEXT NOT NULL DEFAULT 'No', ship_via TEXT NOT NULL DEFAULT '', fob TEXT NOT NULL DEFAULT 'Destination', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_deleted ON inventory_parts (deleted);
@@ -75,7 +76,16 @@ CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_number ON inventory_requis
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_part ON inventory_requisitions (inventory_part_id,status,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_status ON inventory_requisitions (status,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
-CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
+CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);
+CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
+CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
+CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
+CREATE INDEX IF NOT EXISTS idx_history_logs_user_name ON history_logs (user_name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_history_logs_work_order ON history_logs (work_order_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_history_logs_part_number ON history_logs (part_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_history_logs_requisition_number ON history_logs (requisition_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_history_logs_asset_id ON history_logs (asset_id COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_history_logs_entity_label ON history_logs (entity_label COLLATE NOCASE);`);
 }
 initDb();
 function migrateDb() {
@@ -136,6 +146,105 @@ function cookie(req: Request, name: string) { return req.headers.cookie?.split('
 function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run('INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES (?,?,?,?)', [id,userId,exp,now()]); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); }
 function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) run('DELETE FROM sessions WHERE id=?', [req.sessionId]); res.clearCookie('mcc_session', { path: '/' }); }
 function audit(req: Request, action: string, targetType?: string, targetId?: string|number, details: Record<string, unknown> = {}) { const u = (req as AuthRequest).user; run('INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [u?.id ?? null,u?.email ?? '',action,targetType ?? '',String(targetId ?? ''),JSON.stringify(details),req.ip ?? '',req.get('user-agent') ?? '',now()]); }
+type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance';
+type HistoryLogInput = {
+  section: HistorySection;
+  action: string;
+  entityType?: string;
+  entityId?: string | number;
+  entityLabel?: string;
+  workOrderNumber?: string;
+  partNumber?: string;
+  requisitionNumber?: string;
+  assetId?: string;
+  machineName?: string;
+  equipmentName?: string;
+  locationName?: string;
+  vendorName?: string;
+  oldValue?: Record<string, unknown> | null;
+  newValue?: Record<string, unknown> | null;
+  quantityBefore?: number | null;
+  quantityAfter?: number | null;
+  quantityDelta?: number | null;
+  reasonNote?: string;
+  actor?: User | null;
+  createdAt?: string;
+};
+type HistoryLogRow = {
+  id: number;
+  section: HistorySection;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  entity_label: string | null;
+  work_order_number: string | null;
+  part_number: string | null;
+  requisition_number: string | null;
+  asset_id: string | null;
+  machine_name: string | null;
+  equipment_name: string | null;
+  location_name: string | null;
+  vendor_name: string | null;
+  old_value_json: string | null;
+  new_value_json: string | null;
+  quantity_before: number | null;
+  quantity_after: number | null;
+  quantity_delta: number | null;
+  reason_note: string | null;
+  user_id: number | null;
+  user_name: string | null;
+  user_email: string | null;
+  created_at: string;
+};
+const historySections: HistorySection[] = ['inventory','requisitions','machine_library','equipment_library','facility_info','preventive_maintenance'];
+const historySectionLabels: Record<HistorySection, string> = {
+  inventory: 'Inventory',
+  requisitions: 'Requisitions',
+  machine_library: 'Machine Library',
+  equipment_library: 'Equipment Library',
+  facility_info: 'Facility Info',
+  preventive_maintenance: 'Preventive Maintenance',
+};
+function historyString(value: unknown, maxLength = 240) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+function historyJson(value: Record<string, unknown> | null | undefined) {
+  if (!value) return null;
+  return JSON.stringify(value);
+}
+function recordHistoryLog(input: HistoryLogInput) {
+  const actor = input.actor ?? null;
+  run(`INSERT INTO history_logs (section,action,entity_type,entity_id,entity_label,work_order_number,part_number,requisition_number,asset_id,machine_name,equipment_name,location_name,vendor_name,old_value_json,new_value_json,quantity_before,quantity_after,quantity_delta,reason_note,user_id,user_name,user_email,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    input.section,
+    historyString(input.action, 80),
+    historyString(input.entityType, 80),
+    historyString(input.entityId, 120),
+    historyString(input.entityLabel, 240),
+    historyString(input.workOrderNumber, 160),
+    historyString(input.partNumber, 160),
+    historyString(input.requisitionNumber, 160),
+    historyString(input.assetId, 160),
+    historyString(input.machineName, 160),
+    historyString(input.equipmentName, 160),
+    historyString(input.locationName, 160),
+    historyString(input.vendorName, 160),
+    historyJson(input.oldValue),
+    historyJson(input.newValue),
+    input.quantityBefore ?? null,
+    input.quantityAfter ?? null,
+    input.quantityDelta ?? null,
+    historyString(input.reasonNote, 1200),
+    actor?.id ?? null,
+    actor?.full_name ?? '',
+    actor?.email ?? '',
+    input.createdAt ?? now(),
+  ]);
+}
+function requiredReasonNote(value: unknown, label: string) {
+  const reason = String(value ?? '').trim();
+  if (!reason) throw new Error(`${label} reason is required.`);
+  return reason.slice(0, 1200);
+}
 function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
@@ -479,6 +588,40 @@ WHERE p.deleted=0 AND p.id=?`, [id]);
 function nativePartById(id: number) {
   const row = nativePartRowById(id);
   return row ? normalizeNativePart(row) : undefined;
+}
+function nativePartHistoryValue(row: NativePartRow | (NativePartInput & { location_name?: string | null; vendor_name?: string | null })) {
+  return {
+    partNumber: 'part_number' in row ? row.part_number : row.partNumber,
+    description: row.description,
+    location: 'location_name' in row ? row.location_name ?? '' : row.location,
+    vendor: 'vendor_name' in row ? row.vendor_name ?? '' : row.vendor,
+    quantity: Number(row.quantity ?? 0),
+    minQuantity: 'min_quantity' in row ? Number(row.min_quantity ?? 0) : row.minQuantity,
+    status: row.status,
+    unitCost: 'unit_cost' in row ? Number(row.unit_cost ?? 0) : row.unitCost,
+    manufacturerBrand: 'manufacturer_brand' in row ? row.manufacturer_brand ?? '' : row.manufacturerBrand,
+    supplierPartNumber: 'supplier_part_number' in row ? row.supplier_part_number ?? '' : row.supplierPartNumber,
+  };
+}
+function recordInventoryPartHistory(input: { action: string; actor: User; partId: number; row?: NativePartRow; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; quantityBefore?: number | null; quantityAfter?: number | null; reasonNote?: string }) {
+  const row = input.row ?? nativePartRowById(input.partId);
+  recordHistoryLog({
+    section: 'inventory',
+    action: input.action,
+    entityType: 'inventory_part',
+    entityId: input.partId,
+    entityLabel: row?.part_number ?? String(input.partId),
+    partNumber: row?.part_number ?? '',
+    locationName: row?.location_name ?? '',
+    vendorName: row?.vendor_name ?? '',
+    oldValue: input.oldValue,
+    newValue: input.newValue,
+    quantityBefore: input.quantityBefore,
+    quantityAfter: input.quantityAfter,
+    quantityDelta: input.quantityBefore === null || input.quantityBefore === undefined || input.quantityAfter === null || input.quantityAfter === undefined ? null : input.quantityAfter - input.quantityBefore,
+    reasonNote: input.reasonNote,
+    actor: input.actor,
+  });
 }
 function nativeParts(search = '', filter: NativePartFilter = 'all') {
   const where = ['p.deleted=0'];
@@ -1104,6 +1247,45 @@ function publicRequisition(row: RequisitionRow, options: { includeDeletedLines?:
     deleted: Boolean(row.deleted),
     deletedAt: row.deleted_at,
   };
+}
+function requisitionHistoryValue(row: RequisitionRow) {
+  const publicRow = publicRequisition(row, { includeDeletedLines: true });
+  return {
+    requisitionNumber: publicRow.requisitionNumber,
+    status: publicRow.status,
+    lineCount: publicRow.lineCount,
+    partNumbers: publicRow.partNumbers,
+    firstPartNumber: publicRow.firstPartNumber,
+    description: publicRow.firstDescription,
+    vendor: publicRow.vendorSummary || publicRow.vendorName,
+    location: publicRow.locationSummary || publicRow.locationName,
+    quantityRequested: publicRow.totalQuantity,
+    totalCost: publicRow.totalCost,
+    workOrderNumber: publicRow.workOrderNumber,
+    notes: publicRow.notes,
+    cancelReason: publicRow.cancelReason,
+  };
+}
+function recordRequisitionHistory(input: { action: string; actor: User; row: RequisitionRow; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; reasonNote?: string; createdAt?: string }) {
+  const value = requisitionHistoryValue(input.row);
+  recordHistoryLog({
+    section: 'requisitions',
+    action: input.action,
+    entityType: 'requisition',
+    entityId: input.row.id,
+    entityLabel: input.row.requisition_number,
+    workOrderNumber: input.row.work_order_number,
+    partNumber: Array.isArray(value.partNumbers) ? value.partNumbers.join(', ') : input.row.part_number,
+    requisitionNumber: input.row.requisition_number,
+    locationName: input.row.location_name,
+    vendorName: input.row.vendor_name,
+    oldValue: input.oldValue,
+    newValue: input.newValue ?? value,
+    quantityAfter: Number(input.row.quantity_requested ?? 0),
+    reasonNote: input.reasonNote,
+    actor: input.actor,
+    createdAt: input.createdAt,
+  });
 }
 function activeRequisitionForPart(partId: number) {
   return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT r.requisition_number,r.status
@@ -2653,6 +2835,16 @@ function createGroupedRequisitions(req: AuthRequest, actor: User, input: Record<
       : (vendorGroups.size > 1 ? 'vendor-grouped requisition create' : lineInputs.length > 1 ? 'requisition create from selection' : 'requisition create');
     inventoryAudit(req,createAction,'requisition',requisitionId,auditDetails);
     audit(req,createAction,'requisition',requisitionId,auditDetails);
+    const historyRow = requisitionById(requisitionId, { includeDeleted: true });
+    if (historyRow) {
+      recordRequisitionHistory({
+        action: options.status === 'Draft' ? 'preview_created' : 'requested',
+        actor,
+        row: historyRow,
+        newValue: requisitionHistoryValue(historyRow),
+        createdAt: timestamp,
+      });
+    }
   }
 
   if (options.syncParts) syncRequisitionPartFlags(lineInputs.map(item=>item.part.id),timestamp);
@@ -2720,6 +2912,229 @@ function canInventoryWrite(actor: User) {
 }
 function canInventoryImport(actor: User) {
   return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+}
+function canViewHistory(_actor: User) {
+  return true;
+}
+function canExportHistory(actor: User) {
+  return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+}
+function historySectionFromValue(value: unknown): HistorySection | undefined {
+  const clean = String(value ?? '').trim().toLowerCase().replace(/-/g, '_');
+  return historySections.includes(clean as HistorySection) ? clean as HistorySection : undefined;
+}
+type HistoryFilters = {
+  section?: HistorySection;
+  q?: string;
+  action?: string;
+  user?: string;
+  startDate?: string;
+  endDate?: string;
+  workOrderNumber?: string;
+  partNumber?: string;
+  requisitionNumber?: string;
+  assetId?: string;
+  selectedIds?: number[];
+};
+function historyFiltersFromSource(source: Record<string, unknown>): HistoryFilters {
+  return {
+    section: historySectionFromValue(source.section),
+    q: queryText(source.q),
+    action: queryText(source.action),
+    user: queryText(source.user),
+    startDate: queryText(source.startDate),
+    endDate: queryText(source.endDate),
+    workOrderNumber: queryText(source.workOrderNumber),
+    partNumber: queryText(source.partNumber),
+    requisitionNumber: queryText(source.requisitionNumber),
+    assetId: queryText(source.assetId),
+  };
+}
+function addHistoryLike(where: string[], params: SqlParam[], column: string, value?: string) {
+  const clean = value?.trim();
+  if (!clean) return;
+  where.push(`${column} LIKE ? ESCAPE '\\' COLLATE NOCASE`);
+  params.push(`%${escapeLike(clean)}%`);
+}
+function historyWhere(filters: HistoryFilters) {
+  const where: string[] = [];
+  const params: SqlParam[] = [];
+  if (filters.selectedIds?.length) {
+    where.push(`id IN (${filters.selectedIds.map(()=>'?').join(',')})`);
+    params.push(...filters.selectedIds);
+  }
+  if (filters.section) {
+    where.push('section=?');
+    params.push(filters.section);
+  }
+  addHistoryLike(where, params, 'action', filters.action);
+  addHistoryLike(where, params, 'user_name', filters.user);
+  addHistoryLike(where, params, 'work_order_number', filters.workOrderNumber);
+  addHistoryLike(where, params, 'part_number', filters.partNumber);
+  addHistoryLike(where, params, 'requisition_number', filters.requisitionNumber);
+  addHistoryLike(where, params, 'asset_id', filters.assetId);
+  if (filters.startDate) {
+    where.push('created_at>=?');
+    params.push(filters.startDate.length <= 10 ? `${filters.startDate}T00:00:00.000Z` : filters.startDate);
+  }
+  if (filters.endDate) {
+    where.push('created_at<=?');
+    params.push(filters.endDate.length <= 10 ? `${filters.endDate}T23:59:59.999Z` : filters.endDate);
+  }
+  const q = filters.q?.trim();
+  if (q) {
+    const like = `%${escapeLike(q)}%`;
+    where.push(`(section LIKE ? ESCAPE '\\' COLLATE NOCASE OR action LIKE ? ESCAPE '\\' COLLATE NOCASE OR entity_type LIKE ? ESCAPE '\\' COLLATE NOCASE OR entity_id LIKE ? ESCAPE '\\' COLLATE NOCASE OR entity_label LIKE ? ESCAPE '\\' COLLATE NOCASE OR work_order_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR part_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR requisition_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR asset_id LIKE ? ESCAPE '\\' COLLATE NOCASE OR machine_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR equipment_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR location_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR vendor_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR reason_note LIKE ? ESCAPE '\\' COLLATE NOCASE OR user_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR user_email LIKE ? ESCAPE '\\' COLLATE NOCASE)`);
+    params.push(like,like,like,like,like,like,like,like,like,like,like,like,like,like,like,like);
+  }
+  return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+}
+function publicHistoryRecord(row: HistoryLogRow) {
+  return {
+    id: row.id,
+    section: row.section,
+    sectionLabel: historySectionLabels[row.section] ?? row.section,
+    action: row.action,
+    entityType: row.entity_type ?? '',
+    entityId: row.entity_id ?? '',
+    entityLabel: row.entity_label ?? '',
+    workOrderNumber: row.work_order_number ?? '',
+    partNumber: row.part_number ?? '',
+    requisitionNumber: row.requisition_number ?? '',
+    assetId: row.asset_id ?? '',
+    machineName: row.machine_name ?? '',
+    equipmentName: row.equipment_name ?? '',
+    locationName: row.location_name ?? '',
+    vendorName: row.vendor_name ?? '',
+    quantityBefore: row.quantity_before,
+    quantityAfter: row.quantity_after,
+    quantityDelta: row.quantity_delta,
+    reasonNote: row.reason_note ?? '',
+    userName: row.user_name ?? '',
+    userEmail: row.user_email ?? '',
+    createdAt: row.created_at,
+  };
+}
+function historyRecords(filters: HistoryFilters, page = 1, pageSize = 50) {
+  const safePage = Math.max(1, Math.floor(page || 1));
+  const safePageSize = Math.min(Math.max(1, Math.floor(pageSize || 50)), 200);
+  const { clause, params } = historyWhere(filters);
+  const total = one<{ count: number }>(`SELECT COUNT(*) AS count FROM history_logs ${clause}`, params)?.count ?? 0;
+  const records = all<HistoryLogRow>(`SELECT * FROM history_logs ${clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, [...params,safePageSize,(safePage - 1) * safePageSize]).map(publicHistoryRecord);
+  return { records, total, page: safePage, pageSize: safePageSize };
+}
+function historyExportRows(filters: HistoryFilters) {
+  const { clause, params } = historyWhere(filters);
+  return all<HistoryLogRow>(`SELECT * FROM history_logs ${clause} ORDER BY created_at DESC, id DESC LIMIT 5000`, params);
+}
+function historyFilterSummary(filters: HistoryFilters) {
+  const entries = [
+    filters.q && `Search: ${filters.q}`,
+    filters.action && `Action: ${filters.action}`,
+    filters.user && `User: ${filters.user}`,
+    filters.startDate && `Start: ${filters.startDate}`,
+    filters.endDate && `End: ${filters.endDate}`,
+    filters.workOrderNumber && `WO: ${filters.workOrderNumber}`,
+    filters.partNumber && `Part: ${filters.partNumber}`,
+    filters.requisitionNumber && `Req: ${filters.requisitionNumber}`,
+    filters.assetId && `Asset: ${filters.assetId}`,
+    filters.selectedIds?.length && `Selected rows: ${filters.selectedIds.length}`,
+  ].filter(Boolean);
+  return entries.length ? entries.join(' | ') : 'None';
+}
+function formatHistoryDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' });
+}
+function historyRecordLabel(row: HistoryLogRow) {
+  return row.entity_label || row.requisition_number || row.part_number || row.asset_id || row.machine_name || row.equipment_name || row.entity_id || '-';
+}
+function historyReference(row: HistoryLogRow) {
+  return row.requisition_number || row.part_number || row.asset_id || row.machine_name || row.equipment_name || '-';
+}
+function historyQty(row: HistoryLogRow) {
+  const delta = row.quantity_delta;
+  if (delta === null || delta === undefined) return '';
+  const sign = delta > 0 ? '+' : '';
+  return `${row.quantity_before ?? '-'} > ${row.quantity_after ?? '-'} (${sign}${delta})`;
+}
+async function buildHistoryPdf(input: { section: HistorySection; rows: HistoryLogRow[]; filters: HistoryFilters; actor: User }) {
+  const pdf = await PDFDocument.create();
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const accent = rgb(0.02, 0.45, 0.72);
+  const softBlue = rgb(0.9, 0.97, 1);
+  const dark = rgb(0.05, 0.08, 0.12);
+  const gray = rgb(0.35, 0.42, 0.48);
+  const width = 792;
+  const height = 612;
+  const margin = 32;
+  const rowHeight = 38;
+  const columns = [
+    { label: 'Date/Time', x: margin, width: 72 },
+    { label: 'Action', x: 108, width: 66 },
+    { label: 'Record', x: 178, width: 112 },
+    { label: 'User', x: 294, width: 84 },
+    { label: 'WO', x: 382, width: 54 },
+    { label: 'Part/Req/Asset', x: 440, width: 88 },
+    { label: 'Qty Change', x: 532, width: 74 },
+    { label: 'Reason/Note', x: 610, width: 150 },
+  ];
+  const title = `${historySectionLabels[input.section]} History Log`;
+  const generatedAt = new Date();
+  const filterText = historyFilterSummary(input.filters);
+  let page: PDFPage;
+  let y = 0;
+  let pageNumber = 0;
+  const addHistoryPage = () => {
+    const nextPage = pdf.addPage([width,height]);
+    page = nextPage;
+    pageNumber += 1;
+    y = height - margin;
+    nextPage.drawRectangle({ x: 0, y: height - 58, width, height: 58, color: softBlue });
+    nextPage.drawRectangle({ x: 0, y: height - 58, width: 7, color: accent });
+    nextPage.drawText(title, { x: margin, y: height - 36, size: 18, font: bold, color: dark });
+    nextPage.drawText(`Generated ${generatedAt.toLocaleString('en-US')} by ${input.actor.full_name}`, { x: margin, y: height - 52, size: 8, font: regular, color: gray });
+    nextPage.drawText(`Section: ${historySectionLabels[input.section]} | Filters: ${truncateToFit(filterText, regular, 8, width - margin * 2)}`, { x: margin, y: height - 72, size: 8, font: regular, color: gray });
+    y = height - 96;
+    nextPage.drawRectangle({ x: margin, y: y - 15, width: width - margin * 2, height: 19, color: accent });
+    for (const column of columns) nextPage.drawText(column.label, { x: column.x + 3, y: y - 9, size: 7, font: bold, color: rgb(1,1,1) });
+    y -= 25;
+    return nextPage;
+  };
+  page = addHistoryPage();
+  const rows = input.rows.length ? input.rows : [];
+  if (!rows.length) {
+    page.drawText('No history records found for this section and filter set.', { x: margin, y, size: 11, font: regular, color: dark });
+  }
+  for (const row of rows) {
+    if (y < 54) addHistoryPage();
+    page.drawRectangle({ x: margin, y: y - rowHeight + 8, width: width - margin * 2, height: rowHeight, borderColor: rgb(0.76,0.86,0.92), borderWidth: 0.5 });
+    const values = [
+      formatHistoryDateTime(row.created_at),
+      row.action,
+      historyRecordLabel(row),
+      row.user_name || '-',
+      row.work_order_number || '-',
+      historyReference(row),
+      historyQty(row),
+      row.reason_note || '',
+    ];
+    values.forEach((value,index)=>{
+      const column = columns[index];
+      const lines = wrapPdfText(value, regular, 6.8, column.width - 6, index === 7 || index === 2 ? 2 : 1);
+      lines.forEach((line,lineIndex)=>{
+        page.drawText(line, { x: column.x + 3, y: y - 7 - lineIndex * 8, size: 6.8, font: regular, color: dark });
+      });
+    });
+    y -= rowHeight;
+  }
+  const pages = pdf.getPages();
+  pages.forEach((pdfPage,index)=>{
+    pdfPage.drawText(`Page ${index + 1} of ${pages.length}`, { x: width - 86, y: 18, size: 8, font: regular, color: gray });
+  });
+  return Buffer.from(await pdf.save());
 }
 function validateMit3PartInput(body: unknown) {
   const input = isRecord(body) ? body : {};
@@ -2796,7 +3211,7 @@ async function mutateMit3Inventory(req: Request, operation: string, targetId: st
 }
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -2841,6 +3256,49 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:A
 for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
+app.get('/api/history/summary', requireAuth, requirePermission('history.view'), (_req,res)=>{
+  const rows = all<{ section: HistorySection; count: number; latestCreatedAt: string | null }>('SELECT section, COUNT(*) AS count, MAX(created_at) AS latestCreatedAt FROM history_logs GROUP BY section');
+  const summary = historySections.map(section=>{
+    const row = rows.find(item=>item.section===section);
+    return {section,sectionLabel:historySectionLabels[section],count:row?.count ?? 0,latestCreatedAt:row?.latestCreatedAt ?? null};
+  });
+  res.json({ok:true,summary});
+});
+app.get('/api/history', requireAuth, requirePermission('history.view'), (req,res)=>{
+  try {
+    const filters = historyFiltersFromSource(req.query as Record<string, unknown>);
+    const page = Number(req.query.page ?? 1);
+    const pageSize = Number(req.query.pageSize ?? 50);
+    res.json({ok:true,...historyRecords(filters,page,pageSize)});
+  } catch (error) {
+    res.status(400).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.post('/api/history/export/pdf', requireAuth, requirePermission('history.export'), async (req:AuthRequest,res)=>{
+  try {
+    const body = isRecord(req.body) ? req.body : {};
+    const section = historySectionFromValue(body.section);
+    if (!section) throw new Error('History section is required.');
+    const filterBody = isRecord(body.filters) ? body.filters : {};
+    const selectedIds = Array.isArray(body.selectedIds) ? uniquePositiveIds(body.selectedIds.map(id => Number(id))) : [];
+    const filters = {...historyFiltersFromSource(filterBody),section,selectedIds:selectedIds.length ? selectedIds : undefined};
+    const rows = historyExportRows(filters);
+    const buffer = await buildHistoryPdf({section,rows,filters,actor:req.user!});
+    const fileName = `MCC_${safeFileToken(historySectionLabels[section])}_History_${downloadDateStamp()}.pdf`;
+    recordHistoryLog({
+      section,
+      action: 'history_pdf_exported',
+      entityType: 'history_report',
+      entityLabel: `${historySectionLabels[section]} History Log`,
+      newValue: { rowCount: rows.length, selectedCount: selectedIds.length, fileName },
+      actor: req.user!,
+    });
+    sendDownload(res,fileName,'application/pdf',buffer);
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/required|section/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>{
   const lanUrls = detectedLanUrls();
   res.json({
@@ -2876,6 +3334,12 @@ app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.v
     const action = preview ? 'requisition PDF preview generated' : 'requisition PDF generated';
     inventoryAudit(req,action,'requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
     audit(req,action,'requisition',requisition.id,{requisitionNumber:requisition.requisition_number,fileName});
+    recordRequisitionHistory({
+      action: preview ? 'pdf_previewed' : 'pdf_generated',
+      actor: req.user!,
+      row: requisition,
+      newValue: { requisitionNumber: requisition.requisition_number, fileName, preview },
+    });
     if (preview) {
       res.setHeader('Content-Type','application/pdf');
       res.setHeader('Content-Disposition',`inline; filename="${fileName}"`);
@@ -2955,6 +3419,17 @@ app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('inventory
       audit(req,'requisition preview passed','requisition',requisitionId,{previousStatus:existing.status,nextStatus:'Requested',partIds});
       inventoryAudit(req,'requisition active create','requisition',requisitionId,{requisitionNumber:existing.requisition_number,partIds});
       audit(req,'requisition active create','requisition',requisitionId,{requisitionNumber:existing.requisition_number,partIds});
+      const updated = requisitionById(requisitionId, { includeDeleted: true });
+      if (updated) {
+        recordRequisitionHistory({
+          action: 'passed',
+          actor,
+          row: updated,
+          oldValue: requisitionHistoryValue(existing),
+          newValue: requisitionHistoryValue(updated),
+          createdAt: timestamp,
+        });
+      }
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -2996,12 +3471,24 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
         if (!part) throw new Error('Native inventory part not found.');
         const rawUnitCost = Number(rawItem.unitCost ?? part.unit_cost ?? 0);
         const unitCost = Number.isFinite(rawUnitCost) && rawUnitCost >= 0 ? rawUnitCost : 0;
+        const currentRequisitionNumber = rawItems.length > 1 ? `${requisitionNumber}-${String(requisitionIds.length + 1).padStart(2,'0')}` : requisitionNumber;
         const result = run(`INSERT INTO inventory_requisitions (requisition_number,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,status,requested_by_user_id,requested_by_name,requested_at,work_order_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
-          rawItems.length > 1 ? `${requisitionNumber}-${String(requisitionIds.length + 1).padStart(2,'0')}` : requisitionNumber,
+          currentRequisitionNumber,
           part.id, part.part_number, part.description, vendorName, part.location_name ?? '', quantityRequested, unitCost, 'Requested', actor.id, actor.full_name, timestamp, '', notes, timestamp, timestamp,
         ]);
-        requisitionIds.push(Number(result.lastInsertRowid));
+        const createdId = Number(result.lastInsertRowid);
+        requisitionIds.push(createdId);
         syncPartRequisitionFlag(partId,timestamp);
+        const createdRow = requisitionById(createdId, { includeDeleted: true });
+        if (createdRow) {
+          recordRequisitionHistory({
+            action: 'requested',
+            actor,
+            row: createdRow,
+            newValue: requisitionHistoryValue(createdRow),
+            createdAt: timestamp,
+          });
+        }
         pdfItems.push({partNumber:part.part_number,description:part.description,locationName:part.location_name ?? '',quantityRequested,unitCost,supplierPartNumber:textField(rawItem, ['supplierPartNumber']) || (part.supplier_part_number ?? ''),dueDate:textField(rawItem, ['dueDate']),notes:textField(rawItem, ['notes','note'])});
       }
       inventoryAudit(req,'vendor requisition PDF create','requisition',requisitionNumber,{vendorName,itemCount:pdfItems.length,requisitionIds});
@@ -3054,6 +3541,18 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
       const specificAction = nextStatus === 'Ordered' ? 'requisition ordered' : nextStatus === 'Received' ? 'requisition received' : 'requisition canceled';
       inventoryAudit(req,specificAction,'requisition',requisitionId,{previousStatus,nextStatus});
       audit(req,specificAction,'requisition',requisitionId,{previousStatus,nextStatus});
+      const updated = requisitionById(requisitionId, { includeDeleted: true });
+      if (updated) {
+        recordRequisitionHistory({
+          action: nextStatus.toLowerCase(),
+          actor,
+          row: updated,
+          oldValue: requisitionHistoryValue(existing),
+          newValue: requisitionHistoryValue(updated),
+          reasonNote: nextStatus === 'Canceled' ? cancelReason : '',
+          createdAt: timestamp,
+        });
+      }
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -3065,6 +3564,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
   }
 });
 app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
   const operation = 'requisition edit';
   const requisitionId = Number(req.params.id);
   try {
@@ -3085,6 +3585,17 @@ app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.wri
       }
       inventoryAudit(req,'requisition edit','requisition',requisitionId,{quantityRequested,workOrderNumber});
       audit(req,'requisition edit','requisition',requisitionId,{quantityRequested,workOrderNumber});
+      const updated = requisitionById(requisitionId, { includeDeleted: true });
+      if (updated) {
+        recordRequisitionHistory({
+          action: 'updated',
+          actor,
+          row: updated,
+          oldValue: requisitionHistoryValue(existing),
+          newValue: requisitionHistoryValue(updated),
+          createdAt: timestamp,
+        });
+      }
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -3106,6 +3617,8 @@ app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
       return res.status(403).json({ok:false,error:'Permission denied.'});
     }
     if (!Number.isInteger(requisitionId) || requisitionId <= 0) throw new Error('Requisition not found.');
+    const input = isRecord(req.body) ? req.body : {};
+    const reasonNote = requiredReasonNote(input.reasonNote ?? input.reason ?? input.deleteReason, 'Delete requisition');
     const timestamp = now();
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -3117,6 +3630,18 @@ app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
       syncRequisitionPartFlags(partIds,timestamp);
       inventoryAudit(req,'requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
       audit(req,'requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+      const deleted = requisitionById(requisitionId, { includeDeleted: true });
+      if (deleted) {
+        recordRequisitionHistory({
+          action: 'deleted',
+          actor,
+          row: deleted,
+          oldValue: requisitionHistoryValue(existing),
+          newValue: requisitionHistoryValue(deleted),
+          reasonNote,
+          createdAt: timestamp,
+        });
+      }
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -3127,7 +3652,74 @@ app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
     const message = safeErrorMessage(error);
     inventoryAudit(req,'failed delete','requisition',targetId,{error:message});
     audit(req,'failed delete','requisition',targetId,{error:message});
-    res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : /required/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const ids = Array.isArray(input.ids) ? uniquePositiveIds(input.ids.map(id => Number(id))) : [];
+    if (!ids.length) throw new Error('Select at least one requisition to cancel.');
+    const reasonNote = requiredReasonNote(input.reasonNote ?? input.reason ?? input.cancelReason, 'Cancel requisition');
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const requisitionId of ids) {
+        const existing = requisitionById(requisitionId);
+        if (!existing) throw new Error('Requisition not found.');
+        if (existing.status !== 'Requested' && existing.status !== 'Ordered') throw new Error('Only Requested or Ordered requisitions can be canceled.');
+        const partIds = requisitionPartIds(existing);
+        run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', ['Canceled',actor.id,timestamp,reasonNote,timestamp,requisitionId]);
+        syncRequisitionPartFlags(partIds,timestamp);
+        inventoryAudit(req,'bulk requisition canceled','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+        audit(req,'bulk requisition canceled','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+        const updated = requisitionById(requisitionId, { includeDeleted: true });
+        if (updated) recordRequisitionHistory({action:'canceled',actor,row:updated,oldValue:requisitionHistoryValue(existing),newValue:requisitionHistoryValue(updated),reasonNote,createdAt:timestamp});
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,count:ids.length,summary:requisitionSummary()});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /required|select|only/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.post('/api/requisitions/bulk-delete', requireAuth, (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  try {
+    if (!canDeleteRequisitions(actor)) return res.status(403).json({ok:false,error:'Permission denied.'});
+    const input = isRecord(req.body) ? req.body : {};
+    const ids = Array.isArray(input.ids) ? uniquePositiveIds(input.ids.map(id => Number(id))) : [];
+    if (!ids.length) throw new Error('Select at least one requisition to delete.');
+    const reasonNote = requiredReasonNote(input.reasonNote ?? input.reason ?? input.deleteReason, 'Delete requisition');
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const requisitionId of ids) {
+        const existing = requisitionById(requisitionId);
+        if (!existing) throw new Error('Requisition not found.');
+        const partIds = requisitionPartIds(existing);
+        run('UPDATE inventory_requisitions SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [timestamp,actor.id,timestamp,requisitionId]);
+        run('UPDATE inventory_requisition_lines SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE requisition_id=? AND deleted=0', [timestamp,actor.id,timestamp,requisitionId]);
+        syncRequisitionPartFlags(partIds,timestamp);
+        inventoryAudit(req,'bulk requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+        audit(req,'bulk requisition soft deleted','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
+        const deleted = requisitionById(requisitionId, { includeDeleted: true });
+        if (deleted) recordRequisitionHistory({action:'deleted',actor,row:deleted,oldValue:requisitionHistoryValue(existing),newValue:requisitionHistoryValue(deleted),reasonNote,createdAt:timestamp});
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,count:ids.length,summary:requisitionSummary()});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : /required|select/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.get('/api/inventory/native/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...nativeInventorySummary()}));
@@ -3215,8 +3807,17 @@ app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventor
       const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
       const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,'',input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,'','mcc',null,actor.id,actor.id,timestamp,timestamp]);
       partId = Number(result.lastInsertRowid);
+      const createdRow = nativePartRowById(partId);
       inventoryAudit(req,'native part create','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
       audit(req,'inventory native part create','inventory',partId,{partNumber:input.partNumber});
+      recordInventoryPartHistory({
+        action: 'created',
+        actor,
+        partId,
+        row: createdRow,
+        newValue: createdRow ? nativePartHistoryValue(createdRow) : nativePartHistoryValue({...input,location_name:input.location,vendor_name:input.vendor}),
+        quantityAfter: input.quantity,
+      });
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -3237,14 +3838,27 @@ app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inv
     const timestamp = now();
     db.exec('BEGIN IMMEDIATE');
     try {
-      const existing = one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND id=?', [partId]);
+      const existing = nativePartRowById(partId);
       if (!existing) throw new Error('Native inventory part not found.');
       if (findDuplicateNativePart(input.partNumber,partId)) throw new Error('Part Number already exists in MCC native inventory.');
       const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
       const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
       run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,'mcc',actor.id,timestamp,partId]);
+      const updatedRow = nativePartRowById(partId);
+      const quantityBefore = Number(existing.quantity ?? 0);
+      const quantityAfter = Number(input.quantity ?? 0);
       inventoryAudit(req,'native part edit','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
       audit(req,'inventory native part edit','inventory',partId,{partNumber:input.partNumber});
+      recordInventoryPartHistory({
+        action: quantityBefore !== quantityAfter ? 'quantity_changed' : 'updated',
+        actor,
+        partId,
+        row: updatedRow,
+        oldValue: nativePartHistoryValue(existing),
+        newValue: updatedRow ? nativePartHistoryValue(updatedRow) : nativePartHistoryValue({...input,location_name:input.location,vendor_name:input.vendor}),
+        quantityBefore,
+        quantityAfter,
+      });
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');

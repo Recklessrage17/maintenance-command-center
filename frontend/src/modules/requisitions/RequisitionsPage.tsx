@@ -67,6 +67,10 @@ type EditForm = {
   workOrderNumber: string;
   notes: string;
 };
+type ReasonAction = {
+  kind: 'cancel' | 'delete';
+  requisitions: Requisition[];
+};
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const deleteRoles = new Set(['Admin','Manager']);
@@ -171,6 +175,11 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   const [previewUrl,setPreviewUrl]=useState('');
   const [previewLoading,setPreviewLoading]=useState(false);
   const [previewError,setPreviewError]=useState('');
+  const [selectedIds,setSelectedIds]=useState<Set<number>>(()=>new Set());
+  const [reasonAction,setReasonAction]=useState<ReasonAction|null>(null);
+  const [reasonNote,setReasonNote]=useState('');
+  const [reasonError,setReasonError]=useState('');
+  const [reasonSaving,setReasonSaving]=useState(false);
 
   const canWrite = writeRoles.has(userRole);
   const canDelete = deleteRoles.has(userRole);
@@ -245,6 +254,9 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
       ...(requisition.lines ?? []).flatMap(line=>[line.partNumber,line.description,line.vendorName,line.locationName,line.itemNumber,line.notes]),
     ].some(value=>value.toLowerCase().includes(needle)));
   },[requisitions,search]);
+  const selectedRequisitions = useMemo(()=>requisitions.filter(requisition=>selectedIds.has(requisition.id)&&!requisition.deleted),[requisitions,selectedIds]);
+  const selectedCancelable = selectedRequisitions.filter(requisition=>requisition.status==='Requested'||requisition.status==='Ordered');
+  const allVisibleSelected = filteredRequisitions.length > 0 && filteredRequisitions.every(requisition=>selectedIds.has(requisition.id));
 
   function setNextFilter(nextFilter: StatusFilter) {
     setFilter(nextFilter);
@@ -255,6 +267,82 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
     const next = !showDeleted;
     setShowDeleted(next);
     void loadRequisitions(filter, next);
+  }
+
+  function toggleRequisitionSelection(id: number) {
+    setSelectedIds(current=>{
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection() {
+    setSelectedIds(current=>{
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        filteredRequisitions.forEach(requisition=>next.delete(requisition.id));
+      } else {
+        filteredRequisitions.filter(requisition=>!requisition.deleted).forEach(requisition=>next.add(requisition.id));
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function openReasonAction(kind: ReasonAction['kind'], requisitionsForAction: Requisition[]) {
+    const actionable = requisitionsForAction.filter(requisition=>!requisition.deleted);
+    if (!actionable.length) return;
+    setReasonAction({kind,requisitions:actionable});
+    setReasonNote('');
+    setReasonError('');
+    setNotice(null);
+  }
+
+  function closeReasonAction(force = false) {
+    if (reasonSaving && !force) return;
+    setReasonAction(null);
+    setReasonNote('');
+    setReasonError('');
+  }
+
+  async function submitReasonAction(event: FormEvent) {
+    event.preventDefault();
+    if (!reasonAction) return;
+    const reason = reasonNote.trim();
+    if (!reason) {
+      setReasonError('Reason is required.');
+      return;
+    }
+    const ids = reasonAction.requisitions.map(requisition=>requisition.id);
+    setReasonSaving(true);
+    setReasonError('');
+    try {
+      if (reasonAction.kind === 'cancel') {
+        if (ids.length === 1) {
+          await api(`/api/requisitions/${ids[0]}/status`, {method:'PATCH',body:JSON.stringify({status:'Canceled',cancelReason:reason,reasonNote:reason})});
+        } else {
+          await api('/api/requisitions/bulk-cancel', {method:'POST',body:JSON.stringify({ids,reasonNote:reason})});
+        }
+      } else if (ids.length === 1) {
+        await api(`/api/requisitions/${ids[0]}`, {method:'DELETE',body:JSON.stringify({reasonNote:reason})});
+      } else {
+        await api('/api/requisitions/bulk-delete', {method:'POST',body:JSON.stringify({ids,reasonNote:reason})});
+      }
+      const label = reasonAction.kind === 'cancel' ? 'canceled' : 'deleted';
+      setNotice({kind:'success',text:`${ids.length} requisition${ids.length === 1 ? '' : 's'} ${label}.`});
+      closeReasonAction(true);
+      clearSelection();
+      await loadRequisitions(filter, showDeleted);
+    } catch (err) {
+      setReasonError((err as Error).message);
+    } finally {
+      setReasonSaving(false);
+    }
   }
 
   async function downloadPdf(requisition: Requisition) {
@@ -290,14 +378,16 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
 
   async function updateStatus(requisition: Requisition, status: Exclude<RequisitionStatus,'Requested'>) {
     if (!canWrite || requisition.deleted || busyId) return;
-    const cancelReason = status === 'Canceled' ? window.prompt('Cancel reason is required. Enter cancellation reason:')?.trim() ?? '' : '';
-    if (status === 'Canceled' && !cancelReason) return;
+    if (status === 'Canceled') {
+      openReasonAction('cancel',[requisition]);
+      return;
+    }
     setBusyId(requisition.id);
     setNotice(null);
     try {
       await api(`/api/requisitions/${requisition.id}/status`, {
         method: 'PATCH',
-        body: JSON.stringify({status,cancelReason}),
+        body: JSON.stringify({status}),
       });
       setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
       await loadRequisitions(filter, showDeleted);
@@ -354,20 +444,9 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
     }
   }
 
-  async function deleteRequisition(requisition: Requisition) {
+  function deleteRequisition(requisition: Requisition) {
     if (!canDelete || requisition.deleted || busyId) return;
-    if (!window.confirm('This will hide the requisition from the active list but keep audit history.')) return;
-    setBusyId(requisition.id);
-    setNotice(null);
-    try {
-      await api(`/api/requisitions/${requisition.id}`, { method: 'DELETE' });
-      setNotice({kind:'success',text:`${requisition.requisitionNumber} hidden from the active list.`});
-      await loadRequisitions(filter, showDeleted);
-    } catch (err) {
-      setNotice({kind:'error',text:(err as Error).message});
-    } finally {
-      setBusyId(null);
-    }
+    openReasonAction('delete',[requisition]);
   }
 
   return (
@@ -407,11 +486,19 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
             </label>
           )}
         </div>
+        <div className="requisition-selection-toolbar">
+          <span>Selected: {selectedRequisitions.length}</span>
+          <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!filteredRequisitions.length}>{allVisibleSelected?'Unselect Visible':'Select Visible'}</button>
+          <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedRequisitions.length}>Clear Selection</button>
+          {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',selectedCancelable)} disabled={!selectedCancelable.length}>Cancel Selected</button>}
+          {canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('delete',selectedRequisitions)} disabled={!selectedRequisitions.length}>Delete Selected</button>}
+        </div>
 
         <div className="table-card requisitions-table-wrap">
           <table>
             <thead>
               <tr>
+                <th>Select</th>
                 <th>Req #</th>
                 <th>Status</th>
                 <th>Part Number</th>
@@ -428,6 +515,9 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
             <tbody>
               {filteredRequisitions.map(requisition=>(
                 <tr className={requisition.deleted?'deleted-row':''} key={requisition.id}>
+                  <td>
+                    <input className="table-checkbox" type="checkbox" checked={selectedIds.has(requisition.id)} onChange={()=>toggleRequisitionSelection(requisition.id)} disabled={requisition.deleted} aria-label={`Select ${requisition.requisitionNumber}`} />
+                  </td>
                   <td><strong className="req-number">{requisition.requisitionNumber}</strong></td>
                   <td><span className={statusClass(requisition.status)}>{requisition.status}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
                   <td>{partNumberSummary(requisition)}</td>
@@ -444,19 +534,43 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
                       <button className="secondary-button compact-button" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
                       {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
                       {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id}>Mark Received</button>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Canceled')} disabled={busyId===requisition.id}>Cancel</button>}
+                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
                       {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
-                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button" type="button" onClick={()=>void deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
+                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button" type="button" onClick={()=>deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
                     </div>
                   </td>
                 </tr>
               ))}
-              {!loading&&filteredRequisitions.length===0&&<tr><td colSpan={11} className="empty-table-cell">No requisitions match this view.</td></tr>}
-              {loading&&<tr><td colSpan={11} className="empty-table-cell">Loading requisitions...</td></tr>}
+              {!loading&&filteredRequisitions.length===0&&<tr><td colSpan={12} className="empty-table-cell">No requisitions match this view.</td></tr>}
+              {loading&&<tr><td colSpan={12} className="empty-table-cell">Loading requisitions...</td></tr>}
             </tbody>
           </table>
         </div>
       </section>
+
+      {reasonAction&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReasonAction(); }}>
+          <form className="mcc-card requisition-modal reason-modal" onSubmit={submitReasonAction}>
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">{reasonAction.kind === 'cancel' ? 'Cancel requisition' : 'Delete requisition'}</p>
+                <h3>{reasonAction.requisitions.length === 1 ? reasonAction.requisitions[0].requisitionNumber : `${reasonAction.requisitions.length} selected requisitions`}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>closeReasonAction()}>Close</button>
+            </div>
+            <label className="form-field">
+              <span>{reasonAction.kind === 'cancel' ? 'Reason for canceling requisition' : 'Reason for deleting requisition'} <b className="required-marker" aria-label="required">*</b></span>
+              <textarea value={reasonNote} onChange={event=>setReasonNote(event.target.value)} required autoFocus placeholder="Enter the business reason for this action..." />
+            </label>
+            <p className="form-help">This note will be written to History Logs for every affected requisition.</p>
+            {reasonError&&<p className="form-message error">{reasonError}</p>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={()=>closeReasonAction()}>Cancel</button>
+              <button className={reasonAction.kind === 'delete' ? 'danger-button' : 'primary-button'} type="submit" disabled={reasonSaving}>{reasonSaving?'Saving...':reasonAction.kind === 'delete'?'Delete / Log Reason':'Cancel / Log Reason'}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {editing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeEdit(); }}>

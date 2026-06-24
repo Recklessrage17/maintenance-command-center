@@ -5,6 +5,7 @@ import { InventoryPage } from './modules/inventory/InventoryPage';
 import { MachineLibraryPage } from './modules/machine-library/MachineLibraryPage';
 import { EquipmentLibraryPage } from './modules/equipment-library/EquipmentLibraryPage';
 import { FacilityInfoPage } from './modules/facility-info/FacilityInfoPage';
+import { HistoryPage, historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/HistoryPage';
 import { RequisitionsPage } from './modules/requisitions/RequisitionsPage';
 import { SettingsPage } from './modules/settings/SettingsPage';
 import { UsersPage } from './modules/users/UsersPage';
@@ -14,18 +15,45 @@ type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
 function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:React.ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
 function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }
+function routeFromPath(pathname: string): { section: MccSection; historySection: HistorySection | null } {
+  const clean = pathname.replace(/^\/+|\/+$/g, '');
+  if (clean.startsWith('history')) return { section: 'history', historySection: historySectionFromPath(clean) };
+  const first = clean.split('/')[0] as MccSection;
+  if (['inventory','requisitions','machine-library','equipment-library','facility-info','users','settings'].includes(first)) return { section: first, historySection: null };
+  return { section: 'dashboard', historySection: null };
+}
+function pathForSection(section: MccSection, historySection?: HistorySection | null) {
+  if (section === 'dashboard') return '/';
+  if (section === 'history') return historySection ? `/history/${historySectionSlug(historySection)}` : '/history';
+  return `/${section}`;
+}
 function App() {
-  const [mode,setMode]=useState<AuthMode>('loading'); const [user,setUser]=useState<User|null>(null); const [activeSection,setActiveSection]=useState<MccSection>('dashboard');
+  const initialRoute = useMemo(()=>routeFromPath(window.location.pathname),[]);
+  const [mode,setMode]=useState<AuthMode>('loading'); const [user,setUser]=useState<User|null>(null); const [activeSection,setActiveSection]=useState<MccSection>(initialRoute.section); const [historySection,setHistorySection]=useState<HistorySection|null>(initialRoute.historySection);
   const refresh=()=>api('/api/auth/status').then(d=>{setUser(d.user); setMode(d.setupRequired?'setup':d.user?.forcePasswordChange?'change':d.user?'app':'login');}).catch(()=>setMode('login'));
   useEffect(()=>{ refresh(); },[]);
+  useEffect(()=>{
+    function onPopState() {
+      const route = routeFromPath(window.location.pathname);
+      setActiveSection(route.section);
+      setHistorySection(route.historySection);
+    }
+    window.addEventListener('popstate',onPopState);
+    return ()=>window.removeEventListener('popstate',onPopState);
+  },[]);
   const permissions=useMemo(()=>({canManageUsers: !!user && user.role !== 'Maintenance Tech 1'}),[user]);
-  const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} onBackToDashboard={()=>setActiveSection('dashboard')} onOpenRequisitions={()=>setActiveSection('requisitions')} /> : activeSection === 'machine-library' ? <MachineLibraryPage /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage /> : <DashboardPage />;
+  function navigate(section: MccSection, nextHistorySection: HistorySection | null = null) {
+    setActiveSection(section);
+    setHistorySection(section === 'history' ? nextHistorySection : null);
+    window.history.pushState(null,'',pathForSection(section,nextHistorySection));
+  }
+  const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} onBackToDashboard={()=>navigate('dashboard')} onOpenRequisitions={()=>navigate('requisitions')} /> : activeSection === 'machine-library' ? <MachineLibraryPage /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'history' ? <HistoryPage userRole={user?.role ?? ''} selectedSection={historySection} onSectionChange={section=>navigate('history',section)} onBackToLanding={()=>navigate('history')} /> : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage /> : <DashboardPage />;
   if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;
   if(mode==='forgot') return <Forgot onBack={()=>setMode('login')} />;
   if(mode==='change') return <Change onDone={refresh} />;
-  return <MccLayout activeSection={activeSection} onSectionChange={setActiveSection} user={user!} canManageUsers={permissions.canManageUsers} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}>{page}</MccLayout>;
+  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} user={user!} canManageUsers={permissions.canManageUsers} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}>{page}</MccLayout>;
 }
 function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{await api('/api/auth/setup-first-admin',{method:'POST',body:JSON.stringify({fullName,email,password,confirmPassword})});setMsg('First Admin created. Please log in.'); setTimeout(onDone,800);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="First Admin Setup" eyebrow="MCC security foundation"><form onSubmit={submit} className="auth-form"><Field label="Full name" value={fullName} onChange={setFullName}/><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword}/><Field label="Confirm password" type="password" value={confirmPassword} onChange={setConfirm}/><p className="form-help">Minimum 10 characters with uppercase, lowercase, number, and special character.</p><button className="primary-button">Create First Admin</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) { const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{const d=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})});onLogin(d.user);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="MCC Login" eyebrow="JBT command center"><form onSubmit={submit} className="auth-form"><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password"/><button className="primary-button">Log In</button><button type="button" className="link-button" onClick={onForgot}>Forgot Password</button>{msg&&<p className="form-message error">{msg}</p>}</form></AuthCard> }

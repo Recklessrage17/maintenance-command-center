@@ -35,10 +35,11 @@ async function fetchShellHtml() {
 }
 
 async function assertSourceWiring() {
-  const [layout, app, inventory, pm, assets, prints] = await Promise.all([
+  const [layout, app, inventory, history, pm, assets, prints] = await Promise.all([
     readFile('frontend/src/layout/MccLayout.tsx', 'utf8'),
     readFile('frontend/src/App.tsx', 'utf8'),
     readFile('frontend/src/modules/inventory/InventoryPage.tsx', 'utf8'),
+    readFile('frontend/src/modules/history/HistoryPage.tsx', 'utf8'),
     readFile('frontend/src/modules/machine-library/MachineLibraryPage.tsx', 'utf8'),
     readFile('frontend/src/modules/equipment-library/EquipmentLibraryPage.tsx', 'utf8'),
     readFile('frontend/src/modules/facility-info/FacilityInfoPage.tsx', 'utf8'),
@@ -46,6 +47,7 @@ async function assertSourceWiring() {
 
   const requiredTabs = [
     ['Inventory', "'inventory'", 'InventoryPage'],
+    ['History Logs', "'history'", 'HistoryPage'],
     ['Machine Library', "'machine-library'", 'MachineLibraryPage'],
     ['Equipment Library', "'equipment-library'", 'EquipmentLibraryPage'],
     ['Facility Info', "'facility-info'", 'FacilityInfoPage'],
@@ -58,6 +60,7 @@ async function assertSourceWiring() {
   }
 
   assert(inventory.includes('InventoryPage'), 'Inventory page module did not load for smoke inspection.');
+  assert(history.includes('History Logs'), 'History Logs page module did not load for smoke inspection.');
   assert(pm.includes('Production machine records, PMs, parts, and documents.'), 'Machine Library page shell is missing.');
   assert(assets.includes('Auxiliary and support equipment records, PMs, parts, and documents.'), 'Equipment Library page shell is missing.');
   assert(prints.includes('Building prints, facility documents, and plant reference information.'), 'Facility Info page shell is missing.');

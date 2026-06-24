@@ -5,6 +5,7 @@ const machineCards = [
   { title: 'Machine Documents', detail: 'Manuals, reference files, and machine documents.' },
 ];
 
+// Future machine create/edit/remove and PM completion flows should call the backend history helper for this section.
 export function MachineLibraryPage() {
   return (
     <div className="page-stack">

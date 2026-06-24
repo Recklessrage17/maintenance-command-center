@@ -5,6 +5,7 @@ const facilityCards = [
   { title: 'Plant Reference', detail: 'Plant layout and reference documents for later expansion.' },
 ];
 
+// Future facility document and facility PM flows should call the backend history helper for this section.
 export function FacilityInfoPage() {
   return (
     <div className="page-stack">

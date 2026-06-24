@@ -5,6 +5,7 @@ const equipmentCards = [
   { title: 'Equipment Documents', detail: 'Manuals, reference files, and equipment documents.' },
 ];
 
+// Future equipment create/edit/remove and PM completion flows should call the backend history helper for this section.
 export function EquipmentLibraryPage() {
   return (
     <div className="page-stack">
