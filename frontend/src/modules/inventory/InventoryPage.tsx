@@ -1,12 +1,5 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-type Mit3Status = {
-  ok: boolean;
-  mit3Url: string;
-  healthUrl: string;
-  message: string;
-};
-
 type InventoryPart = {
   id: string;
   itemId: string;
@@ -30,7 +23,6 @@ type InventoryPart = {
 
 type PartsResponse = {
   ok: boolean;
-  mit3Url?: string;
   source?: string;
   writeAvailable?: boolean;
   parts: InventoryPart[];
@@ -56,22 +48,9 @@ type NativeSummary = {
   requisitionCount: number;
   vendorCount: number;
   locationCount: number;
-  lastImportedFromMit3At: string | null;
 };
 
 type NativeSummaryResponse = NativeSummary & { ok: boolean };
-
-type ImportSummary = {
-  importedCount: number;
-  updatedCount: number;
-  skippedCount: number;
-  vendorCount: number;
-  locationCount: number;
-  skippedUrlCount?: number;
-  errors: string[];
-  importedFromMit3At?: string;
-  nativeSummary?: NativeSummary;
-};
 
 type BackupFile = {
   fileName: string;
@@ -182,7 +161,6 @@ function blankVendorRequisitionForm(vendorName = '', estimatedTotal = 0): Vendor
 }
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
-const importRoles = new Set(['Admin','Manager','Maintenance Tech 3']);
 const pageSizeOptions: PageSize[] = [50,100,250,'all'];
 const filterOptions: { label: string; value: FilterMode }[] = [
   { label: 'All', value: 'all' },
@@ -195,7 +173,6 @@ const emptyNativeSummary: NativeSummary = {
   requisitionCount: 0,
   vendorCount: 0,
   locationCount: 0,
-  lastImportedFromMit3At: null,
 };
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
@@ -299,7 +276,6 @@ function normalizeNativeSummary(summary?: Partial<NativeSummary> | null): Native
     requisitionCount: Number(summary?.requisitionCount ?? 0),
     vendorCount: Number(summary?.vendorCount ?? 0),
     locationCount: Number(summary?.locationCount ?? 0),
-    lastImportedFromMit3At: summary?.lastImportedFromMit3At ?? null,
   };
 }
 
@@ -404,9 +380,7 @@ function payloadFromForm(form: PartForm) {
 }
 
 export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
-  const [status,setStatus]=useState<Mit3Status|null>(null);
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
-  const [importSummary,setImportSummary]=useState<ImportSummary|null>(null);
   const [parts,setParts]=useState<InventoryPart[]>([]);
   const [search,setSearch]=useState('');
   const [filter,setFilter]=useState<FilterMode>('all');
@@ -423,7 +397,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [form,setForm]=useState<PartForm>(blankForm);
   const [formError,setFormError]=useState('');
   const [saving,setSaving]=useState(false);
-  const [importing,setImporting]=useState(false);
   const [toolsBusy,setToolsBusy]=useState('');
   const [toolsOpen,setToolsOpen]=useState(false);
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
@@ -449,18 +422,13 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const pendingScrollTargetRef = useRef<'top'|'bottom'|null>(null);
 
   const canWrite = writeRoles.has(userRole);
-  const canImport = importRoles.has(userRole);
   const canUseInventoryTools = canWrite;
 
   async function refresh(options: { notify?: boolean } = {}){
     setLoading(true);
     setError('');
     try {
-      const [nextStatus,nextNativeSummary] = await Promise.all([
-        api<Mit3Status>('/api/inventory/mit3-status').catch(()=>null),
-        api<NativeSummaryResponse>('/api/inventory/native/summary'),
-      ]);
-      if (nextStatus) setStatus(nextStatus);
+      const nextNativeSummary = await api<NativeSummaryResponse>('/api/inventory/native/summary');
       setNativeSummary(normalizeNativeSummary(nextNativeSummary));
       const partsResponse = await api<PartsResponse>('/api/inventory/native/parts');
       if (partsResponse.summary) setNativeSummary(normalizeNativeSummary(partsResponse.summary));
@@ -690,26 +658,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       setRequisitionError((err as Error).message);
     } finally {
       setRequisitionSaving(false);
-    }
-  }
-
-  async function importFromMit3(){
-    if (!canImport || importing) return;
-    if (!window.confirm('This will copy legacy inventory data into MCC. The legacy system will not be modified.')) return;
-    setImporting(true);
-    setNotice(null);
-    setError('');
-    try {
-      const result = await api<ImportSummary>('/api/inventory/native/import-from-mit3',{method:'POST'});
-      setImportSummary(result);
-      if (result.nativeSummary) setNativeSummary(normalizeNativeSummary(result.nativeSummary));
-      await refresh();
-      const skipped = result.skippedCount + Number(result.skippedUrlCount ?? 0);
-      setNotice({kind:'success',text:`Legacy import complete: ${result.importedCount} imported, ${result.updatedCount} updated${skipped ? `, ${skipped} skipped` : ''}.`});
-    } catch (err) {
-      setNotice({kind:'error',text:(err as Error).message});
-    } finally {
-      setImporting(false);
     }
   }
 
@@ -1025,29 +973,13 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       {nativeSummary.totalParts===0&&!loading&&(
         <section className="mcc-card inventory-setup-card">
           <div>
-            <span>Phase 2E setup</span>
-            <strong>MCC Inventory is empty. Import legacy inventory to begin daily use.</strong>
-            <p>This copies inventory into Maintenance Command Center without modifying the legacy system.</p>
+            <span>Inventory setup</span>
+            <strong>MCC Inventory is empty. Add parts or import a CSV / Excel file to begin daily use.</strong>
+            <p>Open Inventory Tools to use the standard import template, export files, and backup controls.</p>
           </div>
           <div className="inventory-setup-actions">
             <button className="primary-button" type="button" onClick={()=>setToolsOpen(true)} disabled={!canUseInventoryTools}>Open Inventory Tools</button>
           </div>
-          {!canImport&&<p className="form-message">Admin, Manager, or Maintenance Tech 3 permission is required to run the migration import.</p>}
-        </section>
-      )}
-
-      {importSummary&&(
-        <section className="mcc-card inventory-import-summary" aria-live="polite">
-          <div>
-            <span>Last import summary</span>
-            <strong>{importSummary.importedCount} imported / {importSummary.updatedCount} updated</strong>
-            <p>{importSummary.skippedCount} rows skipped. {Number(importSummary.skippedUrlCount ?? 0)} unsafe links skipped. {importSummary.vendorCount} vendors and {importSummary.locationCount} locations in MCC.</p>
-          </div>
-          {importSummary.errors.length>0&&(
-            <ul>
-              {importSummary.errors.slice(0,4).map((message,index)=><li key={`${message}-${index}`}>{message}</li>)}
-            </ul>
-          )}
         </section>
       )}
 
@@ -1106,14 +1038,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               )}
             </div>
           )}
-          <div className="inventory-tools-panel inventory-tools-legacy">
-            <span>Legacy Import / Migration</span>
-            <div className="inventory-tool-actions">
-              {canImport&&<button className="primary-button compact-button" type="button" onClick={()=>void importFromMit3()} disabled={importing||Boolean(toolsBusy)}>{importing?'Importing...':'Import Legacy Inventory'}</button>}
-              <a className="secondary-button compact-button action-link" href={status?.mit3Url ?? 'http://localhost:4173'} target="_blank" rel="noreferrer">Open Legacy Inventory</a>
-            </div>
-            <p className="form-message">MCC Inventory remains the daily-use system.</p>
-          </div>
         </section>
       )}
 

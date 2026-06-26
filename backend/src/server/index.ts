@@ -282,6 +282,12 @@ function safeErrorMessage(error: unknown, extraSecrets: string[] = [], fallback 
   }
   return message.replace(/\s+/g, ' ').slice(0, 300) || fallback;
 }
+function safeBackupClientError(error: unknown, fallback = 'Backup failed.') {
+  const message = safeErrorMessage(error, [], fallback);
+  if (/already running/i.test(message)) return 'Another backup is already running.';
+  if (/permission denied/i.test(message)) return 'Permission denied.';
+  return fallback;
+}
 function smtpTransport() {
   if (!smtpConfigured) return undefined;
   return nodemailer.createTransport({
@@ -1006,7 +1012,7 @@ function createMasterBackup(input: { type: MasterBackupType; actor?: User | null
     lastBackupResult = { ok: true, type: input.type, backupId: folderName, createdAt, message: `${masterBackupTypeLabel(input.type)} backup created.` };
     return summary!;
   } catch (error) {
-    lastBackupResult = { ok: false, type: input.type, createdAt: now(), message: safeErrorMessage(error, [], 'Master backup failed.') };
+    lastBackupResult = { ok: false, type: input.type, createdAt: now(), message: safeBackupClientError(error, 'Master backup failed.') };
     throw error;
   } finally {
     backupInProgress = false;
@@ -3666,7 +3672,7 @@ app.get('/api/backup/status', requireAuth, requirePermission('settings.view'), (
   }
 });
 app.get('/api/backup/list', requireAuth, (req:AuthRequest,res)=>{
-  if (!canViewMasterBackups(req.user!)) return res.status(403).json({error:'Permission denied.'});
+  if (!canViewMasterBackups(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   try {
     res.json({ok:true,backups:listMasterBackupsInternal()});
   } catch (error) {
@@ -3674,14 +3680,14 @@ app.get('/api/backup/list', requireAuth, (req:AuthRequest,res)=>{
   }
 });
 app.post('/api/backup/create', requireAuth, (req:AuthRequest,res)=>{
-  if (!canCreateMasterBackups(req.user!)) return res.status(403).json({error:'Permission denied.'});
+  if (!canCreateMasterBackups(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   try {
     const backup = createMasterBackup({ type: 'manual', actor: req.user!, notes: 'Manual backup from MCC Settings.' });
-    audit(req,'master backup created','backup',backup.id,{backupType:backup.type});
-    res.status(201).json({ok:true,backup,status:masterBackupStatus()});
+    try { audit(req,'master backup created','backup',backup.id,{backupType:backup.type}); } catch (auditError) { console.log(`MCC manual backup audit failed: ${safeErrorMessage(auditError, [], 'Audit failed.')}`); }
+    res.status(201).json({ok:true,backup,status:masterBackupStatus(),message:'Manual backup created successfully.'});
   } catch (error) {
-    const message = safeErrorMessage(error, [], 'Manual backup failed.');
-    audit(req,'master backup failed','backup','manual',{error:message});
+    const message = safeBackupClientError(error, 'Backup failed.');
+    try { audit(req,'master backup failed','backup','manual',{error:message}); } catch {}
     res.status(/already running/i.test(message) ? 409 : 500).json({ok:false,error:message});
   }
 });

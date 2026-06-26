@@ -38,12 +38,88 @@ type BackupStatus = {
     canRestoreBackup: boolean;
   };
 };
+type ManualBackupProgress = {
+  state: 'idle' | 'running' | 'success' | 'error';
+  activeStep: number;
+  message: string;
+  completedAt?: string;
+};
+
+const backupStepLabels = [
+  'Preparing backup folder',
+  'Snapshotting MCC database',
+  'Copying MCC files/uploads if present',
+  'Writing backup manifest',
+  'Verifying backup',
+  'Refreshing backup status',
+  'Complete',
+];
+const emptyBackupCounts: Record<BackupType, number> = { startup: 0, scheduled: 0, auto: 0, manual: 0, pre_restore: 0 };
+const emptyBackupPermissions = { canViewBackups: false, canCreateBackup: false, canRestoreBackup: false };
 
 async function api(path:string, options:RequestInit={}) {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizeBackupSummary(value: unknown): BackupSummary | null {
+  const data = asRecord(value);
+  const type = String(data.type ?? 'manual') as BackupType;
+  if (!data.id && !data.name && !data.createdAt) return null;
+  return {
+    id: String(data.id ?? data.name ?? ''),
+    name: String(data.name ?? data.id ?? 'MCC master backup'),
+    type,
+    typeLabel: String(data.typeLabel ?? typeLabel(type)),
+    createdAt: String(data.createdAt ?? ''),
+    sizeBytes: Number(data.sizeBytes ?? 0),
+    databaseSizeBytes: Number(data.databaseSizeBytes ?? 0),
+    recordCounts: asRecord(data.recordCounts) as Record<string, number>,
+    includedPaths: Array.isArray(data.includedPaths) ? data.includedPaths.map(String) : [],
+    notes: String(data.notes ?? ''),
+    restorable: Boolean(data.restorable ?? false),
+  };
+}
+
+function normalizeBackupStatus(value: unknown): BackupStatus {
+  const data = asRecord(value);
+  const counts = asRecord(data.backupCountsByType);
+  const permissions = asRecord(data.permissions);
+  const lastResult = asRecord(data.lastBackupResult);
+  return {
+    ok: data.ok !== false,
+    latestBackup: normalizeBackupSummary(data.latestBackup),
+    backupFolderExists: Boolean(data.backupFolderExists),
+    backupCountsByType: {
+      startup: Number(counts.startup ?? 0),
+      scheduled: Number(counts.scheduled ?? 0),
+      auto: Number(counts.auto ?? 0),
+      manual: Number(counts.manual ?? 0),
+      pre_restore: Number(counts.pre_restore ?? 0),
+    },
+    lastBackupResult: {
+      ok: lastResult.ok !== false,
+      message: String(lastResult.message ?? 'No master backup has run yet.'),
+      backupId: lastResult.backupId ? String(lastResult.backupId) : undefined,
+      createdAt: lastResult.createdAt ? String(lastResult.createdAt) : undefined,
+    },
+    nextScheduledBackupAt: data.nextScheduledBackupAt ? String(data.nextScheduledBackupAt) : null,
+    databaseSize: Number(data.databaseSize ?? 0),
+    backupHealth: String(data.backupHealth ?? 'Checking...'),
+    autoBackupDelaySeconds: Number(data.autoBackupDelaySeconds ?? 45),
+    scheduledBackupIntervalMinutes: Number(data.scheduledBackupIntervalMinutes ?? 60),
+    permissions: {
+      canViewBackups: Boolean(permissions.canViewBackups),
+      canCreateBackup: Boolean(permissions.canCreateBackup),
+      canRestoreBackup: Boolean(permissions.canRestoreBackup),
+    },
+  };
 }
 
 function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
@@ -69,7 +145,12 @@ export function SettingsPage() {
   const [msg,setMsg]=useState('');
   const [loading,setLoading]=useState(false);
   const [backupLoading,setBackupLoading]=useState(false);
-  const primaryLanUrl = links?.primaryLanUrl ?? links?.detectedLanUrls[0] ?? '';
+  const [manualBackupProgress,setManualBackupProgress]=useState<ManualBackupProgress>({state:'idle',activeStep:0,message:''});
+  const [lastManualBackupResult,setLastManualBackupResult]=useState<{ok:boolean;message:string;createdAt:string}|null>(null);
+  const detectedLanUrls = links?.detectedLanUrls ?? [];
+  const primaryLanUrl = links?.primaryLanUrl ?? detectedLanUrls[0] ?? '';
+  const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
+  const backupCounts = backupStatus?.backupCountsByType ?? emptyBackupCounts;
 
   function loadLinks() {
     setLoading(true);
@@ -79,32 +160,54 @@ export function SettingsPage() {
       .finally(()=>setLoading(false));
   }
 
-  function loadBackupStatus() {
-    setBackupLoading(true);
-    api('/api/backup/status')
-      .then(data=>{ setBackupStatus(data); setMsg(''); })
+  function loadBackupStatus(options: { quiet?: boolean } = {}) {
+    if (!options.quiet) setBackupLoading(true);
+    return api('/api/backup/status')
+      .then(data=>{ setBackupStatus(normalizeBackupStatus(data)); setMsg(''); })
       .catch(e=>setMsg(e.message))
-      .finally(()=>setBackupLoading(false));
+      .finally(()=>{ if (!options.quiet) setBackupLoading(false); });
   }
 
-  function loadBackups() {
-    setBackupLoading(true);
-    api('/api/backup/list')
-      .then(data=>{ setBackups(data.backups ?? []); setShowBackups(true); setMsg(''); })
-      .catch(e=>setMsg(e.message))
-      .finally(()=>setBackupLoading(false));
-  }
-
-  function createManualBackup() {
-    setBackupLoading(true);
-    api('/api/backup/create',{method:'POST',body:JSON.stringify({})})
+  function loadBackups(options: { quiet?: boolean } = {}) {
+    if (!options.quiet) setBackupLoading(true);
+    return api('/api/backup/list')
       .then(data=>{
-        setBackupStatus(data.status);
-        setMsg(`Manual backup created: ${data.backup?.name ?? 'complete'}`);
-        if (showBackups) void loadBackups();
+        const backupList = Array.isArray(data.backups) ? (data.backups as unknown[]).map(normalizeBackupSummary).filter((backup): backup is BackupSummary => Boolean(backup)) : [];
+        setBackups(backupList);
+        setShowBackups(true);
+        setMsg('');
       })
       .catch(e=>setMsg(e.message))
-      .finally(()=>setBackupLoading(false));
+      .finally(()=>{ if (!options.quiet) setBackupLoading(false); });
+  }
+
+  async function createManualBackup() {
+    if (manualBackupProgress.state === 'running') return;
+    setBackupLoading(true);
+    setMsg('');
+    setManualBackupProgress({state:'running',activeStep:0,message:'Creating MCC Master Backup'});
+    try {
+      const data = await api('/api/backup/create',{method:'POST',body:JSON.stringify({})});
+      const nextStatus = normalizeBackupStatus(data.status ?? data);
+      setBackupStatus(nextStatus);
+      const message = String(data.message ?? 'Manual backup created successfully.');
+      setManualBackupProgress({state:'success',activeStep:backupStepLabels.length - 1,message,completedAt:new Date().toISOString()});
+      setLastManualBackupResult({ok:true,message:'Last manual backup succeeded.',createdAt:new Date().toISOString()});
+      setMsg(message);
+      await loadBackupStatus({quiet:true});
+      if (showBackups) await loadBackups({quiet:true});
+    } catch (e) {
+      const message = (e as Error).message || 'Backup failed.';
+      const safeMessage = message === 'Backup failed.'
+        ? 'Backup failed. Settings is still safe. Check server console/logs.'
+        : `Backup failed. Settings is still safe. ${message}`;
+      setManualBackupProgress({state:'error',activeStep:Math.min(manualBackupProgress.activeStep, backupStepLabels.length - 2),message:safeMessage,completedAt:new Date().toISOString()});
+      setLastManualBackupResult({ok:false,message:'Last manual backup failed.',createdAt:new Date().toISOString()});
+      setMsg(safeMessage);
+      await loadBackupStatus({quiet:true}).catch(()=>undefined);
+    } finally {
+      setBackupLoading(false);
+    }
   }
 
   function verifyBackup(backup: BackupSummary) {
@@ -135,6 +238,13 @@ export function SettingsPage() {
     loadLinks();
     loadBackupStatus();
   },[]);
+  useEffect(()=>{
+    if (manualBackupProgress.state !== 'running' || manualBackupProgress.activeStep >= backupStepLabels.length - 2) return;
+    const timer = window.setTimeout(()=>{
+      setManualBackupProgress(current=>current.state === 'running' ? {...current,activeStep:Math.min(current.activeStep + 1, backupStepLabels.length - 2)} : current);
+    }, 700);
+    return () => window.clearTimeout(timer);
+  },[manualBackupProgress.activeStep,manualBackupProgress.state]);
 
   return (
     <div className="page-stack settings-page">
@@ -177,12 +287,12 @@ export function SettingsPage() {
           </section>
         </div>
 
-        {links&&links.detectedLanUrls.length>1&&(
+        {links&&detectedLanUrls.length>1&&(
           <section className="network-link-panel">
             <span>Detected network URLs</span>
             <strong>All detected LAN links</strong>
             <div className="share-url-list">
-              {links.detectedLanUrls.map(url=><CopyUrl key={url} url={url} onCopied={value=>setMsg(`Copied ${value}`)} />)}
+              {detectedLanUrls.map(url=><CopyUrl key={url} url={url} onCopied={value=>setMsg(`Copied ${value}`)} />)}
             </div>
           </section>
         )}
@@ -208,10 +318,30 @@ export function SettingsPage() {
             <p>Startup, hourly, automatic write-triggered, and manual backups protect MCC data without showing private system paths.</p>
           </div>
           <div className="backup-action-row">
-            <button className="secondary-button compact-button" type="button" onClick={loadBackupStatus} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
-            <button className="primary-button compact-button" type="button" onClick={createManualBackup} disabled={backupLoading || !backupStatus?.permissions.canCreateBackup}>Create Manual Backup</button>
+            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
+            <button className="primary-button compact-button" type="button" onClick={()=>void createManualBackup()} disabled={backupLoading || !backupPermissions.canCreateBackup}>{manualBackupProgress.state === 'running' ? 'Creating...' : 'Create Manual Backup'}</button>
           </div>
         </div>
+
+        {manualBackupProgress.state!=='idle'&&(
+          <section className={`backup-progress-panel ${manualBackupProgress.state}`} aria-live="polite">
+            <div className="backup-progress-heading">
+              <div>
+                <span>{manualBackupProgress.state==='running'?'Creating MCC Master Backup':'MCC Master Backup'}</span>
+                <strong>{manualBackupProgress.message}</strong>
+              </div>
+              {manualBackupProgress.state==='running'&&<span className="backup-spinner" aria-hidden="true" />}
+            </div>
+            <ol className="backup-step-list">
+              {backupStepLabels.map((step,index)=>{
+                const done = manualBackupProgress.state==='success' || index < manualBackupProgress.activeStep;
+                const running = manualBackupProgress.state==='running' && index === manualBackupProgress.activeStep;
+                const failed = manualBackupProgress.state==='error' && index === manualBackupProgress.activeStep;
+                return <li className={failed ? 'failed' : running ? 'running' : done ? 'done' : ''} key={step}>{step}</li>;
+              })}
+            </ol>
+          </section>
+        )}
 
         <div className="backup-status-grid">
           <section className="backup-status-panel">
@@ -233,7 +363,7 @@ export function SettingsPage() {
 
         <div className="backup-count-row">
           {(['manual','auto','scheduled','startup','pre_restore'] as BackupType[]).map(type=>(
-            <span className={`backup-type-pill ${type}`} key={type}>{typeLabel(type)}: {backupStatus?.backupCountsByType?.[type] ?? 0}</span>
+            <span className={`backup-type-pill ${type}`} key={type}>{typeLabel(type)}: {backupCounts[type] ?? 0}</span>
           ))}
         </div>
 
@@ -248,7 +378,7 @@ export function SettingsPage() {
         </section>
 
         <div className="backup-action-row">
-          <button className="secondary-button" type="button" onClick={loadBackups} disabled={backupLoading || !backupStatus?.permissions.canViewBackups}>{showBackups ? 'Refresh Backups' : 'View Backups'}</button>
+          <button className="secondary-button" type="button" onClick={()=>void loadBackups()} disabled={backupLoading || !backupPermissions.canViewBackups}>{showBackups ? 'Refresh Backups' : 'View Backups'}</button>
           {showBackups&&<button className="link-button" type="button" onClick={()=>{setShowBackups(false);setRestoreTarget(null);}}>Hide Backups</button>}
         </div>
 
@@ -264,7 +394,7 @@ export function SettingsPage() {
                 </div>
                 <div className="backup-row-actions">
                   <button className="secondary-button compact-button" type="button" onClick={()=>verifyBackup(backup)} disabled={backupLoading}>Verify</button>
-                  <button className="danger-button compact-button" type="button" onClick={()=>{setRestoreTarget(backup);setRestoreConfirmation('');}} disabled={backupLoading || !backupStatus?.permissions.canRestoreBackup || !backup.restorable}>Restore</button>
+                  <button className="danger-button compact-button" type="button" onClick={()=>{setRestoreTarget(backup);setRestoreConfirmation('');}} disabled={backupLoading || !backupPermissions.canRestoreBackup || !backup.restorable}>Restore</button>
                 </div>
               </section>
             ))}
@@ -288,7 +418,13 @@ export function SettingsPage() {
           </section>
         )}
 
-        {backupStatus?.lastBackupResult&&<p className={backupStatus.lastBackupResult.ok ? 'form-message' : 'form-message error'}>{backupStatus.lastBackupResult.message}</p>}
+        {(lastManualBackupResult || backupStatus?.lastBackupResult)&&(
+          <section className={lastManualBackupResult?.ok ?? backupStatus?.lastBackupResult.ok ? 'backup-result-panel success' : 'backup-result-panel error'}>
+            <span>Last result</span>
+            <strong>{lastManualBackupResult?.message ?? (backupStatus?.lastBackupResult.ok ? 'Last backup succeeded' : 'Last backup failed')}</strong>
+            <p>{lastManualBackupResult ? formatDateTime(lastManualBackupResult.createdAt) : backupStatus?.lastBackupResult.message}</p>
+          </section>
+        )}
       </article>
     </div>
   );
