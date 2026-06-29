@@ -22,6 +22,12 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .mcc-brand-jbt { color: #f3fbff; font-size: 1.62rem; font-weight: 950; text-shadow: 0 0 18px rgba(68, 215, 255, 0.24); }
 .mcc-brand-usa { color: #36e5aa; font-size: 1.12rem; font-weight: 950; text-shadow: 0 0 14px rgba(54, 229, 170, 0.2); }
 .mcc-brand-mark > span { display: block; color: #a7e7fb; font-size: .68rem; font-weight: 900; letter-spacing: .07em; line-height: 1.2; text-transform: uppercase; }
+.mcc-brand-image { display: block; width: 42px; height: 42px; object-fit: contain; }
+.command-brand.image-brand { justify-content: center; padding-left: 13px; }
+.command-brand.image-brand::after { right: -4px; }
+.brand-animation-glow .mcc-brand-mark { animation: brand-soft-glow 2.8s ease-in-out infinite; }
+.brand-animation-rotate .mcc-brand-image { animation: brand-slow-rotate 14s linear infinite; }
+.brand-animation-pulse .mcc-brand-mark { animation: brand-pulse 2.4s ease-in-out infinite; }
 .mcc-nav { display: grid; gap: 8px; }
 .mcc-nav-button { min-height: 40px; border: 1px solid rgba(92, 180, 220, 0.2); border-radius: 12px; color: #cfeeff; background: rgba(10, 32, 55, 0.72); text-align: left; padding: 0 14px; cursor: pointer; font-size: .9rem; }
 .mcc-nav-button:hover, .mcc-nav-button.active { border-color: #34c8ff; background: rgba(0, 153, 219, 0.22); box-shadow: 0 0 0 1px rgba(52, 200, 255, 0.16) inset; }
@@ -195,7 +201,33 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .backup-step-list li.done::before { background: #36e5aa; }
 .backup-step-list li.failed { border-color: rgba(255, 117, 138, 0.42); color: #ffd7d7; background: rgba(111, 52, 60, 0.34); }
 .backup-step-list li.failed::before { background: #ff758a; }
+.branding-card, .danger-zone-card { width: 100%; display: grid; gap: 16px; }
+.branding-preview { min-width: 130px; display: flex; justify-content: flex-end; }
+.branding-preview .command-brand { position: relative; width: auto; min-width: 132px; min-height: 66px; padding-left: 18px; }
+.branding-preview .command-brand .mcc-brand-mark strong { display: flex; gap: 8px; }
+.branding-preview .command-brand .mcc-brand-mark > span { display: block; font-size: .58rem; }
+.branding-preview .mcc-brand-image { width: 48px; height: 48px; }
+.branding-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.danger-zone-card { border-color: rgba(255, 117, 138, 0.38); background: linear-gradient(180deg, rgba(83, 28, 42, 0.74), rgba(7, 25, 45, 0.9)); }
+.danger-zone-card > .share-card-heading span { color: #ffb7b7; }
+.reset-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 12px; }
+.reset-option-card { min-width: 0; display: grid; align-content: space-between; gap: 12px; padding: 14px; border: 1px solid rgba(255, 117, 138, 0.26); border-radius: 12px; background: rgba(4, 18, 34, 0.46); }
+.reset-option-card span { margin: 0 0 7px; color: #ffb7b7; font-size: .7rem; font-weight: 900; text-transform: uppercase; }
+.reset-option-card strong { margin-bottom: 7px; color: #fff; font-size: 1rem; line-height: 1.25; }
+.reset-option-card p { font-size: .83rem; }
+.reset-option-card small { color: #ffc9c9; font-size: .8rem; font-weight: 900; }
+.reset-option-card .danger-button { justify-self: start; width: auto; }
+.reset-modal { border-color: rgba(255, 117, 138, 0.44); }
+.reset-checkbox-list { display: grid; gap: 9px; }
+.reset-checkbox-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px; border: 1px solid rgba(143, 205, 233, 0.16); border-radius: 10px; background: rgba(7, 25, 45, 0.52); }
+.reset-checkbox-row input { width: 18px; min-height: 18px; margin-top: 2px; }
+.reset-checkbox-row span { display: grid; gap: 3px; color: #dff7ff; }
+.reset-checkbox-row strong { margin: 0; font-size: .9rem; }
+.reset-checkbox-row small { color: #aac4d2; font-size: .78rem; line-height: 1.35; }
 @keyframes backup-spin { to { transform: rotate(360deg); } }
+@keyframes brand-soft-glow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(68, 215, 255, 0)); } 50% { filter: drop-shadow(0 0 12px rgba(68, 215, 255, .44)); } }
+@keyframes brand-slow-rotate { to { transform: rotate(360deg); } }
+@keyframes brand-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
 @keyframes part-link-shine { 0%, 55% { transform: translateX(-140%); } 75%, 100% { transform: translateX(140%); } }
 .module-card-grid { width: 100%; max-width: none; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .module-shell-card { min-height: 0; padding: 14px 16px; border-radius: 14px; }
@@ -425,7 +457,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 1180px) { .settings-page .network-link-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1120px) { .inventory-focus-toolbar { grid-template-columns: auto minmax(140px, 1fr) auto; } .inventory-focus-actions { grid-column: 1 / -1; justify-content: flex-start; } .inventory-tools-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .inventory-setup-card, .inventory-import-summary { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .inventory-focus-shell .mcc-main { padding: 92px 14px 14px; } .inventory-focus-toolbar { grid-template-columns: 1fr; align-items: stretch; } .inventory-toolbar-badges, .inventory-focus-actions, .inventory-setup-actions { grid-column: auto; justify-content: flex-start; } .inventory-toolbar { grid-template-columns: 1fr; align-items: stretch; } .requisitions-heading { align-items: start; flex-direction: column; } .requisition-toolbar { align-items: stretch; } .requisition-toolbar .requisition-search, .requisition-toolbar .segmented-control, .show-deleted-toggle { flex: 1 1 100%; } .history-filter-card { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .settings-page .network-link-grid, .backup-status-grid { grid-template-columns: 1fr; } .share-card-heading, .backup-list-row { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } .backup-action-row, .backup-row-actions { justify-content: flex-start; } .backup-action-row .primary-button, .backup-action-row .secondary-button, .backup-action-row .danger-button, .backup-row-actions .compact-button { width: 100%; } .inventory-bridge-grid, .inventory-form-grid, .inventory-tools-grid, .inventory-import-row { grid-template-columns: 1fr; } .inventory-heading, .requisitions-heading { align-items: start; flex-direction: column; } .inventory-heading-actions { justify-content: flex-start; } .inventory-form-wide { grid-column: auto; } .inventory-focus-shell .mcc-main { padding: 92px 10px 10px; } .inventory-focus-toolbar { grid-template-columns: 1fr; align-items: stretch; } .inventory-toolbar-badges, .inventory-focus-actions, .inventory-setup-actions { grid-column: auto; justify-content: flex-start; } .inventory-focus-actions .primary-button, .inventory-focus-actions .secondary-button, .inventory-back-button, .inventory-setup-actions .primary-button, .inventory-setup-actions .secondary-button, .inventory-import-row .primary-button { width: 100%; } .native-status-badge { justify-self: start; } .requisition-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .requisition-toolbar { align-items: stretch; } .requisition-toolbar .requisition-search, .requisition-toolbar .segmented-control, .show-deleted-toggle { flex: 1 1 100%; } .inventory-table-wrap { max-height: calc(100vh - 350px); } .requisitions-table-wrap { max-height: calc(100vh - 360px); } .requisition-preview-modal { height: calc(100vh - 28px); } .requisition-preview-summary { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 760px) { .settings-page .network-link-grid, .backup-status-grid, .branding-form-grid { grid-template-columns: 1fr; } .share-card-heading, .backup-list-row { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } .branding-preview { justify-content: flex-start; } .backup-action-row, .backup-row-actions { justify-content: flex-start; } .backup-action-row .primary-button, .backup-action-row .secondary-button, .backup-action-row .danger-button, .backup-row-actions .compact-button { width: 100%; } .reset-option-card .danger-button { width: 100%; } .inventory-bridge-grid, .inventory-form-grid, .inventory-tools-grid, .inventory-import-row { grid-template-columns: 1fr; } .inventory-heading, .requisitions-heading { align-items: start; flex-direction: column; } .inventory-heading-actions { justify-content: flex-start; } .inventory-form-wide { grid-column: auto; } .inventory-focus-shell .mcc-main { padding: 92px 10px 10px; } .inventory-focus-toolbar { grid-template-columns: 1fr; align-items: stretch; } .inventory-toolbar-badges, .inventory-focus-actions, .inventory-setup-actions { grid-column: auto; justify-content: flex-start; } .inventory-focus-actions .primary-button, .inventory-focus-actions .secondary-button, .inventory-back-button, .inventory-setup-actions .primary-button, .inventory-setup-actions .secondary-button, .inventory-import-row .primary-button { width: 100%; } .native-status-badge { justify-self: start; } .requisition-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .requisition-toolbar { align-items: stretch; } .requisition-toolbar .requisition-search, .requisition-toolbar .segmented-control, .show-deleted-toggle { flex: 1 1 100%; } .inventory-table-wrap { max-height: calc(100vh - 350px); } .requisitions-table-wrap { max-height: calc(100vh - 360px); } .requisition-preview-modal { height: calc(100vh - 28px); } .requisition-preview-summary { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 700px) { .inventory-toolbar { grid-template-columns: 1fr; } .segmented-control { width: 100%; } }
 @media (max-width: 520px) { .mcc-main { padding: 92px 12px 12px; } .inventory-focus-shell .mcc-main { padding: 92px 10px 10px; } .mcc-card { padding: 14px; border-radius: 14px; } .card-grid, .requisition-summary-grid, .history-filter-card { grid-template-columns: 1fr; } .page-heading h2, .mcc-header h1 { font-size: 1.25rem; } .primary-button, .secondary-button, .link-button, .danger-button { width: 100%; } .header-actions { width: 100%; } .user-pill { width: 100%; } .history-table-toolbar .compact-button, .requisition-selection-toolbar .compact-button { flex: 1 1 100%; } }
 @media (max-width: 620px) { .share-card-heading, .share-url-row { grid-template-columns: 1fr; } .share-card-heading { display: grid; } .share-url-row .compact-button, .share-card-heading .compact-button { justify-self: start; } }

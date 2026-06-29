@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-export type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance';
+export type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 
 type HistorySummary = {
   section: HistorySection;
@@ -57,6 +57,7 @@ const sectionCards: Array<{ section: HistorySection; label: string; description:
   { section: 'equipment_library', label: 'Equipment Library', description: 'Equipment records, assets, PM activity, and future removals.' },
   { section: 'facility_info', label: 'Facility Info', description: 'Facility documents, utility references, and future facility PM activity.' },
   { section: 'preventive_maintenance', label: 'Preventive Maintenance', description: 'Prepared for PM completion and deletion records.' },
+  { section: 'settings', label: 'Settings / System', description: 'Branding, Owner Admin reset records, and system settings activity.' },
 ];
 
 const emptyFilters: HistoryFilters = { q: '', action: '', user: '', startDate: '', endDate: '', workOrderNumber: '', partNumber: '', requisitionNumber: '', assetId: '' };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 
 type NetworkLinks = {
   localPort: number;
@@ -44,6 +44,56 @@ type ManualBackupProgress = {
   message: string;
   completedAt?: string;
 };
+type BrandingSettings = {
+  companyName: string;
+  companySubtitle: string;
+  companyAccentText: string;
+  logoMode: 'text' | 'image';
+  logoUrl: string;
+  logoFileName: string;
+  iconAnimation: 'none' | 'glow' | 'rotate' | 'pulse';
+};
+type ResetCounts = {
+  inventoryParts: number;
+  inventoryVendors: number;
+  inventoryLocations: number;
+  requisitions: number;
+  requisitionLines: number;
+  historyCounts: Record<string, number>;
+  futureTableCounts: Record<string, Record<string, number | null>>;
+};
+type ResetStatus = { ok: boolean; counts: ResetCounts };
+type ResetSection =
+  | 'inventory'
+  | 'requisitions'
+  | 'history_inventory'
+  | 'history_requisitions'
+  | 'history_machine_library'
+  | 'history_equipment_library'
+  | 'history_facility_info'
+  | 'history_preventive_maintenance'
+  | 'history_settings'
+  | 'machine_library'
+  | 'equipment_library'
+  | 'facility_info'
+  | 'preventive_maintenance';
+type ResetConfig = {
+  section: ResetSection;
+  title: string;
+  description: string;
+  confirmation: string;
+  count: (counts: ResetCounts) => string;
+  options?: Array<{ key: string; label: string; description: string }>;
+};
+type ResetModalState = {
+  target: ResetConfig;
+  reason: string;
+  confirmation: string;
+  options: Record<string, boolean>;
+  state: 'idle' | 'running' | 'success' | 'error';
+  activeStep: number;
+  message: string;
+};
 
 const backupStepLabels = [
   'Preparing backup folder',
@@ -54,8 +104,25 @@ const backupStepLabels = [
   'Refreshing backup status',
   'Complete',
 ];
+const resetStepLabels = [
+  'Creating pre-reset backup',
+  'Verifying backup',
+  'Resetting selected data',
+  'Recording history',
+  'Refreshing status',
+  'Complete',
+];
 const emptyBackupCounts: Record<BackupType, number> = { startup: 0, scheduled: 0, auto: 0, manual: 0, pre_restore: 0 };
 const emptyBackupPermissions = { canViewBackups: false, canCreateBackup: false, canRestoreBackup: false };
+const defaultBranding: BrandingSettings = {
+  companyName: 'JBT',
+  companySubtitle: 'Maintenance Command Center',
+  companyAccentText: 'USA',
+  logoMode: 'text',
+  logoUrl: '',
+  logoFileName: '',
+  iconAnimation: 'none',
+};
 
 async function api(path:string, options:RequestInit={}) {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
@@ -66,6 +133,21 @@ async function api(path:string, options:RequestInit={}) {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizeBranding(value: unknown): BrandingSettings {
+  const data = asRecord(value);
+  const logoMode = data.logoMode === 'image' && data.logoUrl ? 'image' : 'text';
+  const iconAnimation = ['none','glow','rotate','pulse'].includes(String(data.iconAnimation)) ? String(data.iconAnimation) as BrandingSettings['iconAnimation'] : 'none';
+  return {
+    companyName: String(data.companyName ?? defaultBranding.companyName).slice(0, 20) || defaultBranding.companyName,
+    companySubtitle: String(data.companySubtitle ?? defaultBranding.companySubtitle).slice(0, 40),
+    companyAccentText: String(data.companyAccentText ?? defaultBranding.companyAccentText).slice(0, 8),
+    logoMode,
+    logoUrl: String(data.logoUrl ?? ''),
+    logoFileName: String(data.logoFileName ?? ''),
+    iconAnimation,
+  };
 }
 
 function normalizeBackupSummary(value: unknown): BackupSummary | null {
@@ -135,7 +217,7 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
   );
 }
 
-export function SettingsPage() {
+export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
   const [backups,setBackups]=useState<BackupSummary[]>([]);
@@ -147,11 +229,43 @@ export function SettingsPage() {
   const [backupLoading,setBackupLoading]=useState(false);
   const [manualBackupProgress,setManualBackupProgress]=useState<ManualBackupProgress>({state:'idle',activeStep:0,message:''});
   const [lastManualBackupResult,setLastManualBackupResult]=useState<{ok:boolean;message:string;createdAt:string}|null>(null);
+  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
+  const [brandingMsg,setBrandingMsg]=useState('');
+  const [brandingLoading,setBrandingLoading]=useState(false);
+  const [resetStatus,setResetStatus]=useState<ResetStatus|null>(null);
+  const [resetMsg,setResetMsg]=useState('');
+  const [resetModal,setResetModal]=useState<ResetModalState|null>(null);
   const detectedLanUrls = links?.detectedLanUrls ?? [];
   const primaryLanUrl = links?.primaryLanUrl ?? detectedLanUrls[0] ?? '';
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const backupCounts = backupStatus?.backupCountsByType ?? emptyBackupCounts;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
+  const resetConfigs = useMemo<ResetConfig[]>(()=>[
+    {
+      section: 'inventory',
+      title: 'Reset Inventory Data',
+      description: 'Wipes MCC inventory parts. Linked requisitions and lookup lists stay unless selected.',
+      confirmation: 'RESET INVENTORY',
+      count: counts => `${counts.inventoryParts} parts`,
+      options: [
+        { key: 'includeLinkedRequisitions', label: 'Also reset linked requisitions', description: 'Deletes requisitions and requisition lines too.' },
+        { key: 'includeVendorsLocations', label: 'Clean vendors and locations', description: 'Deletes inventory lookup lists.' },
+        { key: 'includeInventoryBackups', label: 'Remove inventory backup list files', description: 'Does not delete master backups.' },
+      ],
+    },
+    { section: 'requisitions', title: 'Reset Requisitions Data', description: 'Wipes requisitions and requisition lines, then clears active requisition flags on remaining parts.', confirmation: 'RESET REQUISITIONS', count: counts => `${counts.requisitions} requisitions / ${counts.requisitionLines} lines` },
+    { section: 'history_inventory', title: 'Reset Inventory History Logs', description: 'Wipes only Inventory history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.inventory ?? 0} logs` },
+    { section: 'history_requisitions', title: 'Reset Requisition History Logs', description: 'Wipes only Requisition history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.requisitions ?? 0} logs` },
+    { section: 'history_machine_library', title: 'Reset Machine History Logs', description: 'Wipes only Machine Library history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.machine_library ?? 0} logs` },
+    { section: 'history_equipment_library', title: 'Reset Equipment History Logs', description: 'Wipes only Equipment Library history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.equipment_library ?? 0} logs` },
+    { section: 'history_facility_info', title: 'Reset Facility History Logs', description: 'Wipes only Facility Info history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.facility_info ?? 0} logs` },
+    { section: 'history_preventive_maintenance', title: 'Reset PM History Logs', description: 'Wipes only Preventive Maintenance history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.preventive_maintenance ?? 0} logs` },
+    { section: 'history_settings', title: 'Reset Settings History Logs', description: 'Wipes only Settings / System history log rows.', confirmation: 'RESET HISTORY', count: counts => `${counts.historyCounts.settings ?? 0} logs` },
+    { section: 'machine_library', title: 'Reset Machine Library Data', description: 'Wipes allowlisted machine records if those tables exist.', confirmation: 'RESET MACHINE LIBRARY', count: counts => futureCountLabel(counts, 'machine_library'), options: [{ key: 'includeHistory', label: 'Also reset machine history logs', description: 'Deletes Machine Library history log rows too.' }] },
+    { section: 'equipment_library', title: 'Reset Equipment Library Data', description: 'Wipes allowlisted equipment records if those tables exist.', confirmation: 'RESET EQUIPMENT LIBRARY', count: counts => futureCountLabel(counts, 'equipment_library'), options: [{ key: 'includeHistory', label: 'Also reset equipment history logs', description: 'Deletes Equipment Library history log rows too.' }] },
+    { section: 'facility_info', title: 'Reset Facility Info Data', description: 'Wipes allowlisted facility records if those tables exist. Uploaded files are not removed.', confirmation: 'RESET FACILITY INFO', count: counts => futureCountLabel(counts, 'facility_info'), options: [{ key: 'includeHistory', label: 'Also reset facility history logs', description: 'Deletes Facility Info history log rows too.' }] },
+    { section: 'preventive_maintenance', title: 'Reset Preventive Maintenance Data', description: 'Wipes allowlisted PM records if those tables exist.', confirmation: 'RESET PM', count: counts => futureCountLabel(counts, 'preventive_maintenance'), options: [{ key: 'includeHistory', label: 'Also reset PM history logs', description: 'Deletes Preventive Maintenance history log rows too.' }] },
+  ],[]);
 
   function loadLinks() {
     setLoading(true);
@@ -161,12 +275,66 @@ export function SettingsPage() {
       .finally(()=>setLoading(false));
   }
 
+  function loadBranding() {
+    setBrandingLoading(true);
+    return api('/api/settings/branding')
+      .then(data=>{ setBranding(normalizeBranding(data.branding)); setBrandingMsg(''); })
+      .catch(e=>setBrandingMsg(e.message))
+      .finally(()=>setBrandingLoading(false));
+  }
+
+  async function saveBranding(nextBranding = branding, resetToDefault = false) {
+    setBrandingLoading(true);
+    setBrandingMsg('');
+    try {
+      const data = await api('/api/settings/branding',{method:'PUT',body:JSON.stringify(resetToDefault ? {resetToDefault:true} : nextBranding)});
+      const saved = normalizeBranding(data.branding);
+      setBranding(saved);
+      window.dispatchEvent(new CustomEvent('mcc-branding-updated',{detail:saved}));
+      setBrandingMsg(String(data.message ?? 'Company branding saved.'));
+    } catch (e) {
+      setBrandingMsg((e as Error).message);
+    } finally {
+      setBrandingLoading(false);
+    }
+  }
+
+  async function uploadLogo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setBrandingLoading(true);
+    setBrandingMsg('');
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch('/api/settings/branding/logo',{method:'POST',credentials:'include',body});
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data.error || 'Logo upload failed.');
+      const saved = normalizeBranding(data.branding);
+      setBranding(saved);
+      window.dispatchEvent(new CustomEvent('mcc-branding-updated',{detail:saved}));
+      setBrandingMsg(String(data.message ?? 'Company logo/icon uploaded.'));
+    } catch (e) {
+      setBrandingMsg((e as Error).message);
+    } finally {
+      setBrandingLoading(false);
+    }
+  }
+
   function loadBackupStatus(options: { quiet?: boolean } = {}) {
     if (!options.quiet) setBackupLoading(true);
     return api('/api/backup/status')
       .then(data=>{ setBackupStatus(normalizeBackupStatus(data)); setMsg(''); })
       .catch(e=>setMsg(e.message))
       .finally(()=>{ if (!options.quiet) setBackupLoading(false); });
+  }
+
+  function loadResetStatus(options: { quiet?: boolean } = {}) {
+    if (!isOwnerAdmin) return Promise.resolve();
+    return api('/api/admin/reset/status')
+      .then(data=>{ setResetStatus(data as ResetStatus); setResetMsg(''); })
+      .catch(e=>setResetMsg(e.message));
   }
 
   function loadBackups(options: { quiet?: boolean } = {}) {
@@ -237,10 +405,42 @@ export function SettingsPage() {
       .finally(()=>setBackupLoading(false));
   }
 
+  function openResetModal(target: ResetConfig) {
+    const options = Object.fromEntries((target.options ?? []).map(option=>[option.key,false]));
+    setResetModal({target,reason:'',confirmation:'',options,state:'idle',activeStep:0,message:''});
+  }
+
+  async function runReset() {
+    if (!resetModal || resetModal.state === 'running') return;
+    const current = resetModal;
+    setResetMsg('');
+    setResetModal({...current,state:'running',activeStep:0,message:'Creating pre-reset backup'});
+    try {
+      const dataPromise = api('/api/admin/reset/section',{method:'POST',body:JSON.stringify({
+        section: current.target.section,
+        reasonNote: current.reason,
+        confirmation: current.confirmation,
+        options: current.options,
+      })});
+      const timer = window.setInterval(()=>{
+        setResetModal(existing=>existing?.state === 'running' ? {...existing,activeStep:Math.min(existing.activeStep + 1, resetStepLabels.length - 2)} : existing);
+      }, 700);
+      const data = await dataPromise.finally(()=>window.clearInterval(timer));
+      setResetModal(existing=>existing ? {...existing,state:'success',activeStep:resetStepLabels.length - 1,message:String(data.message ?? 'Reset complete.')} : existing);
+      setResetMsg(String(data.message ?? 'Reset complete.'));
+      await loadResetStatus({quiet:true});
+      await loadBackupStatus({quiet:true}).catch(()=>undefined);
+    } catch (e) {
+      setResetModal(existing=>existing ? {...existing,state:'error',message:(e as Error).message || 'Reset failed. No data was removed.'} : existing);
+    }
+  }
+
   useEffect(()=>{
     loadLinks();
+    loadBranding();
     loadBackupStatus();
-  },[]);
+    if (isOwnerAdmin) void loadResetStatus();
+  },[isOwnerAdmin]);
   useEffect(()=>{
     if (manualBackupProgress.state !== 'running' || manualBackupProgress.activeStep >= backupStepLabels.length - 2) return;
     const timer = window.setTimeout(()=>{
@@ -249,13 +449,75 @@ export function SettingsPage() {
     return () => window.clearTimeout(timer);
   },[manualBackupProgress.activeStep,manualBackupProgress.state]);
 
+  const resetReady = Boolean(resetModal && resetModal.reason.trim() && resetModal.confirmation === resetModal.target.confirmation && resetModal.state !== 'running');
+
   return (
     <div className="page-stack settings-page">
       <div className="page-heading">
         <p className="eyebrow">Settings</p>
         <h2>MCC Settings</h2>
-        <p>Share local access details without exposing SMTP, session, database, or private system settings.</p>
+        <p>Share local access details, protect MCC data, and manage company branding without exposing private system settings.</p>
       </div>
+
+      <article className="mcc-card wide-card branding-card">
+        <div className="share-card-heading">
+          <div>
+            <span>Company Branding</span>
+            <strong>Launcher logo and company name</strong>
+            <p>Keep JBT USA as the default, or switch the launcher to another company name and safe uploaded icon.</p>
+          </div>
+          <div className="branding-preview">
+            <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
+              <div className="mcc-brand-mark">
+                {branding.logoMode==='image'&&branding.logoUrl ? <img className="mcc-brand-image" src={branding.logoUrl} alt="" /> : <strong><span className="mcc-brand-jbt">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-usa">{branding.companyAccentText}</span>}</strong>}
+                <span>{branding.companySubtitle}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="branding-form-grid">
+          <label className="form-field">
+            <span>Company Name <b className="required-marker">*</b></span>
+            <input value={branding.companyName} maxLength={20} disabled={!isOwnerAdmin || brandingLoading} onChange={event=>setBranding(current=>({...current,companyName:event.target.value.slice(0,20)}))} />
+          </label>
+          <label className="form-field">
+            <span>Accent Text</span>
+            <input value={branding.companyAccentText} maxLength={8} disabled={!isOwnerAdmin || brandingLoading} onChange={event=>setBranding(current=>({...current,companyAccentText:event.target.value.slice(0,8)}))} />
+          </label>
+          <label className="form-field">
+            <span>Subtitle</span>
+            <input value={branding.companySubtitle} maxLength={40} disabled={!isOwnerAdmin || brandingLoading} onChange={event=>setBranding(current=>({...current,companySubtitle:event.target.value.slice(0,40)}))} />
+          </label>
+          <label className="form-field">
+            <span>Logo Mode</span>
+            <select value={branding.logoMode} disabled={!isOwnerAdmin || brandingLoading} onChange={event=>setBranding(current=>({...current,logoMode:event.target.value as BrandingSettings['logoMode']}))}>
+              <option value="text">Text Logo</option>
+              <option value="image">Uploaded Logo/Icon</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Icon Animation</span>
+            <select value={branding.iconAnimation} disabled={!isOwnerAdmin || brandingLoading} onChange={event=>setBranding(current=>({...current,iconAnimation:event.target.value as BrandingSettings['iconAnimation']}))}>
+              <option value="none">None</option>
+              <option value="glow">Soft Glow</option>
+              <option value="rotate">Slow Rotate</option>
+              <option value="pulse">Pulse</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Upload Logo/Icon</span>
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={!isOwnerAdmin || brandingLoading} onChange={uploadLogo} />
+          </label>
+        </div>
+
+        <div className="backup-action-row">
+          <button className="primary-button compact-button" type="button" onClick={()=>void saveBranding()} disabled={!isOwnerAdmin || brandingLoading || !branding.companyName.trim()}>{brandingLoading ? 'Saving...' : 'Save Branding'}</button>
+          <button className="secondary-button compact-button" type="button" onClick={()=>void saveBranding(defaultBranding,true)} disabled={!isOwnerAdmin || brandingLoading}>Reset to Default JBT</button>
+        </div>
+        {!isOwnerAdmin&&<p className="form-help">Owner Admin access is required to change branding.</p>}
+        {brandingMsg&&<p className="form-message">{brandingMsg}</p>}
+      </article>
 
       <article className="mcc-card wide-card share-card">
         <div className="share-card-heading">
@@ -429,8 +691,98 @@ export function SettingsPage() {
           </section>
         )}
       </article>
+
+      {isOwnerAdmin&&(
+        <article className="mcc-card wide-card danger-zone-card">
+          <div className="share-card-heading">
+            <div>
+              <span>Owner Admin Danger Zone</span>
+              <strong>Reset MCC section data</strong>
+              <p>Reset MCC section data only when you have a backup and understand this cannot be undone.</p>
+            </div>
+            <button className="secondary-button compact-button" type="button" onClick={()=>void loadResetStatus()}>{resetStatus ? 'Refresh counts' : 'Load counts'}</button>
+          </div>
+          {resetMsg&&<p className="form-message">{resetMsg}</p>}
+          <div className="reset-card-grid">
+            {resetConfigs.map(config=>(
+              <section className="reset-option-card" key={config.section}>
+                <div>
+                  <span>Owner Admin only</span>
+                  <strong>{config.title}</strong>
+                  <p>{config.description}</p>
+                </div>
+                <small>{resetStatus ? config.count(resetStatus.counts) : 'Counts not loaded'}</small>
+                <button className="danger-button compact-button" type="button" onClick={()=>openResetModal(config)}>Reset</button>
+              </section>
+            ))}
+          </div>
+        </article>
+      )}
+
+      {resetModal&&(
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="mcc-card inventory-modal reset-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Owner Admin reset</p>
+                <h3>{resetModal.target.title}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>setResetModal(null)} disabled={resetModal.state==='running'}>Close</button>
+            </div>
+            <p className="form-help">This will permanently remove selected MCC data after creating a safety backup.</p>
+            <label className="form-field">
+              <span>Reason for reset <b className="required-marker">*</b></span>
+              <textarea value={resetModal.reason} onChange={event=>setResetModal(current=>current ? {...current,reason:event.target.value} : current)} disabled={resetModal.state==='running'} />
+            </label>
+            <label className="form-field">
+              <span>Type {resetModal.target.confirmation} to continue</span>
+              <input value={resetModal.confirmation} onChange={event=>setResetModal(current=>current ? {...current,confirmation:event.target.value} : current)} disabled={resetModal.state==='running'} />
+            </label>
+            {Boolean(resetModal.target.options?.length)&&(
+              <div className="reset-checkbox-list">
+                {resetModal.target.options!.map(option=>(
+                  <label className="reset-checkbox-row" key={option.key}>
+                    <input type="checkbox" checked={Boolean(resetModal.options[option.key])} onChange={event=>setResetModal(current=>current ? {...current,options:{...current.options,[option.key]:event.target.checked}} : current)} disabled={resetModal.state==='running'} />
+                    <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {resetModal.state!=='idle'&&(
+              <section className={`backup-progress-panel ${resetModal.state}`} aria-live="polite">
+                <div className="backup-progress-heading">
+                  <div>
+                    <span>{resetModal.state==='running'?'Reset in progress':'Reset result'}</span>
+                    <strong>{resetModal.message || resetStepLabels[resetModal.activeStep]}</strong>
+                  </div>
+                  {resetModal.state==='running'&&<span className="backup-spinner" aria-hidden="true" />}
+                </div>
+                <ol className="backup-step-list">
+                  {resetStepLabels.map((step,index)=>{
+                    const done = resetModal.state==='success' || index < resetModal.activeStep;
+                    const running = resetModal.state==='running' && index === resetModal.activeStep;
+                    const failed = resetModal.state==='error' && index === resetModal.activeStep;
+                    return <li className={failed ? 'failed' : running ? 'running' : done ? 'done' : ''} key={step}>{step}</li>;
+                  })}
+                </ol>
+              </section>
+            )}
+            <div className="modal-actions">
+              <button className="danger-button" type="button" onClick={()=>void runReset()} disabled={!resetReady}>Create Backup and Reset</button>
+              <button className="secondary-button" type="button" onClick={()=>setResetModal(null)} disabled={resetModal.state==='running'}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
+}
+
+function futureCountLabel(counts: ResetCounts, section: string) {
+  const tableCounts = counts.futureTableCounts[section] ?? {};
+  const existing = Object.values(tableCounts).filter(value=>typeof value === 'number') as number[];
+  if (!existing.length) return 'No data table exists yet';
+  return `${existing.reduce((sum,value)=>sum + value, 0)} records`;
 }
 
 function formatDateTime(value?: string | null) {

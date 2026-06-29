@@ -3,6 +3,15 @@ import { RoleBadge } from '../components/RoleBadge';
 
 export type MccSection = 'dashboard' | 'inventory' | 'requisitions' | 'history' | 'machine-library' | 'equipment-library' | 'facility-info' | 'users' | 'settings';
 type LauncherMode = 'hover' | 'pinned' | null;
+type BrandingSettings = {
+  companyName: string;
+  companySubtitle: string;
+  companyAccentText: string;
+  logoMode: 'text' | 'image';
+  logoUrl: string;
+  iconAnimation: 'none' | 'glow' | 'rotate' | 'pulse';
+};
+const defaultBranding: BrandingSettings = { companyName: 'JBT', companySubtitle: 'Maintenance Command Center', companyAccentText: 'USA', logoMode: 'text', logoUrl: '', iconAnimation: 'none' };
 const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'inventory', label: 'Inventory' },
@@ -17,6 +26,7 @@ const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = 
 export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>!i.management||canManageUsers);
  const [launcherOpen,setLauncherOpen]=useState(false);
+ const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
  const launcherRef=useRef<HTMLDivElement>(null);
  const closeTimerRef=useRef<number>();
  const launcherModeRef=useRef<LauncherMode>(null);
@@ -88,6 +98,34 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
 
  useEffect(()=>()=>clearLauncherClose(),[]);
 
+ useEffect(()=>{
+   let cancelled=false;
+   function normalize(value: unknown): BrandingSettings {
+     const data = value && typeof value === 'object' && !Array.isArray(value) ? value as Partial<BrandingSettings> : {};
+     return {
+       companyName: String(data.companyName ?? defaultBranding.companyName).slice(0,20) || defaultBranding.companyName,
+       companySubtitle: String(data.companySubtitle ?? defaultBranding.companySubtitle).slice(0,40),
+       companyAccentText: String(data.companyAccentText ?? defaultBranding.companyAccentText).slice(0,8),
+       logoMode: data.logoMode === 'image' && data.logoUrl ? 'image' : 'text',
+       logoUrl: String(data.logoUrl ?? ''),
+       iconAnimation: ['none','glow','rotate','pulse'].includes(String(data.iconAnimation)) ? data.iconAnimation as BrandingSettings['iconAnimation'] : 'none',
+     };
+   }
+   fetch('/api/settings/branding',{credentials:'include'})
+     .then(res=>res.json())
+     .then(data=>{ if(!cancelled) setBranding(normalize(data.branding)); })
+     .catch(()=>{ if(!cancelled) setBranding(defaultBranding); });
+   function onBrandingUpdated(event: Event) {
+     const custom = event as CustomEvent<BrandingSettings>;
+     setBranding(normalize(custom.detail));
+   }
+   window.addEventListener('mcc-branding-updated',onBrandingUpdated);
+   return ()=>{
+     cancelled=true;
+     window.removeEventListener('mcc-branding-updated',onBrandingUpdated);
+   };
+ },[]);
+
  function selectSection(section:MccSection) {
    onSectionChange(section);
    closeLauncher();
@@ -96,10 +134,14 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  return (
    <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell':'mcc-shell command-shell'}>
      <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef} onMouseEnter={openLauncherByHover} onMouseLeave={scheduleLauncherClose}>
-       <div className="mcc-brand command-brand" aria-label="JBT USA">
+       <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
          <div className="mcc-brand-mark">
-           <strong><span className="mcc-brand-jbt">JBT</span><span className="mcc-brand-usa">USA</span></strong>
-           <span>Maintenance Command Center</span>
+           {branding.logoMode==='image'&&branding.logoUrl ? (
+             <img className="mcc-brand-image" src={branding.logoUrl} alt={`${branding.companyName} logo`} onError={()=>setBranding(defaultBranding)} />
+           ) : (
+             <strong><span className="mcc-brand-jbt">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-usa">{branding.companyAccentText}</span>}</strong>
+           )}
+           <span>{branding.companySubtitle}</span>
          </div>
        </div>
        <button className="command-launcher-button" type="button" aria-label={launcherOpen?'Close command menu':'Open command menu'} aria-haspopup="menu" aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onMouseEnter={openLauncherByHover} onClick={toggleLauncher}>

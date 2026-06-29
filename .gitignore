@@ -11,3 +11,5 @@ backend/data/*.db-wal
 backend/data/*.db-shm
 backend/backups/
 backend/backups/**
+backend/uploads/
+backend/uploads/**

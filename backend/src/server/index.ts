@@ -31,6 +31,8 @@ const mit3AppDataUrl = `${mit3Url}/api/app-data`;
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
 const dataDir = path.resolve(__dirname, '../../data');
 const backupsDir = path.resolve(__dirname, '../../backups');
+const uploadsDir = path.resolve(__dirname, '../../uploads');
+const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -38,8 +40,17 @@ const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT &&
 const smtpPort = Number(process.env.SMTP_PORT ?? 587);
 const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toString('hex');
 fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(brandingUploadsDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
+const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 app.use(express.json({ limit: '50kb' }));
+app.use('/uploads/branding', express.static(brandingUploadsDir, {
+  fallthrough: false,
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+  },
+}));
 
 type Role = 'Admin' | 'Manager' | 'Maintenance Tech 3' | 'Maintenance Tech 2' | 'Maintenance Tech 1';
 const roles: Role[] = ['Maintenance Tech 1', 'Maintenance Tech 2', 'Maintenance Tech 3', 'Manager', 'Admin'];
@@ -60,6 +71,7 @@ function initDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, is_owner_admin INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', lead_time TEXT NOT NULL DEFAULT '', important_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
@@ -163,7 +175,7 @@ function shouldScheduleMasterBackupFromAudit(action: string) {
 function auditWriteBackup(req: Request, action: string) {
   if (shouldScheduleMasterBackupFromAudit(action)) scheduleAutoBackup(`audit:${action}`, (req as AuthRequest).user ?? null);
 }
-type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance';
+type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 type HistoryLogInput = {
   section: HistorySection;
   action: string;
@@ -213,7 +225,7 @@ type HistoryLogRow = {
   user_email: string | null;
   created_at: string;
 };
-const historySections: HistorySection[] = ['inventory','requisitions','machine_library','equipment_library','facility_info','preventive_maintenance'];
+const historySections: HistorySection[] = ['inventory','requisitions','machine_library','equipment_library','facility_info','preventive_maintenance','settings'];
 const historySectionLabels: Record<HistorySection, string> = {
   inventory: 'Inventory',
   requisitions: 'Requisitions',
@@ -221,6 +233,7 @@ const historySectionLabels: Record<HistorySection, string> = {
   equipment_library: 'Equipment Library',
   facility_info: 'Facility Info',
   preventive_maintenance: 'Preventive Maintenance',
+  settings: 'Settings / System',
 };
 function historyString(value: unknown, maxLength = 240) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -261,6 +274,111 @@ function requiredReasonNote(value: unknown, label: string) {
   const reason = String(value ?? '').trim();
   if (!reason) throw new Error(`${label} reason is required.`);
   return reason.slice(0, 1200);
+}
+type LogoMode = 'text' | 'image';
+type IconAnimation = 'none' | 'glow' | 'rotate' | 'pulse';
+type BrandingSettings = {
+  companyName: string;
+  companySubtitle: string;
+  companyAccentText: string;
+  logoMode: LogoMode;
+  logoUrl: string;
+  logoFileName: string;
+  iconAnimation: IconAnimation;
+};
+const defaultBrandingSettings: BrandingSettings = {
+  companyName: 'JBT',
+  companySubtitle: 'Maintenance Command Center',
+  companyAccentText: 'USA',
+  logoMode: 'text',
+  logoUrl: '',
+  logoFileName: '',
+  iconAnimation: 'none',
+};
+const allowedIconAnimations: IconAnimation[] = ['none','glow','rotate','pulse'];
+const allowedLogoMimeTypes: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+function appSettingJson<T>(key: string): Partial<T> {
+  const row = one<{ value_json: string }>('SELECT value_json FROM app_settings WHERE key=?', [key]);
+  if (!row) return {};
+  try {
+    const parsed = JSON.parse(row.value_json);
+    return isRecord(parsed) ? parsed as Partial<T> : {};
+  } catch {
+    return {};
+  }
+}
+function setAppSettingJson(key: string, value: Record<string, unknown>, actor?: User | null) {
+  run('INSERT INTO app_settings (key,value_json,updated_by_user_id,updated_at) VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_by_user_id=excluded.updated_by_user_id, updated_at=excluded.updated_at', [
+    key,
+    JSON.stringify(value),
+    actor?.id ?? null,
+    now(),
+  ]);
+}
+function normalizeBrandingSettings(value: Partial<BrandingSettings>): BrandingSettings {
+  const companyName = String(value.companyName ?? defaultBrandingSettings.companyName).trim().slice(0, 20) || defaultBrandingSettings.companyName;
+  const companySubtitle = String(value.companySubtitle ?? defaultBrandingSettings.companySubtitle).trim().slice(0, 40);
+  const companyAccentText = String(value.companyAccentText ?? defaultBrandingSettings.companyAccentText).trim().slice(0, 8);
+  const logoMode = value.logoMode === 'image' ? 'image' : 'text';
+  const logoUrl = String(value.logoUrl ?? '').trim();
+  const logoFileName = String(value.logoFileName ?? '').trim();
+  const iconAnimation = allowedIconAnimations.includes(value.iconAnimation as IconAnimation) ? value.iconAnimation as IconAnimation : 'none';
+  return {
+    companyName,
+    companySubtitle,
+    companyAccentText,
+    logoMode: logoMode === 'image' && logoUrl ? 'image' : 'text',
+    logoUrl: logoUrl.startsWith('/uploads/branding/') ? logoUrl : '',
+    logoFileName: logoFileName.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 120),
+    iconAnimation,
+  };
+}
+function currentBrandingSettings() {
+  return normalizeBrandingSettings(appSettingJson<BrandingSettings>('branding'));
+}
+function validateBrandingInput(body: unknown, previous: BrandingSettings): BrandingSettings {
+  const input = isRecord(body) ? body : {};
+  const companyName = String(input.companyName ?? previous.companyName).trim();
+  const companySubtitle = String(input.companySubtitle ?? previous.companySubtitle).trim();
+  const companyAccentText = String(input.companyAccentText ?? previous.companyAccentText).trim();
+  const logoMode = String(input.logoMode ?? previous.logoMode).trim();
+  const iconAnimation = String(input.iconAnimation ?? previous.iconAnimation).trim();
+  if (!companyName) throw new Error('Company Name is required.');
+  if (companyName.length > 20) throw new Error('Company Name must be 20 characters or fewer.');
+  if (companySubtitle.length > 40) throw new Error('Subtitle must be 40 characters or fewer.');
+  if (companyAccentText.length > 8) throw new Error('Accent Text must be 8 characters or fewer.');
+  if (!['text','image'].includes(logoMode)) throw new Error('Logo Mode is invalid.');
+  if (!allowedIconAnimations.includes(iconAnimation as IconAnimation)) throw new Error('Icon Animation is invalid.');
+  const next = normalizeBrandingSettings({
+    ...previous,
+    companyName,
+    companySubtitle,
+    companyAccentText,
+    logoMode: logoMode as LogoMode,
+    iconAnimation: iconAnimation as IconAnimation,
+  });
+  if (next.logoMode === 'image' && !next.logoUrl) return { ...next, logoMode: 'text' };
+  return next;
+}
+function publicBrandingSettings(value = currentBrandingSettings()) {
+  return {
+    companyName: value.companyName,
+    companySubtitle: value.companySubtitle,
+    companyAccentText: value.companyAccentText,
+    logoMode: value.logoMode,
+    logoUrl: value.logoUrl,
+    logoFileName: value.logoFileName,
+    iconAnimation: value.iconAnimation,
+  };
+}
+function safeBrandingFileName(originalName: string, extension: string) {
+  const base = path.basename(originalName, path.extname(originalName)).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || 'company-logo';
+  return `${base}-${crypto.randomBytes(8).toString('hex')}${extension}`;
 }
 function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
@@ -3359,6 +3477,236 @@ function canCreateMasterBackups(actor: User) {
 function canRestoreMasterBackups(actor: User) {
   return actor.role === 'Admin';
 }
+type ResetSection =
+  | 'inventory'
+  | 'requisitions'
+  | 'history_inventory'
+  | 'history_requisitions'
+  | 'history_machine_library'
+  | 'history_equipment_library'
+  | 'history_facility_info'
+  | 'history_preventive_maintenance'
+  | 'history_settings'
+  | 'history_section'
+  | 'machine_library'
+  | 'equipment_library'
+  | 'facility_info'
+  | 'preventive_maintenance';
+type ResetRequest = { section: ResetSection; reasonNote: string; confirmation: string; options: Record<string, unknown> };
+const resetConfirmations: Record<Exclude<ResetSection, 'history_section'>, string> = {
+  inventory: 'RESET INVENTORY',
+  requisitions: 'RESET REQUISITIONS',
+  history_inventory: 'RESET HISTORY',
+  history_requisitions: 'RESET HISTORY',
+  history_machine_library: 'RESET HISTORY',
+  history_equipment_library: 'RESET HISTORY',
+  history_facility_info: 'RESET HISTORY',
+  history_preventive_maintenance: 'RESET HISTORY',
+  history_settings: 'RESET HISTORY',
+  machine_library: 'RESET MACHINE LIBRARY',
+  equipment_library: 'RESET EQUIPMENT LIBRARY',
+  facility_info: 'RESET FACILITY INFO',
+  preventive_maintenance: 'RESET PM',
+};
+const sectionLabels: Record<Exclude<ResetSection, 'history_section'>, string> = {
+  inventory: 'Inventory data',
+  requisitions: 'Requisitions data',
+  history_inventory: 'Inventory history logs',
+  history_requisitions: 'Requisition history logs',
+  history_machine_library: 'Machine Library history logs',
+  history_equipment_library: 'Equipment Library history logs',
+  history_facility_info: 'Facility Info history logs',
+  history_preventive_maintenance: 'Preventive Maintenance history logs',
+  history_settings: 'Settings / System history logs',
+  machine_library: 'Machine Library data',
+  equipment_library: 'Equipment Library data',
+  facility_info: 'Facility Info data',
+  preventive_maintenance: 'Preventive Maintenance data',
+};
+const resetSections = new Set<ResetSection>([
+  'inventory',
+  'requisitions',
+  'history_inventory',
+  'history_requisitions',
+  'history_machine_library',
+  'history_equipment_library',
+  'history_facility_info',
+  'history_preventive_maintenance',
+  'history_settings',
+  'history_section',
+  'machine_library',
+  'equipment_library',
+  'facility_info',
+  'preventive_maintenance',
+]);
+const resetTableAllowlists: Record<'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance', string[]> = {
+  machine_library: ['machine_assets','machines','machine_library','machine_pms'],
+  equipment_library: ['equipment_assets','equipment','equipment_library','equipment_pms'],
+  facility_info: ['facility_documents','facility_info','building_prints','facility_pms'],
+  preventive_maintenance: ['pm_tasks','pm_history','preventive_maintenance'],
+};
+const resetHistorySectionByReset: Partial<Record<ResetSection, HistorySection>> = {
+  history_inventory: 'inventory',
+  history_requisitions: 'requisitions',
+  history_machine_library: 'machine_library',
+  history_equipment_library: 'equipment_library',
+  history_facility_info: 'facility_info',
+  history_preventive_maintenance: 'preventive_maintenance',
+  history_settings: 'settings',
+};
+function tableExists(tableName: string) {
+  if (!/^[A-Za-z0-9_]+$/.test(tableName)) return false;
+  return Boolean(one<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [tableName]));
+}
+function rowCount(tableName: string, where = '', params: SqlParam[] = []) {
+  if (!tableExists(tableName)) return 0;
+  return one<{ count: number }>(`SELECT COUNT(*) AS count FROM ${tableName}${where}`, params)?.count ?? 0;
+}
+function deleteRows(tableName: string, where = '', params: SqlParam[] = []) {
+  if (!tableExists(tableName)) return 0;
+  const before = rowCount(tableName, where, params);
+  run(`DELETE FROM ${tableName}${where}`, params);
+  return before;
+}
+function resetSqliteSequence(tableName: string) {
+  if (tableExists('sqlite_sequence')) run('DELETE FROM sqlite_sequence WHERE name=?', [tableName]);
+}
+function resetStatusCounts() {
+  const historyCounts = Object.fromEntries(historySections.map(section=>[section, rowCount('history_logs',' WHERE section=?', [section])]));
+  const futureTableCounts = Object.fromEntries(Object.entries(resetTableAllowlists).map(([section,tables])=>[
+    section,
+    Object.fromEntries(tables.map(table=>[table, tableExists(table) ? rowCount(table) : null])),
+  ]));
+  return {
+    ok: true,
+    counts: {
+      inventoryParts: rowCount('inventory_parts'),
+      inventoryVendors: rowCount('inventory_vendors'),
+      inventoryLocations: rowCount('inventory_locations'),
+      requisitions: rowCount('inventory_requisitions'),
+      requisitionLines: rowCount('inventory_requisition_lines'),
+      historyCounts,
+      futureTableCounts,
+    },
+  };
+}
+function validateResetRequest(body: unknown): ResetRequest {
+  const input = isRecord(body) ? body : {};
+  const section = String(input.section ?? '').trim() as ResetSection;
+  if (!resetSections.has(section)) throw new Error('Reset section is invalid.');
+  const options = isRecord(input.options) ? input.options : {};
+  const confirmation = String(input.confirmation ?? '').trim();
+  const reasonNote = requiredReasonNote(input.reasonNote, 'Reset');
+  const expectedConfirmation = section === 'history_section' ? 'RESET HISTORY' : resetConfirmations[section];
+  if (confirmation !== expectedConfirmation) throw new Error(`Type ${expectedConfirmation} to confirm reset.`);
+  return { section, reasonNote, confirmation, options };
+}
+function resetTableGroup(section: keyof typeof resetTableAllowlists, deletedCounts: Record<string, number>) {
+  let existingTableCount = 0;
+  for (const tableName of resetTableAllowlists[section]) {
+    if (!tableExists(tableName)) continue;
+    existingTableCount += 1;
+    deletedCounts[tableName] = deleteRows(tableName);
+    resetSqliteSequence(tableName);
+  }
+  return existingTableCount;
+}
+function resetRequisitionsData(deletedCounts: Record<string, number>) {
+  deletedCounts.inventoryRequisitionLines = deleteRows('inventory_requisition_lines');
+  deletedCounts.inventoryRequisitions = deleteRows('inventory_requisitions');
+  if (tableExists('inventory_parts')) run("UPDATE inventory_parts SET requisition='', updated_at=? WHERE requisition<>''", [now()]);
+  resetSqliteSequence('inventory_requisition_lines');
+  resetSqliteSequence('inventory_requisitions');
+}
+function deleteNativeInventoryBackupFiles() {
+  if (!fs.existsSync(backupsDir)) return 0;
+  let deleted = 0;
+  for (const fileName of fs.readdirSync(backupsDir)) {
+    if (!/^MCC_Native_Inventory_Backup_.+\.(json|csv)$/i.test(fileName)) continue;
+    const resolved = path.resolve(backupsDir, fileName);
+    if (path.dirname(resolved) !== path.resolve(backupsDir)) continue;
+    fs.rmSync(resolved, { force: true });
+    deleted += 1;
+  }
+  return deleted;
+}
+function historySectionForReset(request: ResetRequest): HistorySection {
+  if (request.section === 'history_section') {
+    const selected = historySectionFromValue(request.options.historySection);
+    if (!selected) throw new Error('History section is required.');
+    return selected;
+  }
+  const selected = resetHistorySectionByReset[request.section];
+  if (!selected) throw new Error('History reset section is invalid.');
+  return selected;
+}
+function performReset(req: AuthRequest, request: ResetRequest) {
+  const actor = req.user!;
+  const preResetBackup = createMasterBackup({ type: 'manual', actor, notes: `Pre-reset backup before ${request.section}: ${request.reasonNote}` });
+  const verified = verifyMasterBackup(preResetBackup.id);
+  if (!verified.ok) throw new Error('Pre-reset backup could not be verified.');
+  const deletedCounts: Record<string, number> = {};
+  let message = `${sectionLabels[request.section === 'history_section' ? 'history_settings' : request.section]} reset complete.`;
+  const timestamp = now();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (request.section === 'inventory') {
+      deletedCounts.inventoryParts = deleteRows('inventory_parts');
+      resetSqliteSequence('inventory_parts');
+      if (request.options.includeVendorsLocations === true) {
+        deletedCounts.inventoryVendors = deleteRows('inventory_vendors');
+        deletedCounts.inventoryLocations = deleteRows('inventory_locations');
+        resetSqliteSequence('inventory_vendors');
+        resetSqliteSequence('inventory_locations');
+      }
+      if (request.options.includeLinkedRequisitions === true) resetRequisitionsData(deletedCounts);
+      message = 'Inventory data reset complete.';
+    } else if (request.section === 'requisitions') {
+      resetRequisitionsData(deletedCounts);
+      message = 'Requisitions data reset complete.';
+    } else if (request.section.startsWith('history_')) {
+      const historySection = historySectionForReset(request);
+      deletedCounts.historyLogs = deleteRows('history_logs',' WHERE section=?', [historySection]);
+      message = `${historySectionLabels[historySection]} history logs reset complete.`;
+    } else {
+      const dataSection = request.section as keyof typeof resetTableAllowlists;
+      const existingTableCount = resetTableGroup(dataSection, deletedCounts);
+      if (request.options.includeHistory === true) {
+        deletedCounts.historyLogs = deleteRows('history_logs',' WHERE section=?', [dataSection]);
+      }
+      if (existingTableCount === 0) {
+        message = `No ${sectionLabels[dataSection]} table exists yet.`;
+      } else {
+        message = `${sectionLabels[dataSection]} reset complete.`;
+      }
+    }
+    recordHistoryLog({
+      section: 'settings',
+      action: `reset_${request.section}`,
+      entityType: 'admin_reset',
+      entityLabel: sectionLabels[request.section === 'history_section' ? 'history_settings' : request.section],
+      reasonNote: request.reasonNote,
+      newValue: { deletedCounts, preResetBackupId: preResetBackup.id, options: request.options },
+      actor,
+      createdAt: timestamp,
+    });
+    audit(req, `reset ${request.section}`, 'admin_reset', request.section, { deletedCounts, preResetBackupId: preResetBackup.id });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  if (request.section === 'inventory' && request.options.includeInventoryBackups === true) {
+    try {
+      deletedCounts.inventoryBackupFiles = deleteNativeInventoryBackupFiles();
+    } catch (error) {
+      deletedCounts.inventoryBackupFiles = 0;
+      message += ' Inventory backup list files were not removed.';
+      console.log(`MCC inventory backup file cleanup failed: ${safeErrorMessage(error)}`);
+    }
+  }
+  return { ok: true, section: request.section, deletedCounts, preResetBackup, message, status: resetStatusCounts() };
+}
 function historySectionFromValue(value: unknown): HistorySection | undefined {
   const clean = String(value ?? '').trim().toLowerCase().replace(/-/g, '_');
   return historySections.includes(clean as HistorySection) ? clean as HistorySection : undefined;
@@ -3651,6 +3999,7 @@ async function mutateMit3Inventory(req: Request, operation: string, targetId: st
 }
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
+function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
 function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
@@ -3791,6 +4140,89 @@ app.post('/api/backup/restore', requireAuth, (req:AuthRequest,res)=>{
     const message = safeErrorMessage(error, [], 'Restore failed.');
     try { audit(req,'master restore failed','backup',isRecord(req.body) ? String(req.body.backupId ?? '') : '',{error:message}); } catch {}
     res.status(/confirm|not found|missing|checksum/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.get('/api/settings/branding', requireAuth, (_req,res)=>{
+  res.json({ok:true,branding:publicBrandingSettings()});
+});
+app.put('/api/settings/branding', requireAuth, requireOwnerAdmin, (req:AuthRequest,res)=>{
+  try {
+    const previous = currentBrandingSettings();
+    const body = isRecord(req.body) ? req.body : {};
+    const next = body.resetToDefault === true ? defaultBrandingSettings : validateBrandingInput(body, previous);
+    setAppSettingJson('branding', next, req.user!);
+    recordHistoryLog({
+      section: 'settings',
+      action: body.resetToDefault === true ? 'branding_reset_to_default' : 'branding_updated',
+      entityType: 'branding',
+      entityLabel: next.logoMode === 'image' ? 'Company logo/icon' : `${next.companyName} ${next.companyAccentText}`.trim(),
+      oldValue: publicBrandingSettings(previous),
+      newValue: publicBrandingSettings(next),
+      actor: req.user!,
+    });
+    audit(req, body.resetToDefault === true ? 'branding reset to default' : 'branding updated', 'settings', 'branding', {
+      oldBranding: publicBrandingSettings(previous),
+      newBranding: publicBrandingSettings(next),
+    });
+    res.json({ok:true,branding:publicBrandingSettings(next),message:body.resetToDefault === true ? 'Branding reset to JBT USA.' : 'Company branding saved.'});
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'Branding update failed.');
+    res.status(/required|characters|invalid/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.post('/api/settings/branding/logo', requireAuth, requireOwnerAdmin, brandingLogoUpload.single('file'), (req:AuthRequest,res)=>{
+  try {
+    if (!req.file) throw new Error('Choose a logo/icon file.');
+    const extension = allowedLogoMimeTypes[req.file.mimetype];
+    if (!extension) throw new Error('Logo/icon must be PNG, JPG, WEBP, or GIF.');
+    const fileName = safeBrandingFileName(req.file.originalname, extension);
+    const targetPath = path.join(brandingUploadsDir, fileName);
+    fs.writeFileSync(targetPath, req.file.buffer);
+    const previous = currentBrandingSettings();
+    const next = normalizeBrandingSettings({
+      ...previous,
+      logoMode: 'image',
+      logoUrl: `/uploads/branding/${fileName}`,
+      logoFileName: fileName,
+    });
+    setAppSettingJson('branding', next, req.user!);
+    recordHistoryLog({
+      section: 'settings',
+      action: 'branding_logo_uploaded',
+      entityType: 'branding',
+      entityLabel: 'Company logo/icon',
+      oldValue: publicBrandingSettings(previous),
+      newValue: publicBrandingSettings(next),
+      actor: req.user!,
+    });
+    audit(req, 'branding logo uploaded', 'settings', 'branding', {
+      fileName,
+      mimeType: req.file.mimetype,
+      sizeBytes: req.file.size,
+    });
+    res.status(201).json({ok:true,branding:publicBrandingSettings(next),message:'Company logo/icon uploaded.'});
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'Logo upload failed.');
+    res.status(/choose|must be|file too large|Unexpected field/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.get('/api/admin/reset/status', requireAuth, requireOwnerAdmin, (_req,res)=>{
+  try {
+    res.json(resetStatusCounts());
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error, [], 'Reset status failed.')});
+  }
+});
+app.post('/api/admin/reset/section', requireAuth, requireOwnerAdmin, (req:AuthRequest,res)=>{
+  let section = '';
+  try {
+    const request = validateResetRequest(req.body);
+    section = request.section;
+    res.json(performReset(req, request));
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'Reset failed. No data was removed.');
+    try { audit(req,'reset failed','admin_reset',section,{error:message}); } catch {}
+    res.status(/invalid|required|confirm|Owner Admin|backup/i.test(message) ? 400 : 500).json({ok:false,error:/backup|already running/i.test(message) ? message : 'Reset failed. No data was removed.'});
   }
 });
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>{
