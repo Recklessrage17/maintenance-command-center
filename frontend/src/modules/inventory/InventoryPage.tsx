@@ -18,6 +18,9 @@ type InventoryPart = {
   manufacturerBrand: string;
   unitCost: number | null;
   supplierPartNumber: string;
+  leadTime: string;
+  importantNote: string;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -31,7 +34,7 @@ type PartsResponse = {
 
 type FilterMode = 'all' | 'low' | 'requisition';
 type ModalMode = 'add' | 'edit';
-type Notice = { kind: 'success' | 'error'; text: string };
+type Notice = { id: number; kind: 'success' | 'error' | 'info'; text: string; expiresAt?: number };
 type SortKey = 'partNumber' | 'description' | 'location' | 'vendor' | 'quantity' | 'unitCost' | 'status';
 type SortDirection = 'asc' | 'desc';
 type PageSize = 50 | 100 | 250 | 'all';
@@ -123,6 +126,8 @@ type PartForm = {
   manufacturerBrand: string;
   unitCost: string;
   supplierPartNumber: string;
+  leadTime: string;
+  importantNote: string;
 };
 
 const blankForm: PartForm = {
@@ -136,6 +141,8 @@ const blankForm: PartForm = {
   manufacturerBrand: '',
   unitCost: '',
   supplierPartNumber: '',
+  leadTime: '',
+  importantNote: '',
 };
 
 function blankRequisitionForm(userFullName = ''): RequisitionHeaderForm {
@@ -174,6 +181,8 @@ const emptyNativeSummary: NativeSummary = {
   vendorCount: 0,
   locationCount: 0,
 };
+const noticeDurationMs = 5 * 60 * 1000;
+const newPartHighlightMs = 5 * 60 * 1000;
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
@@ -301,6 +310,8 @@ function validateForm(form: PartForm) {
   if (!Number.isFinite(Number(form.quantity))) return 'Quantity must be numeric.';
   if (!Number.isFinite(Number(form.minQuantity))) return 'Minimum Quantity must be numeric.';
   if (form.partInfoUrl.trim() && !validUrl(form.partInfoUrl.trim())) return 'Part Info URL must be blank or a valid http/https URL.';
+  if (form.leadTime.length > 120) return 'Lead Time must be 120 characters or less.';
+  if (form.importantNote.length > 500) return 'Important Note must be 500 characters or less.';
   return '';
 }
 
@@ -316,6 +327,8 @@ function formFromPart(part: InventoryPart): PartForm {
     manufacturerBrand: part.manufacturerBrand ?? '',
     unitCost: part.unitCost === null || part.unitCost === undefined ? '' : String(part.unitCost),
     supplierPartNumber: part.supplierPartNumber ?? '',
+    leadTime: part.leadTime ?? '',
+    importantNote: part.importantNote ?? '',
   };
 }
 
@@ -376,6 +389,8 @@ function payloadFromForm(form: PartForm) {
     manufacturerBrand: form.manufacturerBrand.trim(),
     unitCost: form.unitCost.trim() ? Number(form.unitCost) : 0,
     supplierPartNumber: form.supplierPartNumber.trim(),
+    leadTime: form.leadTime.trim(),
+    importantNote: form.importantNote.trim(),
   };
 }
 
@@ -402,6 +417,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
   const [fileImportSummary,setFileImportSummary]=useState<NativeFileImportSummary|null>(null);
   const [backupFiles,setBackupFiles]=useState<BackupFile[]>([]);
+  const [highlightedPartIds,setHighlightedPartIds]=useState<Record<string, number>>({});
   const [requisitionLines,setRequisitionLines]=useState<RequisitionLineForm[]>([]);
   const [requisitionForm,setRequisitionForm]=useState<RequisitionHeaderForm>(()=>blankRequisitionForm(userFullName));
   const [selectedPartIds,setSelectedPartIds]=useState<Set<string>>(()=>new Set());
@@ -420,27 +436,58 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const tableScrollRef = useRef<HTMLDivElement|null>(null);
   const lastAutoPageAtRef = useRef(0);
   const pendingScrollTargetRef = useRef<'top'|'bottom'|null>(null);
+  const noticeIdRef = useRef(0);
+  const lastRefreshStartedAtRef = useRef<Date|null>(null);
 
   const canWrite = writeRoles.has(userRole);
   const canUseInventoryTools = canWrite;
 
+  function showNotice(kind: Notice['kind'], text: string, options: { autoHide?: boolean } = {}) {
+    const autoHide = options.autoHide ?? kind !== 'error';
+    const nowMs = Date.now();
+    noticeIdRef.current += 1;
+    setNotice({ id: noticeIdRef.current, kind, text, expiresAt: autoHide ? nowMs + noticeDurationMs : undefined });
+  }
+
+  function highlightParts(ids: string[]) {
+    if (!ids.length) return;
+    const expiresAt = Date.now() + newPartHighlightMs;
+    setHighlightedPartIds(current=>{
+      const next = { ...current };
+      ids.forEach(id=>{ next[id] = expiresAt; });
+      return next;
+    });
+  }
+
   async function refresh(options: { notify?: boolean } = {}){
     setLoading(true);
     setError('');
+    const previousRefreshStartedAt = lastRefreshStartedAtRef.current;
+    const refreshStartedAt = new Date();
     try {
       const nextNativeSummary = await api<NativeSummaryResponse>('/api/inventory/native/summary');
       setNativeSummary(normalizeNativeSummary(nextNativeSummary));
       const partsResponse = await api<PartsResponse>('/api/inventory/native/parts');
       if (partsResponse.summary) setNativeSummary(normalizeNativeSummary(partsResponse.summary));
-      setParts(partsResponse.parts ?? []);
+      const nextParts = partsResponse.parts ?? [];
+      setParts(nextParts);
+      if (options.notify && previousRefreshStartedAt) {
+        const newPartIds = nextParts.filter(part=>{
+          const createdAt = new Date(part.createdAt);
+          return !Number.isNaN(createdAt.getTime()) && createdAt > previousRefreshStartedAt;
+        }).map(part=>part.id);
+        highlightParts(newPartIds);
+        if (newPartIds.length) setPage(1);
+      }
       const refreshedAt = new Date();
       setLastRefreshed(refreshedAt);
-      if (options.notify) setNotice({kind:'success',text:`MCC Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`});
+      lastRefreshStartedAtRef.current = refreshStartedAt;
+      if (options.notify) showNotice('success', `MCC Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`);
     } catch (err) {
       setParts([]);
       const message = (err as Error).message;
       setError(message);
-      if (options.notify) setNotice({kind:'error',text:message});
+      if (options.notify) showNotice('error', message);
     } finally {
       setLoading(false);
     }
@@ -457,6 +504,22 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   }
 
   useEffect(()=>{ void refresh(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
+  useEffect(()=>{
+    if (!notice?.expiresAt) return;
+    const delay = Math.max(0, notice.expiresAt - Date.now());
+    const timer = window.setTimeout(()=>setNotice(current=>current?.id === notice.id ? null : current), delay);
+    return () => window.clearTimeout(timer);
+  },[notice]);
+  useEffect(()=>{
+    const timer = window.setInterval(()=>{
+      const nowMs = Date.now();
+      setHighlightedPartIds(current=>{
+        const next = Object.fromEntries(Object.entries(current).filter(([,expiresAt])=>expiresAt > nowMs));
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  },[]);
 
   const showWriteActions = canWrite;
   const writeEnabled = canWrite;
@@ -475,7 +538,17 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     });
   },[filter,parts,search]);
 
-  const sortedParts = useMemo(()=>[...filteredParts].sort((left,right)=>compareParts(left,right,sortKey,sortDirection)),[filteredParts,sortDirection,sortKey]);
+  const activeHighlightedPartIds = useMemo(()=>{
+    const nowMs = Date.now();
+    return new Set(Object.entries(highlightedPartIds).filter(([,expiresAt])=>expiresAt > nowMs).map(([id])=>id));
+  },[highlightedPartIds]);
+  const sortedParts = useMemo(()=>[...filteredParts].sort((left,right)=>{
+    const leftPinned = activeHighlightedPartIds.has(left.id);
+    const rightPinned = activeHighlightedPartIds.has(right.id);
+    if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
+    if (leftPinned && rightPinned) return compareText(right.createdAt ?? '', left.createdAt ?? '');
+    return compareParts(left,right,sortKey,sortDirection);
+  }),[activeHighlightedPartIds,filteredParts,sortDirection,sortKey]);
   const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(sortedParts.length / pageSize));
   const visibleParts = useMemo(()=>{
     if (pageSize === 'all') return sortedParts;
@@ -648,10 +721,10 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         const nextTotal = nextItems.reduce((sum,item)=>sum + Number(item.quantityRequested) * Number(item.part.unitCost ?? 0), 0);
         setReviewItems(nextItems);
         setReviewForm(blankVendorRequisitionForm(nextGroup.vendorName, nextTotal));
-        setNotice({kind:'success',text:`${group.vendorName} PDF created. Review ${nextGroup.vendorName} next.`});
+        showNotice('success', `${group.vendorName} PDF created. Review ${nextGroup.vendorName} next.`);
       } else {
         clearSelection();
-        setNotice({kind:'success',text:'All selected vendor requisition PDFs were created.'});
+        showNotice('success', 'All selected vendor requisition PDFs were created.');
         await refresh();
       }
     } catch (err) {
@@ -667,9 +740,9 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     setNotice(null);
     try {
       await downloadFile(endpoint, fallbackFileName);
-      setNotice({kind:'success',text:successText});
+      showNotice('success', successText);
     } catch (err) {
-      setNotice({kind:'error',text:(err as Error).message});
+      showNotice('error', (err as Error).message);
     } finally {
       setToolsBusy('');
     }
@@ -683,9 +756,9 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       const result = await api<BackupListResponse>('/api/inventory/native/backups/create',{method:'POST'});
       setBackupFiles(result.backups ?? []);
       await loadBackups();
-      setNotice({kind:'success',text:'MCC Inventory backup created.'});
+      showNotice('success', 'MCC Inventory backup created.');
     } catch (err) {
-      setNotice({kind:'error',text:(err as Error).message});
+      showNotice('error', (err as Error).message);
     } finally {
       setToolsBusy('');
     }
@@ -706,9 +779,9 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       await refresh();
       await loadBackups();
       setInventoryImportFile(null);
-      setNotice({kind:'success',text:`Native import complete: ${result.addedCount} added, ${result.updatedCount} updated, ${result.skippedCount} skipped.`});
+      showNotice('success', `Inventory import complete: ${result.addedCount} added, ${result.updatedCount} updated, ${result.skippedCount} skipped.`);
     } catch (err) {
-      setNotice({kind:'error',text:(err as Error).message});
+      showNotice('error', (err as Error).message);
     } finally {
       setToolsBusy('');
     }
@@ -756,13 +829,20 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     const payload = JSON.stringify(payloadFromForm(form));
     const isEdit = modal === 'edit' && editingPart;
     try {
-      await api(isEdit ? `/api/inventory/native/parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/native/parts', {
+      const result = await api<{ part?: InventoryPart }>(isEdit ? `/api/inventory/native/parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/native/parts', {
         method: isEdit ? 'PATCH' : 'POST',
         body: payload,
       });
       closeModal(true);
-      setNotice({kind:'success',text:isEdit ? 'Inventory part updated in MCC Inventory.' : 'Inventory part added to MCC Inventory.'});
+      const savedPart = result.part;
+      const messagePartNumber = savedPart?.partNumber || form.partNumber.trim();
+      const messageDescription = savedPart?.description || form.description.trim();
+      showNotice('success', `${isEdit ? 'Updated' : 'Added'} inventory part: ${messagePartNumber} \u2014 ${messageDescription}`);
       await refresh();
+      if (savedPart?.id) {
+        highlightParts([savedPart.id]);
+        setPage(1);
+      }
     } catch (err) {
       setFormError((err as Error).message);
     } finally {
@@ -809,7 +889,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     if (!requisition) return;
     try {
       await downloadFile(requisition.pdfUrl, `MCC_Requisition_${requisition.requisitionNumber}.pdf`);
-      setNotice({kind:'success',text:`${requisition.requisitionNumber} PDF downloaded.`});
+      showNotice('success', `${requisition.requisitionNumber} PDF downloaded.`);
     } catch (err) {
       setPreviewError((err as Error).message);
     }
@@ -834,7 +914,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       if (!passed.length) throw new Error('No requisitions were passed.');
       closePreview(true);
       setSelectedPartIds(new Set());
-      setNotice({kind:'success',text:passed.length === 1 ? `Active requisition ${passed[0].requisitionNumber} created.` : `Created ${passed.length} active requisitions.`});
+      showNotice('success', passed.length === 1 ? `Active requisition ${passed[0].requisitionNumber} created.` : `Created ${passed.length} active requisitions.`);
       await refresh();
     } catch (err) {
       setPreviewError((err as Error).message);
@@ -896,7 +976,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       setRequisitionLines([]);
       setRequisitionForm(blankRequisitionForm(userFullName));
       openPreview(created);
-      setNotice({kind:'success',text:created.length === 1 ? `Preview ready for ${created[0].requisitionNumber}.` : `Preview ready for ${created.length} requisitions.`});
+      showNotice('success', created.length === 1 ? `Preview ready for ${created[0].requisitionNumber}.` : `Preview ready for ${created.length} requisitions.`);
     } catch (err) {
       const message = (err as Error).message;
       if (/Active requisition already exists/i.test(message) && window.confirm('Active requisition already exists for one or more selected parts. Generate another preview?')) {
@@ -942,6 +1022,17 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         )}
         <button className="primary-button preview-requisition-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
       </div>
+    );
+  }
+
+  function renderPartNumber(part: InventoryPart) {
+    const label = part.partNumber || part.itemId || '-';
+    if (!part.partInfoUrl) return <span className="plain-part-number">{label}</span>;
+    return (
+      <a className="part-number-link" href={part.partInfoUrl} target="_blank" rel="noopener noreferrer" title={part.partInfoUrl} onClick={event=>event.stopPropagation()}>
+        <span>{label}</span>
+        <small>Link</small>
+      </a>
     );
   }
 
@@ -1041,7 +1132,12 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         </section>
       )}
 
-      {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
+      {notice&&(
+        <div className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">
+          <span>{notice.text}</span>
+          <button className="toast-close-button" type="button" aria-label="Close message" onClick={()=>setNotice(null)}>Close</button>
+        </div>
+      )}
 
       <section className="mcc-card inventory-table-card">
         <div className="inventory-toolbar">
@@ -1071,12 +1167,22 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               </tr>
             </thead>
             <tbody>
-              {visibleParts.map(part=>(
-                  <tr key={part.id} className={selectedPartIds.has(part.id) ? 'inventory-row-selected' : undefined}>
+              {visibleParts.map(part=>{
+                const highlighted = activeHighlightedPartIds.has(part.id);
+                const rowClassName = [selectedPartIds.has(part.id) ? 'inventory-row-selected' : '', highlighted ? 'inventory-row-new' : ''].filter(Boolean).join(' ') || undefined;
+                return (
+                  <tr key={part.id} className={rowClassName}>
                     <td>
-                      <span className="plain-part-number">{part.partNumber || part.itemId || '-'}</span>
+                      <div className="part-number-stack">
+                        {renderPartNumber(part)}
+                        {highlighted&&<span className="new-part-badge">New</span>}
+                      </div>
                     </td>
-                    <td className="inventory-description-cell"><span className="inventory-description-text" title={part.description || undefined}>{part.description || '-'}</span></td>
+                    <td className="inventory-description-cell">
+                      <span className="inventory-description-text" title={part.description || undefined}>{part.description || '-'}</span>
+                      {part.importantNote&&<span className="inventory-important-note"><strong>Important:</strong> {part.importantNote}</span>}
+                      {part.leadTime&&<span className="inventory-lead-time">Lead time: {part.leadTime}</span>}
+                    </td>
                     <td>{part.location || '-'}</td>
                     <td>{part.vendor || '-'}</td>
                     <td>{part.quantity}</td>
@@ -1092,7 +1198,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                       </td>
                     )}
                   </tr>
-              ))}
+                );
+              })}
               {!loading&&sortedParts.length===0&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">No inventory rows match this view.</td></tr>}
               {loading&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">Loading MCC Inventory...</td></tr>}
             </tbody>
@@ -1151,6 +1258,14 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               <label className="form-field inventory-form-wide">
                 <span>Part Info URL</span>
                 <input value={form.partInfoUrl} onChange={event=>setForm({...form,partInfoUrl:event.target.value})} placeholder="https://..." />
+              </label>
+              <label className="form-field">
+                <span>Lead Time</span>
+                <input value={form.leadTime} onChange={event=>setForm({...form,leadTime:event.target.value})} placeholder="2 - 3 weeks" />
+              </label>
+              <label className="form-field inventory-form-wide">
+                <span>Important Note</span>
+                <textarea value={form.importantNote} onChange={event=>setForm({...form,importantNote:event.target.value})} placeholder="Important note shown in red under description" />
               </label>
             </div>
 
