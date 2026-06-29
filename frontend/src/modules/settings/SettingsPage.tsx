@@ -151,6 +151,7 @@ export function SettingsPage() {
   const primaryLanUrl = links?.primaryLanUrl ?? detectedLanUrls[0] ?? '';
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const backupCounts = backupStatus?.backupCountsByType ?? emptyBackupCounts;
+  const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
 
   function loadLinks() {
     setLoading(true);
@@ -190,15 +191,17 @@ export function SettingsPage() {
       const data = await api('/api/backup/create',{method:'POST',body:JSON.stringify({})});
       const nextStatus = normalizeBackupStatus(data.status ?? data);
       setBackupStatus(nextStatus);
-      const message = String(data.message ?? 'Manual backup created successfully.');
+      const message = String(data.message ?? (data.ok === false ? 'Backup failed.' : 'Manual backup created successfully.'));
+      if (data.ok === false) throw new Error(message);
       setManualBackupProgress({state:'success',activeStep:backupStepLabels.length - 1,message,completedAt:new Date().toISOString()});
       setLastManualBackupResult({ok:true,message:'Last manual backup succeeded.',createdAt:new Date().toISOString()});
       setMsg(message);
       await loadBackupStatus({quiet:true});
       if (showBackups) await loadBackups({quiet:true});
     } catch (e) {
-      const message = (e as Error).message || 'Backup failed.';
-      const safeMessage = message === 'Backup failed.'
+      const rawMessage = (e as Error).message || 'Backup failed.';
+      const message = rawMessage.replace(/\s+/g, ' ').slice(0, 180);
+      const safeMessage = !message || message === 'Backup failed.' || message === 'Request failed.'
         ? 'Backup failed. Settings is still safe. Check server console/logs.'
         : `Backup failed. Settings is still safe. ${message}`;
       setManualBackupProgress({state:'error',activeStep:Math.min(manualBackupProgress.activeStep, backupStepLabels.length - 2),message:safeMessage,completedAt:new Date().toISOString()});
@@ -418,11 +421,11 @@ export function SettingsPage() {
           </section>
         )}
 
-        {(lastManualBackupResult || backupStatus?.lastBackupResult)&&(
-          <section className={lastManualBackupResult?.ok ?? backupStatus?.lastBackupResult.ok ? 'backup-result-panel success' : 'backup-result-panel error'}>
+        {displayedBackupResult&&(
+          <section className={displayedBackupResult.ok ? 'backup-result-panel success' : 'backup-result-panel error'}>
             <span>Last result</span>
-            <strong>{lastManualBackupResult?.message ?? (backupStatus?.lastBackupResult.ok ? 'Last backup succeeded' : 'Last backup failed')}</strong>
-            <p>{lastManualBackupResult ? formatDateTime(lastManualBackupResult.createdAt) : backupStatus?.lastBackupResult.message}</p>
+            <strong>{lastManualBackupResult?.message ?? (displayedBackupResult.ok ? 'Last backup succeeded' : 'Last backup failed')}</strong>
+            <p>{lastManualBackupResult ? formatDateTime(lastManualBackupResult.createdAt) : displayedBackupResult.message}</p>
           </section>
         )}
       </article>

@@ -666,6 +666,7 @@ const nativeExportHeaders = ['MCC Item ID','Part Number','Description','Location
 const nativeBlankImportHeaders = nativeExportHeaders.filter(header => header !== 'MCC Item ID');
 type NativeExportHeader = typeof nativeExportHeaders[number];
 type NativeExportRecord = Record<NativeExportHeader, string | number>;
+type NativeImportCell = { text: string; hyperlink: string };
 type NativeImportRow = {
   rowNumber: number;
   mccItemId: string;
@@ -754,7 +755,17 @@ async function workbookBuffer(sheetName: string, headers: readonly string[], rec
   workbook.created = new Date();
   const sheet = workbook.addWorksheet(sheetName);
   sheet.addRow([...headers]);
-  for (const record of records) sheet.addRow(headers.map(header => record[header as NativeExportHeader] ?? ''));
+  const urlColumnIndex = headers.findIndex(header => isPartInfoUrlHeader(header)) + 1;
+  for (const record of records) {
+    const row = sheet.addRow(headers.map(header => record[header as NativeExportHeader] ?? ''));
+    if (urlColumnIndex > 0) {
+      const url = validWebUrl(String(record['Part Info URL'] ?? ''));
+      if (url) {
+        row.getCell(urlColumnIndex).value = { text: url, hyperlink: url };
+        row.getCell(urlColumnIndex).font = { color: { argb: 'FF0563C1' }, underline: true };
+      }
+    }
+  }
   styleInventorySheet(sheet);
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
@@ -1173,6 +1184,9 @@ function parseCsvRows(content: string) {
 function normalizeImportHeader(header: string) {
   return header.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
+function isPartInfoUrlHeader(header: string) {
+  return ['partinfourl','parturl','url'].includes(normalizeImportHeader(header));
+}
 function importRowFromRecord(record: Record<string, string>, rowNumber: number): NativeImportRow {
   const value = (...headers: string[]) => {
     for (const header of headers) {
@@ -1213,14 +1227,54 @@ function importRowsFromTable(rows: string[][]) {
     return importRowFromRecord(record, index + 2);
   }).filter(row => Object.values(row).some(value => String(value).trim()));
 }
+function stringFromExcelValue(value: unknown) {
+  if (value === undefined || value === null) return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== 'object') return String(value).trim();
+  const record = value as Record<string, unknown>;
+  if (typeof record.text === 'string') return record.text.trim();
+  if (record.result !== undefined && record.result !== null) return String(record.result).trim();
+  if (Array.isArray(record.richText)) {
+    return record.richText.map(part => isRecord(part) ? String(part.text ?? '') : '').join('').trim();
+  }
+  return '';
+}
 function excelCellText(cell: ExcelJS.Cell) {
+  return stringFromExcelValue(cell.value) || String(cell.text ?? '').trim();
+}
+function excelCellHyperlink(cell: ExcelJS.Cell) {
+  const cellWithHyperlink = cell as ExcelJS.Cell & { hyperlink?: unknown };
+  if (typeof cellWithHyperlink.hyperlink === 'string') return cellWithHyperlink.hyperlink.trim();
   const value = cell.value;
   if (value && typeof value === 'object') {
-    if ('text' in value && value.text !== undefined) return String(value.text).trim();
-    if ('result' in value && value.result !== undefined) return String(value.result).trim();
-    if ('richText' in value && Array.isArray(value.richText)) return value.richText.map(part => part.text).join('').trim();
+    const record = value as unknown as Record<string, unknown>;
+    if (typeof record.hyperlink === 'string') return record.hyperlink.trim();
+    if (record.text && typeof record.text === 'object') {
+      const textRecord = record.text as unknown as Record<string, unknown>;
+      if (typeof textRecord.hyperlink === 'string') return textRecord.hyperlink.trim();
+    }
   }
-  return String(cell.text ?? value ?? '').trim();
+  return '';
+}
+function excelCellImportValue(cell: ExcelJS.Cell, headerName: string): NativeImportCell {
+  const text = excelCellText(cell);
+  const hyperlink = isPartInfoUrlHeader(headerName) ? excelCellHyperlink(cell) : '';
+  return { text, hyperlink };
+}
+function importRowsFromExcelCells(rows: NativeImportCell[][]) {
+  if (rows.length < 1) return [];
+  const headers = rows[0].map(cell => cell.text.trim());
+  const normalizedHeaders = headers.map(normalizeImportHeader);
+  return rows.slice(1).map((row, index) => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, columnIndex) => {
+      const cell = row[columnIndex] ?? { text: '', hyperlink: '' };
+      const value = isPartInfoUrlHeader(header) ? cell.hyperlink || cell.text : cell.text;
+      record[header] = value;
+      record[normalizedHeaders[columnIndex]] = value;
+    });
+    return importRowFromRecord(record, index + 2);
+  }).filter(row => Object.values(row).some(value => String(value).trim()));
 }
 async function importRowsFromExcel(buffer: Buffer) {
   const workbook = new ExcelJS.Workbook();
@@ -1228,17 +1282,22 @@ async function importRowsFromExcel(buffer: Buffer) {
   await workbook.xlsx.load(arrayBuffer);
   const sheet = workbook.getWorksheet('MCC Inventory Update') ?? workbook.getWorksheet('MCC Inventory Import');
   if (!sheet) throw new Error('Excel file must include a sheet named MCC Inventory Import or MCC Inventory Update.');
-  const rows: string[][] = [];
+  const rows: NativeImportCell[][] = [];
   const columnCount = Math.max(sheet.columnCount, nativeExportHeaders.length);
+  const headerRow = sheet.getRow(1);
+  const headers: string[] = [];
+  for (let columnNumber = 1; columnNumber <= columnCount; columnNumber += 1) {
+    headers.push(excelCellText(headerRow.getCell(columnNumber)));
+  }
   for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
-    const values: string[] = [];
+    const values: NativeImportCell[] = [];
     for (let columnNumber = 1; columnNumber <= columnCount; columnNumber += 1) {
-      values.push(excelCellText(row.getCell(columnNumber)));
+      values.push(excelCellImportValue(row.getCell(columnNumber), headers[columnNumber - 1] ?? ''));
     }
-    if (values.some(value => value.trim())) rows.push(values);
+    if (values.some(value => value.text.trim() || value.hyperlink.trim())) rows.push(values);
   }
-  return importRowsFromTable(rows);
+  return importRowsFromExcelCells(rows);
 }
 async function parseInventoryImportFile(file: Express.Multer.File | undefined) {
   if (!file) throw new Error('Choose a CSV or Excel file to import.');
