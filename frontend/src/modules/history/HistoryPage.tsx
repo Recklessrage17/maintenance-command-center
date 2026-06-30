@@ -64,7 +64,7 @@ const sectionCards: Array<{ section: HistorySection; label: string; description:
 ];
 
 const emptyFilters: HistoryFilters = { q: '', action: '', user: '', startDate: '', endDate: '', workOrderNumber: '', partNumber: '', requisitionNumber: '', assetId: '' };
-const exportRoles = new Set(['Admin','Manager','Maintenance Tech 3']);
+const exportRoles = new Set(['Admin','Manager']);
 
 export function historySectionSlug(section: HistorySection) {
   return section.replace(/_/g, '-');
@@ -393,7 +393,7 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
           <button className="primary-button compact-button" type="button" onClick={()=>void exportPdf(false)} disabled={!canExport}>Export Filtered PDF</button>
           <button className="link-button compact-button" type="button" onClick={onBackToLanding}>Back to History Logs</button>
         </div>
-        {!canExport&&<p className="form-message">You can view history logs. Admin, Manager, or Maintenance Tech 3 permission is required to export PDFs.</p>}
+        {!canExport&&<p className="form-message">Admin or Manager permission is required to export History PDFs.</p>}
         <div className="table-card history-table-wrap">
           <table>
             <thead>

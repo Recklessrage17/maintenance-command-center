@@ -72,7 +72,7 @@ function initDb() {
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', lead_time TEXT NOT NULL DEFAULT '', important_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
@@ -139,9 +139,11 @@ function migrateDb() {
   if (!inventoryVendorColumns.has('country')) run("ALTER TABLE inventory_vendors ADD COLUMN country TEXT NOT NULL DEFAULT 'USA'");
   if (!inventoryVendorColumns.has('created_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN created_by_user_id INTEGER');
   if (!inventoryVendorColumns.has('updated_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN updated_by_user_id INTEGER');
+  if (!inventoryVendorColumns.has('is_active')) run('ALTER TABLE inventory_vendors ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
   if (!inventoryVendorColumns.has('deleted_at')) run('ALTER TABLE inventory_vendors ADD COLUMN deleted_at TEXT');
   if (!inventoryVendorColumns.has('deleted_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN deleted_by_user_id INTEGER');
   run("UPDATE inventory_vendors SET country='USA' WHERE country IS NULL OR country=''");
+  run('UPDATE inventory_vendors SET is_active=1 WHERE is_active IS NULL');
 
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
@@ -681,6 +683,8 @@ interface NativePartRow {
   updated_at: string;
   location_name: string | null;
   vendor_name: string | null;
+  vendor_deleted: number | null;
+  vendor_is_active: number | null;
 }
 function inventoryAudit(req: Request, action: string, targetType: string, targetId: string|number, details: Record<string, unknown> = {}) {
   const u = (req as AuthRequest).user;
@@ -695,9 +699,9 @@ function escapeLike(value: string) {
 function getOrCreateNativeLookup(table: NativeLookupTable, name: string, timestamp: string) {
   const cleanName = name.trim();
   if (!cleanName) return { id: null as number | null, created: false };
-  const existing = one<{ id: number }>(`SELECT id FROM ${table} WHERE deleted=0 AND lower(name)=lower(?) ORDER BY id LIMIT 1`, [cleanName]);
+  const existing = one<{ id: number; deleted?: number }>(`SELECT id, deleted FROM ${table} WHERE lower(name)=lower(?) ORDER BY deleted ASC, id LIMIT 1`, [cleanName]);
   if (existing) {
-    run(`UPDATE ${table} SET source=?, imported_from_mit3_at=?, updated_at=? WHERE id=?`, ['MIT3 HTTP API',timestamp,timestamp,existing.id]);
+    if (Number(existing.deleted ?? 0) === 0) run(`UPDATE ${table} SET source=?, imported_from_mit3_at=?, updated_at=? WHERE id=?`, ['MIT3 HTTP API',timestamp,timestamp,existing.id]);
     return { id: existing.id, created: false };
   }
   const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'MIT3 HTTP API',timestamp,timestamp,timestamp]);
@@ -706,7 +710,7 @@ function getOrCreateNativeLookup(table: NativeLookupTable, name: string, timesta
 function getOrCreateMccNativeLookup(req: Request, table: NativeLookupTable, name: string, timestamp: string, vendorHistoryAction = 'vendor_created_from_inventory') {
   const cleanName = name.trim();
   if (!cleanName) return { id: null as number | null, created: false };
-  const existing = one<{ id: number }>(`SELECT id FROM ${table} WHERE deleted=0 AND lower(name)=lower(?) ORDER BY id LIMIT 1`, [cleanName]);
+  const existing = one<{ id: number }>(`SELECT id FROM ${table} WHERE lower(name)=lower(?) ORDER BY deleted ASC, id LIMIT 1`, [cleanName]);
   if (existing) return { id: existing.id, created: false };
   const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'mcc',null,timestamp,timestamp]);
   const id = Number(result.lastInsertRowid);
@@ -743,6 +747,7 @@ interface VendorRow {
   contact_phone_ext: string;
   contact_email: string;
   notes: string;
+  is_active: number;
   source: string;
   imported_from_mit3_at: string | null;
   created_by_user_id: number | null;
@@ -792,17 +797,19 @@ function validateVendorInput(body: unknown) {
     contactPhoneExt,
     contactEmail,
     notes: textField(input, ['notes']).slice(0, 2000),
+    isActive: input.isActive === undefined && input.is_active === undefined ? true : !(input.isActive === false || input.isActive === 0 || String(input.isActive ?? input.is_active).toLowerCase() === 'false' || String(input.isActive ?? input.is_active).toLowerCase() === 'disabled'),
+    reasonNote: textField(input, ['reasonNote','reason']).slice(0, 1200),
   };
 }
 type VendorInput = ReturnType<typeof validateVendorInput>;
 function vendorById(id: number) {
-  return one<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 AND id=?', [id]);
+  return one<VendorRow>('SELECT * FROM inventory_vendors WHERE id=?', [id]);
 }
 function vendorByName(companyName: string, excludeId?: number) {
   const clean = companyName.trim();
   return excludeId
-    ? one<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 AND lower(trim(name))=lower(?) AND id<>? ORDER BY id LIMIT 1', [clean,excludeId])
-    : one<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 AND lower(trim(name))=lower(?) ORDER BY id LIMIT 1', [clean]);
+    ? one<VendorRow>('SELECT * FROM inventory_vendors WHERE lower(trim(name))=lower(?) AND id<>? ORDER BY deleted ASC, id LIMIT 1', [clean,excludeId])
+    : one<VendorRow>('SELECT * FROM inventory_vendors WHERE lower(trim(name))=lower(?) ORDER BY deleted ASC, id LIMIT 1', [clean]);
 }
 function publicVendor(row: VendorRow) {
   return {
@@ -824,6 +831,9 @@ function publicVendor(row: VendorRow) {
     contactPhoneExt: row.contact_phone_ext ?? '',
     contactEmail: row.contact_email ?? '',
     notes: row.notes ?? '',
+    isActive: Boolean(row.is_active),
+    deleted: Boolean(row.deleted),
+    status: row.deleted ? 'Deleted' : row.is_active ? 'Enabled' : 'Disabled',
     source: row.source,
     importedFromMit3At: row.imported_from_mit3_at ?? '',
     createdAt: row.created_at,
@@ -849,6 +859,7 @@ function vendorHistoryValue(row: VendorRow | VendorInput) {
     contactPhoneExt: row.contactPhoneExt,
     contactEmail: row.contactEmail,
     notes: row.notes,
+    isActive: row.isActive,
   };
 }
 function recordVendorHistory(input: { action: string; actor: User; vendorId: number; companyName: string; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; reasonNote?: string }) {
@@ -866,13 +877,13 @@ function recordVendorHistory(input: { action: string; actor: User; vendorId: num
   });
 }
 function updateVendorRow(id: number, input: VendorInput, actor: User, timestamp: string) {
-  run(`UPDATE inventory_vendors SET name=?, phone_type=?, phone_number=?, phone_ext=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_ext=?, contact_email=?, notes=?, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
-    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,actor.id,timestamp,id,
+  run(`UPDATE inventory_vendors SET name=?, phone_type=?, phone_number=?, phone_ext=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_ext=?, contact_email=?, notes=?, is_active=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
+    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,actor.id,timestamp,id,
   ]);
 }
 function insertVendorRow(input: VendorInput, actor: User, timestamp: string) {
-  const result = run(`INSERT INTO inventory_vendors (name,phone_type,phone_number,phone_ext,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_ext,contact_email,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
-    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,null,actor.id,actor.id,timestamp,timestamp,
+  const result = run(`INSERT INTO inventory_vendors (name,phone_type,phone_number,phone_ext,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_ext,contact_email,notes,is_active,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
+    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,null,actor.id,actor.id,timestamp,timestamp,
   ]);
   return Number(result.lastInsertRowid);
 }
@@ -896,6 +907,8 @@ function normalizeNativePart(row: NativePartRow) {
     location: row.location_name ?? '',
     vendor: row.vendor_name ?? '',
     vendorId: row.vendor_id ? String(row.vendor_id) : '',
+    vendorDeleted: Boolean(row.vendor_deleted ?? 0),
+    vendorIsActive: row.vendor_id ? Boolean(row.vendor_is_active ?? 0) : true,
     quantity: Number(row.quantity ?? 0),
     minQuantity: Number(row.min_quantity ?? 0),
     status: row.status,
@@ -916,10 +929,10 @@ function normalizeNativePart(row: NativePartRow) {
   };
 }
 function nativePartRowById(id: number) {
-  return one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+  return one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name, v.deleted AS vendor_deleted, v.is_active AS vendor_is_active
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
-LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
 WHERE p.deleted=0 AND p.id=?`, [id]);
 }
 function nativePartById(id: number) {
@@ -975,10 +988,10 @@ function nativeParts(search = '', filter: NativePartFilter = 'all') {
   }
   if (filter === 'low') where.push("(p.status IN ('Low Stock','Out of Stock') OR (p.min_quantity > 0 AND p.quantity <= p.min_quantity))");
   if (filter === 'requisition') where.push("p.requisition<>''");
-  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name, v.deleted AS vendor_deleted, v.is_active AS vendor_is_active
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
-LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
 WHERE ${where.join(' AND ')}
 ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`, params).map(normalizeNativePart);
 }
@@ -1037,10 +1050,10 @@ type PreparedNativeImportRow = {
   status: string;
 };
 function nativeInventoryRows() {
-  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name, v.deleted AS vendor_deleted, v.is_active AS vendor_is_active
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
-LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
 WHERE p.deleted=0
 ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`);
 }
@@ -1950,10 +1963,10 @@ function normalizedPartNumberKey(partNumber: string) {
 function findActivePartsByPartNumber(partNumber: string) {
   const clean = partNumber.trim();
   if (!clean) return [];
-  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name, v.deleted AS vendor_deleted, v.is_active AS vendor_is_active
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
-LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
 WHERE p.deleted=0 AND lower(trim(p.part_number))=lower(?) ORDER BY p.id`, [clean]);
 }
 function inventoryHistoryCountForPart(partId: number) {
@@ -3634,24 +3647,14 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
   const vendorName = requisitionVendorName(
     requisition.vendor_name && !/^multiple\b/i.test(requisition.vendor_name) ? requisition.vendor_name : vendors[0]
   );
-  const locationSummary = locations.length === 1 ? locations[0] : locations.length > 1 ? `Multiple locations (${locations.length})` : requisition.location_name;
-  const lifecycleNotes = [
-    `Status: ${requisition.status}`,
-    lines.length > 1 ? `Lines: ${lines.length}` : '',
-    locationSummary ? `Location: ${locationSummary}` : '',
-    requisition.ordered_at ? `Ordered: ${userNameById(requisition.ordered_by_user_id) || '-'} ${formatPdfDateTime(requisition.ordered_at)}` : '',
-    requisition.received_at ? `Received: ${userNameById(requisition.received_by_user_id) || '-'} ${formatPdfDateTime(requisition.received_at)}` : '',
-    requisition.canceled_at ? `Canceled: ${userNameById(requisition.canceled_by_user_id) || '-'} ${formatPdfDateTime(requisition.canceled_at)}` : '',
-    requisition.cancel_reason ? `Cancel reason: ${requisition.cancel_reason}` : '',
-    requisition.notes ? `Notes: ${requisition.notes}` : '',
-  ].filter(Boolean).join(' | ');
+  const userComments = cleanPdfText(requisition.notes ?? '');
   const requisitionedByName = requisition.requisitioned_by_name || requisition.requested_by_name;
   return buildRequisitionPdf({
     vendor: vendorName,
     requisitionNumber: requisition.requisition_number,
     requestedBy: requisitionedByName,
     createdAt: requisition.requested_at,
-    notes: lifecycleNotes,
+    notes: userComments,
     header: {
       poNo: '',
       requestDate: localDateOnly(),
@@ -3660,7 +3663,7 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
       shipVia: requisition.ship_via,
       confirmedWith: requisition.confirmed_with,
       workOrderNo: requisition.work_order_number,
-      comments: lifecycleNotes,
+      comments: userComments,
       requisitionedBy: requisitionedByName,
       taxExempt: requisition.tax_exempt || 'No',
       materialCert: requisition.material_cert || 'No',
@@ -3957,11 +3960,11 @@ function canInventoryWrite(actor: User) {
 function canInventoryImport(actor: User) {
   return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
 }
-function canViewHistory(_actor: User) {
-  return true;
+function canViewHistory(actor: User) {
+  return actor.role === 'Admin' || actor.role === 'Manager';
 }
 function canExportHistory(actor: User) {
-  return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+  return actor.role === 'Admin' || actor.role === 'Manager';
 }
 function canViewMasterBackups(actor: User) {
   return roleRank(actor.role) >= roleRank('Manager');
@@ -4542,7 +4545,8 @@ app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (re
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.get('/api/vendors', requireAuth, (req,res)=>{
   const q = queryText(req.query.q);
-  const where = ['deleted=0'];
+  const includeDeleted = String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
+  const where = includeDeleted ? ['1=1'] : ['deleted=0'];
   const params: SqlParam[] = [];
   if (q) {
     const like = `%${escapeLike(q)}%`;
@@ -4553,7 +4557,7 @@ app.get('/api/vendors', requireAuth, (req,res)=>{
   res.json({ok:true,vendors});
 });
 app.get('/api/vendors/options', requireAuth, (_req,res)=>{
-  const options = all<{ id: number; name: string }>('SELECT id, name FROM inventory_vendors WHERE deleted=0 ORDER BY name COLLATE NOCASE, id').map(row=>({id:row.id,companyName:row.name}));
+  const options = all<{ id: number; name: string; is_active: number; deleted: number }>('SELECT id, name, is_active, deleted FROM inventory_vendors WHERE deleted=0 AND is_active=1 ORDER BY name COLLATE NOCASE, id').map(row=>({id:row.id,companyName:row.name,isActive:Boolean(row.is_active),deleted:Boolean(row.deleted)}));
   res.json({ok:true,options});
 });
 app.get('/api/vendors/:id', requireAuth, (req,res)=>{
@@ -4566,30 +4570,34 @@ app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req
   try {
     const actor = req.user!;
     const input = validateVendorInput(req.body);
+    if (!input.isActive && !input.reasonNote) throw new Error('Reason for disabling vendor is required.');
     const timestamp = now();
     const existing = vendorByName(input.companyName);
     let vendorId = existing?.id ?? 0;
     db.exec('BEGIN IMMEDIATE');
     try {
       if (existing) {
+        if (existing.is_active && !input.isActive && !input.reasonNote) throw new Error('Reason for disabling vendor is required.');
         updateVendorRow(existing.id,input,actor,timestamp);
         vendorId = existing.id;
         recordVendorHistory({
-          action: 'vendor_updated',
+          action: existing.deleted && input.isActive ? 'vendor_reactivated' : existing.is_active && !input.isActive ? 'vendor_disabled' : !existing.is_active && input.isActive ? 'vendor_enabled' : 'vendor_updated',
           actor,
           vendorId,
           companyName: input.companyName,
           oldValue: vendorHistoryValue(existing),
           newValue: vendorHistoryValue(input),
+          reasonNote: existing.is_active && !input.isActive ? input.reasonNote : undefined,
         });
       } else {
         vendorId = insertVendorRow(input,actor,timestamp);
         recordVendorHistory({
-          action: 'vendor_created',
+          action: input.isActive ? 'vendor_created' : 'vendor_disabled',
           actor,
           vendorId,
           companyName: input.companyName,
           newValue: vendorHistoryValue(input),
+          reasonNote: input.isActive ? undefined : input.reasonNote,
         });
       }
       db.exec('COMMIT');
@@ -4602,7 +4610,7 @@ app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req
     res.status(existing ? 200 : 201).json({ok:true,vendor:vendor ? publicVendor(vendor) : null,mergedExisting:Boolean(existing)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/required|valid|120|20|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/required|valid|120|20|phone type|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
@@ -4615,17 +4623,19 @@ app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (
     const input = validateVendorInput(req.body);
     const duplicate = vendorByName(input.companyName,vendorId);
     if (duplicate) throw new Error('Company Name already exists for another active vendor.');
+    if (existing.is_active && !input.isActive && !input.reasonNote) throw new Error('Reason for disabling vendor is required.');
     const timestamp = now();
     db.exec('BEGIN IMMEDIATE');
     try {
       updateVendorRow(vendorId,input,actor,timestamp);
       recordVendorHistory({
-        action: 'vendor_updated',
+        action: existing.deleted && input.isActive ? 'vendor_reactivated' : existing.is_active && !input.isActive ? 'vendor_disabled' : !existing.is_active && input.isActive ? 'vendor_enabled' : 'vendor_updated',
         actor,
         vendorId,
         companyName: input.companyName,
         oldValue: vendorHistoryValue(existing),
         newValue: vendorHistoryValue(input),
+        reasonNote: existing.is_active && !input.isActive ? input.reasonNote : undefined,
       });
       db.exec('COMMIT');
     } catch (error) {
@@ -4637,7 +4647,7 @@ app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (
     res.json({ok:true,vendor:vendor ? publicVendor(vendor) : null});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|phone type|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
@@ -4647,11 +4657,9 @@ app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
     if (roleRank(req.user!.role) < roleRank('Manager')) return res.status(403).json({ok:false,error:'Permission denied.'});
     const existing = vendorById(vendorId);
     if (!existing) throw new Error('Vendor not found.');
-    const activePartCount = one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_parts WHERE deleted=0 AND vendor_id=?', [vendorId])?.count ?? 0;
-    if (activePartCount > 0) throw new Error('Vendor is used by active inventory parts and cannot be deleted.');
     const reasonNote = requiredReasonNote(isRecord(req.body) ? req.body.reasonNote ?? req.body.reason : '', 'Vendor delete');
     const timestamp = now();
-    run('UPDATE inventory_vendors SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_by_user_id=?, updated_at=? WHERE id=? AND deleted=0', [timestamp,req.user!.id,req.user!.id,timestamp,vendorId]);
+    run('UPDATE inventory_vendors SET deleted=1, is_active=0, deleted_at=?, deleted_by_user_id=?, updated_by_user_id=?, updated_at=? WHERE id=? AND deleted=0', [timestamp,req.user!.id,req.user!.id,timestamp,vendorId]);
     recordVendorHistory({
       action: 'vendor_deleted',
       actor: req.user!,
@@ -5012,10 +5020,10 @@ app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('invento
         const partId = Number(rawItem.inventoryPartId ?? rawItem.partId ?? rawItem.id);
         if (!Number.isInteger(partId) || partId <= 0) throw new Error('Native inventory part not found.');
         const quantityRequested = validateQuantityRequested(rawItem.quantityRequested ?? rawItem.quantity);
-        const part = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+        const part = one<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name, v.deleted AS vendor_deleted, v.is_active AS vendor_is_active
 FROM inventory_parts p
 LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
-LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
 WHERE p.deleted=0 AND p.id=?`, [partId]);
         if (!part) throw new Error('Native inventory part not found.');
         const rawUnitCost = Number(rawItem.unitCost ?? part.unit_cost ?? 0);

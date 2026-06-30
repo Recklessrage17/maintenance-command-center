@@ -9,6 +9,8 @@ type InventoryPart = {
   location: string;
   vendor: string;
   vendorId?: string;
+  vendorDeleted?: boolean;
+  vendorIsActive?: boolean;
   quantity: number;
   minQuantity: number;
   status: string;
@@ -609,7 +611,21 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const writeEnabled = canWrite;
 
   const locationOptions = useMemo(()=>[...new Set(parts.map(part=>part.location.trim()).filter(Boolean))].sort(compareText),[parts]);
-  const vendorOptions = useMemo(()=>[...new Set([...vendorRecords.map(vendor=>vendor.companyName.trim()), ...parts.map(part=>part.vendor.trim())].filter(Boolean))].sort(compareText),[parts,vendorRecords]);
+  const vendorOptions = useMemo(()=>{
+    const currentVendor = form.vendor.trim();
+    const names = new Map<string, { name: string; disabled: boolean }>();
+    vendorRecords.forEach(vendor=>{
+      const name = vendor.companyName.trim();
+      if (!name) return;
+      if (vendor.isActive && !vendor.deleted) names.set(vendorNameKey(name), { name, disabled: false });
+      else if (currentVendor && vendorNameKey(currentVendor) === vendorNameKey(name)) names.set(vendorNameKey(name), { name, disabled: true });
+    });
+    parts.forEach(part=>{
+      const name = part.vendor.trim();
+      if (name && currentVendor && vendorNameKey(currentVendor) === vendorNameKey(name) && (part.vendorDeleted || part.vendorIsActive === false)) names.set(vendorNameKey(name), { name, disabled: true });
+    });
+    return [...names.values()].sort((left,right)=>compareText(left.name,right.name));
+  },[form.vendor,parts,vendorRecords]);
 
   const filteredParts = useMemo(()=>{
     const needle = search.trim().toLowerCase();
@@ -708,7 +724,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
   function sortIndicator(key: SortKey) {
     if (sortKey !== key) return '';
-    return sortDirection === 'asc' ? 'asc' : 'desc';
+    return sortDirection === 'asc' ? '^' : 'v';
   }
 
   function sortAria(key: SortKey): 'none' | 'ascending' | 'descending' {
@@ -1285,9 +1301,12 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                     <td>{part.location || '-'}</td>
                     <td>
                       {part.vendor ? (
-                        <button className="vendor-name-link inventory-vendor-link" type="button" onClick={event=>{ event.stopPropagation(); void openVendorDetailForPart(part); }}>
-                          {part.vendor}
-                        </button>
+                        <div className="inventory-vendor-cell">
+                          <button className={(part.vendorDeleted || part.vendorIsActive === false) ? 'inactive-vendor-link inventory-vendor-link' : 'vendor-name-link inventory-vendor-link'} type="button" onClick={event=>{ event.stopPropagation(); void openVendorDetailForPart(part); }}>
+                            {part.vendor}
+                          </button>
+                          {(part.vendorDeleted || part.vendorIsActive === false)&&<span className="inactive-vendor-note">Company no longer uses this vendor.</span>}
+                        </div>
                       ) : '-'}
                     </td>
                     <td>{part.quantity}</td>
@@ -1378,7 +1397,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               {locationOptions.map(name=><option key={name} value={name} />)}
             </datalist>
             <datalist id="native-vendor-options">
-              {vendorOptions.map(name=><option key={name} value={name} />)}
+              {vendorOptions.map(option=><option key={option.name} value={option.name} label={option.disabled ? `${option.name} (Disabled)` : option.name} />)}
             </datalist>
 
             {formError&&<p className="form-message error">{formError}</p>}
@@ -1408,6 +1427,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         contactPhoneExt: vendorDetail.contactPhoneExt,
         contactEmail: vendorDetail.contactEmail,
         notes: vendorDetail.notes,
+        isActive: vendorDetail.isActive,
+        reasonNote: '',
       }); setVendorEditorId(vendorDetail.id); setVendorDetail(null); setVendorError(''); }} />}
       {vendorEditorInitial&&<VendorEditorModal mode={vendorEditorId ? 'edit' : 'add'} initial={vendorEditorInitial} onClose={()=>{ if(!vendorSaving){ setVendorEditorInitial(null); setVendorEditorId(null); setVendorError(''); } }} onSave={saveInventoryVendor} saving={vendorSaving} error={vendorError} />}
 

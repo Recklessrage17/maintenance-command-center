@@ -6,9 +6,9 @@ type RoleBadgeProps = {
 
 function roleLabel(role: string, isOwnerAdmin?: boolean) {
   if (isOwnerAdmin) return 'Owner Admin';
-  if (role === 'Maintenance Tech 3') return 'Tech 3';
-  if (role === 'Maintenance Tech 2') return 'Tech 2';
-  if (role === 'Maintenance Tech 1') return 'Tech 1';
+  if (role === 'Maintenance Tech 3') return 'Tier 3';
+  if (role === 'Maintenance Tech 2') return 'Tier 2';
+  if (role === 'Maintenance Tech 1') return 'Tier 1';
   return role;
 }
 

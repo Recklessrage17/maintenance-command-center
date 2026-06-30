@@ -63,6 +63,8 @@ async function assertSourceWiring() {
 
   assert(inventory.includes('InventoryPage'), 'Inventory page module did not load for smoke inspection.');
   assert(vendors.includes('Manage vendor companies'), 'Vendors page module did not load for smoke inspection.');
+  assert(layout.includes("i.id !== 'history' || canViewHistory"), 'History Logs navigation is not gated by role.');
+  assert(app.includes('canViewHistory') && app.includes("user.role === 'Admin' || user.role === 'Manager'"), 'History Logs route is not limited to Admin/Manager users.');
   assert(history.includes('History Logs'), 'History Logs page module did not load for smoke inspection.');
   assert(pm.includes('Production machine records, PMs, parts, and documents.'), 'Machine Library page shell is missing.');
   assert(assets.includes('Auxiliary and support equipment records, PMs, parts, and documents.'), 'Equipment Library page shell is missing.');

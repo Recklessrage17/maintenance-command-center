@@ -21,12 +21,15 @@ export type VendorRecord = {
   contactPhoneExt: string;
   contactEmail: string;
   notes: string;
+  isActive: boolean;
+  deleted: boolean;
+  status: 'Enabled' | 'Disabled' | 'Deleted';
   source?: string;
   createdAt?: string;
   updatedAt?: string;
 };
 
-export type VendorForm = Omit<VendorRecord, 'id' | 'source' | 'createdAt' | 'updatedAt'>;
+export type VendorForm = Omit<VendorRecord, 'id' | 'deleted' | 'status' | 'source' | 'createdAt' | 'updatedAt'> & { reasonNote: string };
 
 type VendorsResponse = { ok: boolean; vendors: VendorRecord[] };
 type VendorResponse = { ok: boolean; vendor: VendorRecord };
@@ -52,6 +55,8 @@ export const blankVendorForm: VendorForm = {
   contactPhoneExt: '',
   contactEmail: '',
   notes: '',
+  isActive: true,
+  reasonNote: '',
 };
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
@@ -93,6 +98,8 @@ export function vendorFormFromVendor(vendor: VendorRecord): VendorForm {
     contactPhoneExt: vendor.contactPhoneExt ?? '',
     contactEmail: vendor.contactEmail ?? '',
     notes: vendor.notes ?? '',
+    isActive: vendor.isActive ?? true,
+    reasonNote: '',
   };
 }
 
@@ -115,14 +122,17 @@ export function vendorPayloadFromForm(form: VendorForm) {
     contactPhoneExt: form.contactPhoneExt.trim(),
     contactEmail: form.contactEmail.trim(),
     notes: form.notes.trim(),
+    isActive: form.isActive,
+    reasonNote: form.reasonNote.trim(),
   };
 }
 
-export function validateVendorForm(form: VendorForm) {
+export function validateVendorForm(form: VendorForm, requireDisableReason = !form.isActive) {
   if (!form.companyName.trim()) return 'Company Name is required.';
   if (form.companyName.trim().length > 120) return 'Company Name must be 120 characters or less.';
   if (form.phoneExt.trim().length > 20 || form.contactPhoneExt.trim().length > 20) return 'EXT # must be 20 characters or less.';
   if (form.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) return 'Contact Email must be a valid email address.';
+  if (requireDisableReason && !form.reasonNote.trim()) return 'Reason for disabling vendor is required.';
   return '';
 }
 
@@ -153,6 +163,7 @@ export function VendorDetailModal({vendor,onClose,onEdit}:{vendor:VendorRecord;o
           <DetailRow label="Contact title">{vendor.contactTitle}</DetailRow>
           <DetailRow label="Contact phone">{formatPhone(vendor.contactPhoneType, vendor.contactPhoneNumber, vendor.contactPhoneExt)}</DetailRow>
           <DetailRow label="Contact email">{vendor.contactEmail ? <a href={`mailto:${vendor.contactEmail}`}>{vendor.contactEmail}</a> : '-'}</DetailRow>
+          <DetailRow label="Status">{vendor.status}</DetailRow>
           <DetailRow label="Notes">{vendor.notes}</DetailRow>
         </div>
         {onEdit&&(
@@ -173,7 +184,7 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const validation = validateVendorForm(form);
+    const validation = validateVendorForm(form, initial.isActive && !form.isActive);
     setLocalError(validation);
     if (validation) return;
     await onSave(form);
@@ -206,6 +217,8 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
           <label className="form-field"><span>Contact Phone #</span><input value={form.contactPhoneNumber} onChange={event=>setForm({...form,contactPhoneNumber:event.target.value})} /></label>
           <label className="form-field"><span>Contact EXT #</span><input value={form.contactPhoneExt} onChange={event=>setForm({...form,contactPhoneExt:event.target.value})} /></label>
           <label className="form-field"><span>Contact Email</span><input value={form.contactEmail} onChange={event=>setForm({...form,contactEmail:event.target.value})} /></label>
+          <label className="form-field"><span>Vendor Status</span><select value={form.isActive ? 'enabled' : 'disabled'} onChange={event=>setForm({...form,isActive:event.target.value === 'enabled',reasonNote:event.target.value === 'enabled' ? '' : form.reasonNote})}><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+          {!form.isActive&&<label className="form-field vendor-form-wide"><span>Reason for disabling vendor <b className="required-marker" aria-label="required">*</b></span><textarea value={form.reasonNote} onChange={event=>setForm({...form,reasonNote:event.target.value})} /></label>}
           <label className="form-field vendor-form-wide"><span>Notes</span><textarea value={form.notes} onChange={event=>setForm({...form,notes:event.target.value})} /></label>
         </div>
         {(localError||error)&&<p className="form-message error">{localError||error}</p>}
@@ -226,6 +239,7 @@ export function VendorsPage() {
   const [detailVendor,setDetailVendor]=useState<VendorRecord|null>(null);
   const [editingVendor,setEditingVendor]=useState<VendorRecord|null>(null);
   const [adding,setAdding]=useState(false);
+  const [showDeleted,setShowDeleted]=useState(false);
   const [saving,setSaving]=useState(false);
   const [formError,setFormError]=useState('');
 
@@ -234,6 +248,7 @@ export function VendorsPage() {
     try {
       const params = new URLSearchParams();
       if (nextSearch.trim()) params.set('q', nextSearch.trim());
+      if (showDeleted) params.set('includeDeleted', '1');
       const data = await api<VendorsResponse>(`/api/vendors${params.toString() ? `?${params}` : ''}`);
       setVendors(data.vendors ?? []);
     } catch (err) {
@@ -243,7 +258,7 @@ export function VendorsPage() {
     }
   }
 
-  useEffect(()=>{ void loadVendors(''); },[]);
+  useEffect(()=>{ void loadVendors(''); },[showDeleted]);
 
   const sortedVendors = useMemo(()=>[...vendors].sort((left,right)=>compareText(left.companyName,right.companyName)),[vendors]);
   const editorInitial = editingVendor ? vendorFormFromVendor(editingVendor) : blankVendorForm;
@@ -297,6 +312,7 @@ export function VendorsPage() {
         <div className="vendors-toolbar-actions">
           <button className="secondary-button" type="button" onClick={()=>loadVendors(search)} disabled={loading}>{loading?'Searching...':'Search'}</button>
           <button className="link-button" type="button" onClick={()=>{ setSearch(''); void loadVendors(''); }}>Clear</button>
+          <label className="show-deleted-toggle vendor-deleted-toggle"><input type="checkbox" checked={showDeleted} onChange={event=>setShowDeleted(event.target.checked)} /> Show Deleted</label>
           <button className="primary-button" type="button" onClick={()=>{ setAdding(true); setEditingVendor(null); setFormError(''); }}>Add Vendor</button>
         </div>
       </section>
@@ -313,19 +329,21 @@ export function VendorsPage() {
                 <th>Contact Phone</th>
                 <th>Email</th>
                 <th>City/State</th>
+                <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {sortedVendors.map(vendor=>(
                 <tr key={vendor.id}>
-                  <td><button className="vendor-name-link" type="button" onClick={()=>setDetailVendor(vendor)}>{vendor.companyName}</button></td>
+                  <td><button className="vendor-list-name-button" type="button" onClick={()=>setDetailVendor(vendor)}>{vendor.companyName}</button></td>
                   <td>{formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt) || '-'}</td>
                   <td>{vendor.contactName || '-'}</td>
                   <td>{vendor.contactTitle || '-'}</td>
                   <td>{formatPhone(vendor.contactPhoneType, vendor.contactPhoneNumber, vendor.contactPhoneExt) || '-'}</td>
                   <td>{vendor.contactEmail ? <a href={`mailto:${vendor.contactEmail}`}>{vendor.contactEmail}</a> : '-'}</td>
                   <td>{cityState(vendor) || '-'}</td>
+                  <td><span className={vendor.deleted ? 'status-pill disabled vendor-status-deleted' : vendor.isActive ? 'status-pill vendor-status-enabled' : 'status-pill disabled vendor-status-disabled'}>{vendor.status}</span></td>
                   <td>
                     <div className="inventory-row-actions vendors-row-actions">
                       <button className="secondary-button compact-button" type="button" onClick={()=>setDetailVendor(vendor)}>View</button>
@@ -335,8 +353,8 @@ export function VendorsPage() {
                   </td>
                 </tr>
               ))}
-              {!loading&&!sortedVendors.length&&<tr><td colSpan={8} className="empty-table-cell">No vendors found.</td></tr>}
-              {loading&&<tr><td colSpan={8} className="empty-table-cell">Loading vendors...</td></tr>}
+              {!loading&&!sortedVendors.length&&<tr><td colSpan={9} className="empty-table-cell">No vendors found.</td></tr>}
+              {loading&&<tr><td colSpan={9} className="empty-table-cell">Loading vendors...</td></tr>}
             </tbody>
           </table>
         </div>

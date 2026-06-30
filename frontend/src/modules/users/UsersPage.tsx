@@ -4,10 +4,10 @@ import { RoleBadge } from '../../components/RoleBadge';
 const roles = ['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2','Maintenance Tech 1'];
 const roleHelp: Record<string, string> = {
   Admin: 'Admin - full user management',
-  Manager: 'Manager - manager and tech users',
-  'Maintenance Tech 3': 'Maintenance Tech 3 - tech 3 and below',
-  'Maintenance Tech 2': 'Maintenance Tech 2 - tech 2 and below',
-  'Maintenance Tech 1': 'Maintenance Tech 1 - no user management',
+  Manager: 'Manager - manager and tier users',
+  'Maintenance Tech 3': 'Tier 3 - tier 3 and below',
+  'Maintenance Tech 2': 'Tier 2 - tier 2 and below',
+  'Maintenance Tech 1': 'Tier 1 - no user management',
 };
 
 async function api(path:string, options:RequestInit={}) {

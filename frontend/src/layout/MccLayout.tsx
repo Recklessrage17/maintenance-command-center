@@ -24,8 +24,8 @@ const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = 
   { id: 'users', label: 'Admin / Users', management: true },
   { id: 'settings', label: 'Settings' },
 ];
-export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;onLogout:()=>void}) {
- const navItems=baseNav.filter(i=>!i.management||canManageUsers);
+export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
+ const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory));
  const [launcherOpen,setLauncherOpen]=useState(false);
  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
  const launcherRef=useRef<HTMLDivElement>(null);
