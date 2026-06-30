@@ -29,6 +29,17 @@ type User={
   canDelete:boolean;
 };
 
+function formatMccDateTime(value?: string | null) {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || 'Unknown';
+  const month = new Intl.DateTimeFormat(undefined,{month:'long'}).format(date);
+  const day = String(date.getDate()).padStart(2, '0');
+  const year = date.getFullYear();
+  const time = new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',hour12:true}).format(date);
+  return `Date: ${month}-${day}-${year} → Time: ${time}`;
+}
+
 export function UsersPage(){
   const [users,setUsers]=useState<User[]>([]);
   const [msg,setMsg]=useState('');
@@ -122,7 +133,7 @@ export function UsersPage(){
                 <td><strong className="user-name">{u.fullName}</strong></td>
                 <td>{u.email}</td>
                 <td><RoleBadge role={u.role} isOwnerAdmin={u.isOwnerAdmin} /></td>
-                <td>{u.lastLoginAt ?? 'Never'}</td>
+                <td className="user-last-login">{formatMccDateTime(u.lastLoginAt)}</td>
                 <td><span className={u.disabled?'status-pill disabled':'status-pill'}>{u.disabled?'Disabled':'Active'}</span></td>
                 <td>
                   <div className="user-actions">

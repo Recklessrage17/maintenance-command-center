@@ -197,6 +197,9 @@ function shouldScheduleMasterBackupFromAudit(action: string) {
   return value.startsWith('user ')
     || value.startsWith('password change')
     || value.startsWith('password reset')
+    || value.startsWith('vendor ')
+    || value.startsWith('branding ')
+    || value.startsWith('reset ')
     || value.includes('inventory native')
     || value.includes('inventory import')
     || value.includes('import from mit3')
@@ -1187,6 +1190,7 @@ type MasterBackupManifest = {
   databaseFile: 'mcc.sqlite';
   databaseSizeBytes: number;
   includedPaths: string[];
+  includedFolders: string[];
   recordCounts: Record<string, number>;
   checksumSha256: string;
   notes: string;
@@ -1200,10 +1204,18 @@ type MasterBackupSummary = {
   sizeBytes: number;
   databaseSizeBytes: number;
   includedPaths: string[];
+  includedFolders: string[];
   recordCounts: Record<string, number>;
   checksumSha256: string;
   notes: string;
   restorable: boolean;
+};
+type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
+type ProtectedBackupArea = {
+  key: string;
+  label: string;
+  status: ProtectedAreaStatus;
+  detail: string;
 };
 type BackupOperationResult = {
   ok: boolean;
@@ -1218,6 +1230,19 @@ const masterBackupPrefix = 'MCC_Master_Backup_';
 const scheduledBackupIntervalMs = 60 * 60 * 1000;
 const autoBackupDelayMs = 45 * 1000;
 const backupRetention: Record<MasterBackupType, number> = { startup: 10, scheduled: 30, auto: 50, manual: 30, pre_restore: 20 };
+const masterBackupFolderCandidates = ['uploads','documents','files'];
+const backupDataAreaDefinitions = [
+  { key: 'inventoryParts', label: 'Inventory', tables: ['inventory_parts'] },
+  { key: 'vendors', label: 'Vendors', tables: ['inventory_vendors'] },
+  { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines'] },
+  { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
+  { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
+  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machines','machine_library','machine_pms'] },
+  { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment','equipment_library','equipment_pms'] },
+  { key: 'facilityRecords', label: 'Facility', tables: ['facility_documents','facility_info','building_prints','facility_pms'] },
+  { key: 'users', label: 'Users/Roles', tables: ['users'] },
+  { key: 'settingsBranding', label: 'Settings/Branding', tables: ['app_settings'] },
+] as const;
 let autoBackupTimer: NodeJS.Timeout | undefined;
 let autoBackupReason = '';
 let autoBackupActor: User | null = null;
@@ -1258,6 +1283,9 @@ function tableCount(tableName: string) {
     return 0;
   }
 }
+function tableGroupCount(tableNames: readonly string[]) {
+  return tableNames.reduce((total, tableName)=>total + (tableExists(tableName) ? tableCount(tableName) : 0), 0);
+}
 function masterBackupRecordCounts() {
   return {
     users: tableCount('users'),
@@ -1266,7 +1294,27 @@ function masterBackupRecordCounts() {
     requisitions: tableCount('inventory_requisitions'),
     requisitionLines: tableCount('inventory_requisition_lines'),
     historyLogs: tableCount('history_logs'),
+    machineRecords: tableGroupCount(['machine_assets','machines','machine_library','machine_pms']),
+    equipmentRecords: tableGroupCount(['equipment_assets','equipment','equipment_library','equipment_pms']),
+    facilityRecords: tableGroupCount(['facility_documents','facility_info','building_prints','facility_pms']),
+    preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
   };
+}
+function masterBackupProtectedAreas(): ProtectedBackupArea[] {
+  const counts = masterBackupRecordCounts();
+  return backupDataAreaDefinitions.map(area=>{
+    const existingTables = area.tables.filter(tableName=>tableExists(tableName));
+    const recordCount = Number(counts[area.key as keyof typeof counts] ?? 0);
+    if (!existingTables.length) {
+      return { key: area.key, label: area.label, status: 'ready', detail: 'Ready / No data yet' };
+    }
+    return {
+      key: area.key,
+      label: area.label,
+      status: 'protected',
+      detail: recordCount > 0 ? `${recordCount} record${recordCount === 1 ? '' : 's'}` : 'Protected / No data yet',
+    };
+  });
 }
 function actorForManifest(actor?: User | null) {
   return actor ? { id: actor.id, fullName: actor.full_name, email: actor.email, role: actor.role } : null;
@@ -1313,6 +1361,7 @@ function summaryFromMasterBackupFolder(folderPath: string): MasterBackupSummary 
     sizeBytes: folderSizeBytes(folderPath),
     databaseSizeBytes: manifest?.databaseSizeBytes ?? (fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0),
     includedPaths: manifest?.includedPaths ?? (fs.existsSync(dbFile) ? ['mcc.sqlite'] : []),
+    includedFolders: manifest?.includedFolders ?? (manifest?.includedPaths ?? []).filter(value=>value.endsWith('/')),
     recordCounts: manifest?.recordCounts ?? {},
     checksumSha256: manifest?.checksumSha256 ?? '',
     notes: manifest?.notes ?? '',
@@ -1358,10 +1407,14 @@ function createMasterBackup(input: { type: MasterBackupType; actor?: User | null
     db.exec('PRAGMA wal_checkpoint(FULL);');
     db.exec(`VACUUM INTO ${sqliteLiteral(backupDbPath)}`);
     const includedPaths = ['mcc.sqlite'];
+    const includedFolders: string[] = [];
     const fileTargetRoot = path.join(targetDir, 'files');
-    for (const includedFolder of ['uploads','documents','files']) {
+    for (const includedFolder of masterBackupFolderCandidates) {
       const sourcePath = path.resolve(__dirname, '../../', includedFolder);
-      if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder))) includedPaths.push(`${includedFolder}/`);
+      if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder))) {
+        includedPaths.push(`${includedFolder}/`);
+        includedFolders.push(`${includedFolder}/`);
+      }
     }
     const databaseSizeBytes = fs.statSync(backupDbPath).size;
     const manifest: MasterBackupManifest = {
@@ -1373,6 +1426,7 @@ function createMasterBackup(input: { type: MasterBackupType; actor?: User | null
       databaseFile: 'mcc.sqlite',
       databaseSizeBytes,
       includedPaths,
+      includedFolders,
       recordCounts: masterBackupRecordCounts(),
       checksumSha256: sha256File(backupDbPath),
       notes: input.notes ?? '',
@@ -1462,9 +1516,15 @@ function masterBackupStatus() {
   return {
     ok: true,
     latestBackup,
+    lastAutoBackup: backups.find(backup=>backup.type === 'auto') ?? null,
+    lastManualBackup: backups.find(backup=>backup.type === 'manual') ?? null,
+    lastPreResetBackup: backups.find(backup=>backup.type === 'manual' && /pre-reset backup/i.test(backup.notes)) ?? null,
+    lastPreRestoreBackup: backups.find(backup=>backup.type === 'pre_restore') ?? null,
     backupFolderExists: fs.existsSync(masterBackupDir),
     backupCountsByType: backupCountsByType(backups),
     lastBackupResult,
+    autoBackupPending: Boolean(autoBackupTimer),
+    protectedAreas: masterBackupProtectedAreas(),
     nextScheduledBackupAt,
     databaseSize: dbStat?.size ?? 0,
     backupHealth: health.ok ? 'Healthy' : `Needs attention: ${health.message}`,

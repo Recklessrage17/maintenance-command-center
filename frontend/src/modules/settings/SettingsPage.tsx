@@ -18,15 +18,29 @@ type BackupSummary = {
   databaseSizeBytes: number;
   recordCounts: Record<string, number>;
   includedPaths: string[];
+  includedFolders: string[];
   notes: string;
   restorable: boolean;
+};
+type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
+type ProtectedArea = {
+  key: string;
+  label: string;
+  status: ProtectedAreaStatus;
+  detail: string;
 };
 type BackupStatus = {
   ok: boolean;
   latestBackup: BackupSummary | null;
+  lastAutoBackup: BackupSummary | null;
+  lastManualBackup: BackupSummary | null;
+  lastPreResetBackup: BackupSummary | null;
+  lastPreRestoreBackup: BackupSummary | null;
   backupFolderExists: boolean;
   backupCountsByType: Record<BackupType, number>;
   lastBackupResult: { ok: boolean; message: string; backupId?: string; createdAt?: string };
+  autoBackupPending: boolean;
+  protectedAreas: ProtectedArea[];
   nextScheduledBackupAt: string | null;
   databaseSize: number;
   backupHealth: string;
@@ -164,8 +178,21 @@ function normalizeBackupSummary(value: unknown): BackupSummary | null {
     databaseSizeBytes: Number(data.databaseSizeBytes ?? 0),
     recordCounts: asRecord(data.recordCounts) as Record<string, number>,
     includedPaths: Array.isArray(data.includedPaths) ? data.includedPaths.map(String) : [],
+    includedFolders: Array.isArray(data.includedFolders) ? data.includedFolders.map(String) : [],
     notes: String(data.notes ?? ''),
     restorable: Boolean(data.restorable ?? false),
+  };
+}
+
+function normalizeProtectedArea(value: unknown): ProtectedArea | null {
+  const data = asRecord(value);
+  if (!data.key && !data.label) return null;
+  const status = ['protected','ready','pending'].includes(String(data.status)) ? String(data.status) as ProtectedAreaStatus : 'ready';
+  return {
+    key: String(data.key ?? data.label),
+    label: String(data.label ?? data.key),
+    status,
+    detail: String(data.detail ?? protectedAreaStatusLabel(status)),
   };
 }
 
@@ -177,6 +204,10 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
   return {
     ok: data.ok !== false,
     latestBackup: normalizeBackupSummary(data.latestBackup),
+    lastAutoBackup: normalizeBackupSummary(data.lastAutoBackup),
+    lastManualBackup: normalizeBackupSummary(data.lastManualBackup),
+    lastPreResetBackup: normalizeBackupSummary(data.lastPreResetBackup),
+    lastPreRestoreBackup: normalizeBackupSummary(data.lastPreRestoreBackup),
     backupFolderExists: Boolean(data.backupFolderExists),
     backupCountsByType: {
       startup: Number(counts.startup ?? 0),
@@ -191,6 +222,8 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
       backupId: lastResult.backupId ? String(lastResult.backupId) : undefined,
       createdAt: lastResult.createdAt ? String(lastResult.createdAt) : undefined,
     },
+    autoBackupPending: Boolean(data.autoBackupPending),
+    protectedAreas: Array.isArray(data.protectedAreas) ? data.protectedAreas.map(normalizeProtectedArea).filter((area): area is ProtectedArea => Boolean(area)) : [],
     nextScheduledBackupAt: data.nextScheduledBackupAt ? String(data.nextScheduledBackupAt) : null,
     databaseSize: Number(data.databaseSize ?? 0),
     backupHealth: String(data.backupHealth ?? 'Checking...'),
@@ -632,6 +665,31 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
           ))}
         </div>
 
+        <section className="backup-protection-panel">
+          <div className="backup-protection-heading">
+            <div>
+              <span>Auto Protection</span>
+              <strong>{backupStatus?.autoBackupPending ? 'Pending write backup' : 'Enabled'}</strong>
+            </div>
+            <span className={`backup-area-badge ${backupStatus?.autoBackupPending ? 'pending' : 'protected'}`}>{backupStatus?.autoBackupPending ? 'Pending' : 'Protected'}</span>
+          </div>
+          <div className="backup-protection-times">
+            <p><strong>Last backup</strong><span>{formatDateTime(backupStatus?.latestBackup?.createdAt)}</span></p>
+            <p><strong>Last auto backup</strong><span>{formatDateTime(backupStatus?.lastAutoBackup?.createdAt)}</span></p>
+            <p><strong>Last manual backup</strong><span>{formatDateTime(backupStatus?.lastManualBackup?.createdAt)}</span></p>
+            <p><strong>Last pre-reset/pre-restore</strong><span>{formatDateTime(backupStatus?.lastPreResetBackup?.createdAt ?? backupStatus?.lastPreRestoreBackup?.createdAt)}</span></p>
+          </div>
+          <div className="backup-protected-area-grid">
+            {(backupStatus?.protectedAreas ?? []).map(area=>(
+              <div className="backup-protected-area" key={area.key}>
+                <span className={`backup-area-badge ${area.status}`}>{protectedAreaStatusLabel(area.status)}</span>
+                <strong>{area.label}</strong>
+                <small>{area.detail}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="network-notes backup-notes">
           <strong>Automatic safety</strong>
           <ul>
@@ -790,6 +848,12 @@ function formatDateTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined,{dateStyle:'short',timeStyle:'short'}).format(date);
+}
+
+function protectedAreaStatusLabel(status: ProtectedAreaStatus) {
+  if (status === 'protected') return 'Protected';
+  if (status === 'pending') return 'Pending';
+  return 'Ready / No data yet';
 }
 
 function formatBytes(value: number) {
