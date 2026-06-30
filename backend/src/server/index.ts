@@ -1319,6 +1319,9 @@ function normalizeImportHeader(header: string) {
 function isPartInfoUrlHeader(header: string) {
   return ['partinfourl','parturl','url'].includes(normalizeImportHeader(header));
 }
+function isPartNumberHeader(header: string) {
+  return ['partnumber','partno'].includes(normalizeImportHeader(header));
+}
 function importRowFromRecord(record: Record<string, string>, rowNumber: number): NativeImportRow {
   const value = (...headers: string[]) => {
     for (const header of headers) {
@@ -1406,7 +1409,7 @@ function excelCellHyperlink(cell: ExcelJS.Cell) {
 }
 function excelCellImportValue(cell: ExcelJS.Cell, headerName: string): NativeImportCell {
   const text = excelCellText(cell);
-  const hyperlink = isPartInfoUrlHeader(headerName) ? excelCellHyperlink(cell) : '';
+  const hyperlink = isPartInfoUrlHeader(headerName) || isPartNumberHeader(headerName) ? excelCellHyperlink(cell) : '';
   return { text, hyperlink };
 }
 function importRowsFromExcelCells(rows: NativeImportCell[][]) {
@@ -1415,12 +1418,20 @@ function importRowsFromExcelCells(rows: NativeImportCell[][]) {
   const normalizedHeaders = headers.map(normalizeImportHeader);
   return rows.slice(1).map((row, index) => {
     const record: Record<string, string> = {};
+    let partInfoUrl = '';
+    let partNumberHyperlink = '';
     headers.forEach((header, columnIndex) => {
       const cell = row[columnIndex] ?? { text: '', hyperlink: '' };
       const value = isPartInfoUrlHeader(header) ? cell.hyperlink || cell.text : cell.text;
+      if (isPartInfoUrlHeader(header) && value.trim()) partInfoUrl = value.trim();
+      if (isPartNumberHeader(header) && cell.hyperlink.trim() && !partNumberHyperlink) partNumberHyperlink = cell.hyperlink.trim();
       record[header] = value;
       record[normalizedHeaders[columnIndex]] = value;
     });
+    if (!partInfoUrl && partNumberHyperlink) {
+      record['Part Info URL'] = partNumberHyperlink;
+      record[normalizeImportHeader('Part Info URL')] = partNumberHyperlink;
+    }
     return importRowFromRecord(record, index + 2);
   }).filter(row => Object.values(row).some(value => String(value).trim()));
 }
