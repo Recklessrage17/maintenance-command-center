@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', po_initiator TEXT NOT NULL DEFAULT '', requisitioned_by_name TEXT NOT NULL DEFAULT '', tax_exempt TEXT NOT NULL DEFAULT 'No', confirmed_with TEXT NOT NULL DEFAULT '', material_cert TEXT NOT NULL DEFAULT 'No', ship_via TEXT NOT NULL DEFAULT '', fob TEXT NOT NULL DEFAULT 'Destination', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
@@ -89,6 +91,9 @@ CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_part ON inventory_requisit
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_status ON inventory_requisitions (status,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);
+CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
 CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
 CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
 CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
@@ -162,6 +167,12 @@ function migrateDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
+CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);`);
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -4098,7 +4109,7 @@ const resetSections = new Set<ResetSection>([
   'preventive_maintenance',
 ]);
 const resetTableAllowlists: Record<'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance', string[]> = {
-  machine_library: ['machine_assets','machines','machine_library','machine_pms'],
+  machine_library: ['machine_assets','machine_brand_settings','machines','machine_library','machine_pms'],
   equipment_library: ['equipment_assets','equipment','equipment_library','equipment_pms'],
   facility_info: ['facility_documents','facility_info','building_prints','facility_pms'],
   preventive_maintenance: ['pm_tasks','pm_history','preventive_maintenance'],
@@ -4556,9 +4567,213 @@ async function mutateMit3Inventory(req: Request, operation: string, targetId: st
   return {part,id};
 }
 
+type MachineAssetStatus = 'active' | 'down' | 'disabled' | 'removed';
+type MachineReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap';
+type MachineAssetRow = {
+  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
+};
+const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
+const voltageTypes = new Set(['AC','DC','']);
+const machineDefaultBrandColors: Record<string, string> = { Toyo: '#67D8FF', Arburg: '#38D7B3', Husky: '#FFD45A', Engel: '#8FB6D8', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
+const machineImportHeaders = ['Press','Shot (oz)','Ton','H&E','Mfg','Barrel','Year','Model #','Equip Serial #'] as const;
+type MachineAssetInput = ReturnType<typeof validateMachineAssetInput>;
+function canMachineWrite(actor: User) { return roleRank(actor.role) >= roleRank('Maintenance Tech 3'); }
+function canMachineDelete(actor: User) { return roleRank(actor.role) >= roleRank('Manager'); }
+function safeHexColor(value: unknown, fallback = '#44D7FF') {
+  const clean = String(value ?? '').trim();
+  return /^#[0-9A-Fa-f]{6}$/.test(clean) ? clean.toUpperCase() : fallback;
+}
+function seedMachineBrandSettings(actor?: User | null) {
+  const timestamp = now();
+  for (const [brandName, colorHex] of Object.entries(machineDefaultBrandColors)) run('INSERT OR IGNORE INTO machine_brand_settings (brand_name,color_hex,created_at,updated_at,updated_by_user_id) VALUES (?,?,?,?,?)', [brandName,colorHex,timestamp,timestamp,actor?.id ?? null]);
+}
+seedMachineBrandSettings();
+function normalizeMachineBrand(value: string) {
+  const clean = value.trim().replace(/\s+/g, ' ');
+  return (clean || 'Unknown').slice(0, 120);
+}
+function ensureMachineBrandSetting(brandName: string, actor?: User | null) {
+  const clean = normalizeMachineBrand(brandName);
+  if (one<{ id: number }>('SELECT id FROM machine_brand_settings WHERE lower(brand_name)=lower(?)', [clean])) return;
+  const timestamp = now();
+  run('INSERT INTO machine_brand_settings (brand_name,color_hex,created_at,updated_at,updated_by_user_id) VALUES (?,?,?,?,?)', [clean,machineDefaultBrandColors[clean] ?? machineDefaultBrandColors.Default,timestamp,timestamp,actor?.id ?? null]);
+}
+function machineText(input: Record<string, unknown>, keys: string[], maxLength = 240, fallback = '') {
+  return textField(input, keys, fallback).slice(0, maxLength);
+}
+function machineNumericInput(input: Record<string, unknown>, keys: string[], label: string, fallback = 0) {
+  for (const key of keys) {
+    const value = input[key];
+    if (value === undefined || value === null || String(value).trim() === '') continue;
+    const parsed = typeof value === 'number' ? value : Number(String(value).replace(/,/g, '').trim());
+    if (!Number.isFinite(parsed)) throw new Error(`${label} must be numeric.`);
+    return parsed;
+  }
+  return fallback;
+}
+function normalizeMachinePowerType(value: string) {
+  const clean = value.trim();
+  const lower = clean.toLowerCase();
+  if (/hyb/.test(lower)) return 'Hybrid';
+  if (/elec/.test(lower)) return 'Electric';
+  if (/hyd/.test(lower)) return 'Hydraulic';
+  return clean ? 'Other' : '';
+}
+function validateMachineAssetInput(body: unknown) {
+  const input = isRecord(body) ? body : {};
+  const assetNumber = machineText(input, ['assetNumber','asset_number','press','pressNumber'], 120).replace(/\s+/g, ' ').trim();
+  if (!assetNumber) throw new Error('Asset Number is required.');
+  const brand = normalizeMachineBrand(machineText(input, ['brand','manufacturer','mfg'], 120));
+  if (!brand) throw new Error('Brand is required.');
+  const statusInput = machineText(input, ['status'], 40, 'active').toLowerCase() as MachineAssetStatus;
+  const status = machineStatuses.includes(statusInput) ? statusInput : 'active';
+  const voltageType = machineText(input, ['voltageType','voltage_type'], 12).toUpperCase();
+  if (!voltageTypes.has(voltageType)) throw new Error('Voltage Type must be AC or DC.');
+  return {
+    assetNumber, assetName: machineText(input, ['assetName','asset_name','name'], 160, assetNumber), brand,
+    model: machineText(input, ['model','modelNumber','model_number'], 160), serialNumber: machineText(input, ['serialNumber','serial_number','equipSerialNumber'], 160),
+    machineYear: machineText(input, ['machineYear','machine_year','year'], 40), machineType: machineText(input, ['machineType','machine_type'], 120, 'Injection Molding Machine') || 'Injection Molding Machine',
+    powerType: normalizeMachinePowerType(machineText(input, ['powerType','power_type','he'])), shotSizeOz: machineNumericInput(input, ['shotSizeOz','shot_size_oz','shot'], 'Shot Size', 0), tonnage: machineNumericInput(input, ['tonnage','ton'], 'Tonnage', 0),
+    barrelDiameter: machineText(input, ['barrelDiameter','barrel_diameter','barrel'], 120), location: machineText(input, ['location'], 120), department: machineText(input, ['department'], 120), status,
+    voltageValue: machineText(input, ['voltageValue','voltage_value','voltage'], 80), voltageType, fullLoadAmp: machineText(input, ['fullLoadAmp','full_load_amp'], 80),
+    machineLength: machineText(input, ['machineLength','machine_length'], 80), machineWidth: machineText(input, ['machineWidth','machine_width'], 80), machineHeight: machineText(input, ['machineHeight','machine_height'], 80), fullDieHeightLength: machineText(input, ['fullDieHeightLength','full_die_height_length'], 120),
+    screwType: machineText(input, ['screwType','screw_type'], 120), screwTipType: machineText(input, ['screwTipType','screw_tip_type'], 120), screwTipInstalledDate: machineText(input, ['screwTipInstalledDate','screw_tip_installed_date'], 80), screwInstalledDate: machineText(input, ['screwInstalledDate','screw_installed_date'], 80),
+    barrelInstalledDate: machineText(input, ['barrelInstalledDate','barrel_installed_date'], 80), barrelEndCapInstalledDate: machineText(input, ['barrelEndCapInstalledDate','barrel_end_cap_installed_date'], 80), barrelLength: machineText(input, ['barrelLength','barrel_length'], 80), screwLength: machineText(input, ['screwLength','screw_length'], 80),
+    notes: machineText(input, ['notes'], 2400), criticalNotes: machineText(input, ['criticalNotes','critical_notes'], 2400),
+  };
+}
+function publicMachineAsset(row: MachineAssetRow) {
+  return {
+    id: row.id, assetNumber: row.asset_number, assetName: row.asset_name, brand: row.brand, model: row.model, serialNumber: row.serial_number, machineYear: row.machine_year, machineType: row.machine_type, powerType: row.power_type,
+    shotSizeOz: Number(row.shot_size_oz ?? 0), tonnage: Number(row.tonnage ?? 0), barrelDiameter: row.barrel_diameter, location: row.location, department: row.department, status: row.status, voltageValue: row.voltage_value, voltageType: row.voltage_type, fullLoadAmp: row.full_load_amp,
+    machineLength: row.machine_length, machineWidth: row.machine_width, machineHeight: row.machine_height, fullDieHeightLength: row.full_die_height_length, screwType: row.screw_type, screwTipType: row.screw_tip_type, screwTipInstalledDate: row.screw_tip_installed_date, screwInstalledDate: row.screw_installed_date,
+    barrelInstalledDate: row.barrel_installed_date, barrelEndCapInstalledDate: row.barrel_end_cap_installed_date, barrelLength: row.barrel_length, screwLength: row.screw_length, notes: row.notes, criticalNotes: row.critical_notes, createdAt: row.created_at, updatedAt: row.updated_at, deleted: Boolean(row.deleted),
+    brandColorHex: safeHexColor(row.brand_color_hex, machineDefaultBrandColors.Default),
+  };
+}
+function machineAssetById(id: number, includeDeleted = false) {
+  return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
+}
+function machineAssetByNumber(assetNumber: string) {
+  return one<MachineAssetRow>('SELECT * FROM machine_assets WHERE lower(trim(asset_number))=lower(?) ORDER BY deleted ASC, id LIMIT 1', [assetNumber.trim()]);
+}
+function machineAssetHistoryValue(row: MachineAssetRow | MachineAssetInput) {
+  return 'asset_number' in row ? publicMachineAsset(row) : row;
+}
+function recordMachineAssetHistory(input: { action: string; actor: User; row: MachineAssetRow; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; reasonNote?: string }) {
+  recordHistoryLog({ section: 'machine_library', action: input.action, entityType: 'machine_asset', entityId: input.row.id, entityLabel: input.row.asset_number, assetId: String(input.row.id), machineName: input.row.asset_number, oldValue: input.oldValue, newValue: input.newValue, reasonNote: input.reasonNote, actor: input.actor });
+}
+function insertMachineAsset(input: MachineAssetInput, actor: User, timestamp: string) {
+  ensureMachineBrandSetting(input.brand, actor);
+  const result = run(`INSERT INTO machine_assets (asset_number,asset_name,brand,model,serial_number,machine_year,machine_type,power_type,shot_size_oz,tonnage,barrel_diameter,location,department,status,voltage_value,voltage_type,full_load_amp,machine_length,machine_width,machine_height,full_die_height_length,screw_type,screw_tip_type,screw_tip_installed_date,screw_installed_date,barrel_installed_date,barrel_end_cap_installed_date,barrel_length,screw_length,notes,critical_notes,created_at,updated_at,created_by_user_id,updated_by_user_id,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [input.assetNumber,input.assetName,input.brand,input.model,input.serialNumber,input.machineYear,input.machineType,input.powerType,input.shotSizeOz,input.tonnage,input.barrelDiameter,input.location,input.department,input.status,input.voltageValue,input.voltageType,input.fullLoadAmp,input.machineLength,input.machineWidth,input.machineHeight,input.fullDieHeightLength,input.screwType,input.screwTipType,input.screwTipInstalledDate,input.screwInstalledDate,input.barrelInstalledDate,input.barrelEndCapInstalledDate,input.barrelLength,input.screwLength,input.notes,input.criticalNotes,timestamp,timestamp,actor.id,actor.id]);
+  return Number(result.lastInsertRowid);
+}
+function updateMachineAsset(id: number, input: MachineAssetInput, actor: User, timestamp: string) {
+  ensureMachineBrandSetting(input.brand, actor);
+  run(`UPDATE machine_assets SET asset_number=?,asset_name=?,brand=?,model=?,serial_number=?,machine_year=?,machine_type=?,power_type=?,shot_size_oz=?,tonnage=?,barrel_diameter=?,location=?,department=?,status=?,voltage_value=?,voltage_type=?,full_load_amp=?,machine_length=?,machine_width=?,machine_height=?,full_die_height_length=?,screw_type=?,screw_tip_type=?,screw_tip_installed_date=?,screw_installed_date=?,barrel_installed_date=?,barrel_end_cap_installed_date=?,barrel_length=?,screw_length=?,notes=?,critical_notes=?,updated_at=?,updated_by_user_id=?,deleted=0,deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?`, [input.assetNumber,input.assetName,input.brand,input.model,input.serialNumber,input.machineYear,input.machineType,input.powerType,input.shotSizeOz,input.tonnage,input.barrelDiameter,input.location,input.department,input.status,input.voltageValue,input.voltageType,input.fullLoadAmp,input.machineLength,input.machineWidth,input.machineHeight,input.fullDieHeightLength,input.screwType,input.screwTipType,input.screwTipInstalledDate,input.screwInstalledDate,input.barrelInstalledDate,input.barrelEndCapInstalledDate,input.barrelLength,input.screwLength,input.notes,input.criticalNotes,timestamp,actor.id,id]);
+}
+function machineCsvFromRows(headers: readonly string[], rows: Array<Record<string, string | number>>) {
+  const lines = [headers.map(csvCell).join(',')];
+  for (const row of rows) lines.push(headers.map(header=>csvCell(row[header] ?? '')).join(','));
+  return `${lines.join('\r\n')}\r\n`;
+}
+function machineImportRecordFromRow(record: Record<string, string>, rowNumber: number) {
+  const value = (...headers: string[]) => {
+    for (const header of headers) {
+      const direct = record[header];
+      if (direct !== undefined) return direct.trim();
+      const normalized = record[normalizeImportHeader(header)];
+      if (normalized !== undefined) return normalized.trim();
+    }
+    return '';
+  };
+  const press = value('Press','Asset Number','Asset Number / Press Number');
+  return { rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number') };
+}
+function machineImportRowsFromTable(rows: string[][]) {
+  const [headers = [], ...dataRows] = rows;
+  const normalizedHeaders = headers.map(normalizeImportHeader);
+  for (const required of machineImportHeaders) if (!normalizedHeaders.includes(normalizeImportHeader(required))) throw new Error('Machine import must include Press, Shot (oz), Ton, H&E, Mfg, Barrel, Year, Model #, and Equip Serial # headers.');
+  return dataRows.map((row,index)=>{
+    const record: Record<string, string> = {};
+    headers.forEach((header,columnIndex)=>{ record[header] = row[columnIndex] ?? ''; record[normalizeImportHeader(header)] = row[columnIndex] ?? ''; });
+    return machineImportRecordFromRow(record, index + 2);
+  });
+}
+async function parseMachineImportFile(file: Express.Multer.File | undefined) {
+  if (!file) throw new Error('Choose a CSV or Excel file to import.');
+  const extension = path.extname(file.originalname).toLowerCase();
+  if (extension === '.csv' || file.mimetype.includes('csv')) return machineImportRowsFromTable(parseCsvRows(file.buffer.toString('utf8')));
+  if (extension === '.xlsx') {
+    const workbook = new ExcelJS.Workbook();
+    const arrayBuffer = file.buffer.buffer.slice(file.buffer.byteOffset, file.buffer.byteOffset + file.buffer.byteLength) as ArrayBuffer;
+    await workbook.xlsx.load(arrayBuffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('Excel import file is empty.');
+    const rows: string[][] = [];
+    sheet.eachRow({ includeEmpty: false }, row=>{
+      const values: string[] = [];
+      for (let columnNumber = 1; columnNumber <= Math.max(row.cellCount, machineImportHeaders.length); columnNumber += 1) values.push(excelCellText(row.getCell(columnNumber)).trim());
+      if (values.some(Boolean)) rows.push(values);
+    });
+    return machineImportRowsFromTable(rows);
+  }
+  throw new Error('Machine import file must be CSV or .xlsx Excel format.');
+}
+function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>) {
+  return validateMachineAssetInput({ assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
+}
+function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machineImportRecordFromRow>[]) {
+  const actor = req.user!;
+  const timestamp = now();
+  const summary = { addedCount: 0, updatedCount: 0, skippedCount: 0, errorCount: 0, errors: [] as string[] };
+  const seen = new Set<string>();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const row of rows) {
+      try {
+        const input = machineInputFromImport(row);
+        const key = input.assetNumber.toLowerCase();
+        if (seen.has(key)) { summary.skippedCount += 1; continue; }
+        seen.add(key);
+        const existing = machineAssetByNumber(input.assetNumber);
+        if (existing) {
+          const oldValue = machineAssetHistoryValue(existing);
+          updateMachineAsset(existing.id, input, actor, timestamp);
+          const updated = machineAssetById(existing.id, true)!;
+          summary.updatedCount += 1;
+          recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: 'Machine list import' });
+        } else {
+          const id = insertMachineAsset(input, actor, timestamp);
+          const created = machineAssetById(id)!;
+          summary.addedCount += 1;
+          recordMachineAssetHistory({ action: 'machine_asset_created', actor, row: created, newValue: machineAssetHistoryValue(created), reasonNote: 'Machine list import' });
+        }
+      } catch (error) {
+        summary.skippedCount += 1;
+        summary.errorCount += 1;
+        if (summary.errors.length < 5) summary.errors.push(`Row ${row.rowNumber}: ${safeErrorMessage(error)}`);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  audit(req, 'machine asset import', 'machine_asset', 'bulk', summary);
+  scheduleAutoBackup('machine asset import', actor);
+  return summary;
+}
+const replacementFields: Record<MachineReplacementField, { column: keyof MachineAssetRow; action: string; label: string }> = {
+  screw: { column: 'screw_installed_date', action: 'new_screw_installed', label: 'Screw' },
+  screw_tip: { column: 'screw_tip_installed_date', action: 'new_screw_tip_installed', label: 'Screw Tip' },
+  barrel: { column: 'barrel_installed_date', action: 'new_barrel_installed', label: 'Barrel' },
+  barrel_end_cap: { column: 'barrel_end_cap_installed_date', action: 'new_barrel_end_cap_installed', label: 'Barrel End Cap' },
+};
+
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -4736,6 +4951,173 @@ app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
     res.status(/not found/i.test(message) ? 404 : /used by active|reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
+app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  seedMachineBrandSettings();
+  const search = queryText(req.query.q);
+  const brand = queryText(req.query.brand);
+  const status = queryText(req.query.status);
+  const where = ['a.deleted=0'];
+  const params: SqlParam[] = [machineDefaultBrandColors.Default];
+  if (search) {
+    const like = `%${escapeLike(search)}%`;
+    where.push('(a.asset_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.asset_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.brand LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.model LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.serial_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE)');
+    params.push(like,like,like,like,like);
+  }
+  if (brand) { where.push('lower(a.brand)=lower(?)'); params.push(brand); }
+  if (status && machineStatuses.includes(status as MachineAssetStatus)) { where.push('a.status=?'); params.push(status); }
+  const assets = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params).map(publicMachineAsset);
+  const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
+  res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});
+});
+app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const input = validateMachineAssetInput(req.body);
+    const existing = machineAssetByNumber(input.assetNumber);
+    if (existing && !existing.deleted) return res.status(409).json({ok:false,error:'Asset Number already exists.'});
+    const timestamp = now();
+    const id = existing?.deleted ? existing.id : 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const assetId = id || insertMachineAsset(input, actor, timestamp);
+      if (id) updateMachineAsset(id, input, actor, timestamp);
+      const row = machineAssetById(assetId)!;
+      recordMachineAssetHistory({ action: 'machine_asset_created', actor, row, newValue: machineAssetHistoryValue(row) });
+      db.exec('COMMIT');
+      audit(req,'machine asset create','machine_asset',assetId,{assetNumber:input.assetNumber});
+      scheduleAutoBackup('machine asset create', actor);
+      res.status(201).json({ok:true,asset:publicMachineAsset(machineAssetById(assetId)!)});
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/required|numeric|Voltage Type|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const id = Number(req.params.id);
+    const existing = machineAssetById(id);
+    if (!existing) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const input = validateMachineAssetInput(req.body);
+    const duplicate = machineAssetByNumber(input.assetNumber);
+    if (duplicate && duplicate.id !== id && !duplicate.deleted) return res.status(409).json({ok:false,error:'Asset Number already exists.'});
+    const oldValue = machineAssetHistoryValue(existing);
+    const timestamp = now();
+    updateMachineAsset(id, input, actor, timestamp);
+    const updated = machineAssetById(id)!;
+    recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']) });
+    audit(req,'machine asset update','machine_asset',id,{assetNumber:input.assetNumber});
+    scheduleAutoBackup('machine asset update', actor);
+    res.json({ok:true,asset:publicMachineAsset(updated)});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /required|numeric|Voltage Type|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+for (const action of ['disable','enable'] as const) app.post(`/api/machine-library/assets/:id/${action}`, requireAuth, requirePermission('machine.delete'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const asset = machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const oldValue = machineAssetHistoryValue(asset);
+    const status = action === 'disable' ? 'disabled' : 'active';
+    const timestamp = now();
+    run('UPDATE machine_assets SET status=?, updated_at=?, updated_by_user_id=? WHERE id=?', [status,timestamp,actor.id,asset.id]);
+    const updated = machineAssetById(asset.id)!;
+    recordMachineAssetHistory({ action: action === 'disable' ? 'machine_asset_disabled' : 'machine_asset_enabled', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']) });
+    audit(req,`machine asset ${action}`,'machine_asset',asset.id,{assetNumber:asset.asset_number});
+    scheduleAutoBackup(`machine asset ${action}`, actor);
+    res.json({ok:true,asset:publicMachineAsset(updated)});
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.delete('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.delete'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const asset = machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const reasonNote = requiredReasonNote(isRecord(req.body) ? req.body.reasonNote ?? req.body.reason : '', 'Machine delete');
+    const timestamp = now();
+    run('UPDATE machine_assets SET deleted=1,status=?,deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?', ['removed',timestamp,actor.id,timestamp,actor.id,asset.id]);
+    const removed = machineAssetById(asset.id, true)!;
+    recordMachineAssetHistory({ action: 'machine_asset_deleted', actor, row: removed, oldValue: machineAssetHistoryValue(asset), newValue: machineAssetHistoryValue(removed), reasonNote });
+    audit(req,'machine asset delete','machine_asset',asset.id,{assetNumber:asset.asset_number});
+    scheduleAutoBackup('machine asset delete', actor);
+    res.json({ok:true});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/required/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.post('/api/machine-library/assets/:id/replacements/:field', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const config = replacementFields[String(req.params.field) as MachineReplacementField];
+    if (!config) return res.status(400).json({ok:false,error:'Replacement field is invalid.'});
+    const asset = machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const input = isRecord(req.body) ? req.body : {};
+    const installDate = machineText(input, ['installDate','installedDate','date'], 80);
+    if (!installDate) return res.status(400).json({ok:false,error:'Install Date is required.'});
+    const reasonNote = machineText(input, ['reasonNote','reason','note'], 1200);
+    const oldDate = String(asset[config.column] ?? '');
+    const timestamp = now();
+    run(`UPDATE machine_assets SET ${String(config.column)}=?, updated_at=?, updated_by_user_id=? WHERE id=?`, [installDate,timestamp,actor.id,asset.id]);
+    const updated = machineAssetById(asset.id)!;
+    recordMachineAssetHistory({ action: config.action, actor, row: updated, oldValue: { [config.column]: oldDate }, newValue: { [config.column]: installDate, assetNumber: updated.asset_number, brand: updated.brand, model: updated.model }, reasonNote });
+    audit(req,config.action,'machine_asset',asset.id,{assetNumber:asset.asset_number,oldInstalledDate:oldDate,newInstalledDate:installDate});
+    scheduleAutoBackup(config.action, actor);
+    res.json({ok:true,asset:publicMachineAsset(updated)});
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.get('/api/machine-library/brand-settings', requireAuth, requirePermission('machine.view'), (_req,res)=>{
+  seedMachineBrandSettings();
+  res.json({ok:true,brandSettings:all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}))});
+});
+app.put('/api/machine-library/brand-settings/:brandName', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const brandName = normalizeMachineBrand(String(req.params.brandName));
+    const colorHex = safeHexColor(isRecord(req.body) ? req.body.colorHex : '', '');
+    if (!colorHex) return res.status(400).json({ok:false,error:'Brand color must be a safe #RRGGBB hex value.'});
+    const previous = one<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings WHERE lower(brand_name)=lower(?)', [brandName]);
+    const timestamp = now();
+    run('INSERT INTO machine_brand_settings (brand_name,color_hex,created_at,updated_at,updated_by_user_id) VALUES (?,?,?,?,?) ON CONFLICT(brand_name) DO UPDATE SET color_hex=excluded.color_hex, updated_at=excluded.updated_at, updated_by_user_id=excluded.updated_by_user_id', [brandName,colorHex,timestamp,timestamp,actor.id]);
+    recordHistoryLog({ section: 'machine_library', action: 'brand_color_changed', entityType: 'machine_brand_settings', entityLabel: brandName, oldValue: previous ? { brandName: previous.brand_name, colorHex: previous.color_hex } : null, newValue: { brandName, colorHex }, reasonNote: textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']), actor });
+    audit(req,'machine brand color change','machine_brand_settings',brandName,{brandName,colorHex});
+    scheduleAutoBackup('machine brand color change', actor);
+    res.json({ok:true,brandSetting:{brandName,colorHex}});
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.get('/api/machine-library/assets/:id/history', requireAuth, requirePermission('machine.view'), (req,res)=>{
+  const asset = machineAssetById(Number(req.params.id), true);
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const records = all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC, id DESC LIMIT 200", [String(asset.id),String(asset.id),asset.asset_number]).map(publicHistoryRecord);
+  res.json({ok:true,asset:publicMachineAsset(asset),records});
+});
+app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.write'), (_req,res)=>{
+  sendDownload(res, `MCC_Machine_List_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', machineCsvFromRows(machineImportHeaders, []));
+});
+app.post('/api/machine-library/import', requireAuth, requirePermission('machine.write'), upload.single('file'), async (req:AuthRequest,res)=>{
+  try {
+    const rows = await parseMachineImportFile(req.file);
+    const summary = importMachineAssetRows(req, rows);
+    res.json({ok:true,...summary});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/Choose|must include|must be CSV|numeric|required/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,errorCount:1,errors:[message]});
+  }
+});
+
 app.get('/api/history/summary', requireAuth, requirePermission('history.view'), (_req,res)=>{
   const rows = all<{ section: HistorySection; count: number; latestCreatedAt: string | null }>('SELECT section, COUNT(*) AS count, MAX(created_at) AS latestCreatedAt FROM history_logs GROUP BY section');
   const summary = historySections.map(section=>{
