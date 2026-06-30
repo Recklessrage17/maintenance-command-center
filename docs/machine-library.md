@@ -12,7 +12,9 @@ Technical fields include Voltage, Voltage Type, Full Load Amp, Machine Length, M
 
 Install dates are stored as text so unknown, year-only, and exact date values can be preserved. The frontend keeps a text field and adds a date picker control for exact dates saved as `YYYY-MM-DD`. The frontend shows a year count when the value parses as an exact date. Blank or non-date values show Unknown.
 
-Length and dimension fields store the original typed text. When a user enters `mm`, `millimeter`, `millimeters`, `in`, `inch`, `inches`, or `"`, the form previews the converted millimeter and inch values without changing the stored text.
+Length and dimension fields store the original typed text. When a user enters `mm`, `millimeter`, `millimeters`, `in`, `inch`, `inches`, `"`, `ft`, `foot`, `feet`, or `'`, the form previews converted millimeter, inch, and foot values without changing the stored text.
+
+The conversion preview appears on Machine Length, Machine Width, Machine Height, Full Die Height Length / Range, Barrel Length, and Screw Length. Blank values, plain unitless numbers, and invalid mixed examples do not show a preview.
 
 Notes are displayed in amber/yellow. Critical Notes are displayed in red.
 
@@ -60,6 +62,18 @@ Import result handling shows a duplicate rejection modal first when duplicate ro
 All logged-in MCC users can view Machine Library assets. Tier 3, Manager, Admin, and Owner Admin can add/edit assets, import machine lists, export the template, edit brand colors, and update replacement dates. Manager, Admin, and Owner Admin can disable, enable, or delete machine assets.
 
 Backend routes enforce these permissions. The frontend hides or disables restricted controls for lower tiers.
+
+## Screw / Barrel Layout
+
+The asset editor splits Screw and Barrel details into two bordered boxes. On desktop the boxes sit side by side; on tablet and mobile they stack vertically. Filled fields use a slightly brighter border and input treatment so completed values are easier to scan without changing saved data.
+
+The Screw box includes Screw Type, Screw Tip Type, Screw Rebuild / Repaired, Screw Installed Date, Screw Tip Installed Date, Screw Length conversion preview, condition label, and the New Screw / New Screw Tip actions for existing assets.
+
+The Barrel box includes Barrel Diameter, Barrel Rebuild / Repaired, Barrel Installed Date, Barrel End Cap Installed Date, Barrel Length conversion preview, condition label, and the New Barrel / New Barrel End Cap actions for existing assets.
+
+Measurement Inspection remains a placeholder action below the Screw and Barrel boxes. The future workflow is tracked by GitHub issue #16 and will move condition from New to Used to Worn.
+
+Asset cards show a compact Screw / Tip / Barrel / End Cap age summary. Screw and Tip display their type plus install-date year count, Barrel displays length or diameter plus install-date year count, and End Cap displays its install-date year count. Unknown or non-exact install dates display Unknown.
 
 ## Replacement Date Badges
 

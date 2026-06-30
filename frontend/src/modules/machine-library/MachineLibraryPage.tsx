@@ -109,13 +109,24 @@ function ageYears(value: string) {
   if (!value.trim() || !isExactDate(value.trim())) return 'Unknown';
   const date = new Date(`${value.trim()}T00:00:00`);
   const years = (Date.now() - date.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-  return years < 0 ? 'Unknown' : `${years.toFixed(1)} years`;
+  return years < 0 ? 'Unknown' : `${years.toFixed(1)} yr`;
+}
+function displayText(value: string) {
+  return value.trim() || '-';
+}
+function fieldClass(value: string, extra = '') {
+  const classes = ['form-field'];
+  if (value.trim()) classes.push('is-filled');
+  if (extra) classes.push(extra);
+  return classes.join(' ');
 }
 function safeCssHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#44D7FF';
 }
 function conditionInfo(status: MachineConditionStatus, rebuilt: boolean) {
-  return conditionLabels[rebuilt ? 'rebuilt_repaired' : status] ?? conditionLabels.new;
+  void status;
+  // Future Measurement Inspection, GitHub issue #16, can honor used/worn here.
+  return conditionLabels[rebuilt ? 'rebuilt_repaired' : 'new'] ?? conditionLabels.new;
 }
 function formatMm(value: number) {
   const rounded = Math.round(value * 10) / 10;
@@ -125,17 +136,24 @@ function formatInches(value: number) {
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 }
-function dimensionConversion(value: string): { mm: string; inches: string } | null | 'invalid' {
+function formatFeet(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+}
+function dimensionConversion(value: string): { mm: string; inches: string; feet: string } | null {
   const clean = value.trim();
   if (!clean || /^\d+(?:\.\d+)?$/.test(clean)) return null;
-  const match = clean.match(/^(\d+(?:\.\d+)?)\s*(mm|millimeters?|in|inch(?:es)?|")$/i);
-  if (!match) return 'invalid';
+  const match = clean.match(/^(\d+(?:\.\d+)?)\s*(mm|millimeters?|in|inch(?:es)?|"|ft|foot|feet|')$/i);
+  if (!match) return null;
   const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) return 'invalid';
+  if (!Number.isFinite(amount)) return null;
   const unit = match[2].toLowerCase();
-  const mm = unit.startsWith('mm') || unit.startsWith('millimeter') ? amount : amount * 25.4;
-  const inches = unit.startsWith('in') || unit === '"' ? amount : amount / 25.4;
-  return { mm: formatMm(mm), inches: formatInches(inches) };
+  const isMillimeters = unit.startsWith('mm') || unit.startsWith('millimeter');
+  const isFeet = unit === 'ft' || unit === 'foot' || unit === 'feet' || unit === "'";
+  const mm = isMillimeters ? amount : isFeet ? amount * 304.8 : amount * 25.4;
+  const inches = isMillimeters ? amount / 25.4 : isFeet ? amount * 12 : amount;
+  const feet = isFeet ? amount : inches / 12;
+  return { mm: formatMm(mm), inches: formatInches(inches), feet: formatFeet(feet) };
 }
 export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [assets,setAssets]=useState<MachineAsset[]>([]);
@@ -400,6 +418,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
         {assets.map(asset=>{
           const screwCondition = conditionInfo(asset.screwConditionStatus, asset.screwRebuildRepaired);
           const barrelCondition = conditionInfo(asset.barrelConditionStatus, asset.barrelRebuildRepaired);
+          const barrelCardValue = asset.barrelLength.trim() || asset.barrelDiameter.trim() || '-';
           return (
             <article className="machine-asset-card" style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
               <div className="machine-card-head">
@@ -413,6 +432,12 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
               <div className="machine-condition-strip">
                 <span className={`machine-condition-label condition-${screwCondition.tone}`}>Screw: {screwCondition.label}</span>
                 <span className={`machine-condition-label condition-${barrelCondition.tone}`}>Barrel: {barrelCondition.label}</span>
+              </div>
+              <div className="machine-component-summary-grid">
+                <div><span>Screw</span><strong>{displayText(asset.screwType)} / {ageYears(asset.screwInstalledDate)}</strong></div>
+                <div><span>Tip</span><strong>{displayText(asset.screwTipType)} / {ageYears(asset.screwTipInstalledDate)}</strong></div>
+                <div><span>Barrel</span><strong>{barrelCardValue} / {ageYears(asset.barrelInstalledDate)}</strong></div>
+                <div><span>End Cap</span><strong>{ageYears(asset.barrelEndCapInstalledDate)}</strong></div>
               </div>
               {(asset.notes || asset.criticalNotes)&&<div className="machine-notes-preview">
                 {asset.notes&&<p className="machine-notes-text">Notes: {asset.notes}</p>}
@@ -468,30 +493,45 @@ function MachineEditorModal({form,setField,onClose,onSubmit,onOutsideAutosave,ca
   return <div className="modal-backdrop" role="dialog" aria-modal="true" onMouseDown={handleBackdropMouseDown}><form ref={formRef} className="mcc-card machine-modal" onSubmit={onSubmit}>
     <div className="modal-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3>{form.assetNumber || 'New Machine Asset'}</h3><p>{form.brand || 'Brand'} / {form.model || 'Model'} / S/N: {form.serialNumber || '-'}</p></div><button className="link-button compact-button" type="button" onClick={onClose} disabled={saving}>Close</button></div>
     {editorStatus&&<p className={`form-message machine-save-status ${editorStatus.kind === 'error' ? 'error' : editorStatus.kind}`}>{editorStatus.text}</p>}
-    <MachineSection title="Basic Info"><Text field="assetNumber" label="Asset Number / Press Number *" value={form.assetNumber} set={v=>setField('assetNumber',v)} disabled={disabled}/><Text field="assetName" label="Asset Name" value={form.assetName} set={v=>setField('assetName',v)} disabled={disabled}/><Text field="brand" label="Brand *" value={form.brand} set={v=>setField('brand',v)} disabled={disabled}/><Text field="model" label="Model" value={form.model} set={v=>setField('model',v)} disabled={disabled}/><Text field="serialNumber" label="Serial Number" value={form.serialNumber} set={v=>setField('serialNumber',v)} disabled={disabled}/><Text field="machineYear" label="Machine Year" value={form.machineYear} set={v=>setField('machineYear',v)} disabled={disabled}/><Text field="machineType" label="Machine Type" value={form.machineType} set={v=>setField('machineType',v)} disabled={disabled}/><Select field="powerType" label="Power Type" value={form.powerType} set={v=>setField('powerType',v)} options={['','Hydraulic','Electric','Hybrid','Other']} disabled={disabled}/><Text field="shotSizeOz" label="Shot Size (oz)" value={form.shotSizeOz} set={v=>setField('shotSizeOz',v)} disabled={disabled} type="number" step="0.01" min="0"/><Text field="tonnage" label="Tonnage" value={form.tonnage} set={v=>setField('tonnage',v)} disabled={disabled} type="number" step="0.01"/><Text field="barrelDiameter" label="Barrel/Screw Diameter" value={form.barrelDiameter} set={v=>setField('barrelDiameter',v)} disabled={disabled}/><Text field="location" label="Location" value={form.location} set={v=>setField('location',v)} disabled={disabled}/><Select field="status" label="Status" value={form.status} set={v=>setField('status',v)} options={['active','down','disabled','removed']} disabled={disabled}/></MachineSection>
+    <MachineSection title="Basic Info"><Text field="assetNumber" label="Asset Number / Press Number *" value={form.assetNumber} set={v=>setField('assetNumber',v)} disabled={disabled}/><Text field="assetName" label="Asset Name" value={form.assetName} set={v=>setField('assetName',v)} disabled={disabled}/><Text field="brand" label="Brand *" value={form.brand} set={v=>setField('brand',v)} disabled={disabled}/><Text field="model" label="Model" value={form.model} set={v=>setField('model',v)} disabled={disabled}/><Text field="serialNumber" label="Serial Number" value={form.serialNumber} set={v=>setField('serialNumber',v)} disabled={disabled}/><Text field="machineYear" label="Machine Year" value={form.machineYear} set={v=>setField('machineYear',v)} disabled={disabled}/><Text field="machineType" label="Machine Type" value={form.machineType} set={v=>setField('machineType',v)} disabled={disabled}/><Select field="powerType" label="Power Type" value={form.powerType} set={v=>setField('powerType',v)} options={['','Hydraulic','Electric','Hybrid','Other']} disabled={disabled}/><Text field="shotSizeOz" label="Shot Size (oz)" value={form.shotSizeOz} set={v=>setField('shotSizeOz',v)} disabled={disabled} type="number" step="0.01" min="0"/><Text field="tonnage" label="Tonnage" value={form.tonnage} set={v=>setField('tonnage',v)} disabled={disabled} type="number" step="0.01"/><Text field="location" label="Location" value={form.location} set={v=>setField('location',v)} disabled={disabled}/><Select field="status" label="Status" value={form.status} set={v=>setField('status',v)} options={['active','down','disabled','removed']} disabled={disabled}/></MachineSection>
     <MachineSection title="Electrical"><Text field="voltageValue" label="Voltage" value={form.voltageValue} set={v=>setField('voltageValue',v)} disabled={disabled}/><Select field="voltageType" label="Voltage Type" value={form.voltageType} set={v=>setField('voltageType',v)} options={['','AC','DC']} disabled={disabled}/><Text field="fullLoadAmp" label="Full Load Amp" value={form.fullLoadAmp} set={v=>setField('fullLoadAmp',v)} disabled={disabled}/></MachineSection>
     <MachineSection title="Dimensions"><DimensionText field="machineLength" label="Machine Length" value={form.machineLength} set={v=>setField('machineLength',v)} disabled={disabled}/><DimensionText field="machineWidth" label="Machine Width" value={form.machineWidth} set={v=>setField('machineWidth',v)} disabled={disabled}/><DimensionText field="machineHeight" label="Machine Height" value={form.machineHeight} set={v=>setField('machineHeight',v)} disabled={disabled}/><DimensionText field="fullDieHeightLength" label="Full Die Height Length / Range" value={form.fullDieHeightLength} set={v=>setField('fullDieHeightLength',v)} disabled={disabled}/></MachineSection>
-    <MachineSection title="Screw / Barrel">
-      <ConditionText field="screwType" label="Screw Type" value={form.screwType} set={v=>setField('screwType',v)} disabled={disabled} checked={form.screwRebuildRepaired} setChecked={setScrewRebuildRepaired} condition={conditionInfo(form.screwConditionStatus, form.screwRebuildRepaired)} checkboxLabel="Screw Rebuild / Repaired"/>
-      <Text field="screwTipType" label="Screw Tip Type" value={form.screwTipType} set={v=>setField('screwTipType',v)} disabled={disabled}/>
-      <DateWithAge field="screwInstalledDate" label="Screw Installed Date" value={form.screwInstalledDate} set={v=>setField('screwInstalledDate',v)} disabled={disabled}/>
-      <DateWithAge field="screwTipInstalledDate" label="Screw Tip Installed Date" value={form.screwTipInstalledDate} set={v=>setField('screwTipInstalledDate',v)} disabled={disabled}/>
-      <DateWithAge field="barrelInstalledDate" label="Barrel Installed Date" value={form.barrelInstalledDate} set={v=>setField('barrelInstalledDate',v)} disabled={disabled}/>
-      <DateWithAge field="barrelEndCapInstalledDate" label="Barrel End Cap Installed Date" value={form.barrelEndCapInstalledDate} set={v=>setField('barrelEndCapInstalledDate',v)} disabled={disabled}/>
-      <ConditionDimensionText field="barrelLength" label="Barrel Length" value={form.barrelLength} set={v=>setField('barrelLength',v)} disabled={disabled} checked={form.barrelRebuildRepaired} setChecked={setBarrelRebuildRepaired} condition={conditionInfo(form.barrelConditionStatus, form.barrelRebuildRepaired)} checkboxLabel="Barrel Rebuild / Repaired"/>
-      <DimensionText field="screwLength" label="Screw Length" value={form.screwLength} set={v=>setField('screwLength',v)} disabled={disabled}/>
-      {canEdit&&<div className="machine-inspection-row machine-form-wide"><button className="machine-action-badge machine-inspection-badge" type="button" onClick={onInspectionClick} disabled={saving}>Measurement Inspection</button></div>}
-    </MachineSection>
-    {asset&&<section className="machine-replacement-panel"><span>Replacement Updates</span>{(['screw','screw_tip','barrel','barrel_end_cap'] as ReplacementField[]).map(field=><button className="machine-action-badge" type="button" key={field} onClick={()=>onReplacement(asset,field)} disabled={!canEdit || saving}>New {replacementLabels[field]}</button>)}</section>}
+    <section className="machine-form-section machine-screw-barrel-section">
+      <span>Screw / Barrel</span>
+      <div className="machine-screw-barrel-layout">
+        <section className="machine-component-box">
+          <div className="machine-component-box-heading"><strong>Screw</strong></div>
+          <div className="machine-component-box-grid">
+            <ConditionText field="screwType" label="Screw Type" value={form.screwType} set={v=>setField('screwType',v)} disabled={disabled} checked={form.screwRebuildRepaired} setChecked={setScrewRebuildRepaired} condition={conditionInfo(form.screwConditionStatus, form.screwRebuildRepaired)} checkboxLabel="Screw Rebuild / Repaired"/>
+            <Text field="screwTipType" label="Screw Tip Type" value={form.screwTipType} set={v=>setField('screwTipType',v)} disabled={disabled}/>
+            <DateWithAge field="screwInstalledDate" label="Screw Installed Date" value={form.screwInstalledDate} set={v=>setField('screwInstalledDate',v)} disabled={disabled}/>
+            <DateWithAge field="screwTipInstalledDate" label="Screw Tip Installed Date" value={form.screwTipInstalledDate} set={v=>setField('screwTipInstalledDate',v)} disabled={disabled}/>
+            <DimensionText field="screwLength" label="Screw Length" value={form.screwLength} set={v=>setField('screwLength',v)} disabled={disabled}/>
+            {asset&&<div className="machine-box-actions"><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'screw')} disabled={!canEdit || saving}>New Screw</button><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'screw_tip')} disabled={!canEdit || saving}>New Screw Tip</button></div>}
+          </div>
+        </section>
+        <section className="machine-component-box">
+          <div className="machine-component-box-heading"><strong>Barrel</strong></div>
+          <div className="machine-component-box-grid">
+            <Text field="barrelDiameter" label="Barrel Diameter" value={form.barrelDiameter} set={v=>setField('barrelDiameter',v)} disabled={disabled}/>
+            <ConditionDimensionText field="barrelLength" label="Barrel Length" value={form.barrelLength} set={v=>setField('barrelLength',v)} disabled={disabled} checked={form.barrelRebuildRepaired} setChecked={setBarrelRebuildRepaired} condition={conditionInfo(form.barrelConditionStatus, form.barrelRebuildRepaired)} checkboxLabel="Barrel Rebuild / Repaired"/>
+            <DateWithAge field="barrelInstalledDate" label="Barrel Installed Date" value={form.barrelInstalledDate} set={v=>setField('barrelInstalledDate',v)} disabled={disabled}/>
+            <DateWithAge field="barrelEndCapInstalledDate" label="Barrel End Cap Installed Date" value={form.barrelEndCapInstalledDate} set={v=>setField('barrelEndCapInstalledDate',v)} disabled={disabled}/>
+            {asset&&<div className="machine-box-actions"><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'barrel')} disabled={!canEdit || saving}>New Barrel</button><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'barrel_end_cap')} disabled={!canEdit || saving}>New Barrel End Cap</button></div>}
+          </div>
+        </section>
+      </div>
+      {canEdit&&<div className="machine-inspection-row"><button className="machine-action-badge machine-inspection-badge" type="button" onClick={onInspectionClick} disabled={saving}>Measurement Inspection</button></div>}
+    </section>
     <MachineSection title="Notes / Critical Notes"><Area field="notes" label="Notes" value={form.notes} set={v=>setField('notes',v)} disabled={disabled} tone="notes"/><Area field="criticalNotes" label="Critical Notes" value={form.criticalNotes} set={v=>setField('criticalNotes',v)} disabled={disabled} tone="critical"/></MachineSection>
     <div className="machine-placeholder-grid"><section>Linked Inventory Parts coming next</section><section>Machine PM schedules coming next</section><section>Machine documents coming next</section><section>History preview available from Logs</section></div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={!canEdit || saving}>{saving ? 'Saving...' : asset?'Save Machine Asset':'Create Machine Asset'}</button></div>
   </form></div>;
 }
 function MachineSection({title,children}:{title:string;children:ReactNode}) { return <section className="machine-form-section"><span>{title}</span><div className="machine-form-grid">{children}</div></section>; }
-function Text({label,value,set,disabled,field,type='text',step,min}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;type?:string;step?:string;min?:string}) { return <label className="form-field"><span>{label}</span><input data-machine-field={field} type={type} step={step} min={min} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
-function Area({label,value,set,disabled,field,tone}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;tone?:'notes'|'critical'}) { return <label className="form-field machine-form-wide"><span>{label}</span><textarea data-machine-field={field} className={tone === 'critical' ? 'machine-critical-input' : tone === 'notes' ? 'machine-notes-input' : undefined} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
-function Select({label,value,set,options,disabled,field}:{label:string;value:string;set:(value:string)=>void;options:string[];disabled:boolean;field?:string}) { return <label className="form-field"><span>{label}</span><select data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)}>{options.map(option=><option key={option} value={option}>{option || 'Select'}</option>)}</select></label>; }
+function Text({label,value,set,disabled,field,type='text',step,min}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;type?:string;step?:string;min?:string}) { return <label className={fieldClass(value)}><span>{label}</span><input data-machine-field={field} type={type} step={step} min={min} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
+function Area({label,value,set,disabled,field,tone}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;tone?:'notes'|'critical'}) { return <label className={fieldClass(value, 'machine-form-wide')}><span>{label}</span><textarea data-machine-field={field} className={tone === 'critical' ? 'machine-critical-input' : tone === 'notes' ? 'machine-notes-input' : undefined} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
+function Select({label,value,set,options,disabled,field}:{label:string;value:string;set:(value:string)=>void;options:string[];disabled:boolean;field?:string}) { return <label className={fieldClass(value)}><span>{label}</span><select data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)}>{options.map(option=><option key={option} value={option}>{option || 'Select'}</option>)}</select></label>; }
 function DateWithAge({label,value,set,disabled,field}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string}) {
   const pickerRef = useRef<HTMLInputElement|null>(null);
   const pickerValue = isExactDate(value.trim()) ? value.trim() : '';
@@ -500,22 +540,21 @@ function DateWithAge({label,value,set,disabled,field}:{label:string;value:string
     picker?.showPicker?.();
     picker?.focus();
   }
-  return <div className="form-field"><span>{label}</span><div className="machine-date-row"><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD or known text" /><button className="machine-calendar-button" type="button" onClick={openPicker} disabled={disabled} aria-label={`Pick ${label}`}>Cal</button><input ref={pickerRef} className="machine-date-picker" type="date" value={pickerValue} disabled={disabled} onChange={event=>set(event.target.value)} aria-label={`${label} calendar`} /></div><small className="machine-age-label">Year count: {ageYears(value)}</small></div>;
+  return <div className={fieldClass(value)}><span>{label}</span><div className="machine-date-row"><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD or known text" /><button className="machine-calendar-button" type="button" onClick={openPicker} disabled={disabled} aria-label={`Pick ${label}`}>Cal</button><input ref={pickerRef} className="machine-date-picker" type="date" value={pickerValue} disabled={disabled} onChange={event=>set(event.target.value)} aria-label={`${label} calendar`} /></div><small className="machine-age-label">Year count: {ageYears(value)}</small></div>;
 }
 function DimensionPreview({value}:{value:string}) {
   const conversion = dimensionConversion(value);
   if (!conversion) return null;
-  if (conversion === 'invalid') return <small className="machine-dimension-preview muted">Unable to convert</small>;
-  return <small className="machine-dimension-preview"><span className="dimension-mm">{conversion.mm}mm</span><span className="dimension-separator">/</span><span className="dimension-in">{conversion.inches}in</span></small>;
+  return <small className="machine-dimension-preview"><span className="dimension-mm">{conversion.mm}mm</span><span className="dimension-separator">/</span><span className="dimension-in">{conversion.inches}in</span><span className="dimension-separator">/</span><span className="dimension-ft">{conversion.feet}ft</span></small>;
 }
 function DimensionText({label,value,set,disabled,field}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string}) {
-  return <label className="form-field"><span>{label}</span><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 72&quot;" /><DimensionPreview value={value} /></label>;
+  return <label className={fieldClass(value)}><span>{label}</span><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 72&quot;" /><DimensionPreview value={value} /></label>;
 }
 function ConditionText({label,value,set,disabled,field,checked,setChecked,condition,checkboxLabel}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;checked:boolean;setChecked:(checked:boolean)=>void;condition:{label:string;tone:string};checkboxLabel:string}) {
-  return <div className="form-field machine-condition-field"><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label></div><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /><small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
+  return <div className={`${fieldClass(value, 'machine-condition-field')}${checked ? ' is-filled' : ''}`}><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label></div><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /><small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
 }
 function ConditionDimensionText({label,value,set,disabled,field,checked,setChecked,condition,checkboxLabel}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;checked:boolean;setChecked:(checked:boolean)=>void;condition:{label:string;tone:string};checkboxLabel:string}) {
-  return <div className="form-field machine-condition-field"><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label></div><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 72&quot;" /><DimensionPreview value={value} /><small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
+  return <div className={`${fieldClass(value, 'machine-condition-field')}${checked ? ' is-filled' : ''}`}><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label></div><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 72&quot;" /><DimensionPreview value={value} /><small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
 }
 function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string)=>void;onClose:()=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><h3>Machine Brand Colors</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>{brandSettings.map(setting=><div className="machine-color-row" key={setting.brandName}><span className="machine-color-swatch" style={{background:safeCssHex(colorDrafts[setting.brandName] ?? setting.colorHex)}} /><strong>{setting.brandName}</strong><input value={colorDrafts[setting.brandName] ?? setting.colorHex} disabled={!canEdit} onChange={event=>setColorDrafts(current=>({...current,[setting.brandName]:event.target.value}))} /><button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit}>Save</button></div>)}</section></div>;
