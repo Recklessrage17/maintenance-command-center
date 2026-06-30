@@ -2121,6 +2121,7 @@ type StampPositions = {
 
 const pdfBlack = rgb(0, 0, 0);
 const pdfHeaderGray = rgb(0.88, 0.88, 0.88);
+const pdfWhite = rgb(1, 1, 1);
 const requisitionTemplateDir = path.join(repoRootPath, 'reference', 'mit3-requisition', 'public', 'templates');
 const pdfTemplatePaths: Record<RequisitionTemplateKind, string> = {
   'under-100': path.join(requisitionTemplateDir, 'blank-requisition-under-100.pdf'),
@@ -2197,6 +2198,7 @@ type XlsxSheet = {
 type OfficialPdfChoices = {
   fob: string;
   materialCert: string;
+  printArea: string;
   taxExempt: string;
 };
 
@@ -2269,7 +2271,7 @@ const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCell
       authorizedBy: 'L36',
     },
     lineStartRow: 22,
-    lineEndRow: 31,
+    lineEndRow: 32,
     line: {
       quantity: 'A',
       unitOfMeasure: 'B',
@@ -2280,7 +2282,7 @@ const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCell
       totalPrice: 'M',
     },
     grandTotal: 'N20',
-    printAreaEndColumn: 'N',
+    printAreaEndColumn: 'O',
     printAreaEndRow: 37,
   },
 };
@@ -2336,23 +2338,20 @@ function officialSetWrappedCellValue(cell: XlsxCell, value: unknown, maxLineLeng
   const wrappedValue = officialWrapTextByLength(value, maxLineLength, maxLines);
   cell.value(wrappedValue);
   try {
-    cell.style?.({ shrinkToFit: true, verticalAlignment: 'center', wrapText: true });
+    cell.style?.({ fontSize: 8.5, shrinkToFit: false, verticalAlignment: 'top', wrapText: true });
   } catch {
     // MIT3 parity: template cells can reject style updates; the filled value is still useful.
   }
   return officialCountWrappedLines(wrappedValue);
 }
 
-function officialSetCompactHeaderCellValue(sheet: XlsxSheet, address: string, value: unknown, maxLineLength: number) {
-  const cell = sheet.cell(address);
-  const wrappedValue = officialWrapTextByLength(value, maxLineLength, 1);
-  cell.value(wrappedValue);
+function officialSetShrinkCellValue(cell: XlsxCell, value: unknown, maxChars = 100, fontSize = 7.6) {
+  cell.value(cleanPdfText(value).slice(0, maxChars));
   try {
-    cell.style?.({ fontSize: 7.2, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
+    cell.style?.({ fontSize, shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
   } catch {
-    // Header field tuning only; the value should still export if the template rejects style changes.
+    // Template cells can reject style updates; the value should still export.
   }
-  return officialCountWrappedLines(wrappedValue);
 }
 
 function officialSetCellValue(sheet: XlsxSheet, address: string, value: unknown) {
@@ -2385,28 +2384,28 @@ function officialWriteHeader(sheet: XlsxSheet, map: OfficialHeaderCellMap, input
   const { header, notes, requestedBy, vendor } = input;
   const [vendorAddressLine1 = '', vendorAddressLine2 = ''] = officialHeaderContactLines(header);
 
-  officialSetWrappedCellValue(sheet.cell(map.poNo), '', 18, 1);
-  officialSetCompactHeaderCellValue(sheet, map.poInitiator, textField(header, ['poInitiator']), 22);
-  officialSetWrappedCellValue(sheet.cell(map.shipVia), textField(header, ['shipVia']), 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.poClass), textField(header, ['poClass']), 18, 1);
+  officialSetShrinkCellValue(sheet.cell(map.poNo), '', 40);
+  officialSetShrinkCellValue(sheet.cell(map.poInitiator), textField(header, ['poInitiator']), 70);
+  officialSetShrinkCellValue(sheet.cell(map.shipVia), textField(header, ['shipVia']), 40);
+  officialSetShrinkCellValue(sheet.cell(map.poClass), textField(header, ['poClass']), 40);
   officialSetCellValue(sheet, map.reqDate, officialParseDateInput(textField(header, ['requestDate','reqDate'])));
-  officialSetWrappedCellValue(sheet.cell(map.vendorName), textField(header, ['vendorName'], vendor), 26, 1);
-  officialSetWrappedCellValue(sheet.cell(map.vendorAddressLine1), vendorAddressLine1, 34, 1);
-  officialSetWrappedCellValue(sheet.cell(map.vendorAddressLine2), vendorAddressLine2, 44, 1);
-  officialSetCompactHeaderCellValue(sheet, map.confirmedWith, textField(header, ['confirmedWith']), 24);
-  officialSetWrappedCellValue(sheet.cell(map.assetNo), textField(header, ['assetNo']), 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.moldNo), textField(header, ['moldNo']), 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.equipmentNo), textField(header, ['equipmentNo']), 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.partNo), textField(header, ['partNo']), 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.jobNo), textField(header, ['jobNo']), 18, 1);
-  officialSetWrappedCellValue(sheet.cell(map.initials), textField(header, ['initials']), 8, 1);
-  officialSetWrappedCellValue(sheet.cell(map.tsNo), textField(header, ['tsNo']), 16, 1);
-  officialSetWrappedCellValue(sheet.cell(map.codeNo), textField(header, ['codeNo']), 16, 1);
-  officialSetWrappedCellValue(sheet.cell(map.workOrderNo), textField(header, ['workOrderNo']), 18, 1);
+  officialSetShrinkCellValue(sheet.cell(map.vendorName), textField(header, ['vendorName'], vendor), 90);
+  officialSetShrinkCellValue(sheet.cell(map.vendorAddressLine1), vendorAddressLine1, 100);
+  officialSetShrinkCellValue(sheet.cell(map.vendorAddressLine2), vendorAddressLine2, 100);
+  officialSetShrinkCellValue(sheet.cell(map.confirmedWith), textField(header, ['confirmedWith']), 70);
+  officialSetShrinkCellValue(sheet.cell(map.assetNo), textField(header, ['assetNo']), 50);
+  officialSetShrinkCellValue(sheet.cell(map.moldNo), textField(header, ['moldNo']), 40);
+  officialSetShrinkCellValue(sheet.cell(map.equipmentNo), textField(header, ['equipmentNo']), 50);
+  officialSetShrinkCellValue(sheet.cell(map.partNo), textField(header, ['partNo']), 40);
+  officialSetShrinkCellValue(sheet.cell(map.jobNo), textField(header, ['jobNo']), 40);
+  officialSetShrinkCellValue(sheet.cell(map.initials), textField(header, ['initials']), 12);
+  officialSetShrinkCellValue(sheet.cell(map.tsNo), textField(header, ['tsNo']), 30);
+  officialSetShrinkCellValue(sheet.cell(map.codeNo), textField(header, ['codeNo']), 30);
+  officialSetShrinkCellValue(sheet.cell(map.workOrderNo), textField(header, ['workOrderNo']), 70);
   officialSetWrappedCellValue(sheet.cell(map.comments), officialComments(header, notes), 72, 2);
-  officialSetWrappedCellValue(sheet.cell(map.departmentManager), textField(header, ['departmentManager']), 22, 1);
-  officialSetWrappedCellValue(sheet.cell(map.requisitionedBy), textField(header, ['requisitionedBy'], requestedBy), 22, 1);
-  officialSetWrappedCellValue(sheet.cell(map.authorizedBy), textField(header, ['authorizedBy']), 22, 1);
+  officialSetShrinkCellValue(sheet.cell(map.departmentManager), textField(header, ['departmentManager']), 70);
+  officialSetShrinkCellValue(sheet.cell(map.requisitionedBy), textField(header, ['requisitionedBy'], requestedBy), 70);
+  officialSetShrinkCellValue(sheet.cell(map.authorizedBy), textField(header, ['authorizedBy']), 70);
 }
 
 function officialLineDescription(item: RequisitionPdfItem) {
@@ -2439,8 +2438,8 @@ function officialWriteLineRow(sheet: XlsxSheet, columns: OfficialLineCellMap, ro
   const unitPrice = Number(item.unitCost ?? 0) || 0;
   officialSetCellValue(sheet, quantityCell, quantity);
   officialSetCellValue(sheet, unitCell, item.unitOfMeasure || 'EA');
-  const itemNumberLines = officialSetWrappedCellValue(itemNumberCell, item.supplierPartNumber || item.partNumber || '', 22, 2);
-  const descriptionLines = officialSetWrappedCellValue(descriptionCell, officialLineDescription(item), 54, 2);
+  const itemNumberLines = officialSetWrappedCellValue(itemNumberCell, item.supplierPartNumber || item.partNumber || '', 18, 2);
+  const descriptionLines = officialSetWrappedCellValue(descriptionCell, officialLineDescription(item), 50, 3);
   officialSetCellValue(sheet, dueDateCell, officialParseDateInput(item.dueDate ?? ''));
 
   if (typeof unitPriceCell.formula === 'function') unitPriceCell.formula(undefined);
@@ -2450,13 +2449,16 @@ function officialWriteLineRow(sheet: XlsxSheet, columns: OfficialLineCellMap, ro
 
   try {
     const lineCount = Math.max(itemNumberLines, descriptionLines);
-    sheet.row?.(row).height?.(Math.min(46, 20 + (lineCount - 1) * 12));
+    sheet.row?.(row).height?.(Math.min(50, 22 + (lineCount - 1) * 12));
   } catch {
     // Keep export moving if row-height changes are rejected.
   }
   try {
-    unitPriceCell.style?.({ fontSize: 8, numberFormat: '$#,##0.00', shrinkToFit: true });
-    totalPriceCell.style?.({ fontSize: 8, numberFormat: '$#,##0.00', shrinkToFit: true });
+    sheet.cell(quantityCell).style?.({ fontSize: 8.5, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center' });
+    sheet.cell(unitCell).style?.({ fontSize: 8, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center' });
+    sheet.cell(dueDateCell).style?.({ fontSize: 8, horizontalAlignment: 'center', shrinkToFit: true, verticalAlignment: 'center' });
+    unitPriceCell.style?.({ fontSize: 8, horizontalAlignment: 'right', numberFormat: '$#,##0.00', shrinkToFit: true, verticalAlignment: 'center' });
+    totalPriceCell.style?.({ fontSize: 8, horizontalAlignment: 'right', numberFormat: '$#,##0.00', shrinkToFit: true, verticalAlignment: 'center' });
   } catch {
     // Keep export moving if a template rejects style updates.
   }
@@ -2503,6 +2505,12 @@ function officialSetFitToPage(sheet: XlsxSheet) {
   pageSetUpPr.attributes = { ...(pageSetUpPr.attributes ?? {}), fitToPage: 1 };
 }
 
+function officialSetSheetChildAttributes(sheet: XlsxSheet, childName: string, attributes: Record<string, unknown>) {
+  const child = officialWorksheetChild(sheet, childName);
+  if (!child) return;
+  child.attributes = { ...(child.attributes ?? {}), ...attributes };
+}
+
 function officialSetPageSetup(sheet: XlsxSheet) {
   try {
     const pageSetup = officialWorksheetChild(sheet, 'pageSetup');
@@ -2518,6 +2526,8 @@ function officialSetPageSetup(sheet: XlsxSheet) {
       scale: undefined,
     };
     delete pageSetup.attributes.scale;
+    officialSetSheetChildAttributes(sheet, 'pageMargins', { left: 0.25, right: 0.25, top: 0.25, bottom: 0.25, header: 0.1, footer: 0.12 });
+    officialSetSheetChildAttributes(sheet, 'printOptions', { horizontalCentered: 1, verticalCentered: 0 });
     officialSetFitToPage(sheet);
   } catch {
     // Direct page-setup XML tuning is best-effort; Excel COM still applies the same settings during export.
@@ -2558,22 +2568,45 @@ function officialApplyWorkbookLayout(sheet: XlsxSheet, type: RequisitionTemplate
   officialSetPageSetup(sheet);
 
   if (type === 'under-100') {
-    officialSetColumnWidth(sheet, 'C', 15.2);
-    officialSetColumnWidth(sheet, 'D', 10.2);
-    officialSetColumnWidth(sheet, 'E', 10.2);
-    officialSetColumnWidth(sheet, 'F', 10.6);
-    officialSetColumnWidth(sheet, 'G', 11.2);
-    officialSetColumnWidth(sheet, 'H', 11.2);
-    officialSetColumnWidth(sheet, 'L', 10.4);
-    officialSetColumnWidth(sheet, 'M', 10.4);
-    officialSetColumnWidth(sheet, 'N', 9.6);
+    officialSetColumnWidth(sheet, 'A', 5.8);
+    officialSetColumnWidth(sheet, 'B', 15.4);
+    officialSetColumnWidth(sheet, 'C', 14.8);
+    officialSetColumnWidth(sheet, 'D', 9.8);
+    officialSetColumnWidth(sheet, 'E', 9.8);
+    officialSetColumnWidth(sheet, 'F', 11.8);
+    officialSetColumnWidth(sheet, 'G', 9.8);
+    officialSetColumnWidth(sheet, 'H', 9.8);
+    officialSetColumnWidth(sheet, 'I', 9.4);
+    officialSetColumnWidth(sheet, 'J', 6.8);
+    officialSetColumnWidth(sheet, 'K', 6.8);
+    officialSetColumnWidth(sheet, 'L', 9.4);
+    officialSetColumnWidth(sheet, 'M', 9.4);
+    officialSetColumnWidth(sheet, 'N', 7.4);
+    officialSetColumnWidth(sheet, 'O', 2.4);
   } else {
-    officialSetColumnWidth(sheet, 'D', 24.6);
-    officialSetColumnWidth(sheet, 'G', 11.1);
-    officialSetColumnWidth(sheet, 'H', 11.2);
-    officialSetColumnWidth(sheet, 'I', 10.8);
-    officialSetColumnWidth(sheet, 'M', 11.4);
-    officialSetColumnWidth(sheet, 'O', 8.8);
+    officialSetColumnWidth(sheet, 'B', 6.2);
+    officialSetColumnWidth(sheet, 'C', 13.2);
+    officialSetColumnWidth(sheet, 'D', 17.2);
+    officialSetColumnWidth(sheet, 'E', 8.2);
+    officialSetColumnWidth(sheet, 'F', 7.2);
+    officialSetColumnWidth(sheet, 'G', 11.4);
+    officialSetColumnWidth(sheet, 'H', 9.4);
+    officialSetColumnWidth(sheet, 'I', 9.4);
+    officialSetColumnWidth(sheet, 'J', 3.8);
+    officialSetColumnWidth(sheet, 'K', 6.2);
+    officialSetColumnWidth(sheet, 'L', 7.2);
+    officialSetColumnWidth(sheet, 'M', 9.3);
+    officialSetColumnWidth(sheet, 'N', 6.1);
+    officialSetColumnWidth(sheet, 'O', 8.6);
+    officialSetColumnWidth(sheet, 'P', 2.4);
+  }
+}
+
+function officialStyleStaticLabel(sheet: XlsxSheet, address: string, fontSize = 8) {
+  try {
+    sheet.cell(address).style?.({ fontSize, shrinkToFit: true, verticalAlignment: 'center', wrapText: false });
+  } catch {
+    // Static template label tuning only.
   }
 }
 
@@ -2596,13 +2629,19 @@ function officialAdjustHeaderSpacing(sheet: XlsxSheet, type: RequisitionTemplate
   } catch {
     // Keep original template layout if row height changes are rejected.
   }
-  if (type !== 'under-100') return;
-  try {
-    sheet.cell('B13').style?.({ fontSize: 7, shrinkToFit: true, verticalAlignment: 'center' });
-    sheet.cell('B14').style?.({ fontSize: 7, shrinkToFit: true, verticalAlignment: 'center' });
-  } catch {
-    // Decorative helper label update only.
+  if (type === 'under-100') {
+    officialStyleStaticLabel(sheet, 'F12', 7.5);
+    officialStyleStaticLabel(sheet, 'B13', 7);
+    officialStyleStaticLabel(sheet, 'B14', 7);
+    officialStyleStaticLabel(sheet, 'B18', 8);
+    officialStyleStaticLabel(sheet, 'F18', 7.5);
+    return;
   }
+  officialStyleStaticLabel(sheet, 'C14', 6.8);
+  officialStyleStaticLabel(sheet, 'C15', 6.8);
+  officialStyleStaticLabel(sheet, 'G13', 7.4);
+  officialStyleStaticLabel(sheet, 'C19', 7.6);
+  officialStyleStaticLabel(sheet, 'E19', 7.4);
 }
 
 function officialShiftUnder100TitleRight(sheet: XlsxSheet, type: RequisitionTemplateKind) {
@@ -2658,6 +2697,7 @@ function tryExcelComPdfExport(xlsxPath: string, pdfPath: string, choices: Offici
 param(
   [Parameter(Mandatory=$true)][string]$XlsxPath,
   [Parameter(Mandatory=$true)][string]$PdfPath,
+  [string]$PrintArea = "",
   [string]$TaxExempt = "",
   [string]$MaterialCert = "",
   [string]$Fob = ""
@@ -2825,6 +2865,7 @@ try {
   $worksheet.Activate() | Out-Null
   try { Set-RequisitionCheckboxes $worksheet $TaxExempt $MaterialCert $Fob } catch {}
   try {
+    if ($PrintArea.Trim()) { $worksheet.PageSetup.PrintArea = $PrintArea.Trim() }
     $worksheet.PageSetup.PaperSize = 1
     $worksheet.PageSetup.Orientation = 2
     $worksheet.PageSetup.Zoom = $false
@@ -2855,7 +2896,7 @@ try {
 }`;
   const scriptPath = path.join(path.dirname(xlsxPath), 'export-requisition-pdf.ps1');
   fs.writeFileSync(scriptPath, script);
-  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath,'-TaxExempt',choices.taxExempt,'-MaterialCert',choices.materialCert,'-Fob',choices.fob], {
+  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath,'-PrintArea',choices.printArea,'-TaxExempt',choices.taxExempt,'-MaterialCert',choices.materialCert,'-Fob',choices.fob], {
     encoding: 'utf8',
     timeout: 90_000,
     windowsHide: true,
@@ -2923,6 +2964,7 @@ async function mergeOfficialPdfPages(pdfPages: Buffer[]) {
   const pages = mergedPdf.getPages();
   pages.forEach((page, index) => {
     const { width } = page.getSize();
+    page.drawRectangle({ x: width - 142, y: 0, width: 134, height: 34, color: pdfWhite });
     page.drawText(`Page ${index + 1} of ${pages.length}`, { x: width - 82, y: 16, size: 7, font: pageNumberFont, color: pdfBlack });
   });
   return Buffer.from(await mergedPdf.save());
@@ -2934,9 +2976,11 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
   const type = normalizedRequisitionType(input.requisitionType || textField(header, ['requisitionType']), total);
   const rowsPerPage = officialTemplateMaps[type].lineEndRow - officialTemplateMaps[type].lineStartRow + 1;
   const chunks = chunkRequisitionItems(input.items, rowsPerPage);
+  const printArea = `A1:${officialTemplateMaps[type].printAreaEndColumn}${officialTemplateMaps[type].printAreaEndRow}`;
   const choices = {
     fob: textField(header, ['fob'], 'Destination'),
     materialCert: textField(header, ['materialCert','material_cert'], 'No'),
+    printArea,
     taxExempt: textField(header, ['taxExempt','tax_exempt'], 'No'),
   };
   const pdfPages: Buffer[] = [];
