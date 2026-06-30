@@ -1,6 +1,6 @@
 # MCC Authentication and SMTP
 
-MCC stores local authentication data in `backend/data/mcc.sqlite`. This database is for MCC only and must not be replaced with, copied from, or connected to MIT3 data.
+MCC stores local authentication data in `backend/data/mcc.sqlite`. This database is for MCC only and must not be replaced with, copied from, or connected to retired tracker data.
 
 ## Environment variables
 
@@ -10,7 +10,7 @@ Copy `.env.example` to a local `.env` in the MCC repo root:
 F:\maintenance-command-center\.env
 ```
 
-Do not put the MCC `.env` under `backend`, do not commit `.env`, and do not use MIT3's environment or data files. MCC loads the repo-root `.env` automatically before it checks authentication or SMTP settings. Environment variables already set by the system are preserved.
+Do not put the MCC `.env` under `backend`, do not commit `.env`, and do not use retired tracker environment or data files. MCC loads the repo-root `.env` automatically before it checks authentication or SMTP settings. Environment variables already set by the system are preserved.
 
 - `SESSION_SECRET`: required for production. Development uses a temporary secret if this is missing and reports `SESSION_SECRET configured: no` at startup.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`: SMTP values used to email temporary passwords for forgot-password requests.

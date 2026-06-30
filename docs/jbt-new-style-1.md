@@ -45,11 +45,9 @@ Sidebar navigation should:
 
 ## Safety and Product Boundaries
 
-- Inventory remains a protected placeholder until MIT3 is integrated later.
-- MIT3 stays separate and protected.
-- MIT3 remains on port `4173`.
 - MCC remains on port `4273`.
-- The MCC visual style must not imply that MIT3 has already been integrated.
+- MCC is the current daily-use maintenance system.
+- Retired tracker workflows should not appear in normal MCC UI.
 
 ## Design Checklist
 
@@ -63,5 +61,5 @@ When adding new MCC screens or components, confirm that they follow JBT New Styl
 - Clean maintenance department look.
 - Modern but not overdesigned.
 - Easy labels and large clickable buttons.
-- MIT3 safety boundary remains clear.
-- MCC port `4273` and MIT3 port `4173` remain separate.
+- MCC-native wording throughout normal screens.
+- MCC port `4273` remains unchanged.

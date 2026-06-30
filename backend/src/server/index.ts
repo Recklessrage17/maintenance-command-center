@@ -499,14 +499,14 @@ async function checkMit3Status() {
       ok: response.ok,
       mit3Url,
       healthUrl: mit3HealthUrl,
-      message: response.ok ? 'MIT3 online' : 'MIT3 offline or not reachable',
+      message: response.ok ? 'Retired inventory bridge reachable' : 'Retired inventory bridge unavailable',
     };
   } catch {
     return {
       ok: false,
       mit3Url,
       healthUrl: mit3HealthUrl,
-      message: 'MIT3 offline or not reachable',
+      message: 'Retired inventory bridge unavailable',
     };
   } finally {
     clearTimeout(timeout);
@@ -643,14 +643,14 @@ async function fetchMit3AppData() {
   const timeout = setTimeout(() => controller.abort(), 2500);
   try {
     const response = await fetch(mit3AppDataUrl, { signal: controller.signal });
-    if (!response.ok) throw new Error(`MIT3 app-data returned HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`Retired inventory import source returned HTTP ${response.status}`);
     const payload = await response.json();
     const root = isRecord(payload) ? payload : {};
     const data = isRecord(root.data) ? root.data : root;
-    if (!isRecord(data) || data.app !== 'maintenance-inventory-tracker') throw new Error('MIT3 app-data shape is not supported.');
+    if (!isRecord(data) || data.app !== 'maintenance-inventory-tracker') throw new Error('Retired inventory import data shape is not supported.');
     return data;
   } catch {
-    throw new Error('MIT3 is offline or not reachable. Start MIT3 Website first.');
+    throw new Error('Retired inventory import source is unavailable. Use MCC Inventory import tools instead.');
   } finally {
     clearTimeout(timeout);
   }
@@ -704,10 +704,10 @@ function getOrCreateNativeLookup(table: NativeLookupTable, name: string, timesta
   if (!cleanName) return { id: null as number | null, created: false };
   const existing = one<{ id: number; deleted?: number }>(`SELECT id, deleted FROM ${table} WHERE lower(name)=lower(?) ORDER BY deleted ASC, id LIMIT 1`, [cleanName]);
   if (existing) {
-    if (Number(existing.deleted ?? 0) === 0) run(`UPDATE ${table} SET source=?, imported_from_mit3_at=?, updated_at=? WHERE id=?`, ['MIT3 HTTP API',timestamp,timestamp,existing.id]);
+    if (Number(existing.deleted ?? 0) === 0) run(`UPDATE ${table} SET source=?, imported_from_mit3_at=?, updated_at=? WHERE id=?`, ['Retired inventory import',timestamp,timestamp,existing.id]);
     return { id: existing.id, created: false };
   }
-  const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'MIT3 HTTP API',timestamp,timestamp,timestamp]);
+  const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'Retired inventory import',timestamp,timestamp,timestamp]);
   return { id: Number(result.lastInsertRowid), created: true };
 }
 function getOrCreateMccNativeLookup(req: Request, table: NativeLookupTable, name: string, timestamp: string, vendorHistoryAction = 'vendor_created_from_inventory') {
@@ -1962,7 +1962,7 @@ function importMit3Part(part: NormalizedMit3Part, actorId: number, timestamp: st
     Number.isFinite(part.unitCost) ? Math.max(0, Number(part.unitCost)) : 0,
     part.supplierPartNumber.trim(),
     part.notes.trim(),
-    'MIT3 HTTP API',
+    'Retired inventory import',
     timestamp,
   ];
   if (existing) {
@@ -2605,7 +2605,7 @@ function officialSetWrappedCellValue(cell: XlsxCell, value: unknown, maxLineLeng
   try {
     cell.style?.({ fontSize: 8.5, shrinkToFit: false, verticalAlignment: 'top', wrapText: true });
   } catch {
-    // MIT3 parity: template cells can reject style updates; the filled value is still useful.
+    // Official template cells can reject style updates; the filled value is still useful.
   }
   return officialCountWrappedLines(wrappedValue);
 }
@@ -2926,7 +2926,7 @@ function officialShiftUnder100TitleRight(sheet: XlsxSheet, type: RequisitionTemp
 async function officialWorkbookBuffer(input: { header: Record<string, unknown>; items: RequisitionPdfItem[]; notes: string; requestedBy: string; total: number; type: RequisitionTemplateKind; vendor: string }) {
   const map = officialTemplateMaps[input.type];
   if (!fs.existsSync(map.templatePath)) throw new Error(`Official requisition workbook template is missing: ${path.basename(map.templatePath)}`);
-  // MIT3 parity: fill the official JBT XLSX template instead of redrawing price fields by PDF coordinates.
+  // Fill the official JBT XLSX template instead of redrawing price fields by PDF coordinates.
   const workbook = await XlsxPopulate.fromFileAsync(map.templatePath);
   const sheet = workbook.sheet(0) as XlsxSheet;
   officialApplyWorkbookLayout(sheet, input.type);
@@ -3201,7 +3201,7 @@ function convertOfficialWorkbookToPdf(workbook: Buffer, fileNameBase: string, ch
     fs.writeFileSync(xlsxPath, workbook);
     const converted = tryExcelComPdfExport(xlsxPath, pdfPath, choices) || tryLibreOfficePdfExport(xlsxPath, pdfPath, tempDir);
     if (!converted || !fs.existsSync(pdfPath)) {
-      throw new Error('Official requisition PDF export failed. Microsoft Excel or LibreOffice could not convert the MIT3 workbook template.');
+      throw new Error('Official requisition PDF export failed. Microsoft Excel or LibreOffice could not convert the official workbook template.');
     }
     const pdf = fs.readFileSync(pdfPath);
     if (!pdf.length) throw new Error('Official requisition PDF export failed. The generated PDF was empty.');
@@ -3536,7 +3536,7 @@ function drawCurrencyInBox(
   options: { font: PDFFont; pageHeight: number; paddingX?: number; size?: number }
 ) {
   const amount = Number.isFinite(value) ? value : 0;
-  // MIT3 parity: the official JBT templates include placeholder prices ($0.00 / $ -).
+  // The official JBT templates include placeholder prices ($0.00 / $ -).
   // Clear the cell interior first so MCC draws exactly one fitted price value.
   clearPdfBox(page, box, options.pageHeight);
   drawTextInBox(page, money(amount), box, {
@@ -4006,11 +4006,11 @@ async function writeMit3AppData(data: Record<string, unknown>) {
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify(data),
   });
-  if (response.status === 404 || response.status === 405) throw new Error('MIT3 write endpoint not available yet.');
+  if (response.status === 404 || response.status === 405) throw new Error('Retired inventory bridge write endpoint is not available.');
   if (!response.ok) {
     const body = await response.json().catch(async () => ({error: await response.text().catch(() => '')}));
     const message = isRecord(body) ? textField(body, ['error', 'message'], `HTTP ${response.status}`) : `HTTP ${response.status}`;
-    throw new Error(message || 'MIT3 write failed.');
+    throw new Error(message || 'Retired inventory bridge write failed.');
   }
   return response.json().catch(() => ({}));
 }
@@ -4510,7 +4510,7 @@ function resolveLookupId(records: unknown[], value: string, label: string) {
     textField(record, ['id']).toLowerCase() === normalized ||
     textField(record, ['name', 'title', 'label']).toLowerCase() === normalized
   );
-  if (!match) throw new Error(`MIT3 ${label} "${value}" was not found. Use an existing MIT3 ${label.toLowerCase()} or leave it blank.`);
+  if (!match) throw new Error(`${label} "${value}" was not found. Use an existing ${label.toLowerCase()} or leave it blank.`);
   return textField(match, ['id']);
 }
 function findMit3Item(items: unknown[], id: string) {
@@ -4544,7 +4544,7 @@ function mit3InventoryErrorStatus(message: string) {
 }
 function sendMit3InventoryError(req: Request, res: Response, operation: string, targetId: string, error: unknown) {
   const message = safeErrorMessage(error);
-  audit(req,'failed MIT3 write attempt','inventory',targetId,{operation,error:message});
+  audit(req,'failed retired inventory bridge write attempt','inventory',targetId,{operation,error:message});
   res.status(mit3InventoryErrorStatus(message)).json({ok:false,error:message,mit3Url});
 }
 async function mutateMit3Inventory(req: Request, operation: string, targetId: string, mutator: (data: Record<string, unknown>) => string) {
@@ -5533,7 +5533,7 @@ app.post('/api/inventory/native/import-from-mit3', requireAuth, requirePermissio
         if (result.updated) updatedCount += 1;
         if (result.skipped) {
           skippedCount += 1;
-          if (errors.length < 12) errors.push('Skipped one MIT3 item because it did not have a MIT3 item ID or part number.');
+          if (errors.length < 12) errors.push('Skipped one retired import item because it did not have a source item ID or part number.');
         }
       }
       db.exec('COMMIT');
@@ -5555,15 +5555,15 @@ app.post('/api/inventory/native/import-from-mit3', requireAuth, requirePermissio
       importedFromMit3At,
       nativeSummary: summary,
     };
-    inventoryAudit(req,'import from MIT3','inventory','native',{importedCount,updatedCount,skippedCount,skippedUrlCount,vendorCount:summary.vendorCount,locationCount:summary.locationCount});
-    audit(req,'inventory native import from MIT3','inventory','native',{importedCount,updatedCount,skippedCount,skippedUrlCount});
+    inventoryAudit(req,'retired inventory import','inventory','native',{importedCount,updatedCount,skippedCount,skippedUrlCount,vendorCount:summary.vendorCount,locationCount:summary.locationCount});
+    audit(req,'inventory retired import','inventory','native',{importedCount,updatedCount,skippedCount,skippedUrlCount});
     res.json(response);
   } catch (error) {
     const message = safeErrorMessage(error);
-    inventoryAudit(req,'failed import from MIT3','inventory','native',{error:message});
-    audit(req,'failed inventory native import from MIT3','inventory','native',{error:message});
+    inventoryAudit(req,'failed retired inventory import','inventory','native',{error:message});
+    audit(req,'failed inventory retired import','inventory','native',{error:message});
     const summary = nativeInventorySummary();
-    res.status(/MIT3 is offline|not reachable|app-data/i.test(message) ? 503 : 500).json({ok:false,error:message,importedCount:0,updatedCount:0,skippedCount:0,vendorCount:summary.vendorCount,locationCount:summary.locationCount,errors:[message],nativeSummary:summary});
+    res.status(/retired inventory import source|unavailable|app-data/i.test(message) ? 503 : 500).json({ok:false,error:message,importedCount:0,updatedCount:0,skippedCount:0,vendorCount:summary.vendorCount,locationCount:summary.locationCount,errors:[message],nativeSummary:summary});
   }
 });
 app.get('/api/inventory/mit3-status', requireAuth, requirePermission('inventory.view'), async (_req,res)=>res.json(await checkMit3Status()));
@@ -5571,11 +5571,11 @@ app.get('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.v
   try {
     res.json({ok:true,mit3Url,writeAvailable:true,...await fetchMit3Inventory()});
   } catch (error) {
-    res.status(503).json({ok:false,error:error instanceof Error ? error.message : 'MIT3 is offline or not reachable. Start MIT3 Website first.',mit3Url});
+    res.status(503).json({ok:false,error:error instanceof Error ? error.message : 'Retired inventory bridge unavailable.',mit3Url});
   }
 });
 app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
-  const operation = 'inventory add through MIT3';
+  const operation = 'inventory add through retired inventory bridge';
   try {
     const input = validateMit3PartInput(req.body);
     const {part,id} = await mutateMit3Inventory(req, operation, '', data => {
@@ -5619,14 +5619,14 @@ app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.
   }
 });
 app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
-  const operation = 'inventory edit through MIT3';
+  const operation = 'inventory edit through retired inventory bridge';
   const targetId = String(req.params.id ?? '');
   try {
     const input = validateMit3PartInput(req.body);
     const {part,id} = await mutateMit3Inventory(req, operation, targetId, data => {
       const items = recordArray(data, 'items');
       const index = findMit3Item(items, targetId);
-      if (index < 0 || !isRecord(items[index])) throw new Error('MIT3 inventory item not found.');
+      if (index < 0 || !isRecord(items[index])) throw new Error('Retired inventory item not found.');
       const item = items[index];
       applyMit3PartInput(item, input, data, now());
       return textField(item, ['id', 'itemId', 'item_id'], targetId);
@@ -5638,7 +5638,7 @@ app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inven
   }
 });
 app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
-  const operation = 'inventory requisition update through MIT3';
+  const operation = 'inventory requisition update through retired inventory bridge';
   const targetId = String(req.params.id ?? '');
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -5646,7 +5646,7 @@ app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermi
     const {part,id} = await mutateMit3Inventory(req, operation, targetId, data => {
       const items = recordArray(data, 'items');
       const index = findMit3Item(items, targetId);
-      if (index < 0 || !isRecord(items[index])) throw new Error('MIT3 inventory item not found.');
+      if (index < 0 || !isRecord(items[index])) throw new Error('Retired inventory item not found.');
       const item = items[index];
       item.orderPlaced = requisition;
       item.orderRequisitionId = requisition ? textField(item, ['orderRequisitionId'], 'MCC Requisition') : '';

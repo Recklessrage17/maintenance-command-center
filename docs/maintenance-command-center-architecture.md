@@ -1,90 +1,46 @@
-﻿# Maintenance Command Center Architecture
+# Maintenance Command Center Architecture
 
 ## Decision
 
-Maintenance Command Center should be built as a brand-new repo first.
+Maintenance Command Center is the daily-use maintenance system and the current source of truth.
 
-Recommended repo:
+Primary repo:
 
 Recklessrage17/maintenance-command-center
 
-Recommended local paths:
+Primary local path:
 
-F:\maintenance-command-center = dev/testing/coding copy
-D:\maintenance-command-center = future production/live copy
-GitHub main = clean update bridge
+F:\maintenance-command-center
 
-## Why
+## Runtime
 
-MIT3 is already working and should stay protected.
+MCC runs on port `4273`.
 
-Current MIT3 repo:
+Do not change this port without an explicit deployment decision.
 
-Recklessrage17/maintenance-inventory-tracker-3
-
-Current MIT3 local paths:
-
-F:\maintenance-inventory-tracker-3
-D:\maintenance-inventory-tracker-3
-
-## Ports
-
-MIT3 stays on port 4173.
-
-MCC should use a different dev port at first, recommended:
-
-4273
-
-## Planned MCC Modules
+## Current MCC Modules
 
 - Dashboard
 - Inventory
-- Preventive Maintenance
-- Assets
-- Work Orders
-- Requisitions
 - Vendors
-- Locations
-- Documents / Prints
-- Reports
+- Requisitions
+- History Logs
+- Machine Library
+- Equipment Library
+- Facility Info
+- Preventive Maintenance
 - Settings
+- Admin / Users
 
-## MIT3 Inventory Integration Plan
+## Retired Tracker Boundary
 
-Phase 1:
-Build MCC shell only.
+Maintenance Inventory Tracker 3 is retired/scrapped and no longer part of the daily MCC workflow.
 
-Phase 2:
-Mount or migrate MIT3 Inventory into the MCC Inventory tab.
+Do not point users to retired tracker workflows. Do not modify retired tracker folders during MCC work.
 
-Phase 3:
-Add Preventive Maintenance.
+Protected old local paths:
 
-Phase 4:
-Add Assets / Machines.
+- `F:\maintenance-inventory-tracker-3`
+- `D:\maintenance-inventory-tracker-3`
 
-Phase 5:
-Add Documents / Building Prints.
-
-## MIT3 Features That Must Be Preserved
-
-- SQLite
-- Normalized SQLite loading
-- app_snapshots fallback
-- JSON backup/import/export safety
-- CSV import/export
-- Excel import/export
-- Backend auto JSON/CSV backups
-- Requisition behavior
-- Vendors and locations
-- Part links
-- Website mode
-- Update system
-
-## Do Not Touch Yet
-
-Do not modify D:\maintenance-inventory-tracker-3 for MCC work.
-
-Do not copy F:\maintenance-inventory-tracker-3 directly to D:\maintenance-inventory-tracker-3.
-
-Do not change MIT3 production until MCC inventory integration is tested and approved.
+These paths are listed only as a safety boundary so MCC work does not touch them.
