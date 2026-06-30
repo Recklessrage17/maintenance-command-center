@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { RoleBadge } from '../components/RoleBadge';
 
-export type MccSection = 'dashboard' | 'inventory' | 'requisitions' | 'history' | 'machine-library' | 'equipment-library' | 'facility-info' | 'users' | 'settings';
+export type MccSection = 'dashboard' | 'inventory' | 'vendors' | 'requisitions' | 'history' | 'machine-library' | 'equipment-library' | 'facility-info' | 'users' | 'settings';
 type LauncherMode = 'hover' | 'pinned' | null;
 type BrandingSettings = {
   companyName: string;
@@ -15,6 +15,7 @@ const defaultBranding: BrandingSettings = { companyName: 'JBT', companySubtitle:
 const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'inventory', label: 'Inventory' },
+  { id: 'vendors', label: 'Vendors' },
   { id: 'requisitions', label: 'Requisitions' },
   { id: 'history', label: 'History Logs' },
   { id: 'machine-library', label: 'Machine Library' },

@@ -72,7 +72,7 @@ function initDb() {
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', lead_time TEXT NOT NULL DEFAULT '', important_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
@@ -114,6 +114,34 @@ function migrateDb() {
   if (!inventoryPartColumns.has('lead_time')) run("ALTER TABLE inventory_parts ADD COLUMN lead_time TEXT NOT NULL DEFAULT ''");
   if (!inventoryPartColumns.has('important_note')) run("ALTER TABLE inventory_parts ADD COLUMN important_note TEXT NOT NULL DEFAULT ''");
   run('UPDATE inventory_parts SET unit_cost=0 WHERE unit_cost IS NULL');
+
+  const inventoryVendorColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_vendors)').map(column => column.name));
+  const vendorTextColumns = [
+    'phone_type',
+    'phone_number',
+    'phone_ext',
+    'address_line1',
+    'address_line2',
+    'city',
+    'state',
+    'postal_code',
+    'contact_name',
+    'contact_title',
+    'contact_phone_type',
+    'contact_phone_number',
+    'contact_phone_ext',
+    'contact_email',
+    'notes',
+  ];
+  for (const column of vendorTextColumns) {
+    if (!inventoryVendorColumns.has(column)) run(`ALTER TABLE inventory_vendors ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!inventoryVendorColumns.has('country')) run("ALTER TABLE inventory_vendors ADD COLUMN country TEXT NOT NULL DEFAULT 'USA'");
+  if (!inventoryVendorColumns.has('created_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN created_by_user_id INTEGER');
+  if (!inventoryVendorColumns.has('updated_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN updated_by_user_id INTEGER');
+  if (!inventoryVendorColumns.has('deleted_at')) run('ALTER TABLE inventory_vendors ADD COLUMN deleted_at TEXT');
+  if (!inventoryVendorColumns.has('deleted_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN deleted_by_user_id INTEGER');
+  run("UPDATE inventory_vendors SET country='USA' WHERE country IS NULL OR country=''");
 
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
@@ -175,7 +203,7 @@ function shouldScheduleMasterBackupFromAudit(action: string) {
 function auditWriteBackup(req: Request, action: string) {
   if (shouldScheduleMasterBackupFromAudit(action)) scheduleAutoBackup(`audit:${action}`, (req as AuthRequest).user ?? null);
 }
-type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
+type HistorySection = 'inventory' | 'vendors' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 type HistoryLogInput = {
   section: HistorySection;
   action: string;
@@ -225,9 +253,10 @@ type HistoryLogRow = {
   user_email: string | null;
   created_at: string;
 };
-const historySections: HistorySection[] = ['inventory','requisitions','machine_library','equipment_library','facility_info','preventive_maintenance','settings'];
+const historySections: HistorySection[] = ['inventory','vendors','requisitions','machine_library','equipment_library','facility_info','preventive_maintenance','settings'];
 const historySectionLabels: Record<HistorySection, string> = {
   inventory: 'Inventory',
+  vendors: 'Vendors',
   requisitions: 'Requisitions',
   machine_library: 'Machine Library',
   equipment_library: 'Equipment Library',
@@ -674,7 +703,7 @@ function getOrCreateNativeLookup(table: NativeLookupTable, name: string, timesta
   const result = run(`INSERT INTO ${table} (name,source,imported_from_mit3_at,created_at,updated_at,deleted) VALUES (?,?,?,?,?,0)`, [cleanName,'MIT3 HTTP API',timestamp,timestamp,timestamp]);
   return { id: Number(result.lastInsertRowid), created: true };
 }
-function getOrCreateMccNativeLookup(req: Request, table: NativeLookupTable, name: string, timestamp: string) {
+function getOrCreateMccNativeLookup(req: Request, table: NativeLookupTable, name: string, timestamp: string, vendorHistoryAction = 'vendor_created_from_inventory') {
   const cleanName = name.trim();
   if (!cleanName) return { id: null as number | null, created: false };
   const existing = one<{ id: number }>(`SELECT id FROM ${table} WHERE deleted=0 AND lower(name)=lower(?) ORDER BY id LIMIT 1`, [cleanName]);
@@ -684,7 +713,168 @@ function getOrCreateMccNativeLookup(req: Request, table: NativeLookupTable, name
   const isVendor = table === 'inventory_vendors';
   inventoryAudit(req,isVendor ? 'vendor auto-create' : 'location auto-create',isVendor ? 'vendor' : 'location',id,{name:cleanName});
   audit(req,isVendor ? 'inventory vendor auto-create' : 'inventory location auto-create',isVendor ? 'inventory_vendor' : 'inventory_location',id,{name:cleanName});
+  if (isVendor && (req as AuthRequest).user) {
+    recordVendorHistory({
+      action: vendorHistoryAction,
+      actor: (req as AuthRequest).user!,
+      vendorId: id,
+      companyName: cleanName,
+      newValue: { companyName: cleanName, source: 'mcc' },
+    });
+  }
   return { id, created: true };
+}
+interface VendorRow {
+  id: number;
+  name: string;
+  phone_type: string;
+  phone_number: string;
+  phone_ext: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  country: string;
+  contact_name: string;
+  contact_title: string;
+  contact_phone_type: string;
+  contact_phone_number: string;
+  contact_phone_ext: string;
+  contact_email: string;
+  notes: string;
+  source: string;
+  imported_from_mit3_at: string | null;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+  deleted: number;
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+}
+const vendorPhoneTypes = new Set(['Mobile','Work','Cell','Office','Main','Other','']);
+function normalizePhoneType(value: string) {
+  const clean = value.trim();
+  if (!clean) return '';
+  const match = [...vendorPhoneTypes].find(option=>option.toLowerCase() === clean.toLowerCase());
+  if (!match) throw new Error('Phone type must be Mobile, Work, Cell, Office, Main, or Other.');
+  return match;
+}
+function cleanVendorCompanyName(input: Record<string, unknown>) {
+  const companyName = textField(input, ['companyName','company_name','name']).replace(/\s+/g, ' ').trim();
+  if (!companyName) throw new Error('Company Name is required.');
+  if (companyName.length > 120) throw new Error('Company Name must be 120 characters or less.');
+  return companyName;
+}
+function validateVendorInput(body: unknown) {
+  const input = isRecord(body) ? body : {};
+  const companyName = cleanVendorCompanyName(input);
+  const contactEmail = textField(input, ['contactEmail','contact_email']).slice(0, 180);
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error('Contact Email must be a valid email address.');
+  const phoneExt = textField(input, ['phoneExt','phone_ext','ext']).slice(0, 20);
+  const contactPhoneExt = textField(input, ['contactPhoneExt','contact_phone_ext','contactExt']).slice(0, 20);
+  return {
+    companyName,
+    phoneType: normalizePhoneType(textField(input, ['phoneType','phone_type'])),
+    phoneNumber: textField(input, ['phoneNumber','phone_number','phone']).slice(0, 80),
+    phoneExt,
+    addressLine1: textField(input, ['addressLine1','address_line1','address']).slice(0, 180),
+    addressLine2: textField(input, ['addressLine2','address_line2']).slice(0, 180),
+    city: textField(input, ['city']).slice(0, 120),
+    state: textField(input, ['state']).slice(0, 80),
+    postalCode: textField(input, ['postalCode','postal_code','zip']).slice(0, 40),
+    country: textField(input, ['country'], 'USA').slice(0, 80) || 'USA',
+    contactName: textField(input, ['contactName','contact_name']).slice(0, 160),
+    contactTitle: textField(input, ['contactTitle','contact_title']).slice(0, 160),
+    contactPhoneType: normalizePhoneType(textField(input, ['contactPhoneType','contact_phone_type'])),
+    contactPhoneNumber: textField(input, ['contactPhoneNumber','contact_phone_number','contactPhone']).slice(0, 80),
+    contactPhoneExt,
+    contactEmail,
+    notes: textField(input, ['notes']).slice(0, 2000),
+  };
+}
+type VendorInput = ReturnType<typeof validateVendorInput>;
+function vendorById(id: number) {
+  return one<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 AND id=?', [id]);
+}
+function vendorByName(companyName: string, excludeId?: number) {
+  const clean = companyName.trim();
+  return excludeId
+    ? one<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 AND lower(trim(name))=lower(?) AND id<>? ORDER BY id LIMIT 1', [clean,excludeId])
+    : one<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 AND lower(trim(name))=lower(?) ORDER BY id LIMIT 1', [clean]);
+}
+function publicVendor(row: VendorRow) {
+  return {
+    id: row.id,
+    companyName: row.name,
+    phoneType: row.phone_type ?? '',
+    phoneNumber: row.phone_number ?? '',
+    phoneExt: row.phone_ext ?? '',
+    addressLine1: row.address_line1 ?? '',
+    addressLine2: row.address_line2 ?? '',
+    city: row.city ?? '',
+    state: row.state ?? '',
+    postalCode: row.postal_code ?? '',
+    country: row.country ?? 'USA',
+    contactName: row.contact_name ?? '',
+    contactTitle: row.contact_title ?? '',
+    contactPhoneType: row.contact_phone_type ?? '',
+    contactPhoneNumber: row.contact_phone_number ?? '',
+    contactPhoneExt: row.contact_phone_ext ?? '',
+    contactEmail: row.contact_email ?? '',
+    notes: row.notes ?? '',
+    source: row.source,
+    importedFromMit3At: row.imported_from_mit3_at ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+function vendorHistoryValue(row: VendorRow | VendorInput) {
+  return 'name' in row ? publicVendor(row) : {
+    companyName: row.companyName,
+    phoneType: row.phoneType,
+    phoneNumber: row.phoneNumber,
+    phoneExt: row.phoneExt,
+    addressLine1: row.addressLine1,
+    addressLine2: row.addressLine2,
+    city: row.city,
+    state: row.state,
+    postalCode: row.postalCode,
+    country: row.country,
+    contactName: row.contactName,
+    contactTitle: row.contactTitle,
+    contactPhoneType: row.contactPhoneType,
+    contactPhoneNumber: row.contactPhoneNumber,
+    contactPhoneExt: row.contactPhoneExt,
+    contactEmail: row.contactEmail,
+    notes: row.notes,
+  };
+}
+function recordVendorHistory(input: { action: string; actor: User; vendorId: number; companyName: string; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; reasonNote?: string }) {
+  recordHistoryLog({
+    section: 'vendors',
+    action: input.action,
+    entityType: 'vendor',
+    entityId: String(input.vendorId),
+    entityLabel: input.companyName,
+    vendorName: input.companyName,
+    oldValue: input.oldValue,
+    newValue: input.newValue,
+    reasonNote: input.reasonNote,
+    actor: input.actor,
+  });
+}
+function updateVendorRow(id: number, input: VendorInput, actor: User, timestamp: string) {
+  run(`UPDATE inventory_vendors SET name=?, phone_type=?, phone_number=?, phone_ext=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_ext=?, contact_email=?, notes=?, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
+    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,actor.id,timestamp,id,
+  ]);
+}
+function insertVendorRow(input: VendorInput, actor: User, timestamp: string) {
+  const result = run(`INSERT INTO inventory_vendors (name,phone_type,phone_number,phone_ext,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_ext,contact_email,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
+    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,null,actor.id,actor.id,timestamp,timestamp,
+  ]);
+  return Number(result.lastInsertRowid);
 }
 function findNativePart(mit3ItemId: string, partNumber: string) {
   if (mit3ItemId) {
@@ -705,6 +895,7 @@ function normalizeNativePart(row: NativePartRow) {
     description: row.description,
     location: row.location_name ?? '',
     vendor: row.vendor_name ?? '',
+    vendorId: row.vendor_id ? String(row.vendor_id) : '',
     quantity: Number(row.quantity ?? 0),
     minQuantity: Number(row.min_quantity ?? 0),
     status: row.status,
@@ -1057,6 +1248,7 @@ function tableCount(tableName: string) {
 function masterBackupRecordCounts() {
   return {
     users: tableCount('users'),
+    vendors: tableCount('inventory_vendors'),
     inventoryParts: tableCount('inventory_parts'),
     requisitions: tableCount('inventory_requisitions'),
     requisitionLines: tableCount('inventory_requisition_lines'),
@@ -1590,7 +1782,7 @@ function cleanupDuplicateNativeParts(req: Request, actor: User, primary: NativeP
 }
 function updateNativeImportPart(req: Request, actor: User, existing: NativePartRow, input: PreparedNativeImportRow, timestamp: string, summary: NativeImportSummary) {
   const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
-  const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
+  const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp,'vendor_created_from_import');
   if (location.created) summary.locationCreatedCount += 1;
   if (vendor.created) summary.vendorCreatedCount += 1;
   const quantityBefore = Number(existing.quantity ?? 0);
@@ -1613,7 +1805,7 @@ function updateNativeImportPart(req: Request, actor: User, existing: NativePartR
 }
 function insertNativeImportPart(req: Request, actor: User, input: PreparedNativeImportRow, timestamp: string, summary: NativeImportSummary) {
   const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
-  const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
+  const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp,'vendor_created_from_import');
   if (location.created) summary.locationCreatedCount += 1;
   if (vendor.created) summary.vendorCreatedCount += 1;
   const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,lead_time,important_note,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.requisition,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.notes,'mcc',null,actor.id,actor.id,timestamp,timestamp]);
@@ -4348,6 +4540,134 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:A
 for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
+app.get('/api/vendors', requireAuth, (req,res)=>{
+  const q = queryText(req.query.q);
+  const where = ['deleted=0'];
+  const params: SqlParam[] = [];
+  if (q) {
+    const like = `%${escapeLike(q)}%`;
+    where.push('(name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line1 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line2 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR city LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR state LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR postal_code LIKE ? ESCAPE \'\\\' COLLATE NOCASE)');
+    params.push(like,like,like,like,like,like,like,like,like,like);
+  }
+  const vendors = all<VendorRow>(`SELECT * FROM inventory_vendors WHERE ${where.join(' AND ')} ORDER BY name COLLATE NOCASE, id`, params).map(publicVendor);
+  res.json({ok:true,vendors});
+});
+app.get('/api/vendors/options', requireAuth, (_req,res)=>{
+  const options = all<{ id: number; name: string }>('SELECT id, name FROM inventory_vendors WHERE deleted=0 ORDER BY name COLLATE NOCASE, id').map(row=>({id:row.id,companyName:row.name}));
+  res.json({ok:true,options});
+});
+app.get('/api/vendors/:id', requireAuth, (req,res)=>{
+  const vendorId = Number(req.params.id);
+  const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
+  if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
+  res.json({ok:true,vendor:publicVendor(vendor)});
+});
+app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  try {
+    const actor = req.user!;
+    const input = validateVendorInput(req.body);
+    const timestamp = now();
+    const existing = vendorByName(input.companyName);
+    let vendorId = existing?.id ?? 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (existing) {
+        updateVendorRow(existing.id,input,actor,timestamp);
+        vendorId = existing.id;
+        recordVendorHistory({
+          action: 'vendor_updated',
+          actor,
+          vendorId,
+          companyName: input.companyName,
+          oldValue: vendorHistoryValue(existing),
+          newValue: vendorHistoryValue(input),
+        });
+      } else {
+        vendorId = insertVendorRow(input,actor,timestamp);
+        recordVendorHistory({
+          action: 'vendor_created',
+          actor,
+          vendorId,
+          companyName: input.companyName,
+          newValue: vendorHistoryValue(input),
+        });
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    const vendor = vendorById(vendorId);
+    audit(req, existing ? 'vendor update from duplicate create' : 'vendor create', 'vendor', vendorId, {companyName: input.companyName});
+    res.status(existing ? 200 : 201).json({ok:true,vendor:vendor ? publicVendor(vendor) : null,mergedExisting:Boolean(existing)});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/required|valid|120|20|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.id);
+  try {
+    if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error('Vendor not found.');
+    const actor = req.user!;
+    const existing = vendorById(vendorId);
+    if (!existing) throw new Error('Vendor not found.');
+    const input = validateVendorInput(req.body);
+    const duplicate = vendorByName(input.companyName,vendorId);
+    if (duplicate) throw new Error('Company Name already exists for another active vendor.');
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      updateVendorRow(vendorId,input,actor,timestamp);
+      recordVendorHistory({
+        action: 'vendor_updated',
+        actor,
+        vendorId,
+        companyName: input.companyName,
+        oldValue: vendorHistoryValue(existing),
+        newValue: vendorHistoryValue(input),
+      });
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    const vendor = vendorById(vendorId);
+    audit(req,'vendor update','vendor',vendorId,{companyName: input.companyName});
+    res.json({ok:true,vendor:vendor ? publicVendor(vendor) : null});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.id);
+  try {
+    if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error('Vendor not found.');
+    if (roleRank(req.user!.role) < roleRank('Manager')) return res.status(403).json({ok:false,error:'Permission denied.'});
+    const existing = vendorById(vendorId);
+    if (!existing) throw new Error('Vendor not found.');
+    const activePartCount = one<{ count: number }>('SELECT COUNT(*) AS count FROM inventory_parts WHERE deleted=0 AND vendor_id=?', [vendorId])?.count ?? 0;
+    if (activePartCount > 0) throw new Error('Vendor is used by active inventory parts and cannot be deleted.');
+    const reasonNote = requiredReasonNote(isRecord(req.body) ? req.body.reasonNote ?? req.body.reason : '', 'Vendor delete');
+    const timestamp = now();
+    run('UPDATE inventory_vendors SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_by_user_id=?, updated_at=? WHERE id=? AND deleted=0', [timestamp,req.user!.id,req.user!.id,timestamp,vendorId]);
+    recordVendorHistory({
+      action: 'vendor_deleted',
+      actor: req.user!,
+      vendorId,
+      companyName: existing.name,
+      oldValue: vendorHistoryValue(existing),
+      newValue: { ...vendorHistoryValue(existing), deleted: true },
+      reasonNote,
+    });
+    audit(req,'vendor delete','vendor',vendorId,{companyName: existing.name});
+    res.json({ok:true});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /used by active|reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
 app.get('/api/history/summary', requireAuth, requirePermission('history.view'), (_req,res)=>{
   const rows = all<{ section: HistorySection; count: number; latestCreatedAt: string | null }>('SELECT section, COUNT(*) AS count, MAX(created_at) AS latestCreatedAt FROM history_logs GROUP BY section');
   const summary = historySections.map(section=>{

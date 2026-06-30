@@ -9,6 +9,7 @@ import { HistoryPage, historySectionFromPath, historySectionSlug, type HistorySe
 import { RequisitionsPage } from './modules/requisitions/RequisitionsPage';
 import { SettingsPage } from './modules/settings/SettingsPage';
 import { UsersPage } from './modules/users/UsersPage';
+import { VendorsPage } from './modules/vendors/VendorsPage';
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; forcePasswordChange:boolean };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
@@ -19,7 +20,7 @@ function routeFromPath(pathname: string): { section: MccSection; historySection:
   const clean = pathname.replace(/^\/+|\/+$/g, '');
   if (clean.startsWith('history')) return { section: 'history', historySection: historySectionFromPath(clean) };
   const first = clean.split('/')[0] as MccSection;
-  if (['inventory','requisitions','machine-library','equipment-library','facility-info','users','settings'].includes(first)) return { section: first, historySection: null };
+  if (['inventory','vendors','requisitions','machine-library','equipment-library','facility-info','users','settings'].includes(first)) return { section: first, historySection: null };
   return { section: 'dashboard', historySection: null };
 }
 function pathForSection(section: MccSection, historySection?: HistorySection | null) {
@@ -47,7 +48,7 @@ function App() {
     setHistorySection(section === 'history' ? nextHistorySection : null);
     window.history.pushState(null,'',pathForSection(section,nextHistorySection));
   }
-  const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} onBackToDashboard={()=>navigate('dashboard')} onOpenRequisitions={()=>navigate('requisitions')} /> : activeSection === 'machine-library' ? <MachineLibraryPage /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'history' ? <HistoryPage userRole={user?.role ?? ''} selectedSection={historySection} onSectionChange={section=>navigate('history',section)} onBackToLanding={()=>navigate('history')} /> : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage isOwnerAdmin={Boolean(user?.isOwnerAdmin)} /> : <DashboardPage />;
+  const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} onBackToDashboard={()=>navigate('dashboard')} onOpenRequisitions={()=>navigate('requisitions')} /> : activeSection === 'vendors' ? <VendorsPage /> : activeSection === 'machine-library' ? <MachineLibraryPage /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'history' ? <HistoryPage userRole={user?.role ?? ''} selectedSection={historySection} onSectionChange={section=>navigate('history',section)} onBackToLanding={()=>navigate('history')} /> : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage isOwnerAdmin={Boolean(user?.isOwnerAdmin)} /> : <DashboardPage />;
   if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;

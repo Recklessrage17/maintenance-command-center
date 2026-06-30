@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 
-export type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
+export type HistorySection = 'inventory' | 'vendors' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 
 type HistorySummary = {
   section: HistorySection;
@@ -54,6 +54,7 @@ type HistoryResponse = {
 
 const sectionCards: Array<{ section: HistorySection; label: string; description: string }> = [
   { section: 'inventory', label: 'Inventory', description: 'Parts, quantities, stock changes, and inventory edits.' },
+  { section: 'vendors', label: 'Vendors', description: 'Vendor companies, contacts, detail edits, and delete reason notes.' },
   { section: 'requisitions', label: 'Requisitions', description: 'Drafts, pass/create, status changes, cancel/delete notes, and PDFs.' },
   { section: 'machine_library', label: 'Machine Library', description: 'Machine records, assets, PM activity, and future removals.' },
   { section: 'equipment_library', label: 'Equipment Library', description: 'Equipment records, assets, PM activity, and future removals.' },
@@ -125,6 +126,11 @@ function formatAction(value: string) {
     backup_created: 'Backup Created',
     restore_completed: 'Restore Complete',
     history_pdf_exported: 'History PDF Exported',
+    vendor_created: 'Vendor Created',
+    vendor_updated: 'Vendor Updated',
+    vendor_deleted: 'Vendor Deleted',
+    vendor_created_from_inventory: 'Vendor Created From Inventory',
+    vendor_created_from_import: 'Vendor Created From Import',
     branding_updated: 'Branding Updated',
     branding_reset_to_default: 'Branding Reset',
     branding_logo_uploaded: 'Branding Logo Uploaded',

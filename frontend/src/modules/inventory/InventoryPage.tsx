@@ -1,4 +1,5 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
   id: string;
@@ -7,6 +8,7 @@ type InventoryPart = {
   description: string;
   location: string;
   vendor: string;
+  vendorId?: string;
   quantity: number;
   minQuantity: number;
   status: string;
@@ -31,6 +33,9 @@ type PartsResponse = {
   parts: InventoryPart[];
   summary?: NativeSummary;
 };
+
+type VendorsResponse = { ok: boolean; vendors: VendorRecord[] };
+type VendorResponse = { ok: boolean; vendor: VendorRecord; mergedExisting?: boolean };
 
 type FilterMode = 'all' | 'low' | 'requisition';
 type ModalMode = 'add' | 'edit';
@@ -411,6 +416,10 @@ function payloadFromForm(form: PartForm) {
   };
 }
 
+function vendorNameKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
 export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [parts,setParts]=useState<InventoryPart[]>([]);
@@ -450,6 +459,12 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [requisitionError,setRequisitionError]=useState('');
   const [requisitionSaving,setRequisitionSaving]=useState(false);
   const [passSaving,setPassSaving]=useState(false);
+  const [vendorRecords,setVendorRecords]=useState<VendorRecord[]>([]);
+  const [vendorDetail,setVendorDetail]=useState<VendorRecord|null>(null);
+  const [vendorEditorInitial,setVendorEditorInitial]=useState<VendorForm|null>(null);
+  const [vendorEditorId,setVendorEditorId]=useState<number|null>(null);
+  const [vendorSaving,setVendorSaving]=useState(false);
+  const [vendorError,setVendorError]=useState('');
   const tableScrollRef = useRef<HTMLDivElement|null>(null);
   const lastAutoPageAtRef = useRef(0);
   const pendingScrollTargetRef = useRef<'top'|'bottom'|null>(null);
@@ -520,7 +535,59 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     }
   }
 
-  useEffect(()=>{ void refresh(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
+  async function loadVendors() {
+    try {
+      const data = await api<VendorsResponse>('/api/vendors');
+      setVendorRecords(data.vendors ?? []);
+    } catch {
+      setVendorRecords([]);
+    }
+  }
+
+  function findVendorByName(name: string) {
+    const key = vendorNameKey(name);
+    return vendorRecords.find(vendor=>vendorNameKey(vendor.companyName) === key) ?? null;
+  }
+
+  async function openVendorDetailForPart(part: InventoryPart) {
+    if (!part.vendor.trim()) return;
+    const knownVendor = part.vendorId
+      ? vendorRecords.find(vendor=>String(vendor.id) === String(part.vendorId)) ?? null
+      : findVendorByName(part.vendor);
+    try {
+      if (knownVendor) {
+        const data = await api<VendorResponse>(`/api/vendors/${knownVendor.id}`);
+        setVendorDetail(data.vendor);
+        return;
+      }
+      setVendorEditorInitial({...blankVendorForm,companyName:part.vendor.trim()});
+      setVendorEditorId(null);
+      setVendorError('');
+    } catch (err) {
+      showNotice('error', (err as Error).message);
+    }
+  }
+
+  async function saveInventoryVendor(vendorForm: VendorForm) {
+    setVendorSaving(true);
+    setVendorError('');
+    try {
+      const data = await api<VendorResponse>(vendorEditorId ? `/api/vendors/${vendorEditorId}` : '/api/vendors', {method:vendorEditorId ? 'PUT' : 'POST',body:JSON.stringify(vendorPayloadFromForm(vendorForm))});
+      const savedVendor = data.vendor;
+      setForm(current=>({...current,vendor:savedVendor.companyName}));
+      setVendorEditorInitial(null);
+      setVendorEditorId(null);
+      setVendorDetail(savedVendor);
+      await loadVendors();
+      showNotice('success', `Vendor saved: ${savedVendor.companyName}`);
+    } catch (err) {
+      setVendorError((err as Error).message);
+    } finally {
+      setVendorSaving(false);
+    }
+  }
+
+  useEffect(()=>{ void refresh(); void loadVendors(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
   useEffect(()=>{
     if (!notice?.expiresAt) return;
     const delay = Math.max(0, notice.expiresAt - Date.now());
@@ -542,7 +609,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const writeEnabled = canWrite;
 
   const locationOptions = useMemo(()=>[...new Set(parts.map(part=>part.location.trim()).filter(Boolean))].sort(compareText),[parts]);
-  const vendorOptions = useMemo(()=>[...new Set(parts.map(part=>part.vendor.trim()).filter(Boolean))].sort(compareText),[parts]);
+  const vendorOptions = useMemo(()=>[...new Set([...vendorRecords.map(vendor=>vendor.companyName.trim()), ...parts.map(part=>part.vendor.trim())].filter(Boolean))].sort(compareText),[parts,vendorRecords]);
 
   const filteredParts = useMemo(()=>{
     const needle = search.trim().toLowerCase();
@@ -794,6 +861,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       setFileImportSummary(result);
       if (result.nativeSummary) setNativeSummary(normalizeNativeSummary(result.nativeSummary));
       await refresh();
+      await loadVendors();
       await loadBackups();
       setInventoryImportFile(null);
       showNotice(result.addedCount + result.updatedCount + duplicateCleanupCount(result) > 0 ? 'success' : 'error', importCompleteMessage(result));
@@ -841,9 +909,21 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       setFormError('Part Number already exists in MCC Inventory. Choose a unique Part Number before saving.');
       return;
     }
+    const enteredVendor = form.vendor.trim();
+    const existingVendor = findVendorByName(enteredVendor);
+    if (!existingVendor) {
+      setVendorEditorInitial({...blankVendorForm,companyName:enteredVendor});
+      setVendorEditorId(null);
+      setVendorDetail(null);
+      setVendorError('');
+      setFormError('Complete vendor details, then save the inventory part.');
+      return;
+    }
+    const normalizedForm = existingVendor.companyName !== enteredVendor ? {...form,vendor:existingVendor.companyName} : form;
+    if (existingVendor.companyName !== enteredVendor) setForm(normalizedForm);
     setSaving(true);
     setNotice(null);
-    const payload = JSON.stringify(payloadFromForm(form));
+    const payload = JSON.stringify(payloadFromForm(normalizedForm));
     const isEdit = modal === 'edit' && editingPart;
     try {
       const result = await api<{ part?: InventoryPart }>(isEdit ? `/api/inventory/native/parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/native/parts', {
@@ -856,6 +936,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       const messageDescription = savedPart?.description || form.description.trim();
       showNotice('success', `${isEdit ? 'Updated' : 'Added'} inventory part: ${messagePartNumber} \u2014 ${messageDescription}`);
       await refresh();
+      await loadVendors();
       if (savedPart?.id) {
         highlightParts([savedPart.id]);
         setPage(1);
@@ -1202,7 +1283,13 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                       {part.leadTime&&<span className="inventory-lead-time">Lead time: {part.leadTime}</span>}
                     </td>
                     <td>{part.location || '-'}</td>
-                    <td>{part.vendor || '-'}</td>
+                    <td>
+                      {part.vendor ? (
+                        <button className="vendor-name-link inventory-vendor-link" type="button" onClick={event=>{ event.stopPropagation(); void openVendorDetailForPart(part); }}>
+                          {part.vendor}
+                        </button>
+                      ) : '-'}
+                    </td>
                     <td>{part.quantity}</td>
                     <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
                     <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span></div></td>
@@ -1302,6 +1389,27 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
           </form>
         </div>
       )}
+
+      {vendorDetail&&<VendorDetailModal vendor={vendorDetail} onClose={()=>setVendorDetail(null)} onEdit={()=>{ setVendorEditorInitial({
+        companyName: vendorDetail.companyName,
+        phoneType: vendorDetail.phoneType,
+        phoneNumber: vendorDetail.phoneNumber,
+        phoneExt: vendorDetail.phoneExt,
+        addressLine1: vendorDetail.addressLine1,
+        addressLine2: vendorDetail.addressLine2,
+        city: vendorDetail.city,
+        state: vendorDetail.state,
+        postalCode: vendorDetail.postalCode,
+        country: vendorDetail.country || 'USA',
+        contactName: vendorDetail.contactName,
+        contactTitle: vendorDetail.contactTitle,
+        contactPhoneType: vendorDetail.contactPhoneType,
+        contactPhoneNumber: vendorDetail.contactPhoneNumber,
+        contactPhoneExt: vendorDetail.contactPhoneExt,
+        contactEmail: vendorDetail.contactEmail,
+        notes: vendorDetail.notes,
+      }); setVendorEditorId(vendorDetail.id); setVendorDetail(null); setVendorError(''); }} />}
+      {vendorEditorInitial&&<VendorEditorModal mode={vendorEditorId ? 'edit' : 'add'} initial={vendorEditorInitial} onClose={()=>{ if(!vendorSaving){ setVendorEditorInitial(null); setVendorEditorId(null); setVendorError(''); } }} onSave={saveInventoryVendor} saving={vendorSaving} error={vendorError} />}
 
       {reviewGroups[reviewIndex]&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReview(); }}>
