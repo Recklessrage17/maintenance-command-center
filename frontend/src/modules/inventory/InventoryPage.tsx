@@ -71,6 +71,8 @@ type NativeFileImportSummary = {
   addedCount: number;
   updatedCount: number;
   skippedCount: number;
+  duplicateMergedCount?: number;
+  duplicatesRemovedCount?: number;
   vendorCreatedCount: number;
   locationCreatedCount: number;
   invalidUrlCount: number;
@@ -279,9 +281,14 @@ function formatCurrency(value: number | null | undefined) {
   return currencyFormatter.format(Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
 }
 
+function duplicateCleanupCount(summary: NativeFileImportSummary) {
+  return Number(summary.duplicateMergedCount ?? 0) + Number(summary.duplicatesRemovedCount ?? 0);
+}
+
 function importCompleteMessage(summary: NativeFileImportSummary) {
   const totalImported = summary.addedCount + summary.updatedCount;
-  const counts = `${summary.addedCount} added, ${summary.updatedCount} updated, ${summary.skippedCount} skipped`;
+  const duplicatesCleaned = duplicateCleanupCount(summary);
+  const counts = `${summary.addedCount} added, ${summary.updatedCount} updated, ${duplicatesCleaned} duplicates cleaned, ${summary.skippedCount} skipped`;
   if (totalImported === 0 && summary.skippedCount > 0) {
     return 'No rows were imported. Check that the file has PartNumber/Part Number and valid quantity/cost values.';
   }
@@ -789,7 +796,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       await refresh();
       await loadBackups();
       setInventoryImportFile(null);
-      showNotice(result.addedCount + result.updatedCount > 0 ? 'success' : 'error', importCompleteMessage(result));
+      showNotice(result.addedCount + result.updatedCount + duplicateCleanupCount(result) > 0 ? 'success' : 'error', importCompleteMessage(result));
     } catch (err) {
       showNotice('error', (err as Error).message);
     } finally {
@@ -1130,8 +1137,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
           </div>
           {fileImportSummary&&(
             <div className="inventory-tool-summary" aria-live="polite">
-              <strong>{fileImportSummary.addedCount} added / {fileImportSummary.updatedCount} updated / {fileImportSummary.skippedCount} skipped</strong>
-              <span>{fileImportSummary.vendorCreatedCount} vendors created, {fileImportSummary.locationCreatedCount} locations created, {fileImportSummary.invalidUrlCount} unsafe links skipped.</span>
+              <strong>{fileImportSummary.addedCount} added / {fileImportSummary.updatedCount} updated / {duplicateCleanupCount(fileImportSummary)} duplicates cleaned / {fileImportSummary.skippedCount} skipped</strong>
+              <span>{fileImportSummary.vendorCreatedCount} vendors created, {fileImportSummary.locationCreatedCount} locations created, {fileImportSummary.duplicatesRemovedCount ?? 0} duplicate records cleaned, {fileImportSummary.duplicateMergedCount ?? 0} duplicate import rows consolidated, {fileImportSummary.invalidUrlCount} unsafe links skipped.</span>
               {fileImportSummary.errors.length>0&&(
                 <ul>
                   {fileImportSummary.errors.slice(0,5).map((message,index)=><li key={`${message}-${index}`}>{message}</li>)}

@@ -749,6 +749,8 @@ function nativePartHistoryValue(row: NativePartRow | (NativePartInput & { locati
     supplierPartNumber: 'supplier_part_number' in row ? row.supplier_part_number ?? '' : row.supplierPartNumber,
     leadTime: 'lead_time' in row ? row.lead_time ?? '' : row.leadTime,
     importantNote: 'important_note' in row ? row.important_note ?? '' : row.importantNote,
+    partInfoUrl: 'part_info_url' in row ? row.part_info_url ?? '' : row.partInfoUrl,
+    notes: 'notes' in row ? row.notes ?? '' : '',
   };
 }
 function recordInventoryPartHistory(input: { action: string; actor: User; partId: number; row?: NativePartRow; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; quantityBefore?: number | null; quantityAfter?: number | null; reasonNote?: string }) {
@@ -816,11 +818,32 @@ type NativeImportSummary = {
   addedCount: number;
   updatedCount: number;
   skippedCount: number;
+  duplicateMergedCount: number;
+  duplicatesRemovedCount: number;
   vendorCreatedCount: number;
   locationCreatedCount: number;
   invalidUrlCount: number;
   errorCount: number;
   errors: string[];
+};
+type PreparedNativeImportRow = {
+  rowNumber: number;
+  mccItemId: string;
+  partNumber: string;
+  description: string;
+  location: string;
+  vendor: string;
+  quantity: number;
+  minQuantity: number;
+  requisition: string;
+  partInfoUrl: string;
+  manufacturerBrand: string;
+  unitCost: number;
+  supplierPartNumber: string;
+  leadTime: string;
+  importantNote: string;
+  notes: string;
+  status: string;
 };
 function nativeInventoryRows() {
   return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
@@ -1484,44 +1507,151 @@ function addImportError(summary: NativeImportSummary, message: string) {
   summary.errorCount += 1;
   if (summary.errors.length < 5) summary.errors.push(message);
 }
+function prepareNativeImportRow(row: NativeImportRow, summary: NativeImportSummary): PreparedNativeImportRow {
+  const partNumber = row.partNumber.trim();
+  if (!partNumber) throw new Error(`Row ${row.rowNumber}: Part Number is required.`);
+  const quantity = numericImportValue(row.quantity, 'Quantity', row.rowNumber);
+  const minQuantity = numericImportValue(row.minQuantity, 'Minimum Quantity', row.rowNumber);
+  const unitCost = numericImportValue(row.unitCost, 'Unit Cost', row.rowNumber);
+  if (unitCost < 0) throw new Error(`Row ${row.rowNumber}: Unit Cost must be zero or greater.`);
+  const rawUrl = row.partInfoUrl.trim();
+  const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
+  if (rawUrl && !partInfoUrl) {
+    summary.invalidUrlCount += 1;
+    addImportError(summary, `Row ${row.rowNumber}: unsafe Part Info URL was skipped.`);
+  }
+  const status = nativePartStatus(quantity, minQuantity);
+  return {
+    rowNumber: row.rowNumber,
+    mccItemId: row.mccItemId.trim(),
+    partNumber,
+    description: row.description.trim(),
+    location: row.location.trim(),
+    vendor: row.vendor.trim(),
+    quantity,
+    minQuantity,
+    requisition: requisitionImportValue(row.requisition),
+    partInfoUrl,
+    manufacturerBrand: row.manufacturerBrand.trim(),
+    unitCost,
+    supplierPartNumber: row.supplierPartNumber.trim(),
+    leadTime: row.leadTime.trim().slice(0, 120),
+    importantNote: row.importantNote.trim().slice(0, 500),
+    notes: row.notes.trim(),
+    status,
+  };
+}
+function consolidatedNativeImportRows(rows: NativeImportRow[], summary: NativeImportSummary) {
+  const order: string[] = [];
+  const preparedByPartNumber = new Map<string, PreparedNativeImportRow>();
+  for (const row of rows) {
+    try {
+      const prepared = prepareNativeImportRow(row, summary);
+      const key = normalizedPartNumberKey(prepared.partNumber);
+      const previous = preparedByPartNumber.get(key);
+      if (previous) {
+        summary.duplicateMergedCount += 1;
+        addImportError(summary, `Rows ${previous.rowNumber} and ${prepared.rowNumber}: duplicate Part Number in import file; row ${prepared.rowNumber} was used.`);
+      } else {
+        order.push(key);
+      }
+      preparedByPartNumber.set(key, prepared);
+    } catch (error) {
+      summary.skippedCount += 1;
+      addImportError(summary, safeErrorMessage(error));
+    }
+  }
+  return order.map(key => preparedByPartNumber.get(key)).filter(Boolean) as PreparedNativeImportRow[];
+}
+function cleanupDuplicateNativeParts(req: Request, actor: User, primary: NativePartRow, candidates: NativePartRow[], timestamp: string, summary: NativeImportSummary, rowNumber: number) {
+  const reasonNote = 'Duplicate Part Number cleaned during inventory import.';
+  for (const candidate of candidates) {
+    if (candidate.id === primary.id) continue;
+    const activeRequisitionCount = activeRequisitionCountForPart(candidate.id);
+    if (activeRequisitionCount > 0) {
+      addImportError(summary, `Row ${rowNumber}: duplicate Part Number ${primary.part_number} on part ID ${candidate.id} has an active requisition and was left active.`);
+      continue;
+    }
+    run('UPDATE inventory_parts SET deleted=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=? AND deleted=0', [timestamp,actor.id,timestamp,candidate.id]);
+    summary.duplicatesRemovedCount += 1;
+    inventoryAudit(req,'duplicate_soft_deleted','part',candidate.id,{partNumber:candidate.part_number,primaryPartId:primary.id,reason:reasonNote});
+    recordInventoryPartHistory({
+      action: 'duplicate_soft_deleted',
+      actor,
+      partId: candidate.id,
+      row: candidate,
+      oldValue: nativePartHistoryValue(candidate),
+      newValue: { ...nativePartHistoryValue(candidate), deleted: true, primaryPartId: primary.id },
+      quantityBefore: Number(candidate.quantity ?? 0),
+      quantityAfter: Number(candidate.quantity ?? 0),
+      reasonNote,
+    });
+  }
+}
+function updateNativeImportPart(req: Request, actor: User, existing: NativePartRow, input: PreparedNativeImportRow, timestamp: string, summary: NativeImportSummary) {
+  const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
+  const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
+  if (location.created) summary.locationCreatedCount += 1;
+  if (vendor.created) summary.vendorCreatedCount += 1;
+  const quantityBefore = Number(existing.quantity ?? 0);
+  const quantityAfter = Number(input.quantity ?? 0);
+  run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, lead_time=?, important_note=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.requisition,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.notes,'mcc',actor.id,timestamp,existing.id]);
+  const updatedRow = nativePartRowById(existing.id);
+  summary.updatedCount += 1;
+  inventoryAudit(req,'inventory import update','part',existing.id,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created,rowNumber:input.rowNumber});
+  recordInventoryPartHistory({
+    action: 'updated',
+    actor,
+    partId: existing.id,
+    row: updatedRow,
+    oldValue: nativePartHistoryValue(existing),
+    newValue: updatedRow ? nativePartHistoryValue(updatedRow) : null,
+    quantityBefore,
+    quantityAfter,
+  });
+  return updatedRow ?? existing;
+}
+function insertNativeImportPart(req: Request, actor: User, input: PreparedNativeImportRow, timestamp: string, summary: NativeImportSummary) {
+  const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
+  const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
+  if (location.created) summary.locationCreatedCount += 1;
+  if (vendor.created) summary.vendorCreatedCount += 1;
+  const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,lead_time,important_note,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.requisition,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.notes,'mcc',null,actor.id,actor.id,timestamp,timestamp]);
+  const partId = Number(result.lastInsertRowid);
+  const createdRow = nativePartRowById(partId);
+  summary.addedCount += 1;
+  inventoryAudit(req,'inventory import create','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created,rowNumber:input.rowNumber});
+  recordInventoryPartHistory({
+    action: 'created',
+    actor,
+    partId,
+    row: createdRow,
+    newValue: createdRow ? nativePartHistoryValue(createdRow) : null,
+    quantityAfter: input.quantity,
+  });
+}
+function upsertNativeImportRow(req: Request, actor: User, input: PreparedNativeImportRow, timestamp: string, summary: NativeImportSummary) {
+  const candidates = findActivePartsByPartNumber(input.partNumber);
+  const mccItemId = Number(input.mccItemId);
+  const existingById = Number.isInteger(mccItemId) && mccItemId > 0 ? nativePartRowById(mccItemId) : undefined;
+  const activeCandidates = candidates.length ? candidates : existingById ? [existingById] : [];
+  if (activeCandidates.length) {
+    const primary = choosePrimaryNativePart(activeCandidates).row;
+    const updatedPrimary = updateNativeImportPart(req, actor, primary, input, timestamp, summary);
+    cleanupDuplicateNativeParts(req, actor, updatedPrimary, activeCandidates, timestamp, summary, input.rowNumber);
+  } else {
+    insertNativeImportPart(req, actor, input, timestamp, summary);
+  }
+}
 function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
   const actor = (req as AuthRequest).user!;
-  const summary: NativeImportSummary = { addedCount: 0, updatedCount: 0, skippedCount: 0, vendorCreatedCount: 0, locationCreatedCount: 0, invalidUrlCount: 0, errorCount: 0, errors: [] };
+  const summary: NativeImportSummary = { addedCount: 0, updatedCount: 0, skippedCount: 0, duplicateMergedCount: 0, duplicatesRemovedCount: 0, vendorCreatedCount: 0, locationCreatedCount: 0, invalidUrlCount: 0, errorCount: 0, errors: [] };
   const timestamp = now();
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const row of rows) {
+    for (const row of consolidatedNativeImportRows(rows, summary)) {
       try {
-        const partNumber = row.partNumber.trim();
-        if (!partNumber) throw new Error(`Row ${row.rowNumber}: Part Number is required.`);
-        const quantity = numericImportValue(row.quantity, 'Quantity', row.rowNumber);
-        const minQuantity = numericImportValue(row.minQuantity, 'Minimum Quantity', row.rowNumber);
-        const unitCost = row.unitCost.trim() ? numericImportValue(row.unitCost, 'Unit Cost', row.rowNumber) : 0;
-        if (unitCost < 0) throw new Error(`Row ${row.rowNumber}: Unit Cost must be zero or greater.`);
-        const rawUrl = row.partInfoUrl.trim();
-        const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
-        if (rawUrl && !partInfoUrl) {
-          summary.invalidUrlCount += 1;
-          addImportError(summary, `Row ${row.rowNumber}: unsafe Part Info URL was skipped.`);
-        }
-        let existing = row.mccItemId.trim() ? one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND id=?', [Number(row.mccItemId)]) : undefined;
-        if (!existing) existing = findDuplicateNativePart(partNumber);
-        if (existing && findDuplicateNativePart(partNumber, existing.id)) throw new Error(`Row ${row.rowNumber}: Part Number already exists on another native inventory item.`);
-        const location = getOrCreateMccNativeLookup(req,'inventory_locations',row.location,timestamp);
-        const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',row.vendor,timestamp);
-        const leadTime = row.leadTime.trim().slice(0, 120);
-        const importantNote = row.importantNote.trim().slice(0, 500);
-        if (location.created) summary.locationCreatedCount += 1;
-        if (vendor.created) summary.vendorCreatedCount += 1;
-        const status = nativePartStatus(quantity, minQuantity);
-        const requisition = requisitionImportValue(row.requisition);
-        if (existing) {
-          run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, lead_time=?, important_note=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.manufacturerBrand.trim(),unitCost,row.supplierPartNumber.trim(),leadTime,importantNote,row.notes.trim(),'mcc',actor.id,timestamp,existing.id]);
-          summary.updatedCount += 1;
-        } else {
-          run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,lead_time,important_note,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,partNumber,row.description.trim(),location.id,vendor.id,quantity,minQuantity,status,requisition,partInfoUrl,row.manufacturerBrand.trim(),unitCost,row.supplierPartNumber.trim(),leadTime,importantNote,row.notes.trim(),'mcc',null,actor.id,actor.id,timestamp,timestamp]);
-          summary.addedCount += 1;
-        }
+        upsertNativeImportRow(req, actor, row, timestamp, summary);
       } catch (error) {
         summary.skippedCount += 1;
         addImportError(summary, safeErrorMessage(error));
@@ -1619,8 +1749,36 @@ type NativePartInput = ReturnType<typeof validateNativePartInput>;
 function findDuplicateNativePart(partNumber: string, excludeId?: number) {
   if (!partNumber) return undefined;
   return excludeId
-    ? one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(part_number)=lower(?) AND id<>? ORDER BY id LIMIT 1', [partNumber,excludeId])
-    : one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(part_number)=lower(?) ORDER BY id LIMIT 1', [partNumber]);
+    ? one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(trim(part_number))=lower(?) AND id<>? ORDER BY id LIMIT 1', [partNumber.trim(),excludeId])
+    : one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND lower(trim(part_number))=lower(?) ORDER BY id LIMIT 1', [partNumber.trim()]);
+}
+function normalizedPartNumberKey(partNumber: string) {
+  return partNumber.trim().toLowerCase();
+}
+function findActivePartsByPartNumber(partNumber: string) {
+  const clean = partNumber.trim();
+  if (!clean) return [];
+  return all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+FROM inventory_parts p
+LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+LEFT JOIN inventory_vendors v ON v.id=p.vendor_id AND v.deleted=0
+WHERE p.deleted=0 AND lower(trim(p.part_number))=lower(?) ORDER BY p.id`, [clean]);
+}
+function inventoryHistoryCountForPart(partId: number) {
+  return one<{ count: number }>("SELECT COUNT(*) AS count FROM history_logs WHERE section='inventory' AND entity_id=?", [String(partId)])?.count ?? 0;
+}
+function choosePrimaryNativePart(rows: NativePartRow[]) {
+  return rows.map(row => ({
+    row,
+    activeRequisitionCount: activeRequisitionCountForPart(row.id),
+    historyCount: inventoryHistoryCountForPart(row.id),
+  })).sort((left, right) => {
+    const activeDelta = Number(right.activeRequisitionCount > 0) - Number(left.activeRequisitionCount > 0);
+    if (activeDelta) return activeDelta;
+    const historyDelta = Number(right.historyCount > 0) - Number(left.historyCount > 0);
+    if (historyDelta) return historyDelta;
+    return left.row.id - right.row.id;
+  })[0];
 }
 function nativeRequisitionFromInput(body: unknown) {
   const input = isRecord(body) ? body : {};
@@ -4744,7 +4902,7 @@ app.post('/api/inventory/native/import', requireAuth, requirePermission('invento
     const message = safeErrorMessage(error);
     inventoryAudit(req,'failed import','inventory','native',{error:message});
     audit(req,'failed inventory import','inventory','native',{error:message});
-    res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errorCount:1,errors:[message]});
+    res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,duplicateMergedCount:0,duplicatesRemovedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errorCount:1,errors:[message]});
   }
 });
 app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.write'), (req,res)=>{
