@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 
 export type HistorySection = 'inventory' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 
@@ -14,6 +14,8 @@ type HistoryRecord = {
   section: HistorySection;
   sectionLabel: string;
   action: string;
+  entityType: string;
+  entityId: string;
   entityLabel: string;
   workOrderNumber: string;
   partNumber: string;
@@ -109,7 +111,48 @@ function formatDateTime(value?: string | null) {
 }
 
 function formatAction(value: string) {
-  return value.replace(/_/g, ' ').replace(/\b\w/g, letter=>letter.toUpperCase());
+  const clean = value.trim();
+  const known: Record<string, string> = {
+    pdf_previewed: 'PDF Previewed',
+    pdf_generated: 'PDF Generated',
+    preview_created: 'Preview Created',
+    requisition_requested: 'Requested',
+    requested: 'Requested',
+    deleted: 'Deleted',
+    canceled: 'Canceled',
+    updated: 'Updated',
+    created: 'Created',
+    backup_created: 'Backup Created',
+    restore_completed: 'Restore Complete',
+    history_pdf_exported: 'History PDF Exported',
+    branding_updated: 'Branding Updated',
+    branding_reset_to_default: 'Branding Reset',
+    branding_logo_uploaded: 'Branding Logo Uploaded',
+    quantity_changed: 'Quantity Changed',
+    duplicate_soft_deleted: 'Duplicate Removed',
+    passed: 'Passed',
+    ordered: 'Ordered',
+    received: 'Received',
+  };
+  return known[clean] ?? clean.replace(/_/g, ' ').replace(/\b\w/g, letter=>letter.toUpperCase());
+}
+
+function actionTone(action: string) {
+  const clean = action.toLowerCase();
+  if (/(delete|deleted|cancel|canceled|failed|disable|removed)/.test(clean)) return 'danger';
+  if (/(pdf|preview|export)/.test(clean)) return 'pdf';
+  if (/(reset|restore|backup|system|branding)/.test(clean)) return 'system';
+  if (/(create|created|add|added|request|requested|receive|received|complete|completed|pass|passed)/.test(clean)) return 'success';
+  if (/(update|updated|change|changed|order|ordered)/.test(clean)) return 'info';
+  return 'neutral';
+}
+
+function historyPdfUrl(record: HistoryRecord) {
+  if (record.section !== 'requisitions') return '';
+  if (!/(pdf|preview)/i.test(record.action)) return '';
+  const id = Number(record.entityId);
+  if (!Number.isInteger(id) || id <= 0) return '';
+  return `/api/requisitions/${id}/pdf?preview=true`;
 }
 
 function recordLabel(record: HistoryRecord) {
@@ -237,6 +280,31 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
     }
   }
 
+  function openHistoryPdf(record: HistoryRecord, event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const url = historyPdfUrl(record);
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function renderActionBadge(record: HistoryRecord) {
+    const label = formatAction(record.action);
+    const tone = actionTone(record.action);
+    const pdfUrl = historyPdfUrl(record);
+    const className = `history-action-chip action-${tone}${pdfUrl ? ' clickable' : ''}`;
+    if (pdfUrl) {
+      const showPdfMark = !label.toUpperCase().startsWith('PDF ');
+      return (
+        <button className={className} type="button" onClick={event=>openHistoryPdf(record,event)} title="Open PDF preview">
+          {showPdfMark&&<span className="history-action-icon" aria-hidden="true">PDF</span>}
+          <span>{label}</span>
+        </button>
+      );
+    }
+    return <span className={className}>{label}</span>;
+  }
+
   if (!selectedSection) {
     return (
       <div className="page-stack history-page">
@@ -300,36 +368,12 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
           <input value={filters.q} onChange={event=>updateFilter('q',event.target.value)} placeholder="Search username, work order, part, requisition, machine, asset, reason..." />
         </label>
         <label className="form-field">
-          <span>Action</span>
-          <input value={filters.action} onChange={event=>updateFilter('action',event.target.value)} placeholder="updated, canceled, deleted..." />
-        </label>
-        <label className="form-field">
-          <span>User</span>
-          <input value={filters.user} onChange={event=>updateFilter('user',event.target.value)} placeholder="Name or email" />
-        </label>
-        <label className="form-field">
           <span>Start Date</span>
           <input type="date" value={filters.startDate} onChange={event=>updateFilter('startDate',event.target.value)} />
         </label>
         <label className="form-field">
           <span>End Date</span>
           <input type="date" value={filters.endDate} onChange={event=>updateFilter('endDate',event.target.value)} />
-        </label>
-        <label className="form-field">
-          <span>WO#</span>
-          <input value={filters.workOrderNumber} onChange={event=>updateFilter('workOrderNumber',event.target.value)} />
-        </label>
-        <label className="form-field">
-          <span>Part #</span>
-          <input value={filters.partNumber} onChange={event=>updateFilter('partNumber',event.target.value)} />
-        </label>
-        <label className="form-field">
-          <span>Req #</span>
-          <input value={filters.requisitionNumber} onChange={event=>updateFilter('requisitionNumber',event.target.value)} />
-        </label>
-        <label className="form-field">
-          <span>Asset ID</span>
-          <input value={filters.assetId} onChange={event=>updateFilter('assetId',event.target.value)} />
         </label>
       </section>
 
@@ -363,7 +407,7 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
                 <tr key={record.id}>
                   <td><input className="table-checkbox" type="checkbox" checked={selectedIds.has(record.id)} onChange={()=>toggleRecord(record.id)} aria-label={`Select history ${record.id}`} /></td>
                   <td>{formatDateTime(record.createdAt)}</td>
-                  <td><span className="history-action-chip">{formatAction(record.action)}</span></td>
+                  <td>{renderActionBadge(record)}</td>
                   <td><strong className="history-record-label">{recordLabel(record)}</strong><span>{referenceLabel(record)}</span></td>
                   <td>{record.userName || '-'}</td>
                   <td>{record.workOrderNumber || '-'}</td>
