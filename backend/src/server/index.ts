@@ -2167,6 +2167,8 @@ type OfficialTemplateCellMap = {
   line: OfficialLineCellMap;
   lineEndRow: number;
   lineStartRow: number;
+  printAreaEndColumn: string;
+  printAreaEndRow: number;
   templatePath: string;
 };
 type XlsxCell = {
@@ -2176,16 +2178,20 @@ type XlsxCell = {
 };
 type XlsxRow = {
   height?: (height?: number) => unknown;
+  hidden?: (hidden?: boolean) => unknown;
 };
 type XlsxColumn = {
   width?: (width?: number) => unknown;
 };
 type XlsxSheet = {
+  _node?: { children?: Array<{ name: string; attributes?: Record<string, unknown>; children?: unknown[] }> };
   cell: (address: string) => XlsxCell;
   column?: (columnNameOrNumber: string | number) => XlsxColumn;
+  definedName?: (name: string, refersTo?: unknown) => unknown;
   pageMargins?: (attributeName: string, value?: number) => unknown;
   pageMarginsPreset?: (presetName?: string, presetAttributes?: Record<string, number>) => unknown;
   printOptions?: (attributeName: string, attributeEnabled?: boolean) => unknown;
+  range?: (address: string) => unknown;
   row?: (rowNumber: number) => XlsxRow;
 };
 type OfficialPdfChoices = {
@@ -2233,6 +2239,8 @@ const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCell
       totalPrice: 'N',
     },
     grandTotal: 'O21',
+    printAreaEndColumn: 'P',
+    printAreaEndRow: 40,
   },
   'under-100': {
     templatePath: path.join(officialRequisitionTemplateDir, 'requisition-under-100.xlsx'),
@@ -2272,6 +2280,8 @@ const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCell
       totalPrice: 'M',
     },
     grandTotal: 'N20',
+    printAreaEndColumn: 'N',
+    printAreaEndRow: 37,
   },
 };
 
@@ -2286,8 +2296,7 @@ function officialParseDateInput(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return value;
   const [, year, month, day] = match;
-  const date = new Date(Number(year), Number(month) - 1, Number(day));
-  return Number.isNaN(date.getTime()) ? value : date;
+  return `${Number(month)}/${Number(day)}/${year}`;
 }
 
 function officialWrapTextByLength(value: unknown, maxLineLength: number, maxLines = 2) {
@@ -2478,13 +2487,75 @@ function officialSetColumnWidth(sheet: XlsxSheet, column: string, width: number)
   }
 }
 
+function officialWorksheetChild(sheet: XlsxSheet, childName: string) {
+  return sheet._node?.children?.find(child => child.name === childName);
+}
+
+function officialSetFitToPage(sheet: XlsxSheet) {
+  const sheetPr = officialWorksheetChild(sheet, 'sheetPr') as { children?: Array<{ name: string; attributes?: Record<string, unknown>; children?: unknown[] }> } | undefined;
+  if (!sheetPr) return;
+  const children = sheetPr.children ?? [];
+  let pageSetUpPr = children.find(child => child.name === 'pageSetUpPr');
+  if (!pageSetUpPr) {
+    pageSetUpPr = { name: 'pageSetUpPr', attributes: {}, children: [] };
+    sheetPr.children = [...children, pageSetUpPr];
+  }
+  pageSetUpPr.attributes = { ...(pageSetUpPr.attributes ?? {}), fitToPage: 1 };
+}
+
+function officialSetPageSetup(sheet: XlsxSheet) {
+  try {
+    const pageSetup = officialWorksheetChild(sheet, 'pageSetup');
+    if (!pageSetup) return;
+    pageSetup.attributes = {
+      ...(pageSetup.attributes ?? {}),
+      paperSize: 1,
+      orientation: 'landscape',
+      fitToWidth: 1,
+      fitToHeight: 1,
+      horizontalDpi: 300,
+      verticalDpi: 300,
+      scale: undefined,
+    };
+    delete pageSetup.attributes.scale;
+    officialSetFitToPage(sheet);
+  } catch {
+    // Direct page-setup XML tuning is best-effort; Excel COM still applies the same settings during export.
+  }
+}
+
+function officialSetPrintArea(sheet: XlsxSheet, map: OfficialTemplateCellMap) {
+  const printRange = `A1:${map.printAreaEndColumn}${map.printAreaEndRow}`;
+  try {
+    const range = sheet.range?.(printRange) ?? printRange;
+    sheet.definedName?.('_xlnm.Print_Area', range);
+  } catch {
+    // Excel COM receives the same print area during export if workbook-defined names are unavailable.
+  }
+}
+
+function officialHideUnusedLineRows(sheet: XlsxSheet, map: OfficialTemplateCellMap, itemCount: number) {
+  const templateRowCount = map.lineEndRow - map.lineStartRow + 1;
+  const visibleRowCount = Math.max(1, Math.min(itemCount, templateRowCount));
+  const firstHiddenRow = map.lineStartRow + visibleRowCount;
+  for (let row = map.lineStartRow; row <= map.lineEndRow; row += 1) {
+    try {
+      sheet.row?.(row).hidden?.(row >= firstHiddenRow);
+    } catch {
+      // Hidden rows are layout polish only; cleared unused cells still prevent stale printed data.
+    }
+  }
+}
+
 function officialApplyWorkbookLayout(sheet: XlsxSheet, type: RequisitionTemplateKind) {
   try {
-    sheet.pageMarginsPreset?.('mcc-a5-safe', { left: 0.2, right: 0.2, top: 0.24, bottom: 0.24, header: 0.1, footer: 0.12 });
+    sheet.pageMarginsPreset?.('mcc-letter-safe', { left: 0.25, right: 0.25, top: 0.25, bottom: 0.25, header: 0.1, footer: 0.12 });
     sheet.printOptions?.('horizontalCentered', true);
+    sheet.printOptions?.('verticalCentered', false);
   } catch {
     // Margin/print options are layout polish only; keep generation moving.
   }
+  officialSetPageSetup(sheet);
 
   if (type === 'under-100') {
     officialSetColumnWidth(sheet, 'C', 15.2);
@@ -2558,7 +2629,9 @@ async function officialWorkbookBuffer(input: { header: Record<string, unknown>; 
   officialWriteHeader(sheet, map.header, input);
   officialAdjustHeaderSpacing(sheet, input.type);
   officialWriteLineItems(sheet, map, input.items);
+  officialHideUnusedLineRows(sheet, map, input.items.length);
   officialWriteGrandTotal(sheet, map.grandTotal, input.total);
+  officialSetPrintArea(sheet, map);
   officialShiftUnder100TitleRight(sheet, input.type);
   return workbookOutputToBuffer(await workbook.outputAsync());
 }
@@ -2752,19 +2825,19 @@ try {
   $worksheet.Activate() | Out-Null
   try { Set-RequisitionCheckboxes $worksheet $TaxExempt $MaterialCert $Fob } catch {}
   try {
-    $worksheet.PageSetup.PaperSize = 11
+    $worksheet.PageSetup.PaperSize = 1
+    $worksheet.PageSetup.Orientation = 2
     $worksheet.PageSetup.Zoom = $false
     $worksheet.PageSetup.FitToPagesWide = 1
-    $worksheet.PageSetup.FitToPagesTall = $false
+    $worksheet.PageSetup.FitToPagesTall = 1
     $worksheet.PageSetup.CenterHorizontally = $true
     $worksheet.PageSetup.CenterVertically = $false
-    $worksheet.PageSetup.LeftMargin = $excel.InchesToPoints(0.20)
-    $worksheet.PageSetup.RightMargin = $excel.InchesToPoints(0.20)
-    $worksheet.PageSetup.TopMargin = $excel.InchesToPoints(0.24)
-    $worksheet.PageSetup.BottomMargin = $excel.InchesToPoints(0.24)
+    $worksheet.PageSetup.LeftMargin = $excel.InchesToPoints(0.25)
+    $worksheet.PageSetup.RightMargin = $excel.InchesToPoints(0.25)
+    $worksheet.PageSetup.TopMargin = $excel.InchesToPoints(0.25)
+    $worksheet.PageSetup.BottomMargin = $excel.InchesToPoints(0.25)
     $worksheet.PageSetup.HeaderMargin = $excel.InchesToPoints(0.10)
     $worksheet.PageSetup.FooterMargin = $excel.InchesToPoints(0.12)
-    $worksheet.PageSetup.PrintArea = $worksheet.UsedRange.Address($true, $true)
   } catch {}
   try { $excel.CalculateFullRebuild() } catch {}
   $workbook.ExportAsFixedFormat(0, $PdfPath)
