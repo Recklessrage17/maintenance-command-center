@@ -819,6 +819,7 @@ type NativeImportSummary = {
   vendorCreatedCount: number;
   locationCreatedCount: number;
   invalidUrlCount: number;
+  errorCount: number;
   errors: string[];
 };
 function nativeInventoryRows() {
@@ -1328,10 +1329,14 @@ function importRowFromRecord(record: Record<string, string>, rowNumber: number):
     }
     return '';
   };
+  const notes = appendImportNotes(value('Notes','Note'), {
+    Asset: value('Asset','Asset No','Asset Number'),
+    Dept: value('Dept','Department'),
+  });
   return {
     rowNumber,
     mccItemId: value('MCC Item ID','Item ID','ID'),
-    partNumber: value('Part Number','Part No','Part','SKU'),
+    partNumber: value('Part Number','PartNumber','Part No','Part','SKU'),
     description: value('Description','Name'),
     location: value('Location','Location Name'),
     vendor: value('Vendor','Vendor Name'),
@@ -1344,8 +1349,17 @@ function importRowFromRecord(record: Record<string, string>, rowNumber: number):
     supplierPartNumber: value('Supplier Part Number','Supplier Part No','Supplier Part','Vendor Part Number','Vendor Part No','Manufacturer Part Number','Manufacturer Part No'),
     leadTime: value('Lead Time','LeadTime','Delivery Time','ETA'),
     importantNote: value('Important Note','Important','Alert Note','Red Note'),
-    notes: value('Notes','Note'),
+    notes,
   };
+}
+function appendImportNotes(notes: string, additions: Record<string, string>) {
+  const lines = Object.entries(additions)
+    .map(([label, raw]) => [label, raw.trim()] as const)
+    .filter(([, value]) => value)
+    .map(([label, value]) => `${label}: ${value}`);
+  const cleanNotes = notes.trim();
+  if (!lines.length) return cleanNotes;
+  return [cleanNotes, ...lines].filter(Boolean).join('\n');
 }
 function importRowsFromTable(rows: string[][]) {
   if (rows.length < 1) return [];
@@ -1382,6 +1396,7 @@ function excelCellHyperlink(cell: ExcelJS.Cell) {
   if (value && typeof value === 'object') {
     const record = value as unknown as Record<string, unknown>;
     if (typeof record.hyperlink === 'string') return record.hyperlink.trim();
+    if (typeof record.hyperLink === 'string') return record.hyperLink.trim();
     if (record.text && typeof record.text === 'object') {
       const textRecord = record.text as unknown as Record<string, unknown>;
       if (typeof textRecord.hyperlink === 'string') return textRecord.hyperlink.trim();
@@ -1440,8 +1455,9 @@ async function parseInventoryImportFile(file: Express.Multer.File | undefined) {
   throw new Error('Import file must be CSV or .xlsx Excel format.');
 }
 function numericImportValue(value: string, label: string, rowNumber: number) {
-  if (!value.trim()) return 0;
-  const parsed = Number(value);
+  const cleaned = value.trim().replace(/[$,\s]/g, '');
+  if (!cleaned) return 0;
+  const parsed = Number(cleaned);
   if (!Number.isFinite(parsed)) throw new Error(`Row ${rowNumber}: ${label} must be numeric.`);
   return parsed;
 }
@@ -1453,12 +1469,13 @@ function requisitionImportValue(value: string) {
   if (['false','no','n','0'].includes(normalized)) return '';
   return clean.slice(0, 120);
 }
-function addImportError(errors: string[], message: string) {
-  if (errors.length < 25) errors.push(message);
+function addImportError(summary: NativeImportSummary, message: string) {
+  summary.errorCount += 1;
+  if (summary.errors.length < 5) summary.errors.push(message);
 }
 function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
   const actor = (req as AuthRequest).user!;
-  const summary: NativeImportSummary = { addedCount: 0, updatedCount: 0, skippedCount: 0, vendorCreatedCount: 0, locationCreatedCount: 0, invalidUrlCount: 0, errors: [] };
+  const summary: NativeImportSummary = { addedCount: 0, updatedCount: 0, skippedCount: 0, vendorCreatedCount: 0, locationCreatedCount: 0, invalidUrlCount: 0, errorCount: 0, errors: [] };
   const timestamp = now();
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -1474,7 +1491,7 @@ function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
         const partInfoUrl = rawUrl ? validWebUrl(rawUrl) : '';
         if (rawUrl && !partInfoUrl) {
           summary.invalidUrlCount += 1;
-          addImportError(summary.errors, `Row ${row.rowNumber}: unsafe Part Info URL was skipped.`);
+          addImportError(summary, `Row ${row.rowNumber}: unsafe Part Info URL was skipped.`);
         }
         let existing = row.mccItemId.trim() ? one<{ id: number }>('SELECT id FROM inventory_parts WHERE deleted=0 AND id=?', [Number(row.mccItemId)]) : undefined;
         if (!existing) existing = findDuplicateNativePart(partNumber);
@@ -1496,7 +1513,7 @@ function importNativeInventoryRows(req: Request, rows: NativeImportRow[]) {
         }
       } catch (error) {
         summary.skippedCount += 1;
-        addImportError(summary.errors, safeErrorMessage(error));
+        addImportError(summary, safeErrorMessage(error));
       }
     }
     db.exec('COMMIT');
@@ -4716,7 +4733,7 @@ app.post('/api/inventory/native/import', requireAuth, requirePermission('invento
     const message = safeErrorMessage(error);
     inventoryAudit(req,'failed import','inventory','native',{error:message});
     audit(req,'failed inventory import','inventory','native',{error:message});
-    res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errors:[message]});
+    res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errorCount:1,errors:[message]});
   }
 });
 app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.write'), (req,res)=>{

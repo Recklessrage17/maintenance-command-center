@@ -74,6 +74,7 @@ type NativeFileImportSummary = {
   vendorCreatedCount: number;
   locationCreatedCount: number;
   invalidUrlCount: number;
+  errorCount?: number;
   errors: string[];
   backupFiles?: BackupFile[];
   nativeSummary?: NativeSummary;
@@ -276,6 +277,15 @@ const currencyFormatter = new Intl.NumberFormat(undefined, { style: 'currency', 
 function formatCurrency(value: number | null | undefined) {
   const parsed = Number(value ?? 0);
   return currencyFormatter.format(Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+}
+
+function importCompleteMessage(summary: NativeFileImportSummary) {
+  const totalImported = summary.addedCount + summary.updatedCount;
+  const counts = `${summary.addedCount} added, ${summary.updatedCount} updated, ${summary.skippedCount} skipped`;
+  if (totalImported === 0 && summary.skippedCount > 0) {
+    return 'No rows were imported. Check that the file has PartNumber/Part Number and valid quantity/cost values.';
+  }
+  return `Inventory import complete: ${counts}.`;
 }
 
 function normalizeNativeSummary(summary?: Partial<NativeSummary> | null): NativeSummary {
@@ -779,7 +789,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       await refresh();
       await loadBackups();
       setInventoryImportFile(null);
-      showNotice('success', `Inventory import complete: ${result.addedCount} added, ${result.updatedCount} updated, ${result.skippedCount} skipped.`);
+      showNotice(result.addedCount + result.updatedCount > 0 ? 'success' : 'error', importCompleteMessage(result));
     } catch (err) {
       showNotice('error', (err as Error).message);
     } finally {
@@ -1125,6 +1135,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               {fileImportSummary.errors.length>0&&(
                 <ul>
                   {fileImportSummary.errors.slice(0,5).map((message,index)=><li key={`${message}-${index}`}>{message}</li>)}
+                  {(fileImportSummary.errorCount ?? fileImportSummary.errors.length)>5&&<li>Showing first 5 of {fileImportSummary.errorCount ?? fileImportSummary.errors.length} errors.</li>}
                 </ul>
               )}
             </div>
