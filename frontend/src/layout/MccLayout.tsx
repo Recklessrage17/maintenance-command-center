@@ -12,6 +12,8 @@ type BrandingSettings = {
   iconAnimation: 'none' | 'glow' | 'rotate' | 'pulse';
 };
 const defaultBranding: BrandingSettings = { companyName: 'JBT', companySubtitle: 'Maintenance Command Center', companyAccentText: 'USA', logoMode: 'text', logoUrl: '', iconAnimation: 'none' };
+const MENU_WARP_MS = 190;
+const PAGE_ENTER_MS = 260;
 const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'inventory', label: 'Inventory' },
@@ -27,9 +29,12 @@ const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = 
 export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory));
  const [launcherOpen,setLauncherOpen]=useState(false);
+ const [warpingSection,setWarpingSection]=useState<MccSection|null>(null);
+ const [pageEntering,setPageEntering]=useState(false);
  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
  const launcherRef=useRef<HTMLDivElement>(null);
  const closeTimerRef=useRef<number>();
+ const warpTimerRef=useRef<number>();
  const launcherModeRef=useRef<LauncherMode>(null);
  const inventoryFocus=activeSection==='inventory';
 
@@ -37,6 +42,13 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
    if(closeTimerRef.current){
      window.clearTimeout(closeTimerRef.current);
      closeTimerRef.current=undefined;
+   }
+ }
+
+ function clearWarpTimer() {
+   if(warpTimerRef.current){
+     window.clearTimeout(warpTimerRef.current);
+     warpTimerRef.current=undefined;
    }
  }
 
@@ -97,7 +109,13 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
    };
  },[launcherOpen]);
 
- useEffect(()=>()=>clearLauncherClose(),[]);
+ useEffect(()=>()=>{ clearLauncherClose(); clearWarpTimer(); },[]);
+
+ useEffect(()=>{
+   setPageEntering(true);
+   const timer=window.setTimeout(()=>setPageEntering(false),PAGE_ENTER_MS);
+   return ()=>window.clearTimeout(timer);
+ },[activeSection]);
 
  useEffect(()=>{
    let cancelled=false;
@@ -128,8 +146,15 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  },[]);
 
  function selectSection(section:MccSection) {
-   onSectionChange(section);
-   closeLauncher();
+   if(warpingSection) return;
+   clearLauncherClose();
+   clearWarpTimer();
+   setWarpingSection(section);
+   warpTimerRef.current=window.setTimeout(()=>{
+     onSectionChange(section);
+     setWarpingSection(null);
+     closeLauncher();
+   },MENU_WARP_MS);
  }
 
  return (
@@ -156,7 +181,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
          </div>
          <div className="command-menu-list" role="menu">
            {navItems.map(item=>(
-             <button className={item.id===activeSection?'command-menu-item active':'command-menu-item'} key={item.id} onClick={()=>selectSection(item.id)} type="button" role="menuitem">
+             <button className={`${item.id===activeSection?'command-menu-item active':'command-menu-item'} mcc-bubble-transition mcc-menu-item-warp${warpingSection===item.id?' is-warping':''}`} key={item.id} onClick={()=>selectSection(item.id)} type="button" role="menuitem" aria-busy={warpingSection===item.id}>
                <span className="command-menu-dot" aria-hidden="true" />
                <span>{item.label}</span>
              </button>
@@ -172,7 +197,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
        </nav>
      </div>
      <main className="mcc-main mcc-workspace-frame">
-       <section className="mcc-content mcc-workspace">{children}</section>
+       <section className={pageEntering?'mcc-content mcc-workspace mcc-page-enter':'mcc-content mcc-workspace'}>{children}</section>
      </main>
    </div>
  );
