@@ -4585,7 +4585,89 @@ const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','remov
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
 const voltageTypes = new Set(['AC','DC','']);
 const machineDefaultBrandColors: Record<string, string> = { Toyo: '#67D8FF', Arburg: '#38D7B3', Husky: '#FFD45A', Engel: '#8FB6D8', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
-const machineImportHeaders = ['Press','Shot (oz)','Ton','H&E','Mfg','Barrel','Year','Model #','Equip Serial #'] as const;
+const machineExportHeaders = [
+  'Asset Number',
+  'Asset Name',
+  'Brand',
+  'Model',
+  'Serial Number',
+  'Machine Year',
+  'Machine Type',
+  'Power Type',
+  'Shot Size (oz)',
+  'Tonnage',
+  'Barrel/Screw Diameter',
+  'Location',
+  'Status',
+  'Voltage',
+  'Voltage Type',
+  'Full Load Amp',
+  'Machine Length',
+  'Machine Width',
+  'Machine Height',
+  'Full Die Height Length / Range',
+  'Screw Type',
+  'Screw Tip Type',
+  'Screw Rebuild / Repaired',
+  'Barrel Rebuild / Repaired',
+  'Screw Installed Date',
+  'Screw Tip Installed Date',
+  'Barrel Installed Date',
+  'Barrel End Cap Installed Date',
+  'Barrel Length',
+  'Screw Length',
+  'Notes',
+  'Critical Notes',
+] as const;
+type MachineExportHeader = typeof machineExportHeaders[number];
+type MachineExportRecord = Record<MachineExportHeader, string | number>;
+type MachineImportMode = 'add-only' | 'upsert';
+type MachineImportPresentField = 'assetName' | 'brand' | 'model' | 'serialNumber' | 'machineYear' | 'machineType' | 'powerType' | 'shotSizeOz' | 'tonnage' | 'barrelDiameter' | 'location' | 'status' | 'voltageValue' | 'voltageType' | 'fullLoadAmp' | 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'screwType' | 'screwTipType' | 'screwRebuildRepaired' | 'barrelRebuildRepaired' | 'screwInstalledDate' | 'screwTipInstalledDate' | 'barrelInstalledDate' | 'barrelEndCapInstalledDate' | 'barrelLength' | 'screwLength' | 'notes' | 'criticalNotes';
+type MachineImportRow = {
+  rowNumber: number;
+  assetNumber: string;
+  assetName: string;
+  brand: string;
+  model: string;
+  serialNumber: string;
+  machineYear: string;
+  machineType: string;
+  powerType: string;
+  shotSizeOz: string;
+  tonnage: string;
+  barrelDiameter: string;
+  location: string;
+  status: string;
+  voltageValue: string;
+  voltageType: string;
+  fullLoadAmp: string;
+  machineLength: string;
+  machineWidth: string;
+  machineHeight: string;
+  fullDieHeightLength: string;
+  screwType: string;
+  screwTipType: string;
+  screwRebuildRepaired: string;
+  barrelRebuildRepaired: string;
+  screwInstalledDate: string;
+  screwTipInstalledDate: string;
+  barrelInstalledDate: string;
+  barrelEndCapInstalledDate: string;
+  barrelLength: string;
+  screwLength: string;
+  notes: string;
+  criticalNotes: string;
+  present: Partial<Record<MachineImportPresentField, boolean>>;
+};
+type MachineImportSummary = {
+  addedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  rejectedDuplicateCount: number;
+  errorCount: number;
+  errors: string[];
+  rejectedDuplicates: string[];
+};
 type MachineAssetInput = ReturnType<typeof validateMachineAssetInput>;
 function canMachineWrite(actor: User) { return roleRank(actor.role) >= roleRank('Maintenance Tech 3'); }
 function canMachineDelete(actor: User) { return roleRank(actor.role) >= roleRank('Manager'); }
@@ -4678,8 +4760,17 @@ function publicMachineAsset(row: MachineAssetRow) {
 function machineAssetById(id: number, includeDeleted = false) {
   return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
 }
+function normalizeMachineAssetNumberForMatch(assetNumber: string) {
+  return assetNumber.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+function machineAssetMatchesByNumber(assetNumber: string, includeDeleted = false) {
+  const normalized = normalizeMachineAssetNumberForMatch(assetNumber);
+  if (!normalized) return [];
+  return all<MachineAssetRow>(`SELECT * FROM machine_assets ${includeDeleted ? '' : 'WHERE deleted=0'} ORDER BY deleted ASC, id ASC`)
+    .filter(row => normalizeMachineAssetNumberForMatch(row.asset_number) === normalized);
+}
 function machineAssetByNumber(assetNumber: string) {
-  return one<MachineAssetRow>('SELECT * FROM machine_assets WHERE lower(trim(asset_number))=lower(?) ORDER BY deleted ASC, id LIMIT 1', [assetNumber.trim()]);
+  return machineAssetMatchesByNumber(assetNumber, true)[0];
 }
 function machineAssetHistoryValue(row: MachineAssetRow | MachineAssetInput) {
   return 'asset_number' in row ? publicMachineAsset(row) : row;
@@ -4711,33 +4802,165 @@ function updateMachineAsset(id: number, input: MachineAssetInput, actor: User, t
   ensureMachineBrandSetting(input.brand, actor);
   run(`UPDATE machine_assets SET asset_number=?,asset_name=?,brand=?,model=?,serial_number=?,machine_year=?,machine_type=?,power_type=?,shot_size_oz=?,tonnage=?,barrel_diameter=?,location=?,department=?,status=?,voltage_value=?,voltage_type=?,full_load_amp=?,machine_length=?,machine_width=?,machine_height=?,full_die_height_length=?,screw_type=?,screw_tip_type=?,screw_tip_installed_date=?,screw_installed_date=?,barrel_installed_date=?,barrel_end_cap_installed_date=?,barrel_length=?,screw_length=?,notes=?,critical_notes=?,screw_rebuild_repaired=?,barrel_rebuild_repaired=?,screw_condition_status=?,barrel_condition_status=?,updated_at=?,updated_by_user_id=?,deleted=0,deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?`, [input.assetNumber,input.assetName,input.brand,input.model,input.serialNumber,input.machineYear,input.machineType,input.powerType,input.shotSizeOz,input.tonnage,input.barrelDiameter,input.location,input.department,input.status,input.voltageValue,input.voltageType,input.fullLoadAmp,input.machineLength,input.machineWidth,input.machineHeight,input.fullDieHeightLength,input.screwType,input.screwTipType,input.screwTipInstalledDate,input.screwInstalledDate,input.barrelInstalledDate,input.barrelEndCapInstalledDate,input.barrelLength,input.screwLength,input.notes,input.criticalNotes,input.screwRebuildRepaired ? 1 : 0,input.barrelRebuildRepaired ? 1 : 0,input.screwConditionStatus,input.barrelConditionStatus,timestamp,actor.id,id]);
 }
-function machineCsvFromRows(headers: readonly string[], rows: Array<Record<string, string | number>>) {
+function machineCsvFromRecords(headers: readonly MachineExportHeader[], rows: MachineExportRecord[]) {
   const lines = [headers.map(csvCell).join(',')];
   for (const row of rows) lines.push(headers.map(header=>csvCell(row[header] ?? '')).join(','));
   return `${lines.join('\r\n')}\r\n`;
 }
-function machineImportRecordFromRow(record: Record<string, string>, rowNumber: number) {
-  const value = (...headers: string[]) => {
-    for (const header of headers) {
-      const direct = record[header];
+async function machineWorkbookBuffer(sheetName: string, records: MachineExportRecord[]) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = appName;
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.addRow([...machineExportHeaders]);
+  for (const record of records) sheet.addRow(machineExportHeaders.map(header => record[header] ?? ''));
+  styleInventorySheet(sheet);
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
+}
+function machineRowsForExport(options: { activeOnly?: boolean } = {}) {
+  const where = options.activeOnly ? "WHERE deleted=0 AND status='active'" : 'WHERE deleted=0';
+  return all<MachineAssetRow>(`SELECT * FROM machine_assets ${where} ORDER BY asset_number COLLATE NOCASE, id`);
+}
+function yesNo(value: unknown) {
+  return value ? 'Yes' : 'No';
+}
+function machineExportRecord(row: MachineAssetRow): MachineExportRecord {
+  return {
+    'Asset Number': row.asset_number,
+    'Asset Name': row.asset_name,
+    Brand: row.brand,
+    Model: row.model,
+    'Serial Number': row.serial_number,
+    'Machine Year': row.machine_year,
+    'Machine Type': row.machine_type,
+    'Power Type': row.power_type,
+    'Shot Size (oz)': Number(row.shot_size_oz ?? 0),
+    Tonnage: Number(row.tonnage ?? 0),
+    'Barrel/Screw Diameter': row.barrel_diameter,
+    Location: row.location,
+    Status: row.status,
+    Voltage: row.voltage_value,
+    'Voltage Type': row.voltage_type,
+    'Full Load Amp': row.full_load_amp,
+    'Machine Length': row.machine_length,
+    'Machine Width': row.machine_width,
+    'Machine Height': row.machine_height,
+    'Full Die Height Length / Range': row.full_die_height_length,
+    'Screw Type': row.screw_type,
+    'Screw Tip Type': row.screw_tip_type,
+    'Screw Rebuild / Repaired': yesNo(row.screw_rebuild_repaired),
+    'Barrel Rebuild / Repaired': yesNo(row.barrel_rebuild_repaired),
+    'Screw Installed Date': row.screw_installed_date,
+    'Screw Tip Installed Date': row.screw_tip_installed_date,
+    'Barrel Installed Date': row.barrel_installed_date,
+    'Barrel End Cap Installed Date': row.barrel_end_cap_installed_date,
+    'Barrel Length': row.barrel_length,
+    'Screw Length': row.screw_length,
+    Notes: row.notes,
+    'Critical Notes': row.critical_notes,
+  };
+}
+function machineImportModeFromBody(body: unknown): MachineImportMode {
+  const value = String(isRecord(body) ? body.mode ?? body.importMode ?? '' : '').trim().toLowerCase();
+  return /upsert|update/.test(value) ? 'upsert' : 'add-only';
+}
+function machineImportBoolean(value: string) {
+  const clean = value.trim().toLowerCase();
+  return ['yes','true','y','1','rebuild','rebuilt','repaired','rebuild/repaired','rebuilt/repaired'].includes(clean);
+}
+function machineImportRecordFromRow(record: Record<string, string>, headers: string[], rowNumber: number): MachineImportRow {
+  const normalizedHeaders = new Set(headers.map(normalizeImportHeader));
+  const has = (...aliases: string[]) => aliases.some(alias => normalizedHeaders.has(normalizeImportHeader(alias)));
+  const value = (...aliases: string[]) => {
+    for (const alias of aliases) {
+      const direct = record[alias];
       if (direct !== undefined) return direct.trim();
-      const normalized = record[normalizeImportHeader(header)];
+      const normalized = record[normalizeImportHeader(alias)];
       if (normalized !== undefined) return normalized.trim();
     }
     return '';
   };
-  const press = value('Press','Asset Number','Asset Number / Press Number');
-  return { rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number') };
+  return {
+    rowNumber,
+    assetNumber: value('Asset Number','Asset #','Asset No','Asset ID','Asset Number / Press Number','Press','Press Number','Machine Number'),
+    assetName: value('Asset Name','Name','Machine Name'),
+    brand: value('Brand','Mfg','Manufacturer'),
+    model: value('Model','Model #','Model Number'),
+    serialNumber: value('Serial Number','S/N','Serial #','Equip Serial #','Equipment Serial #','Equip Serial Number'),
+    machineYear: value('Machine Year','Year'),
+    machineType: value('Machine Type','Type'),
+    powerType: value('Power Type','H&E','Hydraulic/Electric'),
+    shotSizeOz: value('Shot Size (oz)','Shot','Shot (oz)','Shot Size Oz'),
+    tonnage: value('Tonnage','Ton','Tons'),
+    barrelDiameter: value('Barrel/Screw Diameter','Barrel','Screw Diameter','Barrel Diameter'),
+    location: value('Location'),
+    status: value('Status'),
+    voltageValue: value('Voltage'),
+    voltageType: value('Voltage Type'),
+    fullLoadAmp: value('Full Load Amp','FLA','Full Load Amps'),
+    machineLength: value('Machine Length','Length'),
+    machineWidth: value('Machine Width','Width'),
+    machineHeight: value('Machine Height','Height'),
+    fullDieHeightLength: value('Full Die Height Length / Range','Full Die Height','Die Height','Die Height Range'),
+    screwType: value('Screw Type'),
+    screwTipType: value('Screw Tip Type'),
+    screwRebuildRepaired: value('Screw Rebuild / Repaired','Screw Rebuild Repaired','Screw Rebuilt','Screw Repaired'),
+    barrelRebuildRepaired: value('Barrel Rebuild / Repaired','Barrel Rebuild Repaired','Barrel Rebuilt','Barrel Repaired'),
+    screwInstalledDate: value('Screw Installed Date','Screw Install Date'),
+    screwTipInstalledDate: value('Screw Tip Installed Date','Screw Tip Install Date'),
+    barrelInstalledDate: value('Barrel Installed Date','Barrel Install Date'),
+    barrelEndCapInstalledDate: value('Barrel End Cap Installed Date','Barrel End Cap Install Date'),
+    barrelLength: value('Barrel Length'),
+    screwLength: value('Screw Length'),
+    notes: value('Notes','Note'),
+    criticalNotes: value('Critical Notes','Critical Note','Red Notes','Red Note'),
+    present: {
+      assetName: has('Asset Name','Name','Machine Name'),
+      brand: has('Brand','Mfg','Manufacturer'),
+      model: has('Model','Model #','Model Number'),
+      serialNumber: has('Serial Number','S/N','Serial #','Equip Serial #','Equipment Serial #','Equip Serial Number'),
+      machineYear: has('Machine Year','Year'),
+      machineType: has('Machine Type','Type'),
+      powerType: has('Power Type','H&E','Hydraulic/Electric'),
+      shotSizeOz: has('Shot Size (oz)','Shot','Shot (oz)','Shot Size Oz'),
+      tonnage: has('Tonnage','Ton','Tons'),
+      barrelDiameter: has('Barrel/Screw Diameter','Barrel','Screw Diameter','Barrel Diameter'),
+      location: has('Location'),
+      status: has('Status'),
+      voltageValue: has('Voltage'),
+      voltageType: has('Voltage Type'),
+      fullLoadAmp: has('Full Load Amp','FLA','Full Load Amps'),
+      machineLength: has('Machine Length','Length'),
+      machineWidth: has('Machine Width','Width'),
+      machineHeight: has('Machine Height','Height'),
+      fullDieHeightLength: has('Full Die Height Length / Range','Full Die Height','Die Height','Die Height Range'),
+      screwType: has('Screw Type'),
+      screwTipType: has('Screw Tip Type'),
+      screwRebuildRepaired: has('Screw Rebuild / Repaired','Screw Rebuild Repaired','Screw Rebuilt','Screw Repaired'),
+      barrelRebuildRepaired: has('Barrel Rebuild / Repaired','Barrel Rebuild Repaired','Barrel Rebuilt','Barrel Repaired'),
+      screwInstalledDate: has('Screw Installed Date','Screw Install Date'),
+      screwTipInstalledDate: has('Screw Tip Installed Date','Screw Tip Install Date'),
+      barrelInstalledDate: has('Barrel Installed Date','Barrel Install Date'),
+      barrelEndCapInstalledDate: has('Barrel End Cap Installed Date','Barrel End Cap Install Date'),
+      barrelLength: has('Barrel Length'),
+      screwLength: has('Screw Length'),
+      notes: has('Notes','Note'),
+      criticalNotes: has('Critical Notes','Critical Note','Red Notes','Red Note'),
+    },
+  };
 }
 function machineImportRowsFromTable(rows: string[][]) {
-  const [headers = [], ...dataRows] = rows;
+  if (rows.length < 1) return [];
+  const [rawHeaders = [], ...dataRows] = rows;
+  const headers = rawHeaders.map(header => header.trim());
   const normalizedHeaders = headers.map(normalizeImportHeader);
-  for (const required of machineImportHeaders) if (!normalizedHeaders.includes(normalizeImportHeader(required))) throw new Error('Machine import must include Press, Shot (oz), Ton, H&E, Mfg, Barrel, Year, Model #, and Equip Serial # headers.');
+  if (!['assetnumber','asset','assetno','assetid','press','pressnumber','machinenumber'].some(alias => normalizedHeaders.includes(alias))) throw new Error('Machine import must include an Asset Number column.');
   return dataRows.map((row,index)=>{
     const record: Record<string, string> = {};
     headers.forEach((header,columnIndex)=>{ record[header] = row[columnIndex] ?? ''; record[normalizeImportHeader(header)] = row[columnIndex] ?? ''; });
-    return machineImportRecordFromRow(record, index + 2);
-  });
+    return machineImportRecordFromRow(record, headers, index + 2);
+  }).filter(row => row.assetNumber || Object.entries(row).some(([key, value]) => key !== 'rowNumber' && key !== 'present' && String(value).trim()));
 }
 async function parseMachineImportFile(file: Express.Multer.File | undefined) {
   if (!file) throw new Error('Choose a CSV or Excel file to import.');
@@ -4752,54 +4975,114 @@ async function parseMachineImportFile(file: Express.Multer.File | undefined) {
     const rows: string[][] = [];
     sheet.eachRow({ includeEmpty: false }, row=>{
       const values: string[] = [];
-      for (let columnNumber = 1; columnNumber <= Math.max(row.cellCount, machineImportHeaders.length); columnNumber += 1) values.push(excelCellText(row.getCell(columnNumber)).trim());
+      for (let columnNumber = 1; columnNumber <= Math.max(row.cellCount, machineExportHeaders.length); columnNumber += 1) values.push(excelCellText(row.getCell(columnNumber)).trim());
       if (values.some(Boolean)) rows.push(values);
     });
     return machineImportRowsFromTable(rows);
   }
   throw new Error('Machine import file must be CSV or .xlsx Excel format.');
 }
-function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>) {
-  return validateMachineAssetInput({ assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
+function machineInputFromImport(row: MachineImportRow, existing?: MachineAssetRow | null) {
+  const body = existing ? { ...publicMachineAsset(existing) } as Record<string, unknown> : {
+    assetNumber: row.assetNumber,
+    assetName: row.assetNumber,
+    brand: 'Unknown',
+    machineType: 'Injection Molding Machine',
+    status: 'active',
+  } as Record<string, unknown>;
+  body.assetNumber = row.assetNumber;
+  const applyText = (field: MachineImportPresentField, key: string, value: string) => { if (row.present[field]) body[key] = value; };
+  applyText('assetName', 'assetName', row.assetName);
+  applyText('brand', 'brand', row.brand || 'Unknown');
+  applyText('model', 'model', row.model);
+  applyText('serialNumber', 'serialNumber', row.serialNumber);
+  applyText('machineYear', 'machineYear', row.machineYear);
+  applyText('machineType', 'machineType', row.machineType);
+  applyText('powerType', 'powerType', row.powerType);
+  applyText('shotSizeOz', 'shotSizeOz', row.shotSizeOz);
+  applyText('tonnage', 'tonnage', row.tonnage);
+  applyText('barrelDiameter', 'barrelDiameter', row.barrelDiameter);
+  applyText('location', 'location', row.location);
+  applyText('status', 'status', row.status);
+  applyText('voltageValue', 'voltageValue', row.voltageValue);
+  applyText('voltageType', 'voltageType', row.voltageType);
+  applyText('fullLoadAmp', 'fullLoadAmp', row.fullLoadAmp);
+  applyText('machineLength', 'machineLength', row.machineLength);
+  applyText('machineWidth', 'machineWidth', row.machineWidth);
+  applyText('machineHeight', 'machineHeight', row.machineHeight);
+  applyText('fullDieHeightLength', 'fullDieHeightLength', row.fullDieHeightLength);
+  applyText('screwType', 'screwType', row.screwType);
+  applyText('screwTipType', 'screwTipType', row.screwTipType);
+  applyText('screwInstalledDate', 'screwInstalledDate', row.screwInstalledDate);
+  applyText('screwTipInstalledDate', 'screwTipInstalledDate', row.screwTipInstalledDate);
+  applyText('barrelInstalledDate', 'barrelInstalledDate', row.barrelInstalledDate);
+  applyText('barrelEndCapInstalledDate', 'barrelEndCapInstalledDate', row.barrelEndCapInstalledDate);
+  applyText('barrelLength', 'barrelLength', row.barrelLength);
+  applyText('screwLength', 'screwLength', row.screwLength);
+  applyText('notes', 'notes', row.notes);
+  applyText('criticalNotes', 'criticalNotes', row.criticalNotes);
+  if (row.present.screwRebuildRepaired) body.screwRebuildRepaired = machineImportBoolean(row.screwRebuildRepaired);
+  if (row.present.barrelRebuildRepaired) body.barrelRebuildRepaired = machineImportBoolean(row.barrelRebuildRepaired);
+  return validateMachineAssetInput(body);
 }
-function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machineImportRecordFromRow>[]) {
+function addMachineImportError(summary: MachineImportSummary, message: string) {
+  summary.errorCount += 1;
+  if (summary.errors.length < 10) summary.errors.push(message);
+}
+function rejectMachineImportDuplicate(summary: MachineImportSummary, actor: User, row: MachineImportRow, message: string) {
+  summary.skippedCount += 1;
+  summary.rejectedDuplicateCount += 1;
+  summary.errorCount += 1;
+  const detail = `Row ${row.rowNumber}: ${message}`;
+  if (summary.rejectedDuplicates.length < 10) summary.rejectedDuplicates.push(detail);
+  if (summary.errors.length < 10) summary.errors.push(detail);
+  recordHistoryLog({ section: 'machine_library', action: 'machine_asset_import_rejected_duplicate', entityType: 'machine_asset', entityLabel: row.assetNumber, oldValue: null, newValue: { rowNumber: row.rowNumber, assetNumber: row.assetNumber }, reasonNote: message, actor });
+}
+function importMachineAssetRows(req: AuthRequest, rows: MachineImportRow[], mode: MachineImportMode) {
   const actor = req.user!;
   const timestamp = now();
-  const summary = { addedCount: 0, updatedCount: 0, skippedCount: 0, errorCount: 0, errors: [] as string[] };
+  const summary: MachineImportSummary = { addedCount: 0, updatedCount: 0, skippedCount: 0, rejectedDuplicateCount: 0, errorCount: 0, errors: [], rejectedDuplicates: [] };
   const seen = new Set<string>();
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
       try {
-        const input = machineInputFromImport(row);
-        const key = input.assetNumber.toLowerCase();
-        if (seen.has(key)) { summary.skippedCount += 1; continue; }
+        if (!row.assetNumber.trim()) throw new Error('Asset Number is required.');
+        const key = normalizeMachineAssetNumberForMatch(row.assetNumber);
+        if (seen.has(key)) {
+          rejectMachineImportDuplicate(summary, actor, row, `${row.assetNumber} duplicate in import file.`);
+          continue;
+        }
         seen.add(key);
-        const existing = machineAssetByNumber(input.assetNumber);
+        const activeMatches = machineAssetMatchesByNumber(row.assetNumber);
+        if (activeMatches.length > 1) {
+          rejectMachineImportDuplicate(summary, actor, row, `${row.assetNumber} Duplicate Asset Number already exists in MCC. Clean up existing records first.`);
+          continue;
+        }
+        const existing = activeMatches[0] ?? null;
+        if (existing && mode === 'add-only') {
+          rejectMachineImportDuplicate(summary, actor, row, `${row.assetNumber} already exists.`);
+          continue;
+        }
         if (existing) {
-          const mergedInput = {
-            ...input,
-            department: existing.department,
-            screwRebuildRepaired: Boolean(existing.screw_rebuild_repaired),
-            barrelRebuildRepaired: Boolean(existing.barrel_rebuild_repaired),
-            screwConditionStatus: normalizeMachineConditionStatus(existing.screw_condition_status, Boolean(existing.screw_rebuild_repaired)),
-            barrelConditionStatus: normalizeMachineConditionStatus(existing.barrel_condition_status, Boolean(existing.barrel_rebuild_repaired)),
-          };
-          updateMachineAsset(existing.id, mergedInput, actor, timestamp);
-          const updated = machineAssetById(existing.id, true)!;
+          const input = machineInputFromImport(row, existing);
+          updateMachineAsset(existing.id, input, actor, timestamp);
+          const updated = machineAssetById(existing.id)!;
           const changes = machineAssetChangedHistoryValues(existing, updated);
           summary.updatedCount += 1;
-          recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue: changes.oldValue, newValue: changes.newValue, reasonNote: 'Machine list import' });
+          recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue: changes.oldValue, newValue: changes.newValue, reasonNote: 'Machine asset imported from CSV/XLSX.' });
         } else {
-          const id = insertMachineAsset(input, actor, timestamp);
+          const deletedCandidate = machineAssetMatchesByNumber(row.assetNumber, true).find(asset => Number(asset.deleted) !== 0) ?? null;
+          const input = machineInputFromImport(row, deletedCandidate);
+          const id = deletedCandidate ? deletedCandidate.id : insertMachineAsset(input, actor, timestamp);
+          if (deletedCandidate) updateMachineAsset(deletedCandidate.id, input, actor, timestamp);
           const created = machineAssetById(id)!;
           summary.addedCount += 1;
-          recordMachineAssetHistory({ action: 'machine_asset_created', actor, row: created, newValue: machineAssetHistoryValue(created), reasonNote: 'Machine list import' });
+          recordMachineAssetHistory({ action: 'machine_asset_created', actor, row: created, newValue: machineAssetHistoryValue(created), reasonNote: 'Machine asset imported from CSV/XLSX.' });
         }
       } catch (error) {
         summary.skippedCount += 1;
-        summary.errorCount += 1;
-        if (summary.errors.length < 5) summary.errors.push(`Row ${row.rowNumber}: ${safeErrorMessage(error)}`);
+        addMachineImportError(summary, `Row ${row.rowNumber}: ${safeErrorMessage(error)}`);
       }
     }
     db.exec('COMMIT');
@@ -4807,8 +5090,8 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
     db.exec('ROLLBACK');
     throw error;
   }
-  audit(req, 'machine asset import', 'machine_asset', 'bulk', summary);
-  scheduleAutoBackup('machine asset import', actor);
+  audit(req, 'machine asset import', 'machine_asset', 'bulk', { ...summary, mode });
+  if (summary.addedCount + summary.updatedCount > 0) scheduleAutoBackup('machine asset import', actor);
   return summary;
 }
 const replacementFields: Record<MachineReplacementField, { column: keyof MachineAssetRow; action: string; label: string }> = {
@@ -5020,8 +5303,9 @@ app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.
   try {
     const actor = req.user!;
     const input = validateMachineAssetInput(req.body);
+    const activeMatches = machineAssetMatchesByNumber(input.assetNumber);
+    if (activeMatches.length) return res.status(409).json({ok:false,error:activeMatches.length > 1 ? 'Duplicate Asset Number already exists in MCC. Clean up existing records first.' : 'Asset Number already exists.'});
     const existing = machineAssetByNumber(input.assetNumber);
-    if (existing && !existing.deleted) return res.status(409).json({ok:false,error:'Asset Number already exists.'});
     const timestamp = now();
     const id = existing?.deleted ? existing.id : 0;
     db.exec('BEGIN IMMEDIATE');
@@ -5050,8 +5334,8 @@ app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machi
     const existing = machineAssetById(id);
     if (!existing) return res.status(404).json({ok:false,error:'Machine asset not found.'});
     const input = validateMachineAssetInput(req.body);
-    const duplicate = machineAssetByNumber(input.assetNumber);
-    if (duplicate && duplicate.id !== id && !duplicate.deleted) return res.status(409).json({ok:false,error:'Asset Number already exists.'});
+    const duplicates = machineAssetMatchesByNumber(input.assetNumber).filter(asset => asset.id !== id);
+    if (duplicates.length) return res.status(409).json({ok:false,error:duplicates.length > 1 ? 'Duplicate Asset Number already exists in MCC. Clean up existing records first.' : 'Asset Number already exists.'});
     const timestamp = now();
     updateMachineAsset(id, input, actor, timestamp);
     const updated = machineAssetById(id)!;
@@ -5151,17 +5435,46 @@ app.get('/api/machine-library/assets/:id/history', requireAuth, requirePermissio
   const records = all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC, id DESC LIMIT 200", [String(asset.id),String(asset.id),asset.asset_number]).map(publicHistoryRecord);
   res.json({ok:true,asset:publicMachineAsset(asset),records});
 });
-app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.write'), (_req,res)=>{
-  sendDownload(res, `MCC_Machine_List_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', machineCsvFromRows(machineImportHeaders, []));
+app.get('/api/machine-library/export/csv', requireAuth, requirePermission('machine.write'), (req,res)=>{
+  try {
+    const records = machineRowsForExport({ activeOnly: true }).map(machineExportRecord);
+    const fileName = `MCC_Machine_Assets_Export_${downloadDateStamp()}.csv`;
+    audit(req,'machine asset export CSV','machine_asset','bulk',{rowCount:records.length,fileName});
+    sendDownload(res,fileName,'text/csv; charset=utf-8',machineCsvFromRecords(machineExportHeaders, records));
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.get('/api/machine-library/export/excel-update-template', requireAuth, requirePermission('machine.write'), async (req,res)=>{
+  try {
+    const records = machineRowsForExport().map(machineExportRecord);
+    const fileName = `MCC_Machine_Update_Template_${downloadDateStamp()}.xlsx`;
+    const buffer = await machineWorkbookBuffer('MCC Machine Update', records);
+    audit(req,'machine asset export Excel update template','machine_asset','bulk',{rowCount:records.length,fileName});
+    sendDownload(res,fileName,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer);
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.get('/api/machine-library/export/blank-import-template', requireAuth, requirePermission('machine.write'), async (req,res)=>{
+  try {
+    const fileName = 'MCC_Machine_Blank_Import_Template.xlsx';
+    const buffer = await machineWorkbookBuffer('MCC Machine Import', []);
+    audit(req,'machine asset export blank import template','machine_asset','bulk',{fileName});
+    sendDownload(res,fileName,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer);
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
 });
 app.post('/api/machine-library/import', requireAuth, requirePermission('machine.write'), upload.single('file'), async (req:AuthRequest,res)=>{
   try {
     const rows = await parseMachineImportFile(req.file);
-    const summary = importMachineAssetRows(req, rows);
-    res.json({ok:true,...summary});
+    const mode = machineImportModeFromBody(req.body);
+    const summary = importMachineAssetRows(req, rows, mode);
+    res.json({ok:true,mode,...summary});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/Choose|must include|must be CSV|numeric|required/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,errorCount:1,errors:[message]});
+    res.status(/Choose|must include|must be CSV|numeric|required/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],rejectedDuplicates:[]});
   }
 });
 

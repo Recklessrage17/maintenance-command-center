@@ -31,23 +31,29 @@ Only Tier 3 and higher can edit brand colors. Color values are validated as safe
 
 ## Import Mapping
 
-Machine list import supports CSV or `.xlsx` files with these headers:
+Machine Library tools support:
 
-`Press,Shot (oz),Ton,H&E,Mfg,Barrel,Year,Model #,Equip Serial #`
+- Export CSV
+- Export Excel Update Template
+- Export Blank Import Template
+- Import CSV / Excel
 
-Mapping:
+Blank and update templates use these headers:
 
-- Press -> Asset Number / Press Number
-- Shot (oz) -> Shot Size Oz
-- Ton -> Tonnage
-- H&E -> Power Type
-- Mfg -> Brand
-- Barrel -> Barrel/Screw Diameter
-- Year -> Machine Year
-- Model # -> Model
-- Equip Serial # -> Serial Number
+`Asset Number, Asset Name, Brand, Model, Serial Number, Machine Year, Machine Type, Power Type, Shot Size (oz), Tonnage, Barrel/Screw Diameter, Location, Status, Voltage, Voltage Type, Full Load Amp, Machine Length, Machine Width, Machine Height, Full Die Height Length / Range, Screw Type, Screw Tip Type, Screw Rebuild / Repaired, Barrel Rebuild / Repaired, Screw Installed Date, Screw Tip Installed Date, Barrel Installed Date, Barrel End Cap Installed Date, Barrel Length, Screw Length, Notes, Critical Notes`
 
-Import uses smart upsert by Asset Number / Press Number. Existing assets are updated; new assets are created; duplicate press rows in the same file are skipped. Missing brand color settings are created automatically.
+Department is intentionally excluded from Machine Library import/export templates.
+
+Import supports flexible header names, including Press / Press Number / Machine Number for Asset Number, Mfg / Manufacturer for Brand, Model # for Model, S/N / Serial # / Equip Serial # for Serial Number, Shot / Shot (oz) for Shot Size, Ton / Tons for Tonnage, H&E / Hydraulic/Electric for Power Type, and Barrel / Screw Diameter / Barrel Diameter for Barrel/Screw Diameter.
+
+Import modes:
+
+- Add new only: default. Existing Asset Numbers are rejected and no duplicate active machine asset is created.
+- Update existing / upsert: existing Asset Numbers are updated and new Asset Numbers are created.
+
+Asset Number matching trims spaces, collapses extra spaces, and compares case-insensitively. Duplicate Asset Numbers inside the import file are rejected after the first row for that Asset Number. If existing MCC data already contains duplicate active Asset Numbers after normalization, import rejects that Asset Number and asks the user to clean up existing records first.
+
+Import result handling shows a duplicate rejection modal first when duplicate rows are rejected. After the user clicks OK, the normal import completion banner appears. Missing Brand values import as Unknown.
 
 ## Permissions
 
@@ -83,6 +89,6 @@ Tier 3 and higher users can see the Measurement Inspection placeholder action in
 
 Machine actions are recorded in `history_logs` with `section=machine_library` and `entity_type=machine_asset` where applicable.
 
-Logged actions include asset create/update/disable/enable/delete, brand color changes, import create/update actions, and replacement updates. Asset Number links in Machine Library open a machine-specific log modal with date/time, action, user, and reason/note.
+Logged actions include asset create/update/disable/enable/delete, brand color changes, import create/update/rejected duplicate actions, and replacement updates. Asset Number links in Machine Library open a machine-specific log modal with date/time, action, user, and reason/note.
 
 Machine asset create and update records include old/new snapshots for changed asset fields such as Shot Size, notes, critical notes, install dates, dimensions, Screw Rebuild / Repaired, and Barrel Rebuild / Repaired. Create/update/import actions schedule MCC auto backup protection.

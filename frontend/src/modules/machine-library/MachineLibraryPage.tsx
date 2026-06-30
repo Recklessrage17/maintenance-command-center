@@ -10,6 +10,9 @@ type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'upda
 type ReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap';
 type EditorStatus = { kind: 'saving' | 'success' | 'error'; text: string; field?: keyof AssetForm } | null;
 type ValidationResult = { message: string; field: keyof AssetForm } | null;
+type MachineImportMode = 'add-only' | 'upsert';
+type MachineImportSummary = { ok?: boolean; mode?: MachineImportMode; addedCount: number; updatedCount: number; skippedCount: number; rejectedDuplicateCount: number; errorCount: number; errors: string[]; rejectedDuplicates: string[] };
+type PageMessage = { kind: 'success' | 'error' | 'warning'; text: string };
 
 const blankAssetForm: AssetForm = {
   assetNumber: '', assetName: '', brand: '', model: '', serialNumber: '', machineYear: '', machineType: 'Injection Molding Machine', powerType: '', shotSizeOz: '', tonnage: '', barrelDiameter: '', location: '', department: '', status: 'active', voltageValue: '', voltageType: '', fullLoadAmp: '', machineLength: '', machineWidth: '', machineHeight: '', fullDieHeightLength: '', screwType: '', screwTipType: '', screwTipInstalledDate: '', screwInstalledDate: '', barrelInstalledDate: '', barrelEndCapInstalledDate: '', barrelLength: '', screwLength: '', notes: '', criticalNotes: '', screwRebuildRepaired: false, barrelRebuildRepaired: false, screwConditionStatus: 'new', barrelConditionStatus: 'new',
@@ -29,6 +32,31 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const data = await res.json().catch(()=>({}));
   if (!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;
+}
+async function apiForm<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(path, { method: 'POST', credentials: 'include', body: formData });
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed.');
+  return data as T;
+}
+async function downloadFile(path: string, fallbackFileName: string) {
+  const res = await fetch(path, { credentials: 'include' });
+  if (!res.ok) {
+    const data = await res.json().catch(()=>({}));
+    throw new Error(data.error || 'Download failed.');
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const fileName = match?.[1] || fallbackFileName;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 function formatMachineNumber(value: number | string) {
   const numeric = typeof value === 'number' ? value : Number(value);
@@ -109,10 +137,6 @@ function dimensionConversion(value: string): { mm: string; inches: string } | nu
   const inches = unit.startsWith('in') || unit === '"' ? amount : amount / 25.4;
   return { mm: formatMm(mm), inches: formatInches(inches) };
 }
-function downloadTemplate() {
-  window.location.href = '/api/machine-library/export/template';
-}
-
 export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [assets,setAssets]=useState<MachineAsset[]>([]);
   const [brandSettings,setBrandSettings]=useState<BrandSetting[]>([]);
@@ -120,7 +144,13 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [search,setSearch]=useState('');
   const [brandFilter,setBrandFilter]=useState('');
   const [statusFilter,setStatusFilter]=useState('');
-  const [message,setMessage]=useState<{kind:'success'|'error';text:string}|null>(null);
+  const [message,setMessage]=useState<PageMessage|null>(null);
+  const [toolsOpen,setToolsOpen]=useState(false);
+  const [toolsBusy,setToolsBusy]=useState('');
+  const [machineImportFile,setMachineImportFile]=useState<File|null>(null);
+  const [machineImportMode,setMachineImportMode]=useState<MachineImportMode>('add-only');
+  const [machineImportSummary,setMachineImportSummary]=useState<MachineImportSummary|null>(null);
+  const [duplicateWarning,setDuplicateWarning]=useState<MachineImportSummary|null>(null);
   const [editing,setEditing]=useState<MachineAsset|null>(null);
   const [form,setForm]=useState<AssetForm>(blankAssetForm);
   const [showEditor,setShowEditor]=useState(false);
@@ -131,7 +161,6 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [colorDrafts,setColorDrafts]=useState<Record<string,string>>({});
   const [logs,setLogs]=useState<{asset:MachineAsset;records:HistoryRecord[]}|null>(null);
   const [replacement,setReplacement]=useState<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>(null);
-  const fileRef = useRef<HTMLInputElement|null>(null);
   const brands = useMemo(()=>[...new Set(assets.map(asset=>asset.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[assets]);
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
@@ -257,17 +286,53 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
       setMessage({kind:'error',text:(error as Error).message});
     }
   }
-  async function importMachineList() {
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
-    const body = new FormData();
-    body.append('file', file);
-    const res = await fetch('/api/machine-library/import',{method:'POST',credentials:'include',body});
-    const data = await res.json().catch(()=>({}));
-    if (!res.ok) { setMessage({kind:'error',text:data.error || 'Machine import failed.'}); return; }
-    setMessage({kind:'success',text:`Machine import complete: ${data.addedCount ?? 0} added, ${data.updatedCount ?? 0} updated, ${data.skippedCount ?? 0} skipped.`});
-    if (fileRef.current) fileRef.current.value = '';
-    loadAssets();
+  function importCompleteMessage(summary: MachineImportSummary) {
+    return `Machine import complete: ${summary.addedCount} added, ${summary.updatedCount} updated, ${summary.rejectedDuplicateCount} rejected.`;
+  }
+  function showImportCompletion(summary: MachineImportSummary) {
+    setMessage({kind: summary.addedCount + summary.updatedCount > 0 ? 'success' : 'warning', text: importCompleteMessage(summary)});
+  }
+  async function runMachineDownload(endpoint: string, fallbackFileName: string, successText: string) {
+    if (!canEdit || toolsBusy) return;
+    setToolsBusy(endpoint);
+    setMessage(null);
+    try {
+      await downloadFile(endpoint, fallbackFileName);
+      setMessage({kind:'success',text:successText});
+    } catch (error) {
+      setMessage({kind:'error',text:(error as Error).message});
+    } finally {
+      setToolsBusy('');
+    }
+  }
+  async function importMachineFile() {
+    if (!canEdit || toolsBusy || !machineImportFile) return;
+    setToolsBusy('machine-import');
+    setMessage(null);
+    setMachineImportSummary(null);
+    setDuplicateWarning(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', machineImportFile);
+      formData.append('mode', machineImportMode);
+      const result = await apiForm<MachineImportSummary>('/api/machine-library/import', formData);
+      setMachineImportSummary(result);
+      setMachineImportFile(null);
+      loadAssets();
+      if (result.rejectedDuplicateCount > 0) {
+        setDuplicateWarning(result);
+      } else {
+        showImportCompletion(result);
+      }
+    } catch (error) {
+      setMessage({kind:'error',text:(error as Error).message});
+    } finally {
+      setToolsBusy('');
+    }
+  }
+  function acknowledgeDuplicateWarning() {
+    if (duplicateWarning) showImportCompletion(duplicateWarning);
+    setDuplicateWarning(null);
   }
 
   return (
@@ -277,20 +342,60 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
         <h2>Machine Assets</h2>
         <p>Injection molding machine records, technical specs, replacement tracking, brand colors, and machine-specific history.</p>
       </div>
-      {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
+      {message&&<p className={message.kind==='error'?'form-message inventory-toast error':message.kind==='warning'?'form-message inventory-toast warning':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
       <section className="mcc-card machine-toolbar-card">
         <label className="form-field machine-search"><span>Search assets</span><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>
         <label className="form-field"><span>Brand</span><select value={brandFilter} onChange={event=>setBrandFilter(event.target.value)}><option value="">All brands</option>{brands.map(brand=><option key={brand} value={brand}>{brand}</option>)}</select></label>
         <label className="form-field"><span>Status</span><select value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="">All status</option><option value="active">Active</option><option value="down">Down</option><option value="disabled">Disabled</option><option value="removed">Removed</option></select></label>
         <div className="machine-toolbar-actions">
           <button className="primary-button compact-button" type="button" onClick={openAdd} disabled={!canEdit}>Add Machine Asset</button>
-          <button className="secondary-button compact-button" type="button" onClick={()=>fileRef.current?.click()} disabled={!canEdit}>Import Machine List</button>
-          <button className="secondary-button compact-button" type="button" onClick={downloadTemplate} disabled={!canEdit}>Export Machine Template</button>
+          <button className={toolsOpen?'secondary-button compact-button active':'secondary-button compact-button'} type="button" onClick={()=>setToolsOpen(current=>!current)} disabled={!canEdit} aria-expanded={toolsOpen} aria-controls="machine-tools-panel">Tools</button>
           <button className="secondary-button compact-button" type="button" onClick={()=>setShowColors(true)}>Brand Color Settings</button>
-          <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden-file-input" onChange={()=>void importMachineList()} />
         </div>
         {!canEdit&&<p className="form-help machine-toolbar-note">Tier 3, Manager, Admin, or Owner Admin access is required to add or edit machine assets.</p>}
       </section>
+      {canEdit&&toolsOpen&&(
+        <section className="mcc-card inventory-tools-card machine-tools-card" id="machine-tools-panel">
+          <div className="inventory-tools-heading">
+            <div>
+              <span>Machine Library Tools</span>
+              <strong>Machine import / export templates</strong>
+            </div>
+            <button className="link-button compact-button" type="button" onClick={()=>setToolsOpen(false)}>Close</button>
+          </div>
+          <div className="inventory-tools-grid machine-tools-grid">
+            <div className="inventory-tools-panel">
+              <span>Exports</span>
+              <div className="inventory-tool-actions">
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runMachineDownload('/api/machine-library/export/csv',`MCC_Machine_Assets_Export_${new Date().toISOString().slice(0,10)}.csv`,'Machine CSV export downloaded.')} disabled={Boolean(toolsBusy)}>Export CSV</button>
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runMachineDownload('/api/machine-library/export/excel-update-template',`MCC_Machine_Update_Template_${new Date().toISOString().slice(0,10)}.xlsx`,'Machine Excel update template downloaded.')} disabled={Boolean(toolsBusy)}>Export Excel Update Template</button>
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runMachineDownload('/api/machine-library/export/blank-import-template','MCC_Machine_Blank_Import_Template.xlsx','Machine blank import template downloaded.')} disabled={Boolean(toolsBusy)}>Export Blank Import Template</button>
+              </div>
+            </div>
+            <div className="inventory-tools-panel">
+              <span>Import CSV / Excel</span>
+              <label className="form-field machine-import-mode"><span>Import mode</span><select value={machineImportMode} onChange={event=>setMachineImportMode(event.target.value as MachineImportMode)} disabled={Boolean(toolsBusy)}><option value="add-only">Add new only</option><option value="upsert">Update existing / upsert</option></select></label>
+              <div className="inventory-import-row">
+                <input type="file" accept=".csv,.xlsx" onChange={event=>setMachineImportFile(event.target.files?.[0] ?? null)} />
+                <button className="primary-button compact-button" type="button" onClick={()=>void importMachineFile()} disabled={Boolean(toolsBusy)||!machineImportFile}>Import File</button>
+              </div>
+              <p className="form-message">Asset Number is the key. Add new only rejects existing Asset Numbers.</p>
+            </div>
+          </div>
+          {machineImportSummary&&(
+            <div className={machineImportSummary.addedCount + machineImportSummary.updatedCount > 0 ? 'inventory-tool-summary' : 'inventory-tool-summary warning'}>
+              <strong>{machineImportSummary.addedCount} added / {machineImportSummary.updatedCount} updated / {machineImportSummary.rejectedDuplicateCount} rejected duplicates / {machineImportSummary.skippedCount} skipped</strong>
+              <span>Mode: {machineImportSummary.mode === 'upsert' ? 'Update existing / upsert' : 'Add new only'}</span>
+              {machineImportSummary.errors.length>0&&(
+                <ul>
+                  {machineImportSummary.errors.slice(0,5).map((item,index)=><li key={`${item}-${index}`}>{item}</li>)}
+                  {machineImportSummary.errorCount>5&&<li>Showing first 5 of {machineImportSummary.errorCount} import messages.</li>}
+                </ul>
+              )}
+            </div>
+          )}
+        </section>
+      )}
       <div className="machine-card-grid">
         {assets.map(asset=>{
           const screwCondition = conditionInfo(asset.screwConditionStatus, asset.screwRebuildRepaired);
@@ -326,6 +431,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
       {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={requestCloseEditor} onSubmit={saveAsset} onOutsideAutosave={autosaveFromOutsideClick} canEdit={canEdit} saving={editorSaving} editorStatus={editorStatus} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspectionClick={()=>setShowInspectionNotice(true)} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
       {showInspectionNotice&&<InspectionNoticeModal onClose={()=>setShowInspectionNotice(false)} />}
+      {duplicateWarning&&<DuplicateWarningModal summary={duplicateWarning} onClose={acknowledgeDuplicateWarning} />}
       {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} onSubmit={updateReplacement} />}
       {logs&&<LogsModal logs={logs} onClose={()=>setLogs(null)} onBackToAsset={()=>{ setForm(assetToForm(logs.asset)); setEditing(logs.asset); setLogs(null); setShowEditor(true); }} />}
     </div>
@@ -416,6 +522,10 @@ function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSav
 }
 function InspectionNoticeModal({onClose}:{onClose:()=>void}) {
   return <div className="modal-backdrop machine-notice-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal"><div className="modal-heading"><div><p className="eyebrow">Measurement Inspection</p><h3>Coming next</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p className="form-message">Measurement Inspection form is coming next.</p><p className="form-help">Future inspections will move condition from New to Used to Worn.</p><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Done</button></div></section></div>;
+}
+function DuplicateWarningModal({summary,onClose}:{summary:MachineImportSummary;onClose:()=>void}) {
+  const visible = summary.rejectedDuplicates.slice(0,10);
+  return <div className="modal-backdrop machine-notice-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal machine-duplicate-modal"><div className="modal-heading"><div><p className="eyebrow">Machine Import</p><h3>Machine import rejected duplicates</h3></div></div><div className="machine-import-counts"><span>Added: {summary.addedCount}</span><span>Updated: {summary.updatedCount}</span><span>Rejected duplicates: {summary.rejectedDuplicateCount}</span><span>Skipped: {summary.skippedCount}</span></div><ul className="machine-duplicate-list">{visible.map((item,index)=><li key={`${item}-${index}`}>{item}</li>)}{summary.rejectedDuplicateCount>10&&<li>Showing first 10 of {summary.rejectedDuplicateCount} rejected duplicates.</li>}</ul><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>OK</button></div></section></div>;
 }
 function ReplacementModal({replacement,setReplacement,onSubmit}:{replacement:{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string};setReplacement:Dispatch<SetStateAction<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>>;onSubmit:(event:FormEvent)=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-small-modal" onSubmit={onSubmit}><p className="eyebrow">Replacement Update</p><h3>Update New {replacementLabels[replacement.field]} Install Date</h3><DateWithAge label="Install Date *" value={replacement.installDate} set={installDate=>setReplacement(current=>current&&({...current,installDate}))} disabled={false}/><Area label="Reason / Note" value={replacement.reasonNote} set={reasonNote=>setReplacement(current=>current&&({...current,reasonNote}))} disabled={false}/><div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setReplacement(null)}>Cancel</button><button className="primary-button" type="submit">Update {replacementLabels[replacement.field]} Date</button></div></form></div>;
