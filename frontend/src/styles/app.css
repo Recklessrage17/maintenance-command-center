@@ -287,7 +287,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @keyframes brand-soft-glow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(68, 215, 255, 0)); } 50% { filter: drop-shadow(0 0 12px rgba(68, 215, 255, .44)); } }
 @keyframes brand-slow-rotate { to { transform: rotate(360deg); } }
 @keyframes brand-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
-@keyframes part-link-shine { 0%, 55% { transform: translateX(-140%); } 75%, 100% { transform: translateX(140%); } }
 .module-card-grid { width: 100%; max-width: none; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .module-shell-card { min-height: 0; padding: 14px 16px; border-radius: 14px; }
 .module-shell-card strong { font-size: 1.1rem; }
@@ -502,7 +501,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .part-number-stack { display: grid; justify-items: start; gap: 5px; min-width: 0; }
 .part-number-link, .link-badge { display: inline-flex; align-items: center; gap: 7px; width: fit-content; border: 1px solid rgba(68, 215, 255, 0.42); border-radius: 999px; color: #bff3ff; background: linear-gradient(135deg, rgba(5, 61, 86, 0.72), rgba(18, 97, 71, 0.46)); font-size: .82rem; font-weight: 900; text-decoration: none; white-space: nowrap; box-shadow: 0 0 16px rgba(68, 215, 255, 0.16), inset 0 1px 0 rgba(255,255,255,0.14); }
 .part-number-link { position: relative; max-width: 132px; overflow: hidden; padding: 4px 8px; text-overflow: ellipsis; }
-.part-number-link::after { content: ""; position: absolute; inset: 0; transform: translateX(-140%); background: linear-gradient(100deg, transparent, rgba(255,255,255,0.24), transparent); animation: part-link-shine 3.8s ease-in-out infinite; pointer-events: none; }
 .part-number-link:hover { border-color: rgba(54, 229, 170, 0.72); color: #dcfff0; box-shadow: 0 0 20px rgba(54, 229, 170, 0.2), inset 0 1px 0 rgba(255,255,255,0.18); }
 .link-badge { padding: 4px 8px; font-size: .76rem; }
 .part-number-link span { display: inline !important; margin: 0 !important; color: inherit !important; font-size: .82rem !important; }
