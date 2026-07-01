@@ -8,6 +8,7 @@ export type VendorRecord = {
   phoneType: PhoneType;
   phoneNumber: string;
   phoneExt: string;
+  websiteUrl: string;
   addressLine1: string;
   addressLine2: string;
   city: string;
@@ -42,6 +43,7 @@ export const blankVendorForm: VendorForm = {
   phoneType: '',
   phoneNumber: '',
   phoneExt: '',
+  websiteUrl: '',
   addressLine1: '',
   addressLine2: '',
   city: '',
@@ -79,12 +81,32 @@ function cityState(vendor: Pick<VendorRecord, 'city' | 'state'>) {
   return [vendor.city, vendor.state].filter(Boolean).join(', ');
 }
 
+function safeWebsiteUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+function websiteOrigin(value: string) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
+}
+
 export function vendorFormFromVendor(vendor: VendorRecord): VendorForm {
   return {
     companyName: vendor.companyName ?? '',
     phoneType: vendor.phoneType ?? '',
     phoneNumber: vendor.phoneNumber ?? '',
     phoneExt: vendor.phoneExt ?? '',
+    websiteUrl: vendor.websiteUrl ?? '',
     addressLine1: vendor.addressLine1 ?? '',
     addressLine2: vendor.addressLine2 ?? '',
     city: vendor.city ?? '',
@@ -109,6 +131,7 @@ export function vendorPayloadFromForm(form: VendorForm) {
     phoneType: form.phoneType,
     phoneNumber: form.phoneNumber.trim(),
     phoneExt: form.phoneExt.trim(),
+    websiteUrl: form.websiteUrl.trim(),
     addressLine1: form.addressLine1.trim(),
     addressLine2: form.addressLine2.trim(),
     city: form.city.trim(),
@@ -131,6 +154,7 @@ export function validateVendorForm(form: VendorForm, requireDisableReason = !for
   if (!form.companyName.trim()) return 'Company Name is required.';
   if (form.companyName.trim().length > 120) return 'Company Name must be 120 characters or less.';
   if (form.phoneExt.trim().length > 20 || form.contactPhoneExt.trim().length > 20) return 'EXT # must be 20 characters or less.';
+  if (form.websiteUrl.trim() && !safeWebsiteUrl(form.websiteUrl)) return 'Website URL must start with http:// or https://.';
   if (form.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) return 'Contact Email must be a valid email address.';
   if (requireDisableReason && !form.reasonNote.trim()) return 'Reason for disabling vendor is required.';
   return '';
@@ -142,6 +166,24 @@ function DetailRow({label,children}:{label:string;children:React.ReactNode}) {
       <span>{label}</span>
       <strong>{children || '-'}</strong>
     </div>
+  );
+}
+
+function VendorWebsiteLink({websiteUrl,compact=false}:{websiteUrl:string;compact?:boolean}) {
+  const safeUrl = safeWebsiteUrl(websiteUrl);
+  const [faviconFailed,setFaviconFailed]=useState(false);
+  if (!safeUrl) return null;
+  const origin = websiteOrigin(safeUrl);
+  const label = origin.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  return (
+    <a className={`vendor-website-link${compact ? ' compact' : ''}`} href={safeUrl} target="_blank" rel="noopener noreferrer" title={`Open ${label}`}>
+      {!faviconFailed&&origin ? (
+        <img className="vendor-favicon" src={`${origin}/favicon.ico`} alt="" onError={()=>setFaviconFailed(true)} />
+      ) : (
+        <span className="vendor-favicon-fallback" aria-hidden="true">{label.slice(0,1).toUpperCase()}</span>
+      )}
+      <span>{label || 'Website'}</span>
+    </a>
   );
 }
 
@@ -158,6 +200,7 @@ export function VendorDetailModal({vendor,onClose,onEdit}:{vendor:VendorRecord;o
         </div>
         <div className="vendor-detail-grid">
           <DetailRow label="Company phone">{formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt)}</DetailRow>
+          <DetailRow label="Website">{vendor.websiteUrl ? <VendorWebsiteLink websiteUrl={vendor.websiteUrl} compact /> : '-'}</DetailRow>
           <DetailRow label="Address">{[vendor.addressLine1, vendor.addressLine2, cityState(vendor), vendor.postalCode, vendor.country].filter(Boolean).join(', ')}</DetailRow>
           <DetailRow label="Contact name">{vendor.contactName}</DetailRow>
           <DetailRow label="Contact title">{vendor.contactTitle}</DetailRow>
@@ -205,6 +248,7 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
           <label className="form-field"><span>Company Phone Type</span><select value={form.phoneType} onChange={event=>setForm({...form,phoneType:event.target.value as PhoneType})}>{phoneTypes.map(type=><option key={type || 'blank'} value={type}>{type || 'Select type'}</option>)}</select></label>
           <label className="form-field"><span>Company Phone #</span><input value={form.phoneNumber} onChange={event=>setForm({...form,phoneNumber:event.target.value})} /></label>
           <label className="form-field"><span>Company EXT #</span><input value={form.phoneExt} onChange={event=>setForm({...form,phoneExt:event.target.value})} /></label>
+          <label className="form-field vendor-form-wide"><span>Website URL</span><input value={form.websiteUrl} onChange={event=>setForm({...form,websiteUrl:event.target.value})} placeholder="https://www.mcmaster.com/" /></label>
           <label className="form-field vendor-form-wide"><span>Address Line 1</span><input value={form.addressLine1} onChange={event=>setForm({...form,addressLine1:event.target.value})} /></label>
           <label className="form-field vendor-form-wide"><span>Address Line 2</span><input value={form.addressLine2} onChange={event=>setForm({...form,addressLine2:event.target.value})} /></label>
           <label className="form-field"><span>City</span><input value={form.city} onChange={event=>setForm({...form,city:event.target.value})} /></label>
@@ -228,6 +272,36 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
         </div>
       </form>
     </div>
+  );
+}
+
+function VendorCard({vendor,onView,onEdit,onDelete}:{vendor:VendorRecord;onView:()=>void;onEdit:()=>void;onDelete:()=>void}) {
+  const statusClass = vendor.deleted ? 'vendor-status-deleted' : vendor.isActive ? 'vendor-status-enabled' : 'vendor-status-disabled';
+  const mainPhone = formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt);
+  const contactPhone = formatPhone(vendor.contactPhoneType, vendor.contactPhoneNumber, vendor.contactPhoneExt);
+  return (
+    <article className={`vendor-card${vendor.deleted ? ' deleted' : !vendor.isActive ? ' disabled' : ''}`}>
+      <div className="vendor-card-heading">
+        <button className="vendor-company-pill" type="button" onClick={onView}>{vendor.companyName}</button>
+        {(vendor.deleted||!vendor.isActive)&&<span className={`status-pill disabled ${statusClass}`}>{vendor.status}</span>}
+      </div>
+      {vendor.deleted&&<p className="vendor-disabled-warning deleted">Vendor record deleted.</p>}
+      {!vendor.deleted&&!vendor.isActive&&<p className="vendor-disabled-warning">Company no longer uses this vendor.</p>}
+      <VendorWebsiteLink websiteUrl={vendor.websiteUrl} />
+      <div className="vendor-card-detail-grid">
+        <div><span>Main Phone</span><strong>{mainPhone || '-'}</strong></div>
+        <div><span>Contact</span><strong>{vendor.contactName || '-'}</strong></div>
+        <div><span>Contact Phone</span><strong>{contactPhone || '-'}</strong></div>
+        <div><span>Email</span><strong>{vendor.contactEmail ? <a href={`mailto:${vendor.contactEmail}`}>{vendor.contactEmail}</a> : '-'}</strong></div>
+        <div><span>City/State</span><strong>{cityState(vendor) || '-'}</strong></div>
+        <div><span>Country</span><strong>{vendor.country || '-'}</strong></div>
+      </div>
+      <div className="vendor-card-actions">
+        <button className="secondary-button compact-button" type="button" onClick={onView}>View</button>
+        <button className="secondary-button compact-button" type="button" onClick={onEdit}>Edit</button>
+        <button className="danger-button compact-button" type="button" onClick={onDelete} disabled={vendor.deleted}>Delete</button>
+      </div>
+    </article>
   );
 }
 
@@ -317,47 +391,22 @@ export function VendorsPage() {
         </div>
       </section>
 
-      <section className="mcc-card vendors-table-card">
-        <div className="table-card vendors-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Company Name</th>
-                <th>Main Phone</th>
-                <th>Contact Name</th>
-                <th>Contact Title</th>
-                <th>Contact Phone</th>
-                <th>Email</th>
-                <th>City/State</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedVendors.map(vendor=>(
-                <tr key={vendor.id}>
-                  <td><button className="vendor-list-name-button" type="button" onClick={()=>setDetailVendor(vendor)}>{vendor.companyName}</button></td>
-                  <td>{formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt) || '-'}</td>
-                  <td>{vendor.contactName || '-'}</td>
-                  <td>{vendor.contactTitle || '-'}</td>
-                  <td>{formatPhone(vendor.contactPhoneType, vendor.contactPhoneNumber, vendor.contactPhoneExt) || '-'}</td>
-                  <td>{vendor.contactEmail ? <a href={`mailto:${vendor.contactEmail}`}>{vendor.contactEmail}</a> : '-'}</td>
-                  <td>{cityState(vendor) || '-'}</td>
-                  <td><span className={vendor.deleted ? 'status-pill disabled vendor-status-deleted' : vendor.isActive ? 'status-pill vendor-status-enabled' : 'status-pill disabled vendor-status-disabled'}>{vendor.status}</span></td>
-                  <td>
-                    <div className="inventory-row-actions vendors-row-actions">
-                      <button className="secondary-button compact-button" type="button" onClick={()=>setDetailVendor(vendor)}>View</button>
-                      <button className="secondary-button compact-button" type="button" onClick={()=>{ setEditingVendor(vendor); setAdding(false); setFormError(''); }}>Edit</button>
-                      <button className="danger-button compact-button" type="button" onClick={()=>deleteVendor(vendor)}>Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!loading&&!sortedVendors.length&&<tr><td colSpan={9} className="empty-table-cell">No vendors found.</td></tr>}
-              {loading&&<tr><td colSpan={9} className="empty-table-cell">Loading vendors...</td></tr>}
-            </tbody>
-          </table>
-        </div>
+      <section className="vendors-card-section">
+        {loading&&<div className="mcc-card vendors-empty-card">Loading vendors...</div>}
+        {!loading&&!sortedVendors.length&&<div className="mcc-card vendors-empty-card">No vendors found.</div>}
+        {!loading&&sortedVendors.length>0&&(
+          <div className="vendor-card-grid">
+            {sortedVendors.map(vendor=>(
+              <VendorCard
+                key={vendor.id}
+                vendor={vendor}
+                onView={()=>setDetailVendor(vendor)}
+                onEdit={()=>{ setEditingVendor(vendor); setAdding(false); setFormError(''); }}
+                onDelete={()=>deleteVendor(vendor)}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {detailVendor&&<VendorDetailModal vendor={detailVendor} onClose={()=>setDetailVendor(null)} onEdit={()=>{ setEditingVendor(detailVendor); setDetailVendor(null); setFormError(''); }} />}

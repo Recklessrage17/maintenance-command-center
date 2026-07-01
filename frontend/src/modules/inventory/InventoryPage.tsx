@@ -1414,6 +1414,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         phoneType: vendorDetail.phoneType,
         phoneNumber: vendorDetail.phoneNumber,
         phoneExt: vendorDetail.phoneExt,
+        websiteUrl: vendorDetail.websiteUrl,
         addressLine1: vendorDetail.addressLine1,
         addressLine2: vendorDetail.addressLine2,
         city: vendorDetail.city,
