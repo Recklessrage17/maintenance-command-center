@@ -14,7 +14,7 @@ Install dates are stored as text so unknown, year-only, and exact date values ca
 
 Length and dimension fields store the original typed text. When a user enters `mm`, `millimeter`, `millimeters`, `in`, `inch`, `inches`, `"`, `ft`, `foot`, `feet`, or `'`, the form displays converted millimeter, inch, and foot values without changing the stored text.
 
-Machine Length, Machine Width, Machine Height, Full Die Height Length / Range, Barrel Length, and Screw Length use display/edit mode. Blank fields show the input with the placeholder `100mm, 72in, 6ft`. Valid entries collapse after blur into a bordered display box such as `100mm / 3.94in / 0.33ft` with green millimeters, amber inches, and cyan feet plus a compact Edit button. Invalid values keep the input visible and show the hint `Enter a value like 100mm, 72in, or 6ft.`
+Machine Length, Machine Width, Machine Height, Full Die Height Length / Range, Barrel Length, and Screw Length use display/edit mode. Blank fields show the input with the placeholder `100mm, 72in, 6ft`. Valid entries collapse after blur into a bordered display box such as `100mm / 3.94in / 0.33ft` with green millimeters, amber inches, and red-orange feet plus a compact Edit button. Invalid values keep the input visible and show the hint `Enter a value like 100mm, 72in, or 6ft.`
 
 Notes are displayed in amber/yellow. Critical Notes are displayed in red.
 
@@ -30,6 +30,10 @@ Brand color settings live in `machine_brand_settings`. Default colors are:
 - Default / Unknown: cyan
 
 Only Tier 3 and higher can edit brand colors. Color values are validated as safe `#RRGGBB` hex strings. A confirmation warning is shown before saving because a brand color update changes every matching machine asset card.
+
+Machine cards apply the brand color to the card accent border, a subtle card glow, and the brand text glass pill. Brand color settings remain live: changing Toyo, Arburg, Husky, Engel, or any other brand color updates all matching card accents and brand pills.
+
+Active machine cards use a compact green pulsing dot with `Status: Active` accessibility text instead of a full Active pill. Down uses an orange/red dot, Disabled uses a muted red/gray dot, and Removed uses a gray dot. The detail modal and edit form still show status text. The pulse respects reduced-motion preferences.
 
 ## Import Mapping
 
@@ -73,7 +77,7 @@ The Barrel box includes Barrel Diameter, Barrel Rebuild / Repaired, Barrel Insta
 
 Measurement Inspection remains a placeholder action below the Screw and Barrel boxes. The future workflow is tracked by GitHub issue #16 and will move condition from New to Used to Worn.
 
-Asset cards show a compact Screw / Tip / Barrel / End Cap age summary. Screw and Tip display their type plus install-date year count, Barrel displays length or diameter plus install-date year count, and End Cap displays its install-date year count. Unknown or non-exact install dates display Unknown.
+Asset cards show Screw and Barrel condition badges in their own row, then a compact 2x2 Screw / Tip / Barrel / End Cap summary underneath. Screw and Tip display their type plus install-date year count, Barrel displays length or diameter plus install-date year count, and End Cap displays its install-date year count. Unknown or non-exact install dates display Unknown. On very narrow phone widths, the mini boxes stack one per row to avoid overflow.
 
 ## Replacement Date Badges
 

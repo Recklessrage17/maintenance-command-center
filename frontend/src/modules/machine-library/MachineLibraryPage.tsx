@@ -123,6 +123,9 @@ function fieldClass(value: string, extra = '') {
 function safeCssHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#44D7FF';
 }
+function machineStatusLabel(status: string) {
+  return status.replace(/_/g, ' ').replace(/\b\w/g, letter=>letter.toUpperCase());
+}
 function conditionInfo(status: MachineConditionStatus, rebuilt: boolean) {
   void status;
   // Future Measurement Inspection, GitHub issue #16, can honor used/worn here.
@@ -427,9 +430,12 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
             <article className="machine-asset-card" style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
               <div className="machine-card-head">
                 <button className="machine-asset-number" type="button" onClick={()=>void loadLogs(asset)}>{asset.assetNumber}</button>
-                <span className={`machine-status-badge status-${asset.status}`}>{asset.status}</span>
+                <span className={`machine-status-dot status-${asset.status}`} title={machineStatusLabel(asset.status)} aria-label={`Status: ${machineStatusLabel(asset.status)}`} />
               </div>
-              <div className="machine-card-title"><strong>{asset.brand || 'Unknown'}</strong><span>{asset.model || 'Model not set'} / S/N: {asset.serialNumber || '-'}</span></div>
+              <div className="machine-card-title">
+                <strong className="machine-brand-pill">{asset.brand || 'Unknown'}</strong>
+                <span className="machine-model-serial-line"><span className="machine-model-text">Model: {asset.model || 'Model not set'}</span><span className="machine-serial-text">S/N: {asset.serialNumber || '-'}</span></span>
+              </div>
               <dl className="machine-spec-grid">
                 <div><dt>Tonnage</dt><dd>{machineDisplayNumber(asset.tonnage)}</dd></div><div><dt>Shot Size</dt><dd>{machineDisplayNumber(asset.shotSizeOz)} oz</dd></div><div><dt>Barrel</dt><dd>{asset.barrelDiameter || '-'}</dd></div><div><dt>Power</dt><dd>{asset.powerType || '-'}</dd></div>
               </dl>
