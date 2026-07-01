@@ -1204,6 +1204,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                 <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/csv',`MCC_Inventory_Export_${new Date().toISOString().slice(0,10)}.csv`,'CSV export downloaded.')} disabled={Boolean(toolsBusy)}>Export CSV</button>
                 <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/excel-update-template',`MCC_Inventory_Update_Template_${new Date().toISOString().slice(0,10)}.xlsx`,'Excel update template downloaded.')} disabled={Boolean(toolsBusy)}>Export Excel Update Template</button>
                 <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/blank-import-template','MCC_Inventory_Blank_Import_Template.xlsx','Blank import template downloaded.')} disabled={Boolean(toolsBusy)}>Export Blank Import Template</button>
+                <button className="secondary-button compact-button" type="button" onClick={()=>void runDownload('/api/inventory/native/export/blank-import-template.csv','MCC_Inventory_Blank_Import_Template.csv','Blank CSV import template downloaded.')} disabled={Boolean(toolsBusy)}>Export Blank CSV Template</button>
               </div>
             </div>
             <div className="inventory-tools-panel">
@@ -1411,6 +1412,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {vendorDetail&&<VendorDetailModal vendor={vendorDetail} onClose={()=>setVendorDetail(null)} onEdit={()=>{ setVendorEditorInitial({
         companyName: vendorDetail.companyName,
+        websiteUrl: vendorDetail.websiteUrl ?? vendorDetail.website_url ?? '',
+        website_url: vendorDetail.websiteUrl ?? vendorDetail.website_url ?? '',
         phoneType: vendorDetail.phoneType,
         phoneNumber: vendorDetail.phoneNumber,
         phoneExt: vendorDetail.phoneExt,

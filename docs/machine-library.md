@@ -12,9 +12,9 @@ Technical fields include Voltage, Voltage Type, Full Load Amp, Machine Length, M
 
 Install dates are stored as text so unknown, year-only, and exact date values can be preserved. The frontend keeps a text field and adds a date picker control for exact dates saved as `YYYY-MM-DD`. The frontend shows a year count when the value parses as an exact date. Blank or non-date values show Unknown.
 
-Length and dimension fields store the original typed text. When a user enters `mm`, `millimeter`, `millimeters`, `in`, `inch`, `inches`, `"`, `ft`, `foot`, `feet`, or `'`, the form previews converted millimeter, inch, and foot values without changing the stored text.
+Length and dimension fields store the original typed text. When a user enters `mm`, `millimeter`, `millimeters`, `in`, `inch`, `inches`, `"`, `ft`, `foot`, `feet`, or `'`, the form displays converted millimeter, inch, and foot values without changing the stored text.
 
-The conversion preview appears on Machine Length, Machine Width, Machine Height, Full Die Height Length / Range, Barrel Length, and Screw Length. Blank values, plain unitless numbers, and invalid mixed examples do not show a preview.
+Machine Length, Machine Width, Machine Height, Full Die Height Length / Range, Barrel Length, and Screw Length use display/edit mode. Blank fields show the input with the placeholder `100mm, 72in, 6ft`. Valid entries collapse after blur into a bordered display box such as `100mm / 3.94in / 0.33ft` with green millimeters, amber inches, and cyan feet plus a compact Edit button. Invalid values keep the input visible and show the hint `Enter a value like 100mm, 72in, or 6ft.`
 
 Notes are displayed in amber/yellow. Critical Notes are displayed in red.
 

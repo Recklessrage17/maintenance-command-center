@@ -140,13 +140,14 @@ function formatFeet(value: number) {
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 }
-function dimensionConversion(value: string): { mm: string; inches: string; feet: string } | null {
+type DimensionConversion = { mm: string; inches: string; feet: string };
+function dimensionConversion(value: string): DimensionConversion | null | 'invalid' {
   const clean = value.trim();
-  if (!clean || /^\d+(?:\.\d+)?$/.test(clean)) return null;
+  if (!clean) return null;
   const match = clean.match(/^(\d+(?:\.\d+)?)\s*(mm|millimeters?|in|inch(?:es)?|"|ft|foot|feet|')$/i);
-  if (!match) return null;
+  if (!match) return 'invalid';
   const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) return null;
+  if (!Number.isFinite(amount)) return 'invalid';
   const unit = match[2].toLowerCase();
   const isMillimeters = unit.startsWith('mm') || unit.startsWith('millimeter');
   const isFeet = unit === 'ft' || unit === 'foot' || unit === 'feet' || unit === "'";
@@ -154,6 +155,9 @@ function dimensionConversion(value: string): { mm: string; inches: string; feet:
   const inches = isMillimeters ? amount / 25.4 : isFeet ? amount * 12 : amount;
   const feet = isFeet ? amount : inches / 12;
   return { mm: formatMm(mm), inches: formatInches(inches), feet: formatFeet(feet) };
+}
+function dimensionEditKey(field: string | undefined, label: string) {
+  return field || label;
 }
 export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [assets,setAssets]=useState<MachineAsset[]>([]);
@@ -466,6 +470,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
 function MachineEditorModal({form,setField,onClose,onSubmit,onOutsideAutosave,canEdit,saving,editorStatus,asset,onReplacement,onInspectionClick}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;onOutsideAutosave:()=>Promise<boolean>;canEdit:boolean;saving:boolean;editorStatus:EditorStatus;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onInspectionClick:()=>void}) {
   const disabled = !canEdit || saving;
   const formRef = useRef<HTMLFormElement|null>(null);
+  const [editingDimensions,setEditingDimensions]=useState<Set<string>>(()=>new Set());
   useEffect(()=>{
     if (editorStatus?.kind !== 'error' || !editorStatus.field) return;
     formRef.current?.querySelector<HTMLElement>(`[data-machine-field="${editorStatus.field}"]`)?.focus();
@@ -495,7 +500,7 @@ function MachineEditorModal({form,setField,onClose,onSubmit,onOutsideAutosave,ca
     {editorStatus&&<p className={`form-message machine-save-status ${editorStatus.kind === 'error' ? 'error' : editorStatus.kind}`}>{editorStatus.text}</p>}
     <MachineSection title="Basic Info"><Text field="assetNumber" label="Asset Number / Press Number *" value={form.assetNumber} set={v=>setField('assetNumber',v)} disabled={disabled}/><Text field="assetName" label="Asset Name" value={form.assetName} set={v=>setField('assetName',v)} disabled={disabled}/><Text field="brand" label="Brand *" value={form.brand} set={v=>setField('brand',v)} disabled={disabled}/><Text field="model" label="Model" value={form.model} set={v=>setField('model',v)} disabled={disabled}/><Text field="serialNumber" label="Serial Number" value={form.serialNumber} set={v=>setField('serialNumber',v)} disabled={disabled}/><Text field="machineYear" label="Machine Year" value={form.machineYear} set={v=>setField('machineYear',v)} disabled={disabled}/><Text field="machineType" label="Machine Type" value={form.machineType} set={v=>setField('machineType',v)} disabled={disabled}/><Select field="powerType" label="Power Type" value={form.powerType} set={v=>setField('powerType',v)} options={['','Hydraulic','Electric','Hybrid','Other']} disabled={disabled}/><Text field="shotSizeOz" label="Shot Size (oz)" value={form.shotSizeOz} set={v=>setField('shotSizeOz',v)} disabled={disabled} type="number" step="0.01" min="0"/><Text field="tonnage" label="Tonnage" value={form.tonnage} set={v=>setField('tonnage',v)} disabled={disabled} type="number" step="0.01"/><Text field="location" label="Location" value={form.location} set={v=>setField('location',v)} disabled={disabled}/><Select field="status" label="Status" value={form.status} set={v=>setField('status',v)} options={['active','down','disabled','removed']} disabled={disabled}/></MachineSection>
     <MachineSection title="Electrical"><Text field="voltageValue" label="Voltage" value={form.voltageValue} set={v=>setField('voltageValue',v)} disabled={disabled}/><Select field="voltageType" label="Voltage Type" value={form.voltageType} set={v=>setField('voltageType',v)} options={['','AC','DC']} disabled={disabled}/><Text field="fullLoadAmp" label="Full Load Amp" value={form.fullLoadAmp} set={v=>setField('fullLoadAmp',v)} disabled={disabled}/></MachineSection>
-    <MachineSection title="Dimensions"><DimensionText field="machineLength" label="Machine Length" value={form.machineLength} set={v=>setField('machineLength',v)} disabled={disabled}/><DimensionText field="machineWidth" label="Machine Width" value={form.machineWidth} set={v=>setField('machineWidth',v)} disabled={disabled}/><DimensionText field="machineHeight" label="Machine Height" value={form.machineHeight} set={v=>setField('machineHeight',v)} disabled={disabled}/><DimensionText field="fullDieHeightLength" label="Full Die Height Length / Range" value={form.fullDieHeightLength} set={v=>setField('fullDieHeightLength',v)} disabled={disabled}/></MachineSection>
+    <MachineSection title="Dimensions"><DimensionText field="machineLength" label="Machine Length" value={form.machineLength} set={v=>setField('machineLength',v)} disabled={disabled} editing={editingDimensions} setEditing={setEditingDimensions}/><DimensionText field="machineWidth" label="Machine Width" value={form.machineWidth} set={v=>setField('machineWidth',v)} disabled={disabled} editing={editingDimensions} setEditing={setEditingDimensions}/><DimensionText field="machineHeight" label="Machine Height" value={form.machineHeight} set={v=>setField('machineHeight',v)} disabled={disabled} editing={editingDimensions} setEditing={setEditingDimensions}/><DimensionText field="fullDieHeightLength" label="Full Die Height Length / Range" value={form.fullDieHeightLength} set={v=>setField('fullDieHeightLength',v)} disabled={disabled} editing={editingDimensions} setEditing={setEditingDimensions}/></MachineSection>
     <section className="machine-form-section machine-screw-barrel-section">
       <span>Screw / Barrel</span>
       <div className="machine-screw-barrel-layout">
@@ -506,7 +511,7 @@ function MachineEditorModal({form,setField,onClose,onSubmit,onOutsideAutosave,ca
             <Text field="screwTipType" label="Screw Tip Type" value={form.screwTipType} set={v=>setField('screwTipType',v)} disabled={disabled}/>
             <DateWithAge field="screwInstalledDate" label="Screw Installed Date" value={form.screwInstalledDate} set={v=>setField('screwInstalledDate',v)} disabled={disabled}/>
             <DateWithAge field="screwTipInstalledDate" label="Screw Tip Installed Date" value={form.screwTipInstalledDate} set={v=>setField('screwTipInstalledDate',v)} disabled={disabled}/>
-            <DimensionText field="screwLength" label="Screw Length" value={form.screwLength} set={v=>setField('screwLength',v)} disabled={disabled}/>
+            <DimensionText field="screwLength" label="Screw Length" value={form.screwLength} set={v=>setField('screwLength',v)} disabled={disabled} editing={editingDimensions} setEditing={setEditingDimensions}/>
             {asset&&<div className="machine-box-actions"><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'screw')} disabled={!canEdit || saving}>New Screw</button><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'screw_tip')} disabled={!canEdit || saving}>New Screw Tip</button></div>}
           </div>
         </section>
@@ -514,7 +519,7 @@ function MachineEditorModal({form,setField,onClose,onSubmit,onOutsideAutosave,ca
           <div className="machine-component-box-heading"><strong>Barrel</strong></div>
           <div className="machine-component-box-grid">
             <Text field="barrelDiameter" label="Barrel Diameter" value={form.barrelDiameter} set={v=>setField('barrelDiameter',v)} disabled={disabled}/>
-            <ConditionDimensionText field="barrelLength" label="Barrel Length" value={form.barrelLength} set={v=>setField('barrelLength',v)} disabled={disabled} checked={form.barrelRebuildRepaired} setChecked={setBarrelRebuildRepaired} condition={conditionInfo(form.barrelConditionStatus, form.barrelRebuildRepaired)} checkboxLabel="Barrel Rebuild / Repaired"/>
+            <ConditionDimensionText field="barrelLength" label="Barrel Length" value={form.barrelLength} set={v=>setField('barrelLength',v)} disabled={disabled} checked={form.barrelRebuildRepaired} setChecked={setBarrelRebuildRepaired} condition={conditionInfo(form.barrelConditionStatus, form.barrelRebuildRepaired)} checkboxLabel="Barrel Rebuild / Repaired" editing={editingDimensions} setEditing={setEditingDimensions}/>
             <DateWithAge field="barrelInstalledDate" label="Barrel Installed Date" value={form.barrelInstalledDate} set={v=>setField('barrelInstalledDate',v)} disabled={disabled}/>
             <DateWithAge field="barrelEndCapInstalledDate" label="Barrel End Cap Installed Date" value={form.barrelEndCapInstalledDate} set={v=>setField('barrelEndCapInstalledDate',v)} disabled={disabled}/>
             {asset&&<div className="machine-box-actions"><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'barrel')} disabled={!canEdit || saving}>New Barrel</button><button className="machine-action-badge" type="button" onClick={()=>onReplacement(asset,'barrel_end_cap')} disabled={!canEdit || saving}>New Barrel End Cap</button></div>}
@@ -544,17 +549,49 @@ function DateWithAge({label,value,set,disabled,field}:{label:string;value:string
 }
 function DimensionPreview({value}:{value:string}) {
   const conversion = dimensionConversion(value);
-  if (!conversion) return null;
+  if (!conversion || conversion === 'invalid') return null;
+  return <DimensionConversionDisplay conversion={conversion} />;
+}
+function DimensionConversionDisplay({conversion}:{conversion:DimensionConversion}) {
   return <small className="machine-dimension-preview"><span className="dimension-mm">{conversion.mm}mm</span><span className="dimension-separator">/</span><span className="dimension-in">{conversion.inches}in</span><span className="dimension-separator">/</span><span className="dimension-ft">{conversion.feet}ft</span></small>;
 }
-function DimensionText({label,value,set,disabled,field}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string}) {
-  return <label className={fieldClass(value)}><span>{label}</span><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 72&quot;" /><DimensionPreview value={value} /></label>;
+function setDimensionEditing(setEditing:Dispatch<SetStateAction<Set<string>>>, key:string, active:boolean) {
+  setEditing(current=>{
+    const next = new Set(current);
+    if (active) next.add(key);
+    else next.delete(key);
+    return next;
+  });
+}
+function DimensionText({label,value,set,disabled,field,editing,setEditing}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;editing:Set<string>;setEditing:Dispatch<SetStateAction<Set<string>>>}) {
+  const key = dimensionEditKey(field, label);
+  const conversion = dimensionConversion(value);
+  const isEditing = editing.has(key);
+  const showInput = !value.trim() || isEditing || conversion === 'invalid';
+  const displayConversion = conversion && conversion !== 'invalid' ? conversion : null;
+  function leaveEditIfValid(nextValue = value) {
+    const nextConversion = dimensionConversion(nextValue);
+    if (nextConversion && nextConversion !== 'invalid') setDimensionEditing(setEditing,key,false);
+  }
+  if (!showInput && displayConversion) {
+    return <div className={fieldClass(value, 'machine-dimension-field')}><div className="machine-dimension-display-row"><span>{label}</span><button className="machine-dimension-edit-button" type="button" onClick={()=>setDimensionEditing(setEditing,key,true)} disabled={disabled}>Edit</button></div><div className="machine-dimension-display-box"><DimensionConversionDisplay conversion={displayConversion} /></div></div>;
+  }
+  return <label className={fieldClass(value, 'machine-dimension-field')}><span>{label}</span><input data-machine-field={field} value={value} disabled={disabled} onFocus={()=>setDimensionEditing(setEditing,key,true)} onBlur={()=>leaveEditIfValid()} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 6ft" />{conversion === 'invalid'&&value.trim()&&<small className="machine-dimension-warning">Enter a value like 100mm, 72in, or 6ft.</small>}<DimensionPreview value={value} /></label>;
 }
 function ConditionText({label,value,set,disabled,field,checked,setChecked,condition,checkboxLabel}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;checked:boolean;setChecked:(checked:boolean)=>void;condition:{label:string;tone:string};checkboxLabel:string}) {
   return <div className={`${fieldClass(value, 'machine-condition-field')}${checked ? ' is-filled' : ''}`}><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label></div><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} /><small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
 }
-function ConditionDimensionText({label,value,set,disabled,field,checked,setChecked,condition,checkboxLabel}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;checked:boolean;setChecked:(checked:boolean)=>void;condition:{label:string;tone:string};checkboxLabel:string}) {
-  return <div className={`${fieldClass(value, 'machine-condition-field')}${checked ? ' is-filled' : ''}`}><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label></div><input data-machine-field={field} value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 72&quot;" /><DimensionPreview value={value} /><small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
+function ConditionDimensionText({label,value,set,disabled,field,checked,setChecked,condition,checkboxLabel,editing,setEditing}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;field?:string;checked:boolean;setChecked:(checked:boolean)=>void;condition:{label:string;tone:string};checkboxLabel:string;editing:Set<string>;setEditing:Dispatch<SetStateAction<Set<string>>>}) {
+  const key = dimensionEditKey(field, label);
+  const conversion = dimensionConversion(value);
+  const isEditing = editing.has(key);
+  const showInput = !value.trim() || isEditing || conversion === 'invalid';
+  const displayConversion = conversion && conversion !== 'invalid' ? conversion : null;
+  function leaveEditIfValid(nextValue = value) {
+    const nextConversion = dimensionConversion(nextValue);
+    if (nextConversion && nextConversion !== 'invalid') setDimensionEditing(setEditing,key,false);
+  }
+  return <div className={`${fieldClass(value, 'machine-condition-field machine-dimension-field')}${checked ? ' is-filled' : ''}`}><div className="machine-field-title-row"><span>{label}</span><label className="machine-inline-checkbox"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>setChecked(event.target.checked)} />{checkboxLabel}</label>{!showInput&&displayConversion&&<button className="machine-dimension-edit-button" type="button" onClick={()=>setDimensionEditing(setEditing,key,true)} disabled={disabled}>Edit</button>}</div>{showInput?<><input data-machine-field={field} value={value} disabled={disabled} onFocus={()=>setDimensionEditing(setEditing,key,true)} onBlur={()=>leaveEditIfValid()} onChange={event=>set(event.target.value)} placeholder="100mm, 72in, 6ft" />{conversion === 'invalid'&&value.trim()&&<small className="machine-dimension-warning">Enter a value like 100mm, 72in, or 6ft.</small>}<DimensionPreview value={value} /></>:displayConversion&&<div className="machine-dimension-display-box"><DimensionConversionDisplay conversion={displayConversion} /></div>}<small className={`machine-condition-label condition-${condition.tone}`}>{condition.label}</small></div>;
 }
 function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string)=>void;onClose:()=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><h3>Machine Brand Colors</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>{brandSettings.map(setting=><div className="machine-color-row" key={setting.brandName}><span className="machine-color-swatch" style={{background:safeCssHex(colorDrafts[setting.brandName] ?? setting.colorHex)}} /><strong>{setting.brandName}</strong><input value={colorDrafts[setting.brandName] ?? setting.colorHex} disabled={!canEdit} onChange={event=>setColorDrafts(current=>({...current,[setting.brandName]:event.target.value}))} /><button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit}>Save</button></div>)}</section></div>;
