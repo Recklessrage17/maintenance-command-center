@@ -72,7 +72,8 @@ function initDb() {
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, website_url TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, website_url TEXT NOT NULL DEFAULT '', general_email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', lead_time TEXT NOT NULL DEFAULT '', important_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
@@ -85,6 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_part_number ON inventory_parts (part_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_deleted ON inventory_parts (deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_vendors_name ON inventory_vendors (name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_vendor_contacts_vendor ON vendor_contacts (vendor_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_locations_name ON inventory_locations (name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_number ON inventory_requisitions (requisition_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisitions_part ON inventory_requisitions (inventory_part_id,status,deleted);
@@ -123,6 +125,7 @@ function migrateDb() {
   const inventoryVendorColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_vendors)').map(column => column.name));
   const vendorTextColumns = [
     'website_url',
+    'general_email',
     'phone_type',
     'phone_number',
     'phone_ext',
@@ -150,6 +153,24 @@ function migrateDb() {
   if (!inventoryVendorColumns.has('deleted_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN deleted_by_user_id INTEGER');
   run("UPDATE inventory_vendors SET country='USA' WHERE country IS NULL OR country=''");
   run('UPDATE inventory_vendors SET is_active=1 WHERE is_active IS NULL');
+  db.exec(`CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE INDEX IF NOT EXISTS idx_vendor_contacts_vendor ON vendor_contacts (vendor_id,deleted);`);
+  const vendorContactColumns = new Set(all<{ name: string }>('PRAGMA table_info(vendor_contacts)').map(column => column.name));
+  const vendorContactTextColumns = ['contact_title','email','phone_type','phone_number','phone_ext','notes'];
+  for (const column of vendorContactTextColumns) {
+    if (!vendorContactColumns.has(column)) run(`ALTER TABLE vendor_contacts ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!vendorContactColumns.has('is_primary')) run('ALTER TABLE vendor_contacts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0');
+  if (!vendorContactColumns.has('deleted')) run('ALTER TABLE vendor_contacts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
+  if (!vendorContactColumns.has('created_by_user_id')) run('ALTER TABLE vendor_contacts ADD COLUMN created_by_user_id INTEGER');
+  if (!vendorContactColumns.has('updated_by_user_id')) run('ALTER TABLE vendor_contacts ADD COLUMN updated_by_user_id INTEGER');
+  if (!vendorContactColumns.has('deleted_at')) run('ALTER TABLE vendor_contacts ADD COLUMN deleted_at TEXT');
+  if (!vendorContactColumns.has('deleted_by_user_id')) run('ALTER TABLE vendor_contacts ADD COLUMN deleted_by_user_id INTEGER');
+  run(`INSERT INTO vendor_contacts (vendor_id,contact_name,contact_title,email,phone_type,phone_number,phone_ext,notes,is_primary,deleted,created_at,updated_at,created_by_user_id,updated_by_user_id)
+SELECT id, contact_name, contact_title, contact_email, contact_phone_type, contact_phone_number, contact_phone_ext, '', 1, 0, created_at, updated_at, created_by_user_id, updated_by_user_id
+FROM inventory_vendors v
+WHERE (trim(COALESCE(contact_name,''))<>'' OR trim(COALESCE(contact_title,''))<>'' OR trim(COALESCE(contact_email,''))<>'' OR trim(COALESCE(contact_phone_number,''))<>'')
+  AND NOT EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=v.id)`);
 
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
@@ -755,6 +776,7 @@ interface VendorRow {
   id: number;
   name: string;
   website_url: string;
+  general_email: string;
   phone_type: string;
   phone_number: string;
   phone_ext: string;
@@ -782,13 +804,43 @@ interface VendorRow {
   deleted_at: string | null;
   deleted_by_user_id: number | null;
 }
+interface VendorContactRow {
+  id: number;
+  vendor_id: number;
+  contact_name: string;
+  contact_title: string;
+  email: string;
+  phone_type: string;
+  phone_number: string;
+  phone_ext: string;
+  notes: string;
+  is_primary: number;
+  deleted: number;
+  created_at: string;
+  updated_at: string;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+}
 const vendorPhoneTypes = new Set(['Mobile','Work','Cell','Office','Main','Other','']);
+const vendorContactPhoneTypes = new Set(['Cell','Mobile','Work','Office','Other','']);
 function normalizePhoneType(value: string) {
   const clean = value.trim();
   if (!clean) return '';
   const match = [...vendorPhoneTypes].find(option=>option.toLowerCase() === clean.toLowerCase());
   if (!match) throw new Error('Phone type must be Mobile, Work, Cell, Office, Main, or Other.');
   return match;
+}
+function normalizeContactPhoneType(value: string) {
+  const clean = value.trim();
+  if (!clean) return '';
+  const match = [...vendorContactPhoneTypes].find(option=>option.toLowerCase() === clean.toLowerCase());
+  if (!match) throw new Error('Contact Phone Type must be Cell, Mobile, Work, Office, or Other.');
+  return match;
+}
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 function cleanVendorCompanyName(input: Record<string, unknown>) {
   const companyName = textField(input, ['companyName','company_name','name']).replace(/\s+/g, ' ').trim();
@@ -805,16 +857,53 @@ function vendorWebsiteUrl(input: Record<string, unknown>) {
   if (rawUrl.trim() && !websiteUrl) throw new Error('Website URL must be blank or a valid http/https URL.');
   return websiteUrl;
 }
+function validateVendorContactInput(body: unknown, requireName = true) {
+  const input = isRecord(body) ? body : {};
+  const idValue = input.id ?? input.contactId ?? input.contact_id;
+  const id = idValue === undefined || idValue === null || String(idValue).trim() === '' ? null : Number(idValue);
+  if (id !== null && (!Number.isInteger(id) || id <= 0)) throw new Error('Contact ID is invalid.');
+  const email = textField(input, ['email','contactEmail','contact_email']).slice(0, 180);
+  if (email && !validEmail(email)) throw new Error('Contact Email must be a valid email address.');
+  const contactName = textField(input, ['contactName','contact_name','name']).replace(/\s+/g, ' ').trim().slice(0, 160);
+  const phoneExt = textField(input, ['phoneExt','phone_ext','contactPhoneExt','contact_phone_ext','contactExt']).slice(0, 20);
+  if (requireName && !contactName) throw new Error('Contact Name is required.');
+  return {
+    id,
+    contactName,
+    contactTitle: textField(input, ['contactTitle','contact_title','title']).slice(0, 160),
+    email,
+    phoneType: normalizeContactPhoneType(textField(input, ['phoneType','phone_type','contactPhoneType','contact_phone_type'])),
+    phoneNumber: textField(input, ['phoneNumber','phone_number','contactPhoneNumber','contact_phone_number','phone']).slice(0, 80),
+    phoneExt,
+    notes: textField(input, ['notes','contactNotes','contact_notes']).slice(0, 2000),
+    isPrimary: booleanField(input, ['isPrimary','is_primary','primary']),
+    deleted: booleanField(input, ['deleted']),
+    reasonNote: textField(input, ['reasonNote','reason']).slice(0, 1200),
+  };
+}
+type VendorContactInput = ReturnType<typeof validateVendorContactInput>;
+function vendorContactInputHasData(contact: VendorContactInput) {
+  return Boolean(contact.contactName || contact.contactTitle || contact.email || contact.phoneType || contact.phoneNumber || contact.phoneExt || contact.notes);
+}
+function validateVendorContactsInput(input: Record<string, unknown>) {
+  const rawContacts = Array.isArray(input.contacts) ? input.contacts : [];
+  return rawContacts
+    .map(contact => validateVendorContactInput(contact, true))
+    .filter(contact => contact.deleted || vendorContactInputHasData(contact));
+}
 function validateVendorInput(body: unknown) {
   const input = isRecord(body) ? body : {};
   const companyName = cleanVendorCompanyName(input);
+  const generalEmail = textField(input, ['generalEmail','general_email','vendorEmail','vendor_email','companyEmail','company_email']).slice(0, 180);
+  if (generalEmail && !validEmail(generalEmail)) throw new Error('General Email must be a valid email address.');
   const contactEmail = textField(input, ['contactEmail','contact_email']).slice(0, 180);
-  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error('Contact Email must be a valid email address.');
+  if (contactEmail && !validEmail(contactEmail)) throw new Error('Contact Email must be a valid email address.');
   const phoneExt = textField(input, ['phoneExt','phone_ext','ext']).slice(0, 20);
   const contactPhoneExt = textField(input, ['contactPhoneExt','contact_phone_ext','contactExt']).slice(0, 20);
   return {
     companyName,
     websiteUrl: vendorWebsiteUrl(input),
+    generalEmail,
     phoneType: normalizePhoneType(textField(input, ['phoneType','phone_type'])),
     phoneNumber: textField(input, ['phoneNumber','phone_number','phone']).slice(0, 80),
     phoneExt,
@@ -833,6 +922,8 @@ function validateVendorInput(body: unknown) {
     notes: textField(input, ['notes']).slice(0, 2000),
     isActive: input.isActive === undefined && input.is_active === undefined ? true : !(input.isActive === false || input.isActive === 0 || String(input.isActive ?? input.is_active).toLowerCase() === 'false' || String(input.isActive ?? input.is_active).toLowerCase() === 'disabled'),
     reasonNote: textField(input, ['reasonNote','reason']).slice(0, 1200),
+    contactsProvided: Array.isArray(input.contacts),
+    contacts: validateVendorContactsInput(input),
   };
 }
 type VendorInput = ReturnType<typeof validateVendorInput>;
@@ -847,12 +938,45 @@ function vendorByName(companyName: string, excludeId?: number) {
     : all<VendorRow>('SELECT * FROM inventory_vendors ORDER BY deleted ASC, id');
   return rows.find(row => normalizeVendorCompanyKey(row.name) === key);
 }
-function publicVendor(row: VendorRow) {
+function vendorContacts(vendorId: number, includeDeleted = false) {
+  return all<VendorContactRow>(`SELECT * FROM vendor_contacts WHERE vendor_id=? ${includeDeleted ? '' : 'AND deleted=0'} ORDER BY is_primary DESC, contact_name COLLATE NOCASE, id`, [vendorId]);
+}
+function vendorContactById(vendorId: number, contactId: number, includeDeleted = true) {
+  return one<VendorContactRow>(`SELECT * FROM vendor_contacts WHERE vendor_id=? AND id=? ${includeDeleted ? '' : 'AND deleted=0'}`, [vendorId, contactId]);
+}
+function vendorContactCount(vendorId: number) {
+  return one<{ count: number }>('SELECT COUNT(*) AS count FROM vendor_contacts WHERE vendor_id=? AND deleted=0', [vendorId])?.count ?? 0;
+}
+function primaryVendorContact(vendorId: number) {
+  return one<VendorContactRow>('SELECT * FROM vendor_contacts WHERE vendor_id=? AND deleted=0 ORDER BY is_primary DESC, contact_name COLLATE NOCASE, id LIMIT 1', [vendorId]);
+}
+function publicVendorContact(row: VendorContactRow) {
+  return {
+    id: row.id,
+    vendorId: row.vendor_id,
+    contactName: row.contact_name ?? '',
+    contactTitle: row.contact_title ?? '',
+    email: row.email ?? '',
+    phoneType: row.phone_type ?? '',
+    phoneNumber: row.phone_number ?? '',
+    phoneExt: row.phone_ext ?? '',
+    notes: row.notes ?? '',
+    isPrimary: Boolean(row.is_primary),
+    deleted: Boolean(row.deleted),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? '',
+  };
+}
+function publicVendor(row: VendorRow, includeContacts = false) {
+  const primaryContact = primaryVendorContact(row.id);
   return {
     id: row.id,
     companyName: row.name,
     websiteUrl: validWebUrl(row.website_url ?? ''),
     website_url: validWebUrl(row.website_url ?? ''),
+    generalEmail: row.general_email ?? '',
+    general_email: row.general_email ?? '',
     phoneType: row.phone_type ?? '',
     phoneNumber: row.phone_number ?? '',
     phoneExt: row.phone_ext ?? '',
@@ -876,12 +1000,17 @@ function publicVendor(row: VendorRow) {
     importedFromMit3At: row.imported_from_mit3_at ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    contactCount: vendorContactCount(row.id),
+    contact_count: vendorContactCount(row.id),
+    primaryContact: primaryContact ? publicVendorContact(primaryContact) : null,
+    contacts: includeContacts ? vendorContacts(row.id, false).map(publicVendorContact) : undefined,
   };
 }
 function vendorHistoryValue(row: VendorRow | VendorInput) {
   return 'name' in row ? publicVendor(row) : {
     companyName: row.companyName,
     websiteUrl: row.websiteUrl,
+    generalEmail: row.generalEmail,
     phoneType: row.phoneType,
     phoneNumber: row.phoneNumber,
     phoneExt: row.phoneExt,
@@ -915,24 +1044,185 @@ function recordVendorHistory(input: { action: string; actor: User; vendorId: num
     actor: input.actor,
   });
 }
+function vendorContactHistoryValue(contact: VendorContactRow | VendorContactInput) {
+  return 'vendor_id' in contact ? {
+    id: contact.id,
+    vendorId: contact.vendor_id,
+    contactName: contact.contact_name,
+    contactTitle: contact.contact_title,
+    email: contact.email,
+    phoneType: contact.phone_type,
+    phoneNumber: contact.phone_number,
+    phoneExt: contact.phone_ext,
+    notes: contact.notes,
+    isPrimary: Boolean(contact.is_primary),
+    deleted: Boolean(contact.deleted),
+  } : {
+    id: contact.id,
+    contactName: contact.contactName,
+    contactTitle: contact.contactTitle,
+    email: contact.email,
+    phoneType: contact.phoneType,
+    phoneNumber: contact.phoneNumber,
+    phoneExt: contact.phoneExt,
+    notes: contact.notes,
+    isPrimary: contact.isPrimary,
+    deleted: contact.deleted,
+  };
+}
+function recordVendorContactHistory(input: { action: string; actor: User; vendorId: number; companyName: string; contactId?: number | null; contactName: string; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; reasonNote?: string }) {
+  recordHistoryLog({
+    section: 'vendors',
+    action: input.action,
+    entityType: 'vendor_contact',
+    entityId: input.contactId ? String(input.contactId) : '',
+    entityLabel: input.contactName || input.companyName,
+    vendorName: input.companyName,
+    oldValue: input.oldValue,
+    newValue: input.newValue,
+    reasonNote: input.reasonNote,
+    actor: input.actor,
+  });
+}
+function normalizePrimaryVendorContact(vendorId: number) {
+  const activeContacts = vendorContacts(vendorId, false);
+  if (!activeContacts.length) return;
+  const keep = activeContacts.find(contact => Boolean(contact.is_primary)) ?? activeContacts[0];
+  run('UPDATE vendor_contacts SET is_primary=CASE WHEN id=? THEN 1 ELSE 0 END WHERE vendor_id=? AND deleted=0', [keep.id, vendorId]);
+}
+function insertVendorContactRow(vendorId: number, input: VendorContactInput, actor: User, timestamp: string) {
+  if (input.deleted || !vendorContactInputHasData(input)) return null;
+  const makePrimary = input.isPrimary || vendorContactCount(vendorId) === 0;
+  if (makePrimary) run('UPDATE vendor_contacts SET is_primary=0 WHERE vendor_id=?', [vendorId]);
+  const result = run(`INSERT INTO vendor_contacts (vendor_id,contact_name,contact_title,email,phone_type,phone_number,phone_ext,notes,is_primary,deleted,created_at,updated_at,created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?)`, [
+    vendorId,input.contactName,input.contactTitle,input.email,input.phoneType,input.phoneNumber,input.phoneExt,input.notes,makePrimary ? 1 : 0,timestamp,timestamp,actor.id,actor.id,
+  ]);
+  normalizePrimaryVendorContact(vendorId);
+  return Number(result.lastInsertRowid);
+}
+function updateVendorContactRow(vendorId: number, contactId: number, input: VendorContactInput, actor: User, timestamp: string) {
+  if (input.isPrimary) run('UPDATE vendor_contacts SET is_primary=0 WHERE vendor_id=? AND id<>?', [vendorId,contactId]);
+  run(`UPDATE vendor_contacts SET contact_name=?, contact_title=?, email=?, phone_type=?, phone_number=?, phone_ext=?, notes=?, is_primary=?, deleted=0, deleted_at=NULL, deleted_by_user_id=NULL, updated_by_user_id=?, updated_at=? WHERE vendor_id=? AND id=?`, [
+    input.contactName,input.contactTitle,input.email,input.phoneType,input.phoneNumber,input.phoneExt,input.notes,input.isPrimary ? 1 : 0,actor.id,timestamp,vendorId,contactId,
+  ]);
+  normalizePrimaryVendorContact(vendorId);
+}
+function deleteVendorContactRow(vendorId: number, contactId: number, actor: User, timestamp: string) {
+  run('UPDATE vendor_contacts SET deleted=1, is_primary=0, deleted_at=?, deleted_by_user_id=?, updated_by_user_id=?, updated_at=? WHERE vendor_id=? AND id=? AND deleted=0', [timestamp,actor.id,actor.id,timestamp,vendorId,contactId]);
+  normalizePrimaryVendorContact(vendorId);
+}
+function restoreVendorContactRow(vendorId: number, contactId: number, actor: User, timestamp: string) {
+  const makePrimary = vendorContactCount(vendorId) === 0;
+  if (makePrimary) run('UPDATE vendor_contacts SET is_primary=0 WHERE vendor_id=?', [vendorId]);
+  run('UPDATE vendor_contacts SET deleted=0, is_primary=?, deleted_at=NULL, deleted_by_user_id=NULL, updated_by_user_id=?, updated_at=? WHERE vendor_id=? AND id=?', [makePrimary ? 1 : 0,actor.id,timestamp,vendorId,contactId]);
+  normalizePrimaryVendorContact(vendorId);
+}
+function syncVendorContactsFromInput(vendorId: number, companyName: string, contacts: VendorContactInput[], actor: User, timestamp: string) {
+  const activeBefore = vendorContacts(vendorId, false);
+  if (!contacts.length) {
+    for (const existing of activeBefore) {
+      deleteVendorContactRow(vendorId, existing.id, actor, timestamp);
+      recordVendorContactHistory({
+        action: 'vendor_contact_deleted',
+        actor,
+        vendorId,
+        companyName,
+        contactId: existing.id,
+        contactName: existing.contact_name,
+        oldValue: vendorContactHistoryValue(existing),
+        newValue: { ...vendorContactHistoryValue(existing), deleted: true },
+        reasonNote: 'Removed from vendor edit.',
+      });
+    }
+    return;
+  }
+  const submittedIds = new Set<number>();
+  for (const contact of contacts) {
+    if (contact.id) submittedIds.add(contact.id);
+    if (contact.id) {
+      const existing = vendorContactById(vendorId, contact.id, true);
+      if (!existing) throw new Error('Vendor contact not found.');
+      if (contact.deleted) {
+        if (!existing.deleted) {
+          deleteVendorContactRow(vendorId, existing.id, actor, timestamp);
+          recordVendorContactHistory({
+            action: 'vendor_contact_deleted',
+            actor,
+            vendorId,
+            companyName,
+            contactId: existing.id,
+            contactName: existing.contact_name,
+            oldValue: vendorContactHistoryValue(existing),
+            newValue: { ...vendorContactHistoryValue(existing), deleted: true },
+            reasonNote: contact.reasonNote || 'Removed from vendor edit.',
+          });
+        }
+        continue;
+      }
+      updateVendorContactRow(vendorId, existing.id, contact, actor, timestamp);
+      const updated = vendorContactById(vendorId, existing.id, true);
+      recordVendorContactHistory({
+        action: existing.deleted ? 'vendor_contact_restored' : 'vendor_contact_updated',
+        actor,
+        vendorId,
+        companyName,
+        contactId: existing.id,
+        contactName: contact.contactName,
+        oldValue: vendorContactHistoryValue(existing),
+        newValue: updated ? vendorContactHistoryValue(updated) : vendorContactHistoryValue(contact),
+        reasonNote: contact.reasonNote,
+      });
+    } else if (!contact.deleted) {
+      const contactId = insertVendorContactRow(vendorId, contact, actor, timestamp);
+      if (!contactId) continue;
+      const created = vendorContactById(vendorId, contactId, true);
+      recordVendorContactHistory({
+        action: 'vendor_contact_created',
+        actor,
+        vendorId,
+        companyName,
+        contactId,
+        contactName: contact.contactName,
+        oldValue: null,
+        newValue: created ? vendorContactHistoryValue(created) : vendorContactHistoryValue(contact),
+      });
+    }
+  }
+  for (const existing of activeBefore) {
+    if (submittedIds.has(existing.id)) continue;
+    deleteVendorContactRow(vendorId, existing.id, actor, timestamp);
+    recordVendorContactHistory({
+      action: 'vendor_contact_deleted',
+      actor,
+      vendorId,
+      companyName,
+      contactId: existing.id,
+      contactName: existing.contact_name,
+      oldValue: vendorContactHistoryValue(existing),
+      newValue: { ...vendorContactHistoryValue(existing), deleted: true },
+      reasonNote: 'Removed from vendor edit.',
+    });
+  }
+}
 function updateVendorRow(id: number, input: VendorInput, actor: User, timestamp: string) {
-  run(`UPDATE inventory_vendors SET name=?, website_url=?, phone_type=?, phone_number=?, phone_ext=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_ext=?, contact_email=?, notes=?, is_active=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
-    input.companyName,input.websiteUrl,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,actor.id,timestamp,id,
+  run(`UPDATE inventory_vendors SET name=?, website_url=?, general_email=?, phone_type=?, phone_number=?, phone_ext=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_ext=?, contact_email=?, notes=?, is_active=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
+    input.companyName,input.websiteUrl,input.generalEmail,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,actor.id,timestamp,id,
   ]);
 }
 function insertVendorRow(input: VendorInput, actor: User, timestamp: string) {
-  const result = run(`INSERT INTO inventory_vendors (name,website_url,phone_type,phone_number,phone_ext,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_ext,contact_email,notes,is_active,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
-    input.companyName,input.websiteUrl,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,null,actor.id,actor.id,timestamp,timestamp,
+  const result = run(`INSERT INTO inventory_vendors (name,website_url,general_email,phone_type,phone_number,phone_ext,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_ext,contact_email,notes,is_active,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
+    input.companyName,input.websiteUrl,input.generalEmail,input.phoneType,input.phoneNumber,input.phoneExt,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,null,actor.id,actor.id,timestamp,timestamp,
   ]);
   return Number(result.lastInsertRowid);
 }
-const vendorExportHeaders = ['Company Name','Website URL','Phone Type','Phone Number','EXT #','Address Line 1','Address Line 2','City','State','Postal Code','Country','Contact Name','Contact Title','Contact Phone Type','Contact Phone Number','Contact EXT #','Contact Email','Notes','Status'] as const;
+const vendorExportHeaders = ['Company Name','Website URL','General Email','Phone Type','Phone Number','EXT #','Address Line 1','Address Line 2','City','State','Postal Code','Country','Contact Name','Contact Title','Contact Email','Contact Phone Type','Contact Phone Number','Contact EXT #','Contact Notes','Notes','Status'] as const;
 type VendorExportRecord = Record<typeof vendorExportHeaders[number], string>;
 type VendorImportMode = 'add-only' | 'upsert';
 type VendorImportRow = {
   rowNumber: number;
   companyName: string;
   websiteUrl: string;
+  generalEmail: string;
   phoneType: string;
   phoneNumber: string;
   phoneExt: string;
@@ -944,10 +1234,11 @@ type VendorImportRow = {
   country: string;
   contactName: string;
   contactTitle: string;
+  contactEmail: string;
   contactPhoneType: string;
   contactPhoneNumber: string;
   contactPhoneExt: string;
-  contactEmail: string;
+  contactNotes: string;
   notes: string;
   status: string;
 };
@@ -962,10 +1253,11 @@ type VendorImportSummary = {
   errors: string[];
   rejectedDuplicates: string[];
 };
-function vendorExportRecord(row: VendorRow): VendorExportRecord {
+function vendorExportRecord(row: VendorRow, contact?: VendorContactRow | null): VendorExportRecord {
   return {
     'Company Name': row.name,
     'Website URL': validWebUrl(row.website_url ?? ''),
+    'General Email': row.general_email ?? '',
     'Phone Type': row.phone_type ?? '',
     'Phone Number': row.phone_number ?? '',
     'EXT #': row.phone_ext ?? '',
@@ -975,18 +1267,25 @@ function vendorExportRecord(row: VendorRow): VendorExportRecord {
     State: row.state ?? '',
     'Postal Code': row.postal_code ?? '',
     Country: row.country ?? 'USA',
-    'Contact Name': row.contact_name ?? '',
-    'Contact Title': row.contact_title ?? '',
-    'Contact Phone Type': row.contact_phone_type ?? '',
-    'Contact Phone Number': row.contact_phone_number ?? '',
-    'Contact EXT #': row.contact_phone_ext ?? '',
-    'Contact Email': row.contact_email ?? '',
+    'Contact Name': contact?.contact_name ?? '',
+    'Contact Title': contact?.contact_title ?? '',
+    'Contact Email': contact?.email ?? '',
+    'Contact Phone Type': contact?.phone_type ?? '',
+    'Contact Phone Number': contact?.phone_number ?? '',
+    'Contact EXT #': contact?.phone_ext ?? '',
+    'Contact Notes': contact?.notes ?? '',
     Notes: row.notes ?? '',
     Status: row.deleted ? 'Deleted' : row.is_active ? 'Enabled' : 'Disabled',
   };
 }
 function vendorRowsForExport(includeDeleted = true) {
-  return all<VendorRow>(`SELECT * FROM inventory_vendors ${includeDeleted ? '' : 'WHERE deleted=0'} ORDER BY name COLLATE NOCASE, id`).map(vendorExportRecord);
+  const records: VendorExportRecord[] = [];
+  for (const vendor of all<VendorRow>(`SELECT * FROM inventory_vendors ${includeDeleted ? '' : 'WHERE deleted=0'} ORDER BY name COLLATE NOCASE, id`)) {
+    const contacts = vendorContacts(vendor.id, false);
+    if (!contacts.length) records.push(vendorExportRecord(vendor, null));
+    else for (const contact of contacts) records.push(vendorExportRecord(vendor, contact));
+  }
+  return records;
 }
 async function vendorWorkbookBuffer(sheetName: string, headers: readonly string[], records: VendorExportRecord[]) {
   const workbook = new ExcelJS.Workbook();
@@ -1017,6 +1316,7 @@ function vendorImportRowFromRecord(record: Record<string, string>, rowNumber: nu
     rowNumber,
     companyName: value('Company Name','Vendor','Vendor Name','Supplier','Supplier Name'),
     websiteUrl: value('Website URL','Vendor URL','URL','Website','Link','Hyperlink URL'),
+    generalEmail: value('General Email','Vendor Email','Company Email','Sales Email','Service Email'),
     phoneType: value('Phone Type'),
     phoneNumber: value('Phone Number','Phone','Main Phone','Work Phone'),
     phoneExt: value('EXT #','EXT','Extension','Phone EXT'),
@@ -1028,10 +1328,11 @@ function vendorImportRowFromRecord(record: Record<string, string>, rowNumber: nu
     country: value('Country'),
     contactName: value('Contact Name','Contact','Person Contact Name','Person Name'),
     contactTitle: value('Contact Title','Title'),
+    contactEmail: value('Contact Email','Email'),
     contactPhoneType: value('Contact Phone Type'),
     contactPhoneNumber: value('Contact Phone Number','Contact Phone'),
     contactPhoneExt: value('Contact EXT #','Contact EXT','Contact Extension'),
-    contactEmail: value('Contact Email','Email'),
+    contactNotes: value('Contact Notes','Contact Note'),
     notes: value('Notes','Note'),
     status: value('Status'),
   };
@@ -1080,6 +1381,7 @@ function vendorBodyFromImportRow(row: VendorImportRow) {
   return validateVendorInput({
     companyName: row.companyName,
     websiteUrl: row.websiteUrl,
+    generalEmail: row.generalEmail,
     phoneType: row.phoneType,
     phoneNumber: row.phoneNumber,
     phoneExt: row.phoneExt,
@@ -1089,12 +1391,6 @@ function vendorBodyFromImportRow(row: VendorImportRow) {
     state: row.state,
     postalCode: row.postalCode,
     country: row.country || 'USA',
-    contactName: row.contactName,
-    contactTitle: row.contactTitle,
-    contactPhoneType: row.contactPhoneType,
-    contactPhoneNumber: row.contactPhoneNumber,
-    contactPhoneExt: row.contactPhoneExt,
-    contactEmail: row.contactEmail,
     notes: row.notes,
     isActive: vendorStatusIsActive(row.status),
   });
@@ -1113,11 +1409,91 @@ function rejectVendorImportDuplicate(summary: VendorImportSummary, actor: User, 
     reasonNote: message,
   });
 }
+function vendorImportRowHasContact(row: VendorImportRow) {
+  return Boolean(row.contactName.trim() || row.contactTitle.trim() || row.contactEmail.trim() || row.contactPhoneType.trim() || row.contactPhoneNumber.trim() || row.contactPhoneExt.trim() || row.contactNotes.trim());
+}
+function vendorContactInputFromImportRow(row: VendorImportRow) {
+  if (!vendorImportRowHasContact(row)) return null;
+  return validateVendorContactInput({
+    contactName: row.contactName,
+    contactTitle: row.contactTitle,
+    email: row.contactEmail,
+    phoneType: row.contactPhoneType,
+    phoneNumber: row.contactPhoneNumber,
+    phoneExt: row.contactPhoneExt,
+    notes: row.contactNotes,
+  });
+}
+function normalizeVendorContactKey(contact: Pick<VendorContactInput, 'contactName' | 'email' | 'phoneNumber'>) {
+  const nameKey = normalizeVendorCompanyKey(contact.contactName);
+  const emailKey = contact.email.trim().toLowerCase();
+  const phoneKey = contact.phoneNumber.replace(/\D+/g, '');
+  return `${nameKey}|${emailKey || phoneKey}`;
+}
+function vendorContactInputFromRow(row: VendorContactRow): VendorContactInput {
+  return {
+    id: row.id,
+    contactName: row.contact_name ?? '',
+    contactTitle: row.contact_title ?? '',
+    email: row.email ?? '',
+    phoneType: normalizeContactPhoneType(row.phone_type ?? ''),
+    phoneNumber: row.phone_number ?? '',
+    phoneExt: row.phone_ext ?? '',
+    notes: row.notes ?? '',
+    isPrimary: Boolean(row.is_primary),
+    deleted: Boolean(row.deleted),
+    reasonNote: '',
+  };
+}
+function findVendorContactByKey(vendorId: number, contact: VendorContactInput) {
+  const key = normalizeVendorContactKey(contact);
+  return vendorContacts(vendorId, true).find(existing => normalizeVendorContactKey(vendorContactInputFromRow(existing)) === key);
+}
+function importVendorContactRow(summary: VendorImportSummary, actor: User, vendorId: number, companyName: string, row: VendorImportRow, mode: VendorImportMode, timestamp: string) {
+  const contactInput = vendorContactInputFromImportRow(row);
+  if (!contactInput) return 'none';
+  const existing = findVendorContactByKey(vendorId, contactInput);
+  if (existing && mode === 'add-only') {
+    rejectVendorImportDuplicate(summary, actor, row, 'contact already exists for this vendor.');
+    return 'rejected';
+  }
+  if (existing) {
+    updateVendorContactRow(vendorId, existing.id, contactInput, actor, timestamp);
+    const updated = vendorContactById(vendorId, existing.id, true);
+    recordVendorContactHistory({
+      action: existing.deleted ? 'vendor_contact_import_restored' : 'vendor_contact_import_updated',
+      actor,
+      vendorId,
+      companyName,
+      contactId: existing.id,
+      contactName: contactInput.contactName,
+      oldValue: vendorContactHistoryValue(existing),
+      newValue: updated ? vendorContactHistoryValue(updated) : vendorContactHistoryValue(contactInput),
+      reasonNote: `Vendor contact imported from CSV/XLSX row ${row.rowNumber}.`,
+    });
+    return 'updated';
+  }
+  const contactId = insertVendorContactRow(vendorId, contactInput, actor, timestamp);
+  if (!contactId) return 'none';
+  const created = vendorContactById(vendorId, contactId, true);
+  recordVendorContactHistory({
+    action: 'vendor_contact_imported',
+    actor,
+    vendorId,
+    companyName,
+    contactId,
+    contactName: contactInput.contactName,
+    oldValue: null,
+    newValue: created ? vendorContactHistoryValue(created) : vendorContactHistoryValue(contactInput),
+    reasonNote: `Vendor contact imported from CSV/XLSX row ${row.rowNumber}.`,
+  });
+  return 'added';
+}
 function importVendorRows(req: AuthRequest, rows: VendorImportRow[], mode: VendorImportMode): VendorImportSummary {
   const actor = req.user!;
   const timestamp = now();
   const summary: VendorImportSummary = { ok: true, mode, addedCount: 0, updatedCount: 0, skippedCount: 0, rejectedDuplicateCount: 0, errorCount: 0, errors: [], rejectedDuplicates: [] };
-  const seen = new Map<string, VendorImportRow>();
+  const seen = new Map<string, { row: VendorImportRow; vendorId: number; companyName: string }>();
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
@@ -1129,45 +1505,51 @@ function importVendorRows(req: AuthRequest, rows: VendorImportRow[], mode: Vendo
         continue;
       }
       const previous = seen.get(key);
-      if (previous) {
-        rejectVendorImportDuplicate(summary, actor, row, `duplicate in import file; first seen on row ${previous.rowNumber}.`);
-        continue;
-      }
-      seen.set(key, row);
       try {
-        const input = vendorBodyFromImportRow(row);
-        const existing = vendorByName(input.companyName);
-        if (existing && mode === 'add-only') {
-          rejectVendorImportDuplicate(summary, actor, row, 'vendor already exists.');
-          continue;
+        let vendorId = previous?.vendorId ?? 0;
+        let companyName = previous?.companyName ?? row.companyName.trim();
+        if (!previous) {
+          const input = vendorBodyFromImportRow(row);
+          const existing = vendorByName(input.companyName);
+          if (existing && mode === 'add-only') {
+            rejectVendorImportDuplicate(summary, actor, row, 'vendor already exists.');
+            continue;
+          }
+          if (existing) {
+            updateVendorRow(existing.id, input, actor, timestamp);
+            const updated = vendorById(existing.id);
+            vendorId = existing.id;
+            companyName = input.companyName;
+            summary.updatedCount += 1;
+            recordVendorHistory({
+              action: 'vendor_import_updated',
+              actor,
+              vendorId: existing.id,
+              companyName: input.companyName,
+              oldValue: vendorHistoryValue(existing),
+              newValue: updated ? vendorHistoryValue(updated) : vendorHistoryValue(input),
+              reasonNote: `Vendor imported from CSV/XLSX row ${row.rowNumber}.`,
+            });
+          } else {
+            vendorId = insertVendorRow(input, actor, timestamp);
+            companyName = input.companyName;
+            const created = vendorById(vendorId);
+            summary.addedCount += 1;
+            recordVendorHistory({
+              action: 'vendor_imported',
+              actor,
+              vendorId,
+              companyName: input.companyName,
+              oldValue: null,
+              newValue: created ? vendorHistoryValue(created) : vendorHistoryValue(input),
+              reasonNote: `Vendor imported from CSV/XLSX row ${row.rowNumber}.`,
+            });
+          }
+          seen.set(key, { row, vendorId, companyName });
         }
-        if (existing) {
-          updateVendorRow(existing.id, input, actor, timestamp);
-          const updated = vendorById(existing.id);
-          summary.updatedCount += 1;
-          recordVendorHistory({
-            action: 'vendor_import_updated',
-            actor,
-            vendorId: existing.id,
-            companyName: input.companyName,
-            oldValue: vendorHistoryValue(existing),
-            newValue: updated ? vendorHistoryValue(updated) : vendorHistoryValue(input),
-            reasonNote: `Vendor imported from CSV/XLSX row ${row.rowNumber}.`,
-          });
-        } else {
-          const vendorId = insertVendorRow(input, actor, timestamp);
-          const created = vendorById(vendorId);
-          summary.addedCount += 1;
-          recordVendorHistory({
-            action: 'vendor_imported',
-            actor,
-            vendorId,
-            companyName: input.companyName,
-            oldValue: null,
-            newValue: created ? vendorHistoryValue(created) : vendorHistoryValue(input),
-            reasonNote: `Vendor imported from CSV/XLSX row ${row.rowNumber}.`,
-          });
-        }
+        const contactResult = importVendorContactRow(summary, actor, vendorId, companyName, row, mode, timestamp);
+        if (previous && contactResult === 'updated') summary.updatedCount += 1;
+        if (previous && contactResult === 'added') summary.addedCount += 1;
       } catch (error) {
         summary.errorCount += 1;
         summary.errors.push(`Row ${row.rowNumber}: ${safeErrorMessage(error)}`);
@@ -1533,7 +1915,7 @@ const backupRetention: Record<MasterBackupType, number> = { startup: 10, schedul
 const masterBackupFolderCandidates = ['uploads','documents','files'];
 const backupDataAreaDefinitions = [
   { key: 'inventoryParts', label: 'Inventory', tables: ['inventory_parts'] },
-  { key: 'vendors', label: 'Vendors', tables: ['inventory_vendors'] },
+  { key: 'vendors', label: 'Vendors', tables: ['inventory_vendors','vendor_contacts'] },
   { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
@@ -1589,7 +1971,7 @@ function tableGroupCount(tableNames: readonly string[]) {
 function masterBackupRecordCounts() {
   return {
     users: tableCount('users'),
-    vendors: tableCount('inventory_vendors'),
+    vendors: tableGroupCount(['inventory_vendors','vendor_contacts']),
     inventoryParts: tableCount('inventory_parts'),
     requisitions: tableCount('inventory_requisitions'),
     requisitionLines: tableCount('inventory_requisition_lines'),
@@ -4440,6 +4822,7 @@ function resetStatusCounts() {
     counts: {
       inventoryParts: rowCount('inventory_parts'),
       inventoryVendors: rowCount('inventory_vendors'),
+      vendorContacts: tableExists('vendor_contacts') ? rowCount('vendor_contacts') : 0,
       inventoryLocations: rowCount('inventory_locations'),
       requisitions: rowCount('inventory_requisitions'),
       requisitionLines: rowCount('inventory_requisition_lines'),
@@ -4512,8 +4895,10 @@ function performReset(req: AuthRequest, request: ResetRequest) {
       deletedCounts.inventoryParts = deleteRows('inventory_parts');
       resetSqliteSequence('inventory_parts');
       if (request.options.includeVendorsLocations === true) {
+        deletedCounts.vendorContacts = tableExists('vendor_contacts') ? deleteRows('vendor_contacts') : 0;
         deletedCounts.inventoryVendors = deleteRows('inventory_vendors');
         deletedCounts.inventoryLocations = deleteRows('inventory_locations');
+        resetSqliteSequence('vendor_contacts');
         resetSqliteSequence('inventory_vendors');
         resetSqliteSequence('inventory_locations');
       }
@@ -5436,10 +5821,10 @@ app.get('/api/vendors', requireAuth, (req,res)=>{
   const params: SqlParam[] = [];
   if (q) {
     const like = `%${escapeLike(q)}%`;
-    where.push('(name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR website_url LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line1 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line2 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR city LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR state LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR postal_code LIKE ? ESCAPE \'\\\' COLLATE NOCASE)');
-    params.push(like,like,like,like,like,like,like,like,like,like,like);
+    where.push('(name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR website_url LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR general_email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line1 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line2 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR city LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR state LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR postal_code LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=inventory_vendors.id AND c.deleted=0 AND (c.contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR c.email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR c.phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE)))');
+    params.push(like,like,like,like,like,like,like,like,like,like,like,like,like,like,like);
   }
-  const vendors = all<VendorRow>(`SELECT * FROM inventory_vendors WHERE ${where.join(' AND ')} ORDER BY name COLLATE NOCASE, id`, params).map(publicVendor);
+  const vendors = all<VendorRow>(`SELECT * FROM inventory_vendors WHERE ${where.join(' AND ')} ORDER BY name COLLATE NOCASE, id`, params).map(row=>publicVendor(row));
   res.json({ok:true,vendors});
 });
 app.get('/api/vendors/options', requireAuth, (_req,res)=>{
@@ -5489,11 +5874,153 @@ app.post('/api/vendors/import', requireAuth, requirePermission('inventory.import
     res.status(/choose a CSV|must be CSV|required|valid|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message,mode:vendorImportModeFromBody(req.body),addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],rejectedDuplicates:[]});
   }
 });
+app.get('/api/vendors/:id/contacts', requireAuth, (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.id);
+  const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
+  if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
+  const includeDeleted = (String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true') && canInventoryWrite(req.user!);
+  res.json({ok:true,contacts:vendorContacts(vendorId, includeDeleted).map(publicVendorContact)});
+});
+app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.id);
+  try {
+    const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
+    if (!vendor) throw new Error('Vendor not found.');
+    const actor = req.user!;
+    const input = validateVendorContactInput(req.body, true);
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const contactId = insertVendorContactRow(vendorId, input, actor, timestamp);
+      if (!contactId) throw new Error('Contact Name is required.');
+      const created = vendorContactById(vendorId, contactId, true);
+      recordVendorContactHistory({
+        action: 'vendor_contact_created',
+        actor,
+        vendorId,
+        companyName: vendor.name,
+        contactId,
+        contactName: input.contactName,
+        oldValue: null,
+        newValue: created ? vendorContactHistoryValue(created) : vendorContactHistoryValue(input),
+        reasonNote: input.reasonNote,
+      });
+      db.exec('COMMIT');
+      audit(req,'vendor contact create','vendor_contact',contactId,{vendorId,companyName:vendor.name,contactName:input.contactName});
+      res.status(201).json({ok:true,contact:created ? publicVendorContact(created) : null});
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /required|valid|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.vendorId);
+  const contactId = Number(req.params.contactId);
+  try {
+    const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
+    if (!vendor || !Number.isInteger(contactId) || contactId <= 0) throw new Error('Vendor contact not found.');
+    const existing = vendorContactById(vendorId, contactId, true);
+    if (!existing) throw new Error('Vendor contact not found.');
+    const actor = req.user!;
+    const input = validateVendorContactInput(req.body, true);
+    const timestamp = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      updateVendorContactRow(vendorId, contactId, input, actor, timestamp);
+      const updated = vendorContactById(vendorId, contactId, true);
+      recordVendorContactHistory({
+        action: existing.deleted ? 'vendor_contact_restored' : 'vendor_contact_updated',
+        actor,
+        vendorId,
+        companyName: vendor.name,
+        contactId,
+        contactName: input.contactName,
+        oldValue: vendorContactHistoryValue(existing),
+        newValue: updated ? vendorContactHistoryValue(updated) : vendorContactHistoryValue(input),
+        reasonNote: input.reasonNote,
+      });
+      db.exec('COMMIT');
+      audit(req,'vendor contact update','vendor_contact',contactId,{vendorId,companyName:vendor.name,contactName:input.contactName});
+      res.json({ok:true,contact:updated ? publicVendorContact(updated) : null});
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /required|valid|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.vendorId);
+  const contactId = Number(req.params.contactId);
+  try {
+    const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
+    if (!vendor || !Number.isInteger(contactId) || contactId <= 0) throw new Error('Vendor contact not found.');
+    const existing = vendorContactById(vendorId, contactId, false);
+    if (!existing) throw new Error('Vendor contact not found.');
+    const actor = req.user!;
+    const reasonNote = textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']).slice(0, 1200);
+    const timestamp = now();
+    deleteVendorContactRow(vendorId, contactId, actor, timestamp);
+    recordVendorContactHistory({
+      action: 'vendor_contact_deleted',
+      actor,
+      vendorId,
+      companyName: vendor.name,
+      contactId,
+      contactName: existing.contact_name,
+      oldValue: vendorContactHistoryValue(existing),
+      newValue: { ...vendorContactHistoryValue(existing), deleted: true },
+      reasonNote,
+    });
+    audit(req,'vendor contact delete','vendor_contact',contactId,{vendorId,companyName:vendor.name,contactName:existing.contact_name});
+    res.json({ok:true});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
+  }
+});
+app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const vendorId = Number(req.params.vendorId);
+  const contactId = Number(req.params.contactId);
+  try {
+    const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
+    if (!vendor || !Number.isInteger(contactId) || contactId <= 0) throw new Error('Vendor contact not found.');
+    const existing = vendorContactById(vendorId, contactId, true);
+    if (!existing) throw new Error('Vendor contact not found.');
+    const actor = req.user!;
+    const reasonNote = textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']).slice(0, 1200);
+    const timestamp = now();
+    restoreVendorContactRow(vendorId, contactId, actor, timestamp);
+    const restored = vendorContactById(vendorId, contactId, true);
+    recordVendorContactHistory({
+      action: 'vendor_contact_restored',
+      actor,
+      vendorId,
+      companyName: vendor.name,
+      contactId,
+      contactName: existing.contact_name,
+      oldValue: vendorContactHistoryValue(existing),
+      newValue: restored ? vendorContactHistoryValue(restored) : { ...vendorContactHistoryValue(existing), deleted: false },
+      reasonNote,
+    });
+    audit(req,'vendor contact restore','vendor_contact',contactId,{vendorId,companyName:vendor.name,contactName:existing.contact_name});
+    res.json({ok:true,contact:restored ? publicVendorContact(restored) : null});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
+  }
+});
 app.get('/api/vendors/:id', requireAuth, (req,res)=>{
   const vendorId = Number(req.params.id);
   const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
   if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
-  res.json({ok:true,vendor:publicVendor(vendor)});
+  res.json({ok:true,vendor:publicVendor(vendor, true)});
 });
 app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   try {
@@ -5529,6 +6056,7 @@ app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req
           reasonNote: input.isActive ? undefined : input.reasonNote,
         });
       }
+      if (input.contactsProvided) syncVendorContactsFromInput(vendorId, input.companyName, input.contacts, actor, timestamp);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -5536,7 +6064,7 @@ app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req
     }
     const vendor = vendorById(vendorId);
     audit(req, existing ? 'vendor update from duplicate create' : 'vendor create', 'vendor', vendorId, {companyName: input.companyName});
-    res.status(existing ? 200 : 201).json({ok:true,vendor:vendor ? publicVendor(vendor) : null,mergedExisting:Boolean(existing)});
+    res.status(existing ? 200 : 201).json({ok:true,vendor:vendor ? publicVendor(vendor, true) : null,mergedExisting:Boolean(existing)});
   } catch (error) {
     const message = safeErrorMessage(error);
     res.status(/required|valid|120|20|phone type|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});
@@ -5566,6 +6094,7 @@ app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (
         newValue: vendorHistoryValue(input),
         reasonNote: existing.is_active && !input.isActive ? input.reasonNote : undefined,
       });
+      if (input.contactsProvided) syncVendorContactsFromInput(vendorId, input.companyName, input.contacts, actor, timestamp);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -5573,7 +6102,7 @@ app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (
     }
     const vendor = vendorById(vendorId);
     audit(req,'vendor update','vendor',vendorId,{companyName: input.companyName});
-    res.json({ok:true,vendor:vendor ? publicVendor(vendor) : null});
+    res.json({ok:true,vendor:vendor ? publicVendor(vendor, true) : null});
   } catch (error) {
     const message = safeErrorMessage(error);
     res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|phone type|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});

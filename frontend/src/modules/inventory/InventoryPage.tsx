@@ -1,5 +1,5 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
+import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorFormFromVendor, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
   id: string;
@@ -1410,29 +1410,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         </div>
       )}
 
-      {vendorDetail&&<VendorDetailModal vendor={vendorDetail} onClose={()=>setVendorDetail(null)} onEdit={()=>{ setVendorEditorInitial({
-        companyName: vendorDetail.companyName,
-        websiteUrl: vendorDetail.websiteUrl ?? vendorDetail.website_url ?? '',
-        website_url: vendorDetail.websiteUrl ?? vendorDetail.website_url ?? '',
-        phoneType: vendorDetail.phoneType,
-        phoneNumber: vendorDetail.phoneNumber,
-        phoneExt: vendorDetail.phoneExt,
-        addressLine1: vendorDetail.addressLine1,
-        addressLine2: vendorDetail.addressLine2,
-        city: vendorDetail.city,
-        state: vendorDetail.state,
-        postalCode: vendorDetail.postalCode,
-        country: vendorDetail.country || 'USA',
-        contactName: vendorDetail.contactName,
-        contactTitle: vendorDetail.contactTitle,
-        contactPhoneType: vendorDetail.contactPhoneType,
-        contactPhoneNumber: vendorDetail.contactPhoneNumber,
-        contactPhoneExt: vendorDetail.contactPhoneExt,
-        contactEmail: vendorDetail.contactEmail,
-        notes: vendorDetail.notes,
-        isActive: vendorDetail.isActive,
-        reasonNote: '',
-      }); setVendorEditorId(vendorDetail.id); setVendorDetail(null); setVendorError(''); }} />}
+      {vendorDetail&&<VendorDetailModal vendor={vendorDetail} onClose={()=>setVendorDetail(null)} onEdit={()=>{ setVendorEditorInitial(vendorFormFromVendor(vendorDetail)); setVendorEditorId(vendorDetail.id); setVendorDetail(null); setVendorError(''); }} />}
       {vendorEditorInitial&&<VendorEditorModal mode={vendorEditorId ? 'edit' : 'add'} initial={vendorEditorInitial} onClose={()=>{ if(!vendorSaving){ setVendorEditorInitial(null); setVendorEditorId(null); setVendorError(''); } }} onSave={saveInventoryVendor} saving={vendorSaving} error={vendorError} />}
 
       {reviewGroups[reviewIndex]&&(
