@@ -6,6 +6,9 @@ type MachineAsset = {
 };
 type BrandSetting = { brandName: string; colorHex: string };
 type HistoryRecord = { id: number; action: string; entityLabel: string; userName: string; reasonNote: string; createdAt: string };
+type ImportMode = 'add_new_only' | 'upsert';
+type ImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
+type MachineImportSummary = { addedCount: number; updatedCount: number; skippedCount: number; rejectedDuplicateCount: number; errors?: string[]; rejectedDuplicates?: ImportRejectedDuplicate[]; changedAssetNumbers?: string[] };
 type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz'> & { shotSizeOz: string };
 type ReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'barrelLength' | 'screwLength' | 'screw2Length' | 'barrel2Length' | 'plungerLength' | 'plungerDiameter' | 'plungerBarrelLength' | 'plungerBarrelDiameter';
@@ -94,6 +97,14 @@ function parseDimensionValue(value: string) {
   const mm = unit.startsWith('mm') || unit.startsWith('millimeter') ? amount : unit === 'in' || unit === 'inch' || unit === 'inches' || unit === '"' ? amount * 25.4 : amount * 304.8;
   return { mm, inches: mm / 25.4, feet: mm / 304.8 };
 }
+function importToast(summary: MachineImportSummary) {
+  const added = summary.addedCount ?? 0;
+  const updated = summary.updatedCount ?? 0;
+  const skipped = summary.skippedCount ?? 0;
+  const rejected = summary.rejectedDuplicateCount ?? 0;
+  if (added + updated > 0) return { kind: 'success' as const, text: `Machine import complete: ${added} added, ${updated} updated, ${rejected} rejected.` };
+  return { kind: 'error' as const, text: `Machine import finished with no changes: ${rejected} rejected, ${skipped} skipped.` };
+}
 
 export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [assets,setAssets]=useState<MachineAsset[]>([]);
@@ -103,6 +114,10 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [brandFilter,setBrandFilter]=useState('');
   const [statusFilter,setStatusFilter]=useState('');
   const [message,setMessage]=useState<{kind:'success'|'error';text:string}|null>(null);
+  const [importMode,setImportMode]=useState<ImportMode>('add_new_only');
+  const [isImporting,setIsImporting]=useState(false);
+  const [importSummary,setImportSummary]=useState<MachineImportSummary|null>(null);
+  const [highlightedAssets,setHighlightedAssets]=useState<Set<string>>(new Set());
   const [editing,setEditing]=useState<MachineAsset|null>(null);
   const [form,setForm]=useState<AssetForm>(blankAssetForm);
   const [setupDraft,setSetupDraft]=useState({hasDoubleShotInjection:false,hasPlungerInjection:false});
@@ -187,15 +202,34 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   }
   async function importMachineList() {
     const file = fileRef.current?.files?.[0];
-    if (!file) return;
+    if (!file || isImporting) return;
     const body = new FormData();
     body.append('file', file);
-    const res = await fetch('/api/machine-library/import',{method:'POST',credentials:'include',body});
-    const data = await res.json().catch(()=>({}));
-    if (!res.ok) { setMessage({kind:'error',text:data.error || 'Machine import failed.'}); return; }
-    setMessage({kind:'success',text:`Machine import complete: ${data.addedCount ?? 0} added, ${data.updatedCount ?? 0} updated, ${data.skippedCount ?? 0} skipped.`});
-    if (fileRef.current) fileRef.current.value = '';
-    loadAssets();
+    body.append('importMode', importMode);
+    setIsImporting(true);
+    try {
+      const res = await fetch('/api/machine-library/import',{method:'POST',credentials:'include',body});
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) { setMessage({kind:'error',text:data.error || 'Machine import failed.'}); return; }
+      const summary = data as MachineImportSummary;
+      const changed = new Set((summary.changedAssetNumbers ?? []).map(String));
+      if (changed.size) {
+        setHighlightedAssets(changed);
+        window.setTimeout(()=>setHighlightedAssets(new Set()), 5 * 60 * 1000);
+      }
+      if ((summary.rejectedDuplicateCount ?? 0) > 0) setImportSummary(summary);
+      else setMessage(importToast(summary));
+      loadAssets();
+    } catch (error) {
+      setMessage({kind:'error',text:(error as Error).message || 'Machine import failed.'});
+    } finally {
+      setIsImporting(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+  function closeImportSummary() {
+    if (importSummary) setMessage(importToast(importSummary));
+    setImportSummary(null);
   }
 
   return (
@@ -212,16 +246,18 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
         <label className="form-field"><span>Status</span><select value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="">All status</option><option value="active">Active</option><option value="down">Down</option><option value="disabled">Disabled</option><option value="removed">Removed</option></select></label>
         <div className="machine-toolbar-actions">
           <button className="primary-button compact-button" type="button" onClick={openAdd} disabled={!canEdit}>Add Machine Asset</button>
-          <button className="secondary-button compact-button" type="button" onClick={()=>fileRef.current?.click()} disabled={!canEdit}>Import Machine List</button>
+          <label className="form-field machine-import-mode"><span>Import Mode</span><select value={importMode} onChange={event=>setImportMode(event.target.value as ImportMode)} disabled={!canEdit||isImporting}><option value="add_new_only">Add New Only</option><option value="upsert">Update Existing / Upsert</option></select></label>
+          <button className="secondary-button compact-button" type="button" onClick={()=>fileRef.current?.click()} disabled={!canEdit||isImporting}>{isImporting?'Importing...':'Import Machine List'}</button>
           <button className="secondary-button compact-button" type="button" onClick={downloadTemplate} disabled={!canEdit}>Export Machine Template</button>
           <button className="secondary-button compact-button" type="button" onClick={()=>setShowColors(true)}>Brand Color Settings</button>
           <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden-file-input" onChange={()=>void importMachineList()} />
         </div>
+        <p className="form-help machine-toolbar-note">Add New Only rejects existing Asset Numbers. Upsert updates existing assets and creates new ones. Duplicate Asset Numbers inside one file are always rejected after the first valid row.</p>
         {!canEdit&&<p className="form-help machine-toolbar-note">Tier 3, Manager, Admin, or Owner Admin access is required to add or edit machine assets.</p>}
       </section>
       <div className="machine-card-grid">
         {assets.map(asset=>(
-          <article className="machine-asset-card" style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
+          <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
             <div className="machine-card-head">
               <button className="machine-asset-number" type="button" onClick={()=>void loadLogs(asset)}>{asset.assetNumber}</button>
               <span className={`machine-status-badge status-${asset.status}`}>{asset.status}</span>
@@ -263,6 +299,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
       </div>
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
       {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspection={()=>setMessage({kind:'success',text:'Measurement Inspection form is coming next.'})} />}
+      {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
       {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} onSubmit={updateReplacement} />}
       {logs&&<LogsModal logs={logs} onClose={()=>setLogs(null)} onBackToAsset={()=>{ setForm(assetToForm(logs.asset)); setEditing(logs.asset); setLogs(null); setShowEditor(true); }} />}
@@ -290,6 +327,10 @@ function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onRepl
 }
 function InjectionSetupModal({setup,setSetup,onContinue,onCancel}:{setup:{hasDoubleShotInjection:boolean;hasPlungerInjection:boolean};setSetup:Dispatch<SetStateAction<{hasDoubleShotInjection:boolean;hasPlungerInjection:boolean}>>;onContinue:()=>void;onCancel:()=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-setup-modal"><div className="modal-heading"><div><p className="eyebrow">Machine Asset Setup</p><h3>Machine Injection Setup</h3></div><button className="link-button compact-button" type="button" onClick={onCancel}>Close</button></div><div className="machine-setup-grid"><YesNoToggle label="Does this machine have double shot injection?" value={setup.hasDoubleShotInjection} set={value=>setSetup(current=>({...current,hasDoubleShotInjection:value}))} disabled={false}/><YesNoToggle label="Does this machine have plunger injection?" value={setup.hasPlungerInjection} set={value=>setSetup(current=>({...current,hasPlungerInjection:value}))} disabled={false}/></div><div className="modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="button" onClick={onContinue}>Continue</button></div></section></div>;
+}
+function ImportResultModal({summary,onClose}:{summary:MachineImportSummary;onClose:()=>void}) {
+  const rejected = summary.rejectedDuplicates ?? [];
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-import-result-modal"><div className="modal-heading"><div><p className="eyebrow">Machine Import</p><h3>Machine import rejected duplicates</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><div className="machine-import-summary-grid"><div><span>Added</span><strong>{summary.addedCount ?? 0}</strong></div><div><span>Updated</span><strong>{summary.updatedCount ?? 0}</strong></div><div><span>Skipped</span><strong>{summary.skippedCount ?? 0}</strong></div><div><span>Rejected duplicates</span><strong>{summary.rejectedDuplicateCount ?? 0}</strong></div></div><div className="machine-import-rejection-list">{rejected.slice(0,10).map(item=><p key={`${item.rowNumber}-${item.assetNumber}-${item.reason}`}>Row {item.rowNumber}: {item.assetNumber || 'Asset Number'} {item.reason.charAt(0).toLowerCase() + item.reason.slice(1)}</p>)}{rejected.length > 10&&<small>Showing first 10 of {rejected.length} rejected duplicates.</small>}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>OK</button></div></section></div>;
 }
 function YesNoToggle({label,value,set,disabled}:{label:string;value:boolean;set:(value:boolean)=>void;disabled:boolean}) {
   return <div className="form-field machine-yes-no"><span>{label}</span><div><button className={value ? 'primary-button compact-button' : 'secondary-button compact-button'} type="button" onClick={()=>set(true)} disabled={disabled}>Yes</button><button className={!value ? 'primary-button compact-button' : 'secondary-button compact-button'} type="button" onClick={()=>set(false)} disabled={disabled}>No</button></div></div>;

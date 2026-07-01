@@ -4626,8 +4626,18 @@ const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','remov
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
 const voltageTypes = new Set(['AC','DC','']);
 const machineDefaultBrandColors: Record<string, string> = { Toyo: '#67D8FF', Arburg: '#38D7B3', Husky: '#FFD45A', Engel: '#8FB6D8', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
-const machineRequiredImportHeaders = ['Press','Shot (oz)','Ton','H&E','Mfg','Barrel','Year','Model #','Equip Serial #'] as const;
-const machineImportHeaders = [...machineRequiredImportHeaders,'Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
+const machineRequiredImportHeaderGroups = [
+  ['Press','Asset Number','Asset Number / Press Number'],
+  ['Shot (oz)','Shot Size (oz)','Shot Size Oz','Shot'],
+  ['Ton','Tonnage'],
+  ['H&E','Power Type'],
+  ['Mfg','Brand','Manufacturer'],
+  ['Barrel','Barrel/Screw Diameter','Barrel Diameter'],
+  ['Year','Machine Year'],
+  ['Model #','Model','Model Number'],
+  ['Equip Serial #','Serial Number','Equip Serial Number'],
+] as const;
+const machineImportHeaders = ['Asset Number','Brand','Model','Serial Number','Shot Size (oz)','Tonnage','Power Type','Barrel/Screw Diameter','Machine Year','Machine Type','Screw Type','Screw Tip Type','Screw Rebuild / Repaired','Screw Condition Status','Screw Installed Date','Screw Tip Installed Date','Screw Length','Barrel Rebuild / Repaired','Barrel Condition Status','Barrel Installed Date','Barrel End Cap Installed Date','Barrel Length','Machine Length','Machine Width','Machine Height','Full Die Height Length / Range','Notes','Critical Notes','Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
 type MachineAssetInput = ReturnType<typeof validateMachineAssetInput>;
 function canMachineWrite(actor: User) { return roleRank(actor.role) >= roleRank('Maintenance Tech 3'); }
 function canMachineDelete(actor: User) { return roleRank(actor.role) >= roleRank('Manager'); }
@@ -4756,8 +4766,20 @@ function publicMachineAsset(row: MachineAssetRow) {
 function machineAssetById(id: number, includeDeleted = false) {
   return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
 }
+function normalizedMachineAssetNumber(value: string) {
+  return value.trim().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').toLowerCase();
+}
 function machineAssetByNumber(assetNumber: string) {
   return one<MachineAssetRow>('SELECT * FROM machine_assets WHERE lower(trim(asset_number))=lower(?) ORDER BY deleted ASC, id LIMIT 1', [assetNumber.trim()]);
+}
+function activeMachineAssetsByNormalizedNumber() {
+  const map = new Map<string, MachineAssetRow[]>();
+  for (const row of all<MachineAssetRow>('SELECT * FROM machine_assets WHERE deleted=0 ORDER BY id')) {
+    const key = normalizedMachineAssetNumber(row.asset_number);
+    if (!key) continue;
+    map.set(key, [...(map.get(key) ?? []), row]);
+  }
+  return map;
 }
 function machineAssetHistoryValue(row: MachineAssetRow | MachineAssetInput) {
   return 'asset_number' in row ? publicMachineAsset(row) : row;
@@ -4815,7 +4837,10 @@ function machineImportRecordFromRow(record: Record<string, string>, rowNumber: n
   };
   const press = value('Press','Asset Number','Asset Number / Press Number');
   return {
-    rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number'),
+    rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz','Shot Size (oz)'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter','Barrel Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number'), machineType: value('Machine Type'),
+    screwType: value('Screw Type'), screwTipType: value('Screw Tip Type'), screwRebuildRepaired: value('Screw Rebuild / Repaired'), screwConditionStatus: value('Screw Condition Status'), screwInstalledDate: value('Screw Installed Date'), screwTipInstalledDate: value('Screw Tip Installed Date'), screwLength: value('Screw Length'),
+    barrelRebuildRepaired: value('Barrel Rebuild / Repaired'), barrelConditionStatus: value('Barrel Condition Status'), barrelInstalledDate: value('Barrel Installed Date'), barrelEndCapInstalledDate: value('Barrel End Cap Installed Date'), barrelLength: value('Barrel Length'),
+    machineLength: value('Machine Length'), machineWidth: value('Machine Width'), machineHeight: value('Machine Height'), fullDieHeightLength: value('Full Die Height Length / Range'), notes: value('Notes'), criticalNotes: value('Critical Notes'),
     hasDoubleShotInjection: value('Double Shot Injection'), hasPlungerInjection: value('Plunger Injection'),
     screw2Type: value('Screw 2 Type'), screw2TipType: value('Screw 2 Tip Type'), screw2RebuildRepaired: value('Screw 2 Rebuild / Repaired'), screw2ConditionStatus: value('Screw 2 Condition Status'), screw2InstalledDate: value('Screw 2 Installed Date'), screw2TipInstalledDate: value('Screw 2 Tip Installed Date'), screw2Length: value('Screw 2 Length'),
     barrel2Diameter: value('Barrel 2 Diameter'), barrel2RebuildRepaired: value('Barrel 2 Rebuild / Repaired'), barrel2ConditionStatus: value('Barrel 2 Condition Status'), barrel2InstalledDate: value('Barrel 2 Installed Date'), barrel2EndCapInstalledDate: value('Barrel 2 End Cap Installed Date'), barrel2Length: value('Barrel 2 Length'),
@@ -4826,7 +4851,7 @@ function machineImportRecordFromRow(record: Record<string, string>, rowNumber: n
 function machineImportRowsFromTable(rows: string[][]) {
   const [headers = [], ...dataRows] = rows;
   const normalizedHeaders = headers.map(normalizeImportHeader);
-  for (const required of machineRequiredImportHeaders) if (!normalizedHeaders.includes(normalizeImportHeader(required))) throw new Error('Machine import must include Press, Shot (oz), Ton, H&E, Mfg, Barrel, Year, Model #, and Equip Serial # headers.');
+  for (const group of machineRequiredImportHeaderGroups) if (!group.some(required=>normalizedHeaders.includes(normalizeImportHeader(required)))) throw new Error('Machine import must include Asset Number, Shot Size (oz), Tonnage, Power Type, Brand, Barrel/Screw Diameter, Machine Year, Model, and Serial Number headers.');
   return dataRows.map((row,index)=>{
     const record: Record<string, string> = {};
     headers.forEach((header,columnIndex)=>{ record[header] = row[columnIndex] ?? ''; record[normalizeImportHeader(header)] = row[columnIndex] ?? ''; });
@@ -4856,36 +4881,69 @@ async function parseMachineImportFile(file: Express.Multer.File | undefined) {
 function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>) {
   return validateMachineAssetInput({ ...row, assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
 }
-function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machineImportRecordFromRow>[]) {
+type MachineImportMode = 'add_new_only' | 'upsert';
+type MachineImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
+function machineImportModeFromValue(value: unknown): MachineImportMode {
+  return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'upsert' ? 'upsert' : 'add_new_only';
+}
+function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machineImportRecordFromRow>[], mode: MachineImportMode) {
   const actor = req.user!;
   const timestamp = now();
-  const summary = { addedCount: 0, updatedCount: 0, skippedCount: 0, errorCount: 0, errors: [] as string[] };
+  const summary = { ok: true, addedCount: 0, updatedCount: 0, skippedCount: 0, rejectedDuplicateCount: 0, errorCount: 0, errors: [] as string[], rejectedDuplicates: [] as MachineImportRejectedDuplicate[], changedAssetNumbers: [] as string[] };
   const seen = new Set<string>();
+  const dbAssetsByKey = activeMachineAssetsByNormalizedNumber();
+  const rejectDuplicate = (rowNumber: number, assetNumber: string, reason: string) => {
+    summary.rejectedDuplicateCount += 1;
+    summary.skippedCount += 1;
+    summary.rejectedDuplicates.push({ rowNumber, assetNumber, reason });
+  };
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
+      const assetNumber = String(row.assetNumber ?? '').trim().replace(/\s+/g, ' ');
+      const key = normalizedMachineAssetNumber(assetNumber);
+      if (!key) {
+        summary.skippedCount += 1;
+        summary.errorCount += 1;
+        summary.errors.push(`Row ${row.rowNumber}: Asset Number is required.`);
+        continue;
+      }
+      if (seen.has(key)) {
+        rejectDuplicate(row.rowNumber, assetNumber, 'Duplicate inside import file.');
+        continue;
+      }
+      const dbMatches = dbAssetsByKey.get(key) ?? [];
       try {
         const input = machineInputFromImport(row);
-        const key = input.assetNumber.toLowerCase();
-        if (seen.has(key)) { summary.skippedCount += 1; continue; }
         seen.add(key);
-        const existing = machineAssetByNumber(input.assetNumber);
+        if (dbMatches.length > 1) {
+          rejectDuplicate(row.rowNumber, assetNumber, 'Duplicate Asset Number already exists in MCC. Clean existing records first.');
+          continue;
+        }
+        if (mode === 'add_new_only' && dbMatches.length === 1) {
+          rejectDuplicate(row.rowNumber, assetNumber, 'Already exists in MCC.');
+          continue;
+        }
+        const existing = mode === 'upsert' && dbMatches.length === 1 ? dbMatches[0] : undefined;
         if (existing) {
           const oldValue = machineAssetHistoryValue(existing);
           updateMachineAsset(existing.id, input, actor, timestamp);
           const updated = machineAssetById(existing.id, true)!;
           summary.updatedCount += 1;
-          recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: 'Machine list import' });
+          summary.changedAssetNumbers.push(updated.asset_number);
+          recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: 'Imported from CSV/XLSX.' });
         } else {
           const id = insertMachineAsset(input, actor, timestamp);
           const created = machineAssetById(id)!;
           summary.addedCount += 1;
-          recordMachineAssetHistory({ action: 'machine_asset_created', actor, row: created, newValue: machineAssetHistoryValue(created), reasonNote: 'Machine list import' });
+          summary.changedAssetNumbers.push(created.asset_number);
+          dbAssetsByKey.set(key, [created]);
+          recordMachineAssetHistory({ action: 'machine_asset_created', actor, row: created, newValue: machineAssetHistoryValue(created), reasonNote: 'Imported from CSV/XLSX.' });
         }
       } catch (error) {
         summary.skippedCount += 1;
         summary.errorCount += 1;
-        if (summary.errors.length < 5) summary.errors.push(`Row ${row.rowNumber}: ${safeErrorMessage(error)}`);
+        summary.errors.push(`Row ${row.rowNumber}: ${safeErrorMessage(error) || 'Invalid value skipped.'}`);
       }
     }
     db.exec('COMMIT');
@@ -4894,7 +4952,7 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
     throw error;
   }
   audit(req, 'machine asset import', 'machine_asset', 'bulk', summary);
-  scheduleAutoBackup('machine asset import', actor);
+  if (summary.addedCount + summary.updatedCount > 0) scheduleAutoBackup('machine asset import', actor);
   return summary;
 }
 const replacementFields: Record<MachineReplacementField, { column: keyof MachineAssetRow; action: string; label: string }> = {
@@ -5250,11 +5308,11 @@ app.get('/api/machine-library/export/template', requireAuth, requirePermission('
 app.post('/api/machine-library/import', requireAuth, requirePermission('machine.write'), upload.single('file'), async (req:AuthRequest,res)=>{
   try {
     const rows = await parseMachineImportFile(req.file);
-    const summary = importMachineAssetRows(req, rows);
-    res.json({ok:true,...summary});
+    const summary = importMachineAssetRows(req, rows, machineImportModeFromValue(isRecord(req.body) ? req.body.importMode : ''));
+    res.json(summary);
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/Choose|must include|must be CSV|numeric|required/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,errorCount:1,errors:[message]});
+    res.status(/Choose|must include|must be CSV|numeric|required/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],rejectedDuplicates:[],changedAssetNumbers:[]});
   }
 });
 

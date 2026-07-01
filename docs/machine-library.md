@@ -83,6 +83,21 @@ The machine blank template includes injection setup headers:
 
 Imports accept yes/no, true/false, y/n, and 1/0 for Double Shot Injection and Plunger Injection. Old machine import files without these headers still work and default both setup choices to No.
 
+## Import Duplicate Safety
+
+Machine Library imports have an Import Mode selector:
+
+- Add New Only: creates new Asset Numbers and rejects Asset Numbers that already exist in MCC.
+- Update Existing / Upsert: updates existing Asset Numbers and creates new Asset Numbers.
+
+Asset Number duplicate checks normalize values by trimming spaces, collapsing repeated spaces, comparing case-insensitively, and removing extra spaces around hyphens. For example, `Press 41`, `press 41`, `PRESS 41`, and `Press    41` are treated as the same Asset Number.
+
+Duplicate rows inside the same import file are rejected after the first valid occurrence. If MCC already contains multiple active machine records with the same normalized Asset Number, the import row is rejected with a cleanup message instead of guessing which record to update.
+
+The import response reports added, updated, skipped, rejected duplicate, error, rejected duplicate row, and changed Asset Number details. If duplicates are rejected, MCC shows a warning popup listing the first rejected rows before showing the final import toast. If nothing changes, the final toast is a warning/error message instead of a green success message.
+
+An automatic backup is scheduled only when an import adds or updates at least one machine asset.
+
 ## History And Backups
 
 Machine asset create and update actions write to the `machine_library` history section with `machine_asset` entity data, including changed numeric fields, rebuild flags, condition statuses, notes, dates, and dimensions where old/new values are available. Successful machine asset saves continue to schedule an automatic backup through the current backup system.
