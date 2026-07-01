@@ -1,6 +1,21 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 export type PhoneType = '' | 'Mobile' | 'Work' | 'Cell' | 'Office' | 'Main' | 'Other';
+export type VendorContactPhoneType = '' | 'Cell' | 'Mobile' | 'Work' | 'Office' | 'Other';
+
+export type VendorContactRecord = {
+  id?: number;
+  vendorId?: number;
+  contactName: string;
+  contactTitle: string;
+  email: string;
+  phoneType: VendorContactPhoneType;
+  phoneNumber: string;
+  phoneExt: string;
+  notes: string;
+  isPrimary: boolean;
+  deleted?: boolean;
+};
 
 export type VendorRecord = {
   id: number;
@@ -28,15 +43,32 @@ export type VendorRecord = {
   source?: string;
   createdAt?: string;
   updatedAt?: string;
+  contactCount: number;
+  primaryContactName?: string;
+  primaryContactEmail?: string;
+  contacts?: VendorContactRecord[];
 };
 
-export type VendorForm = Omit<VendorRecord, 'id' | 'deleted' | 'status' | 'source' | 'createdAt' | 'updatedAt'> & { reasonNote: string };
+export type VendorForm = Omit<VendorRecord, 'id' | 'deleted' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'contactCount' | 'primaryContactName' | 'primaryContactEmail' | 'contacts'> & { reasonNote: string; contacts: VendorContactRecord[] };
 
 type VendorsResponse = { ok: boolean; vendors: VendorRecord[] };
 type VendorResponse = { ok: boolean; vendor: VendorRecord };
+type VendorContactsResponse = { ok: boolean; vendor: VendorRecord; contacts: VendorContactRecord[] };
 type Notice = { kind: 'success' | 'error' | 'info'; text: string };
 
 const phoneTypes: PhoneType[] = ['', 'Mobile', 'Work', 'Cell', 'Office', 'Main', 'Other'];
+const contactPhoneTypes: VendorContactPhoneType[] = ['', 'Cell', 'Mobile', 'Work', 'Office', 'Other'];
+
+const blankVendorContact: VendorContactRecord = {
+  contactName: '',
+  contactTitle: '',
+  email: '',
+  phoneType: '',
+  phoneNumber: '',
+  phoneExt: '',
+  notes: '',
+  isPrimary: false,
+};
 
 export const blankVendorForm: VendorForm = {
   companyName: '',
@@ -59,6 +91,7 @@ export const blankVendorForm: VendorForm = {
   notes: '',
   isActive: true,
   reasonNote: '',
+  contacts: [],
 };
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
@@ -100,6 +133,60 @@ function websiteOrigin(value: string) {
   }
 }
 
+function contactCountText(count: number) {
+  return `${count} ${count === 1 ? 'contact' : 'contacts'}`;
+}
+
+function cleanContact(contact: VendorContactRecord): VendorContactRecord {
+  return {
+    id: contact.id,
+    vendorId: contact.vendorId,
+    contactName: contact.contactName.trim(),
+    contactTitle: contact.contactTitle.trim(),
+    email: contact.email.trim(),
+    phoneType: contact.phoneType,
+    phoneNumber: contact.phoneNumber.trim(),
+    phoneExt: contact.phoneExt.trim(),
+    notes: contact.notes.trim(),
+    isPrimary: contact.isPrimary,
+  };
+}
+
+function validateContact(contact: VendorContactRecord) {
+  if (!contact.contactName.trim()) return 'Contact Name is required.';
+  if (contact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim())) return 'Contact Email must be a valid email address.';
+  if (contact.phoneExt.trim().length > 20) return 'Contact EXT # must be 20 characters or less.';
+  return '';
+}
+
+function normalizeContactPrimary(contacts: VendorContactRecord[]) {
+  let primarySeen = false;
+  return contacts.map((contact,index)=>{
+    const isPrimary = contact.isPrimary && !primarySeen;
+    if (isPrimary) primarySeen = true;
+    return {...contact,isPrimary: isPrimary || (!primarySeen && contacts.length === 1 && index === 0)};
+  });
+}
+
+async function copyText(value: string) {
+  const text = value.trim();
+  if (!text) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  return ok;
+}
+
 export function vendorFormFromVendor(vendor: VendorRecord): VendorForm {
   return {
     companyName: vendor.companyName ?? '',
@@ -122,10 +209,12 @@ export function vendorFormFromVendor(vendor: VendorRecord): VendorForm {
     notes: vendor.notes ?? '',
     isActive: vendor.isActive ?? true,
     reasonNote: '',
+    contacts: (vendor.contacts ?? []).filter(contact=>!contact.deleted).map(contact=>({...blankVendorContact,...contact})),
   };
 }
 
 export function vendorPayloadFromForm(form: VendorForm) {
+  const contacts = normalizeContactPrimary(form.contacts.map(cleanContact).filter(contact=>contact.contactName || contact.email || contact.phoneNumber || contact.contactTitle || contact.phoneExt || contact.notes));
   return {
     companyName: form.companyName.trim(),
     phoneType: form.phoneType,
@@ -147,6 +236,7 @@ export function vendorPayloadFromForm(form: VendorForm) {
     notes: form.notes.trim(),
     isActive: form.isActive,
     reasonNote: form.reasonNote.trim(),
+    contacts,
   };
 }
 
@@ -156,6 +246,12 @@ export function validateVendorForm(form: VendorForm, requireDisableReason = !for
   if (form.phoneExt.trim().length > 20 || form.contactPhoneExt.trim().length > 20) return 'EXT # must be 20 characters or less.';
   if (form.websiteUrl.trim() && !safeWebsiteUrl(form.websiteUrl)) return 'Website URL must start with http:// or https://.';
   if (form.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) return 'Contact Email must be a valid email address.';
+  for (const contact of form.contacts) {
+    const hasAnyValue = Boolean(contact.contactName.trim() || contact.email.trim() || contact.phoneNumber.trim() || contact.contactTitle.trim() || contact.phoneExt.trim() || contact.notes.trim());
+    if (!hasAnyValue) continue;
+    const contactError = validateContact(contact);
+    if (contactError) return contactError;
+  }
   if (requireDisableReason && !form.reasonNote.trim()) return 'Reason for disabling vendor is required.';
   return '';
 }
@@ -187,7 +283,172 @@ function VendorWebsiteLink({websiteUrl,compact=false}:{websiteUrl:string;compact
   );
 }
 
-export function VendorDetailModal({vendor,onClose,onEdit}:{vendor:VendorRecord;onClose:()=>void;onEdit?:()=>void}) {
+function EmailCopyButton({email,onCopied,compact=false}:{email:string;onCopied:(email:string)=>void;compact?:boolean}) {
+  if (!email.trim()) return <span>-</span>;
+  return (
+    <button
+      className={`email-copy-button${compact ? ' compact' : ''}`}
+      type="button"
+      title="Click to copy email"
+      onClick={async event=>{
+        event.preventDefault();
+        event.stopPropagation();
+        const ok = await copyText(email);
+        if (ok) onCopied(email.trim());
+      }}
+    >
+      {email}
+    </button>
+  );
+}
+
+function ContactEditCard({contact,index,onChange,onRemove}:{contact:VendorContactRecord;index:number;onChange:(contact:VendorContactRecord)=>void;onRemove:()=>void}) {
+  return (
+    <div className="vendor-contact-edit-card">
+      <div className="vendor-contact-edit-heading">
+        <strong>Contact {index + 1}</strong>
+        <label className="vendor-primary-toggle"><input type="checkbox" checked={contact.isPrimary} onChange={event=>onChange({...contact,isPrimary:event.target.checked})} /> Primary</label>
+        <button className="link-button compact-button" type="button" onClick={onRemove}>Remove</button>
+      </div>
+      <div className="vendor-contact-edit-grid">
+        <label className="form-field"><span>Contact Name <b className="required-marker" aria-label="required">*</b></span><input value={contact.contactName} onChange={event=>onChange({...contact,contactName:event.target.value})} /></label>
+        <label className="form-field"><span>Contact Title</span><input value={contact.contactTitle} onChange={event=>onChange({...contact,contactTitle:event.target.value})} /></label>
+        <label className="form-field"><span>Email</span><input value={contact.email} onChange={event=>onChange({...contact,email:event.target.value})} /></label>
+        <label className="form-field"><span>Phone Type</span><select value={contact.phoneType} onChange={event=>onChange({...contact,phoneType:event.target.value as VendorContactPhoneType,phoneExt:event.target.value === 'Office' ? contact.phoneExt : ''})}>{contactPhoneTypes.map(type=><option key={type || 'blank'} value={type}>{type || 'Select type'}</option>)}</select></label>
+        <label className="form-field"><span>Phone Number</span><input value={contact.phoneNumber} onChange={event=>onChange({...contact,phoneNumber:event.target.value})} /></label>
+        <label className={`form-field ${contact.phoneType === 'Office' ? 'office-ext-field' : 'soft-hidden-ext'}`}><span>EXT #</span><input value={contact.phoneExt} onChange={event=>onChange({...contact,phoneExt:event.target.value})} disabled={contact.phoneType !== 'Office'} /></label>
+        <label className="form-field vendor-form-wide"><span>Notes</span><textarea value={contact.notes} onChange={event=>onChange({...contact,notes:event.target.value})} /></label>
+      </div>
+    </div>
+  );
+}
+
+function roleRank(role: string) {
+  return ['Maintenance Tech 1','Maintenance Tech 2','Maintenance Tech 3','Manager','Admin'].indexOf(role);
+}
+
+function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEdit,canDelete}:{vendor:VendorRecord;onClose:()=>void;onVendorUpdated:(vendor:VendorRecord)=>void;onEmailCopied:(email:string)=>void;canEdit:boolean;canDelete:boolean}) {
+  const [contacts,setContacts]=useState<VendorContactRecord[]>(vendor.contacts ?? []);
+  const [loading,setLoading]=useState(true);
+  const [editing,setEditing]=useState<VendorContactRecord|null>(null);
+  const [error,setError]=useState('');
+  const [saving,setSaving]=useState(false);
+
+  async function loadContacts() {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api<VendorContactsResponse>(`/api/vendors/${vendor.id}/contacts`);
+      setContacts(data.contacts ?? []);
+      onVendorUpdated(data.vendor);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(()=>{ void loadContacts(); },[vendor.id]);
+
+  async function saveContact(event: FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    const validation = validateContact(editing);
+    setError(validation);
+    if (validation) return;
+    setSaving(true);
+    try {
+      const payload = JSON.stringify(cleanContact(editing));
+      const data = await api<{ok:boolean;contact:VendorContactRecord;vendor:VendorRecord}>(editing.id ? `/api/vendors/${vendor.id}/contacts/${editing.id}` : `/api/vendors/${vendor.id}/contacts`, {
+        method: editing.id ? 'PUT' : 'POST',
+        body: payload,
+      });
+      onVendorUpdated(data.vendor);
+      setEditing(null);
+      await loadContacts();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteContact(contact: VendorContactRecord) {
+    if (!contact.id) return;
+    const reasonNote = window.prompt(`Delete contact ${contact.contactName}? Enter a reason note.`);
+    if (!reasonNote?.trim()) return;
+    try {
+      const data = await api<{ok:boolean;vendor:VendorRecord}>(`/api/vendors/${vendor.id}/contacts/${contact.id}`, {method:'DELETE',body:JSON.stringify({reasonNote})});
+      onVendorUpdated(data.vendor);
+      await loadContacts();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget&&!saving) onClose(); }}>
+      <section className="mcc-card vendor-modal vendor-contacts-modal" role="dialog" aria-modal="true" aria-label={`${vendor.companyName} contacts`}>
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">Vendor Contacts</p>
+            <h3>{vendor.companyName}</h3>
+          </div>
+          <button className="link-button compact-button" type="button" onClick={onClose} disabled={saving}>Close</button>
+        </div>
+        <div className="vendor-contact-modal-header">
+          <VendorWebsiteLink websiteUrl={vendor.websiteUrl} compact />
+          <strong>{contactCountText(contacts.filter(contact=>!contact.deleted).length)}</strong>
+        </div>
+        {error&&<p className="form-message error">{error}</p>}
+        {loading&&<p className="vendor-inline-empty">Loading contacts...</p>}
+        {!loading&&contacts.length===0&&<p className="vendor-inline-empty">No contacts saved for this vendor.</p>}
+        {!loading&&contacts.length>0&&(
+          <div className="vendor-contact-list">
+            {contacts.map(contact=>(
+              <article className="vendor-contact-card" key={contact.id ?? contact.contactName}>
+                <div className="vendor-contact-card-heading">
+                  <div>
+                    <strong>{contact.contactName}</strong>
+                    {contact.contactTitle&&<span>{contact.contactTitle}</span>}
+                  </div>
+                  {contact.isPrimary&&<span className="status-pill vendor-status-enabled">Primary</span>}
+                </div>
+                <div className="vendor-contact-info-grid">
+                  <div><span>Email</span><strong><EmailCopyButton email={contact.email} compact onCopied={onEmailCopied} /></strong></div>
+                  <div><span>Phone</span><strong>{formatPhone(contact.phoneType, contact.phoneNumber, contact.phoneExt) || '-'}</strong></div>
+                  <div className="vendor-contact-notes"><span>Notes</span><strong>{contact.notes || '-'}</strong></div>
+                </div>
+                {(canEdit||canDelete)&&(
+                  <div className="vendor-contact-actions">
+                    {canEdit&&<button className="secondary-button compact-button" type="button" onClick={()=>setEditing({...blankVendorContact,...contact})}>Edit Contact</button>}
+                    {canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>deleteContact(contact)}>Delete Contact</button>}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+        {canEdit&&(
+          <div className="vendor-contact-form-shell">
+            {!editing&&<button className="primary-button compact-button" type="button" onClick={()=>setEditing({...blankVendorContact,isPrimary:contacts.length === 0})}>Add Contact</button>}
+            {editing&&(
+              <form className="vendor-contact-inline-form" onSubmit={saveContact}>
+                <ContactEditCard contact={editing} index={Math.max(contacts.findIndex(contact=>contact.id === editing.id), 0)} onChange={setEditing} onRemove={()=>setEditing(null)} />
+                <div className="modal-actions">
+                  <button className="secondary-button" type="button" onClick={()=>setEditing(null)} disabled={saving}>Cancel</button>
+                  <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':'Save Contact'}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function VendorDetailModal({vendor,onClose,onEdit,onEmailCopied}:{vendor:VendorRecord;onClose:()=>void;onEdit?:()=>void;onEmailCopied?:(email:string)=>void}) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) onClose(); }}>
       <section className="mcc-card vendor-modal vendor-detail-modal" role="dialog" aria-modal="true" aria-label={`${vendor.companyName} vendor details`}>
@@ -201,11 +462,9 @@ export function VendorDetailModal({vendor,onClose,onEdit}:{vendor:VendorRecord;o
         <div className="vendor-detail-grid">
           <DetailRow label="Company phone">{formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt)}</DetailRow>
           <DetailRow label="Website">{vendor.websiteUrl ? <VendorWebsiteLink websiteUrl={vendor.websiteUrl} compact /> : '-'}</DetailRow>
+          <DetailRow label="General email">{vendor.contactEmail ? <EmailCopyButton email={vendor.contactEmail} compact onCopied={onEmailCopied ?? (()=>{})} /> : '-'}</DetailRow>
           <DetailRow label="Address">{[vendor.addressLine1, vendor.addressLine2, cityState(vendor), vendor.postalCode, vendor.country].filter(Boolean).join(', ')}</DetailRow>
-          <DetailRow label="Contact name">{vendor.contactName}</DetailRow>
-          <DetailRow label="Contact title">{vendor.contactTitle}</DetailRow>
-          <DetailRow label="Contact phone">{formatPhone(vendor.contactPhoneType, vendor.contactPhoneNumber, vendor.contactPhoneExt)}</DetailRow>
-          <DetailRow label="Contact email">{vendor.contactEmail ? <a href={`mailto:${vendor.contactEmail}`}>{vendor.contactEmail}</a> : '-'}</DetailRow>
+          <DetailRow label="Contacts">{vendor.primaryContactName ? `${contactCountText(vendor.contactCount)} - Primary: ${vendor.primaryContactName}` : contactCountText(vendor.contactCount)}</DetailRow>
           <DetailRow label="Status">{vendor.status}</DetailRow>
           <DetailRow label="Notes">{vendor.notes}</DetailRow>
         </div>
@@ -233,6 +492,21 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
     await onSave(form);
   }
 
+  function updateContact(index: number, contact: VendorContactRecord) {
+    setForm(current=>({
+      ...current,
+      contacts: current.contacts.map((item,itemIndex)=>itemIndex === index ? contact : contact.isPrimary ? {...item,isPrimary:false} : item),
+    }));
+  }
+
+  function addContact() {
+    setForm(current=>({...current,contacts:[...current.contacts,{...blankVendorContact,isPrimary: current.contacts.length === 0}]}));
+  }
+
+  function removeContact(index: number) {
+    setForm(current=>({...current,contacts:current.contacts.filter((_,itemIndex)=>itemIndex !== index)}));
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget&&!saving) onClose(); }}>
       <form className="mcc-card vendor-modal" onSubmit={submit}>
@@ -255,12 +529,20 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
           <label className="form-field"><span>State</span><input value={form.state} onChange={event=>setForm({...form,state:event.target.value})} /></label>
           <label className="form-field"><span>Postal Code</span><input value={form.postalCode} onChange={event=>setForm({...form,postalCode:event.target.value})} /></label>
           <label className="form-field"><span>Country</span><input value={form.country} onChange={event=>setForm({...form,country:event.target.value})} /></label>
-          <label className="form-field"><span>Contact Name</span><input value={form.contactName} onChange={event=>setForm({...form,contactName:event.target.value})} /></label>
-          <label className="form-field"><span>Contact Title</span><input value={form.contactTitle} onChange={event=>setForm({...form,contactTitle:event.target.value})} /></label>
-          <label className="form-field"><span>Contact Phone Type</span><select value={form.contactPhoneType} onChange={event=>setForm({...form,contactPhoneType:event.target.value as PhoneType})}>{phoneTypes.map(type=><option key={type || 'blank'} value={type}>{type || 'Select type'}</option>)}</select></label>
-          <label className="form-field"><span>Contact Phone #</span><input value={form.contactPhoneNumber} onChange={event=>setForm({...form,contactPhoneNumber:event.target.value})} /></label>
-          <label className="form-field"><span>Contact EXT #</span><input value={form.contactPhoneExt} onChange={event=>setForm({...form,contactPhoneExt:event.target.value})} /></label>
-          <label className="form-field"><span>Contact Email</span><input value={form.contactEmail} onChange={event=>setForm({...form,contactEmail:event.target.value})} /></label>
+          <label className="form-field vendor-form-wide"><span>General Email</span><input value={form.contactEmail} onChange={event=>setForm({...form,contactEmail:event.target.value})} placeholder="sales@example.com" /></label>
+          <div className="vendor-contacts-editor vendor-form-wide">
+            <div className="vendor-section-heading">
+              <div>
+                <span>Contacts</span>
+                <strong>{contactCountText(form.contacts.length)}</strong>
+              </div>
+              <button className="secondary-button compact-button" type="button" onClick={addContact}>Add Contact</button>
+            </div>
+            {form.contacts.length === 0&&<p className="vendor-inline-empty">No contacts saved for this vendor.</p>}
+            {form.contacts.map((contact,index)=>(
+              <ContactEditCard key={contact.id ?? `new-${index}`} contact={contact} index={index} onChange={next=>updateContact(index,next)} onRemove={()=>removeContact(index)} />
+            ))}
+          </div>
           <label className="form-field"><span>Vendor Status</span><select value={form.isActive ? 'enabled' : 'disabled'} onChange={event=>setForm({...form,isActive:event.target.value === 'enabled',reasonNote:event.target.value === 'enabled' ? '' : form.reasonNote})}><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
           {!form.isActive&&<label className="form-field vendor-form-wide"><span>Reason for disabling vendor <b className="required-marker" aria-label="required">*</b></span><textarea value={form.reasonNote} onChange={event=>setForm({...form,reasonNote:event.target.value})} /></label>}
           <label className="form-field vendor-form-wide"><span>Notes</span><textarea value={form.notes} onChange={event=>setForm({...form,notes:event.target.value})} /></label>
@@ -275,10 +557,10 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
   );
 }
 
-function VendorCard({vendor,onView,onEdit,onDelete}:{vendor:VendorRecord;onView:()=>void;onEdit:()=>void;onDelete:()=>void}) {
+function VendorCard({vendor,onView,onEdit,onDelete,onContacts,onEmailCopied}:{vendor:VendorRecord;onView:()=>void;onEdit:()=>void;onDelete:()=>void;onContacts:()=>void;onEmailCopied:(email:string)=>void}) {
   const statusClass = vendor.deleted ? 'vendor-status-deleted' : vendor.isActive ? 'vendor-status-enabled' : 'vendor-status-disabled';
   const mainPhone = formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt);
-  const contactPhone = formatPhone(vendor.contactPhoneType, vendor.contactPhoneNumber, vendor.contactPhoneExt);
+  const contactText = vendor.primaryContactName ? `${contactCountText(vendor.contactCount)} - Primary: ${vendor.primaryContactName}` : contactCountText(vendor.contactCount);
   return (
     <article className={`vendor-card${vendor.deleted ? ' deleted' : !vendor.isActive ? ' disabled' : ''}`}>
       <div className="vendor-card-heading">
@@ -290,9 +572,8 @@ function VendorCard({vendor,onView,onEdit,onDelete}:{vendor:VendorRecord;onView:
       <VendorWebsiteLink websiteUrl={vendor.websiteUrl} />
       <div className="vendor-card-detail-grid">
         <div><span>Main Phone</span><strong>{mainPhone || '-'}</strong></div>
-        <div><span>Contact</span><strong>{vendor.contactName || '-'}</strong></div>
-        <div><span>Contact Phone</span><strong>{contactPhone || '-'}</strong></div>
-        <div><span>Email</span><strong>{vendor.contactEmail ? <a href={`mailto:${vendor.contactEmail}`}>{vendor.contactEmail}</a> : '-'}</strong></div>
+        <button className="vendor-contact-count-box" type="button" onClick={onContacts} title="Open vendor contacts"><span>Contacts</span><strong>{contactText}</strong></button>
+        <button className="vendor-email-box" type="button" onClick={()=>vendor.contactEmail&&copyText(vendor.contactEmail).then(ok=>{ if(ok) onEmailCopied(vendor.contactEmail); })} title={vendor.contactEmail ? 'Click to copy email' : 'No general email saved'}><span>General Email</span><strong>{vendor.contactEmail || '-'}</strong></button>
         <div><span>City/State</span><strong>{cityState(vendor) || '-'}</strong></div>
         <div><span>Country</span><strong>{vendor.country || '-'}</strong></div>
       </div>
@@ -305,12 +586,13 @@ function VendorCard({vendor,onView,onEdit,onDelete}:{vendor:VendorRecord;onView:
   );
 }
 
-export function VendorsPage() {
+export function VendorsPage({userRole=''}:{userRole?:string}) {
   const [vendors,setVendors]=useState<VendorRecord[]>([]);
   const [search,setSearch]=useState('');
   const [loading,setLoading]=useState(true);
   const [notice,setNotice]=useState<Notice|null>(null);
   const [detailVendor,setDetailVendor]=useState<VendorRecord|null>(null);
+  const [contactsVendor,setContactsVendor]=useState<VendorRecord|null>(null);
   const [editingVendor,setEditingVendor]=useState<VendorRecord|null>(null);
   const [adding,setAdding]=useState(false);
   const [showDeleted,setShowDeleted]=useState(false);
@@ -336,6 +618,18 @@ export function VendorsPage() {
 
   const sortedVendors = useMemo(()=>[...vendors].sort((left,right)=>compareText(left.companyName,right.companyName)),[vendors]);
   const editorInitial = editingVendor ? vendorFormFromVendor(editingVendor) : blankVendorForm;
+  const canEditContacts = roleRank(userRole) >= roleRank('Maintenance Tech 2');
+  const canDeleteContacts = roleRank(userRole) >= roleRank('Manager');
+
+  function updateVendorInState(vendor: VendorRecord) {
+    setVendors(current=>current.map(item=>item.id === vendor.id ? vendor : item));
+    setDetailVendor(current=>current?.id === vendor.id ? vendor : current);
+    setContactsVendor(current=>current?.id === vendor.id ? vendor : current);
+  }
+
+  function copiedEmail(email: string) {
+    setNotice({kind:'success',text:`Copied email: ${email}`});
+  }
 
   async function saveVendor(form: VendorForm) {
     setSaving(true);
@@ -403,13 +697,16 @@ export function VendorsPage() {
                 onView={()=>setDetailVendor(vendor)}
                 onEdit={()=>{ setEditingVendor(vendor); setAdding(false); setFormError(''); }}
                 onDelete={()=>deleteVendor(vendor)}
+                onContacts={()=>setContactsVendor(vendor)}
+                onEmailCopied={copiedEmail}
               />
             ))}
           </div>
         )}
       </section>
 
-      {detailVendor&&<VendorDetailModal vendor={detailVendor} onClose={()=>setDetailVendor(null)} onEdit={()=>{ setEditingVendor(detailVendor); setDetailVendor(null); setFormError(''); }} />}
+      {detailVendor&&<VendorDetailModal vendor={detailVendor} onClose={()=>setDetailVendor(null)} onEmailCopied={copiedEmail} onEdit={()=>{ setEditingVendor(detailVendor); setDetailVendor(null); setFormError(''); }} />}
+      {contactsVendor&&<VendorContactsModal vendor={contactsVendor} onClose={()=>setContactsVendor(null)} onVendorUpdated={updateVendorInState} onEmailCopied={copiedEmail} canEdit={canEditContacts} canDelete={canDeleteContacts} />}
       {(adding||editingVendor)&&<VendorEditorModal mode={editingVendor ? 'edit' : 'add'} initial={editorInitial} onClose={()=>{ if(!saving){ setAdding(false); setEditingVendor(null); setFormError(''); } }} onSave={saveVendor} saving={saving} error={formError} />}
     </div>
   );

@@ -1430,6 +1430,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         notes: vendorDetail.notes,
         isActive: vendorDetail.isActive,
         reasonNote: '',
+        contacts: vendorDetail.contacts ?? [],
       }); setVendorEditorId(vendorDetail.id); setVendorDetail(null); setVendorError(''); }} />}
       {vendorEditorInitial&&<VendorEditorModal mode={vendorEditorId ? 'edit' : 'add'} initial={vendorEditorInitial} onClose={()=>{ if(!vendorSaving){ setVendorEditorInitial(null); setVendorEditorId(null); setVendorError(''); } }} onSave={saveInventoryVendor} saving={vendorSaving} error={vendorError} />}
 
