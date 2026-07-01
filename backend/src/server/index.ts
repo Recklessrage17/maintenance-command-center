@@ -201,8 +201,45 @@ CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,d
   if (!machineAssetColumns.has('barrel_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('screw_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN screw_condition_status TEXT NOT NULL DEFAULT 'new'");
   if (!machineAssetColumns.has('barrel_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN barrel_condition_status TEXT NOT NULL DEFAULT 'new'");
+  const machineAssetInjectionColumns: Array<[string, string]> = [
+    ['has_double_shot_injection', 'ALTER TABLE machine_assets ADD COLUMN has_double_shot_injection INTEGER NOT NULL DEFAULT 0'],
+    ['has_plunger_injection', 'ALTER TABLE machine_assets ADD COLUMN has_plunger_injection INTEGER NOT NULL DEFAULT 0'],
+    ['screw2_type', "ALTER TABLE machine_assets ADD COLUMN screw2_type TEXT NOT NULL DEFAULT ''"],
+    ['screw2_tip_type', "ALTER TABLE machine_assets ADD COLUMN screw2_tip_type TEXT NOT NULL DEFAULT ''"],
+    ['screw2_rebuild_repaired', 'ALTER TABLE machine_assets ADD COLUMN screw2_rebuild_repaired INTEGER NOT NULL DEFAULT 0'],
+    ['screw2_installed_date', "ALTER TABLE machine_assets ADD COLUMN screw2_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['screw2_tip_installed_date', "ALTER TABLE machine_assets ADD COLUMN screw2_tip_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['screw2_length', "ALTER TABLE machine_assets ADD COLUMN screw2_length TEXT NOT NULL DEFAULT ''"],
+    ['screw2_condition_status', "ALTER TABLE machine_assets ADD COLUMN screw2_condition_status TEXT NOT NULL DEFAULT 'new'"],
+    ['barrel2_rebuild_repaired', 'ALTER TABLE machine_assets ADD COLUMN barrel2_rebuild_repaired INTEGER NOT NULL DEFAULT 0'],
+    ['barrel2_installed_date', "ALTER TABLE machine_assets ADD COLUMN barrel2_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['barrel2_end_cap_installed_date', "ALTER TABLE machine_assets ADD COLUMN barrel2_end_cap_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['barrel2_length', "ALTER TABLE machine_assets ADD COLUMN barrel2_length TEXT NOT NULL DEFAULT ''"],
+    ['barrel2_diameter', "ALTER TABLE machine_assets ADD COLUMN barrel2_diameter TEXT NOT NULL DEFAULT ''"],
+    ['barrel2_condition_status', "ALTER TABLE machine_assets ADD COLUMN barrel2_condition_status TEXT NOT NULL DEFAULT 'new'"],
+    ['plunger_type', "ALTER TABLE machine_assets ADD COLUMN plunger_type TEXT NOT NULL DEFAULT ''"],
+    ['plunger_rebuild_repaired', 'ALTER TABLE machine_assets ADD COLUMN plunger_rebuild_repaired INTEGER NOT NULL DEFAULT 0'],
+    ['plunger_installed_date', "ALTER TABLE machine_assets ADD COLUMN plunger_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['plunger_length', "ALTER TABLE machine_assets ADD COLUMN plunger_length TEXT NOT NULL DEFAULT ''"],
+    ['plunger_diameter', "ALTER TABLE machine_assets ADD COLUMN plunger_diameter TEXT NOT NULL DEFAULT ''"],
+    ['plunger_condition_status', "ALTER TABLE machine_assets ADD COLUMN plunger_condition_status TEXT NOT NULL DEFAULT 'new'"],
+    ['plunger_barrel_type', "ALTER TABLE machine_assets ADD COLUMN plunger_barrel_type TEXT NOT NULL DEFAULT ''"],
+    ['plunger_barrel_rebuild_repaired', 'ALTER TABLE machine_assets ADD COLUMN plunger_barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0'],
+    ['plunger_barrel_installed_date', "ALTER TABLE machine_assets ADD COLUMN plunger_barrel_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['plunger_barrel_end_cap_installed_date', "ALTER TABLE machine_assets ADD COLUMN plunger_barrel_end_cap_installed_date TEXT NOT NULL DEFAULT ''"],
+    ['plunger_barrel_length', "ALTER TABLE machine_assets ADD COLUMN plunger_barrel_length TEXT NOT NULL DEFAULT ''"],
+    ['plunger_barrel_diameter', "ALTER TABLE machine_assets ADD COLUMN plunger_barrel_diameter TEXT NOT NULL DEFAULT ''"],
+    ['plunger_barrel_condition_status', "ALTER TABLE machine_assets ADD COLUMN plunger_barrel_condition_status TEXT NOT NULL DEFAULT 'new'"],
+  ];
+  for (const [column, sql] of machineAssetInjectionColumns) {
+    if (!machineAssetColumns.has(column)) run(sql);
+  }
   run("UPDATE machine_assets SET screw_condition_status='rebuilt_repaired' WHERE screw_rebuild_repaired=1 AND screw_condition_status='new'");
   run("UPDATE machine_assets SET barrel_condition_status='rebuilt_repaired' WHERE barrel_rebuild_repaired=1 AND barrel_condition_status='new'");
+  run("UPDATE machine_assets SET screw2_condition_status='rebuilt_repaired' WHERE screw2_rebuild_repaired=1 AND screw2_condition_status='new'");
+  run("UPDATE machine_assets SET barrel2_condition_status='rebuilt_repaired' WHERE barrel2_rebuild_repaired=1 AND barrel2_condition_status='new'");
+  run("UPDATE machine_assets SET plunger_condition_status='rebuilt_repaired' WHERE plunger_rebuild_repaired=1 AND plunger_condition_status='new'");
+  run("UPDATE machine_assets SET plunger_barrel_condition_status='rebuilt_repaired' WHERE plunger_barrel_rebuild_repaired=1 AND plunger_barrel_condition_status='new'");
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -5242,10 +5279,10 @@ async function mutateMit3Inventory(req: Request, operation: string, targetId: st
 }
 
 type MachineAssetStatus = 'active' | 'down' | 'disabled' | 'removed';
-type MachineReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap';
+type MachineReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type MachineConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAssetRow = {
-  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; notes: string; critical_notes: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
+  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; notes: string; critical_notes: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; screw2_condition_status: MachineConditionStatus; barrel2_rebuild_repaired: number; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; barrel2_diameter: string; barrel2_condition_status: MachineConditionStatus; plunger_type: string; plunger_rebuild_repaired: number; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_condition_status: MachineConditionStatus; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; plunger_barrel_condition_status: MachineConditionStatus; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
 const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
@@ -5263,6 +5300,8 @@ const machineExportHeaders = [
   'Shot Size (oz)',
   'Tonnage',
   'Barrel/Screw Diameter',
+  'Double Shot Injection',
+  'Plunger Injection',
   'Location',
   'Status',
   'Voltage',
@@ -5282,13 +5321,35 @@ const machineExportHeaders = [
   'Barrel End Cap Installed Date',
   'Barrel Length',
   'Screw Length',
+  'Screw 2 Type',
+  'Screw 2 Tip Type',
+  'Screw 2 Rebuild / Repaired',
+  'Screw 2 Installed Date',
+  'Screw 2 Tip Installed Date',
+  'Screw 2 Length',
+  'Barrel 2 Rebuild / Repaired',
+  'Barrel 2 Installed Date',
+  'Barrel 2 End Cap Installed Date',
+  'Barrel 2 Length',
+  'Barrel 2 Diameter',
+  'Plunger Type',
+  'Plunger Rebuild / Repaired',
+  'Plunger Installed Date',
+  'Plunger Length',
+  'Plunger Diameter',
+  'Plunger Barrel Type',
+  'Plunger Barrel Rebuild / Repaired',
+  'Plunger Barrel Installed Date',
+  'Plunger Barrel End Cap Installed Date',
+  'Plunger Barrel Length',
+  'Plunger Barrel Diameter',
   'Notes',
   'Critical Notes',
 ] as const;
 type MachineExportHeader = typeof machineExportHeaders[number];
 type MachineExportRecord = Record<MachineExportHeader, string | number>;
 type MachineImportMode = 'add-only' | 'upsert';
-type MachineImportPresentField = 'assetName' | 'brand' | 'model' | 'serialNumber' | 'machineYear' | 'machineType' | 'powerType' | 'shotSizeOz' | 'tonnage' | 'barrelDiameter' | 'location' | 'status' | 'voltageValue' | 'voltageType' | 'fullLoadAmp' | 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'screwType' | 'screwTipType' | 'screwRebuildRepaired' | 'barrelRebuildRepaired' | 'screwInstalledDate' | 'screwTipInstalledDate' | 'barrelInstalledDate' | 'barrelEndCapInstalledDate' | 'barrelLength' | 'screwLength' | 'notes' | 'criticalNotes';
+type MachineImportPresentField = 'assetName' | 'brand' | 'model' | 'serialNumber' | 'machineYear' | 'machineType' | 'powerType' | 'shotSizeOz' | 'tonnage' | 'barrelDiameter' | 'hasDoubleShotInjection' | 'hasPlungerInjection' | 'location' | 'status' | 'voltageValue' | 'voltageType' | 'fullLoadAmp' | 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'screwType' | 'screwTipType' | 'screwRebuildRepaired' | 'barrelRebuildRepaired' | 'screwInstalledDate' | 'screwTipInstalledDate' | 'barrelInstalledDate' | 'barrelEndCapInstalledDate' | 'barrelLength' | 'screwLength' | 'screw2Type' | 'screw2TipType' | 'screw2RebuildRepaired' | 'screw2InstalledDate' | 'screw2TipInstalledDate' | 'screw2Length' | 'barrel2RebuildRepaired' | 'barrel2InstalledDate' | 'barrel2EndCapInstalledDate' | 'barrel2Length' | 'barrel2Diameter' | 'plungerType' | 'plungerRebuildRepaired' | 'plungerInstalledDate' | 'plungerLength' | 'plungerDiameter' | 'plungerBarrelType' | 'plungerBarrelRebuildRepaired' | 'plungerBarrelInstalledDate' | 'plungerBarrelEndCapInstalledDate' | 'plungerBarrelLength' | 'plungerBarrelDiameter' | 'notes' | 'criticalNotes';
 type MachineImportRow = {
   rowNumber: number;
   assetNumber: string;
@@ -5302,6 +5363,8 @@ type MachineImportRow = {
   shotSizeOz: string;
   tonnage: string;
   barrelDiameter: string;
+  hasDoubleShotInjection: string;
+  hasPlungerInjection: string;
   location: string;
   status: string;
   voltageValue: string;
@@ -5321,6 +5384,28 @@ type MachineImportRow = {
   barrelEndCapInstalledDate: string;
   barrelLength: string;
   screwLength: string;
+  screw2Type: string;
+  screw2TipType: string;
+  screw2RebuildRepaired: string;
+  screw2InstalledDate: string;
+  screw2TipInstalledDate: string;
+  screw2Length: string;
+  barrel2RebuildRepaired: string;
+  barrel2InstalledDate: string;
+  barrel2EndCapInstalledDate: string;
+  barrel2Length: string;
+  barrel2Diameter: string;
+  plungerType: string;
+  plungerRebuildRepaired: string;
+  plungerInstalledDate: string;
+  plungerLength: string;
+  plungerDiameter: string;
+  plungerBarrelType: string;
+  plungerBarrelRebuildRepaired: string;
+  plungerBarrelInstalledDate: string;
+  plungerBarrelEndCapInstalledDate: string;
+  plungerBarrelLength: string;
+  plungerBarrelDiameter: string;
   notes: string;
   criticalNotes: string;
   present: Partial<Record<MachineImportPresentField, boolean>>;
@@ -5393,8 +5478,14 @@ function validateMachineAssetInput(body: unknown) {
   const status = machineStatuses.includes(statusInput) ? statusInput : 'active';
   const voltageType = machineText(input, ['voltageType','voltage_type'], 12).toUpperCase();
   if (!voltageTypes.has(voltageType)) throw new Error('Voltage Type must be AC or DC.');
+  const hasDoubleShotInjection = booleanField(input, ['hasDoubleShotInjection','has_double_shot_injection','doubleShotInjection','double_shot_injection']);
+  const hasPlungerInjection = booleanField(input, ['hasPlungerInjection','has_plunger_injection','plungerInjection','plunger_injection']);
   const screwRebuildRepaired = booleanField(input, ['screwRebuildRepaired','screw_rebuild_repaired']);
   const barrelRebuildRepaired = booleanField(input, ['barrelRebuildRepaired','barrel_rebuild_repaired']);
+  const screw2RebuildRepaired = booleanField(input, ['screw2RebuildRepaired','screw2_rebuild_repaired']);
+  const barrel2RebuildRepaired = booleanField(input, ['barrel2RebuildRepaired','barrel2_rebuild_repaired']);
+  const plungerRebuildRepaired = booleanField(input, ['plungerRebuildRepaired','plunger_rebuild_repaired']);
+  const plungerBarrelRebuildRepaired = booleanField(input, ['plungerBarrelRebuildRepaired','plunger_barrel_rebuild_repaired']);
   return {
     assetNumber, assetName: machineText(input, ['assetName','asset_name','name'], 160, assetNumber), brand,
     model: machineText(input, ['model','modelNumber','model_number'], 160), serialNumber: machineText(input, ['serialNumber','serial_number','equipSerialNumber'], 160),
@@ -5406,10 +5497,24 @@ function validateMachineAssetInput(body: unknown) {
     screwType: machineText(input, ['screwType','screw_type'], 120), screwTipType: machineText(input, ['screwTipType','screw_tip_type'], 120), screwTipInstalledDate: machineText(input, ['screwTipInstalledDate','screw_tip_installed_date'], 80), screwInstalledDate: machineText(input, ['screwInstalledDate','screw_installed_date'], 80),
     barrelInstalledDate: machineText(input, ['barrelInstalledDate','barrel_installed_date'], 80), barrelEndCapInstalledDate: machineText(input, ['barrelEndCapInstalledDate','barrel_end_cap_installed_date'], 80), barrelLength: machineText(input, ['barrelLength','barrel_length'], 80), screwLength: machineText(input, ['screwLength','screw_length'], 80),
     notes: machineText(input, ['notes'], 2400), criticalNotes: machineText(input, ['criticalNotes','critical_notes'], 2400),
+    hasDoubleShotInjection, hasPlungerInjection,
     screwRebuildRepaired, barrelRebuildRepaired,
     // Future Measurement Inspection workflow, GitHub issue #16, can set used/worn statuses here.
     screwConditionStatus: normalizeMachineConditionStatus(machineText(input, ['screwConditionStatus','screw_condition_status'], 40), screwRebuildRepaired),
     barrelConditionStatus: normalizeMachineConditionStatus(machineText(input, ['barrelConditionStatus','barrel_condition_status'], 40), barrelRebuildRepaired),
+    screw2Type: machineText(input, ['screw2Type','screw2_type'], 120), screw2TipType: machineText(input, ['screw2TipType','screw2_tip_type'], 120), screw2RebuildRepaired,
+    screw2InstalledDate: machineText(input, ['screw2InstalledDate','screw2_installed_date'], 80), screw2TipInstalledDate: machineText(input, ['screw2TipInstalledDate','screw2_tip_installed_date'], 80), screw2Length: machineText(input, ['screw2Length','screw2_length'], 80),
+    screw2ConditionStatus: normalizeMachineConditionStatus(machineText(input, ['screw2ConditionStatus','screw2_condition_status'], 40), screw2RebuildRepaired),
+    barrel2RebuildRepaired, barrel2InstalledDate: machineText(input, ['barrel2InstalledDate','barrel2_installed_date'], 80), barrel2EndCapInstalledDate: machineText(input, ['barrel2EndCapInstalledDate','barrel2_end_cap_installed_date'], 80),
+    barrel2Length: machineText(input, ['barrel2Length','barrel2_length'], 80), barrel2Diameter: machineText(input, ['barrel2Diameter','barrel2_diameter'], 120),
+    barrel2ConditionStatus: normalizeMachineConditionStatus(machineText(input, ['barrel2ConditionStatus','barrel2_condition_status'], 40), barrel2RebuildRepaired),
+    plungerType: machineText(input, ['plungerType','plunger_type'], 120), plungerRebuildRepaired, plungerInstalledDate: machineText(input, ['plungerInstalledDate','plunger_installed_date'], 80),
+    plungerLength: machineText(input, ['plungerLength','plunger_length'], 80), plungerDiameter: machineText(input, ['plungerDiameter','plunger_diameter'], 120),
+    plungerConditionStatus: normalizeMachineConditionStatus(machineText(input, ['plungerConditionStatus','plunger_condition_status'], 40), plungerRebuildRepaired),
+    plungerBarrelType: machineText(input, ['plungerBarrelType','plunger_barrel_type','cylinderBarrelType'], 120), plungerBarrelRebuildRepaired,
+    plungerBarrelInstalledDate: machineText(input, ['plungerBarrelInstalledDate','plunger_barrel_installed_date'], 80), plungerBarrelEndCapInstalledDate: machineText(input, ['plungerBarrelEndCapInstalledDate','plunger_barrel_end_cap_installed_date'], 80),
+    plungerBarrelLength: machineText(input, ['plungerBarrelLength','plunger_barrel_length'], 80), plungerBarrelDiameter: machineText(input, ['plungerBarrelDiameter','plunger_barrel_diameter'], 120),
+    plungerBarrelConditionStatus: normalizeMachineConditionStatus(machineText(input, ['plungerBarrelConditionStatus','plunger_barrel_condition_status'], 40), plungerBarrelRebuildRepaired),
   };
 }
 function publicMachineAsset(row: MachineAssetRow) {
@@ -5419,6 +5524,11 @@ function publicMachineAsset(row: MachineAssetRow) {
     machineLength: row.machine_length, machineWidth: row.machine_width, machineHeight: row.machine_height, fullDieHeightLength: row.full_die_height_length, screwType: row.screw_type, screwTipType: row.screw_tip_type, screwTipInstalledDate: row.screw_tip_installed_date, screwInstalledDate: row.screw_installed_date,
     barrelInstalledDate: row.barrel_installed_date, barrelEndCapInstalledDate: row.barrel_end_cap_installed_date, barrelLength: row.barrel_length, screwLength: row.screw_length, notes: row.notes, criticalNotes: row.critical_notes,
     screwRebuildRepaired: Boolean(row.screw_rebuild_repaired), barrelRebuildRepaired: Boolean(row.barrel_rebuild_repaired), screwConditionStatus: normalizeMachineConditionStatus(row.screw_condition_status ?? 'new', Boolean(row.screw_rebuild_repaired)), barrelConditionStatus: normalizeMachineConditionStatus(row.barrel_condition_status ?? 'new', Boolean(row.barrel_rebuild_repaired)),
+    hasDoubleShotInjection: Boolean(row.has_double_shot_injection), hasPlungerInjection: Boolean(row.has_plunger_injection),
+    screw2Type: row.screw2_type ?? '', screw2TipType: row.screw2_tip_type ?? '', screw2RebuildRepaired: Boolean(row.screw2_rebuild_repaired), screw2InstalledDate: row.screw2_installed_date ?? '', screw2TipInstalledDate: row.screw2_tip_installed_date ?? '', screw2Length: row.screw2_length ?? '', screw2ConditionStatus: normalizeMachineConditionStatus(row.screw2_condition_status ?? 'new', Boolean(row.screw2_rebuild_repaired)),
+    barrel2RebuildRepaired: Boolean(row.barrel2_rebuild_repaired), barrel2InstalledDate: row.barrel2_installed_date ?? '', barrel2EndCapInstalledDate: row.barrel2_end_cap_installed_date ?? '', barrel2Length: row.barrel2_length ?? '', barrel2Diameter: row.barrel2_diameter ?? '', barrel2ConditionStatus: normalizeMachineConditionStatus(row.barrel2_condition_status ?? 'new', Boolean(row.barrel2_rebuild_repaired)),
+    plungerType: row.plunger_type ?? '', plungerRebuildRepaired: Boolean(row.plunger_rebuild_repaired), plungerInstalledDate: row.plunger_installed_date ?? '', plungerLength: row.plunger_length ?? '', plungerDiameter: row.plunger_diameter ?? '', plungerConditionStatus: normalizeMachineConditionStatus(row.plunger_condition_status ?? 'new', Boolean(row.plunger_rebuild_repaired)),
+    plungerBarrelType: row.plunger_barrel_type ?? '', plungerBarrelRebuildRepaired: Boolean(row.plunger_barrel_rebuild_repaired), plungerBarrelInstalledDate: row.plunger_barrel_installed_date ?? '', plungerBarrelEndCapInstalledDate: row.plunger_barrel_end_cap_installed_date ?? '', plungerBarrelLength: row.plunger_barrel_length ?? '', plungerBarrelDiameter: row.plunger_barrel_diameter ?? '', plungerBarrelConditionStatus: normalizeMachineConditionStatus(row.plunger_barrel_condition_status ?? 'new', Boolean(row.plunger_barrel_rebuild_repaired)),
     createdAt: row.created_at, updatedAt: row.updated_at, deleted: Boolean(row.deleted),
     brandColorHex: safeHexColor(row.brand_color_hex, machineDefaultBrandColors.Default),
   };
@@ -5459,14 +5569,52 @@ function machineAssetChangedHistoryValues(before: MachineAssetRow, after: Machin
 function recordMachineAssetHistory(input: { action: string; actor: User; row: MachineAssetRow; oldValue?: Record<string, unknown> | null; newValue?: Record<string, unknown> | null; reasonNote?: string }) {
   recordHistoryLog({ section: 'machine_library', action: input.action, entityType: 'machine_asset', entityId: input.row.id, entityLabel: input.row.asset_number, assetId: String(input.row.id), machineName: input.row.asset_number, oldValue: input.oldValue, newValue: input.newValue, reasonNote: input.reasonNote, actor: input.actor });
 }
+function machineInjectionConfiguration(row: MachineAssetRow) {
+  const doubleShot = Boolean(row.has_double_shot_injection);
+  const plunger = Boolean(row.has_plunger_injection);
+  if (doubleShot && plunger) return 'double_shot_plunger';
+  if (doubleShot) return 'double_shot';
+  if (plunger) return 'plunger';
+  return 'standard';
+}
+function machineInjectionSetupHistoryValue(row: MachineAssetRow) {
+  return {
+    hasDoubleShotInjection: Boolean(row.has_double_shot_injection),
+    hasPlungerInjection: Boolean(row.has_plunger_injection),
+    injectionConfiguration: machineInjectionConfiguration(row),
+  };
+}
+function recordMachineInjectionSetupHistory(before: MachineAssetRow, after: MachineAssetRow, actor: User, reasonNote?: string) {
+  const oldValue = machineInjectionSetupHistoryValue(before);
+  const newValue = machineInjectionSetupHistoryValue(after);
+  if (JSON.stringify(oldValue) === JSON.stringify(newValue)) return;
+  recordMachineAssetHistory({ action: 'machine_injection_setup_updated', actor, row: after, oldValue, newValue, reasonNote });
+}
+function machineAssetColumnValues(input: MachineAssetInput): Array<[string, SqlParam]> {
+  return [
+    ['asset_number', input.assetNumber], ['asset_name', input.assetName], ['brand', input.brand], ['model', input.model], ['serial_number', input.serialNumber], ['machine_year', input.machineYear], ['machine_type', input.machineType], ['power_type', input.powerType], ['shot_size_oz', input.shotSizeOz], ['tonnage', input.tonnage],
+    ['barrel_diameter', input.barrelDiameter], ['has_double_shot_injection', input.hasDoubleShotInjection ? 1 : 0], ['has_plunger_injection', input.hasPlungerInjection ? 1 : 0], ['location', input.location], ['department', input.department], ['status', input.status], ['voltage_value', input.voltageValue], ['voltage_type', input.voltageType], ['full_load_amp', input.fullLoadAmp],
+    ['machine_length', input.machineLength], ['machine_width', input.machineWidth], ['machine_height', input.machineHeight], ['full_die_height_length', input.fullDieHeightLength], ['screw_type', input.screwType], ['screw_tip_type', input.screwTipType], ['screw_tip_installed_date', input.screwTipInstalledDate], ['screw_installed_date', input.screwInstalledDate],
+    ['barrel_installed_date', input.barrelInstalledDate], ['barrel_end_cap_installed_date', input.barrelEndCapInstalledDate], ['barrel_length', input.barrelLength], ['screw_length', input.screwLength], ['notes', input.notes], ['critical_notes', input.criticalNotes],
+    ['screw_rebuild_repaired', input.screwRebuildRepaired ? 1 : 0], ['barrel_rebuild_repaired', input.barrelRebuildRepaired ? 1 : 0], ['screw_condition_status', input.screwConditionStatus], ['barrel_condition_status', input.barrelConditionStatus],
+    ['screw2_type', input.screw2Type], ['screw2_tip_type', input.screw2TipType], ['screw2_rebuild_repaired', input.screw2RebuildRepaired ? 1 : 0], ['screw2_installed_date', input.screw2InstalledDate], ['screw2_tip_installed_date', input.screw2TipInstalledDate], ['screw2_length', input.screw2Length], ['screw2_condition_status', input.screw2ConditionStatus],
+    ['barrel2_rebuild_repaired', input.barrel2RebuildRepaired ? 1 : 0], ['barrel2_installed_date', input.barrel2InstalledDate], ['barrel2_end_cap_installed_date', input.barrel2EndCapInstalledDate], ['barrel2_length', input.barrel2Length], ['barrel2_diameter', input.barrel2Diameter], ['barrel2_condition_status', input.barrel2ConditionStatus],
+    ['plunger_type', input.plungerType], ['plunger_rebuild_repaired', input.plungerRebuildRepaired ? 1 : 0], ['plunger_installed_date', input.plungerInstalledDate], ['plunger_length', input.plungerLength], ['plunger_diameter', input.plungerDiameter], ['plunger_condition_status', input.plungerConditionStatus],
+    ['plunger_barrel_type', input.plungerBarrelType], ['plunger_barrel_rebuild_repaired', input.plungerBarrelRebuildRepaired ? 1 : 0], ['plunger_barrel_installed_date', input.plungerBarrelInstalledDate], ['plunger_barrel_end_cap_installed_date', input.plungerBarrelEndCapInstalledDate], ['plunger_barrel_length', input.plungerBarrelLength], ['plunger_barrel_diameter', input.plungerBarrelDiameter], ['plunger_barrel_condition_status', input.plungerBarrelConditionStatus],
+  ];
+}
 function insertMachineAsset(input: MachineAssetInput, actor: User, timestamp: string) {
   ensureMachineBrandSetting(input.brand, actor);
-  const result = run(`INSERT INTO machine_assets (asset_number,asset_name,brand,model,serial_number,machine_year,machine_type,power_type,shot_size_oz,tonnage,barrel_diameter,location,department,status,voltage_value,voltage_type,full_load_amp,machine_length,machine_width,machine_height,full_die_height_length,screw_type,screw_tip_type,screw_tip_installed_date,screw_installed_date,barrel_installed_date,barrel_end_cap_installed_date,barrel_length,screw_length,notes,critical_notes,screw_rebuild_repaired,barrel_rebuild_repaired,screw_condition_status,barrel_condition_status,created_at,updated_at,created_by_user_id,updated_by_user_id,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [input.assetNumber,input.assetName,input.brand,input.model,input.serialNumber,input.machineYear,input.machineType,input.powerType,input.shotSizeOz,input.tonnage,input.barrelDiameter,input.location,input.department,input.status,input.voltageValue,input.voltageType,input.fullLoadAmp,input.machineLength,input.machineWidth,input.machineHeight,input.fullDieHeightLength,input.screwType,input.screwTipType,input.screwTipInstalledDate,input.screwInstalledDate,input.barrelInstalledDate,input.barrelEndCapInstalledDate,input.barrelLength,input.screwLength,input.notes,input.criticalNotes,input.screwRebuildRepaired ? 1 : 0,input.barrelRebuildRepaired ? 1 : 0,input.screwConditionStatus,input.barrelConditionStatus,timestamp,timestamp,actor.id,actor.id]);
+  const pairs = machineAssetColumnValues(input);
+  const columns = [...pairs.map(([column])=>column), 'created_at', 'updated_at', 'created_by_user_id', 'updated_by_user_id', 'deleted'];
+  const values = [...pairs.map(([, value])=>value), timestamp, timestamp, actor.id, actor.id, 0];
+  const result = run(`INSERT INTO machine_assets (${columns.join(',')}) VALUES (${columns.map(()=>'?').join(',')})`, values);
   return Number(result.lastInsertRowid);
 }
 function updateMachineAsset(id: number, input: MachineAssetInput, actor: User, timestamp: string) {
   ensureMachineBrandSetting(input.brand, actor);
-  run(`UPDATE machine_assets SET asset_number=?,asset_name=?,brand=?,model=?,serial_number=?,machine_year=?,machine_type=?,power_type=?,shot_size_oz=?,tonnage=?,barrel_diameter=?,location=?,department=?,status=?,voltage_value=?,voltage_type=?,full_load_amp=?,machine_length=?,machine_width=?,machine_height=?,full_die_height_length=?,screw_type=?,screw_tip_type=?,screw_tip_installed_date=?,screw_installed_date=?,barrel_installed_date=?,barrel_end_cap_installed_date=?,barrel_length=?,screw_length=?,notes=?,critical_notes=?,screw_rebuild_repaired=?,barrel_rebuild_repaired=?,screw_condition_status=?,barrel_condition_status=?,updated_at=?,updated_by_user_id=?,deleted=0,deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?`, [input.assetNumber,input.assetName,input.brand,input.model,input.serialNumber,input.machineYear,input.machineType,input.powerType,input.shotSizeOz,input.tonnage,input.barrelDiameter,input.location,input.department,input.status,input.voltageValue,input.voltageType,input.fullLoadAmp,input.machineLength,input.machineWidth,input.machineHeight,input.fullDieHeightLength,input.screwType,input.screwTipType,input.screwTipInstalledDate,input.screwInstalledDate,input.barrelInstalledDate,input.barrelEndCapInstalledDate,input.barrelLength,input.screwLength,input.notes,input.criticalNotes,input.screwRebuildRepaired ? 1 : 0,input.barrelRebuildRepaired ? 1 : 0,input.screwConditionStatus,input.barrelConditionStatus,timestamp,actor.id,id]);
+  const pairs = machineAssetColumnValues(input);
+  run(`UPDATE machine_assets SET ${pairs.map(([column])=>`${column}=?`).join(',')},updated_at=?,updated_by_user_id=?,deleted=0,deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?`, [...pairs.map(([, value])=>value), timestamp, actor.id, id]);
 }
 function machineCsvFromRecords(headers: readonly MachineExportHeader[], rows: MachineExportRecord[]) {
   const lines = [headers.map(csvCell).join(',')];
@@ -5504,6 +5652,8 @@ function machineExportRecord(row: MachineAssetRow): MachineExportRecord {
     'Shot Size (oz)': Number(row.shot_size_oz ?? 0),
     Tonnage: Number(row.tonnage ?? 0),
     'Barrel/Screw Diameter': row.barrel_diameter,
+    'Double Shot Injection': yesNo(row.has_double_shot_injection),
+    'Plunger Injection': yesNo(row.has_plunger_injection),
     Location: row.location,
     Status: row.status,
     Voltage: row.voltage_value,
@@ -5523,6 +5673,28 @@ function machineExportRecord(row: MachineAssetRow): MachineExportRecord {
     'Barrel End Cap Installed Date': row.barrel_end_cap_installed_date,
     'Barrel Length': row.barrel_length,
     'Screw Length': row.screw_length,
+    'Screw 2 Type': row.screw2_type,
+    'Screw 2 Tip Type': row.screw2_tip_type,
+    'Screw 2 Rebuild / Repaired': yesNo(row.screw2_rebuild_repaired),
+    'Screw 2 Installed Date': row.screw2_installed_date,
+    'Screw 2 Tip Installed Date': row.screw2_tip_installed_date,
+    'Screw 2 Length': row.screw2_length,
+    'Barrel 2 Rebuild / Repaired': yesNo(row.barrel2_rebuild_repaired),
+    'Barrel 2 Installed Date': row.barrel2_installed_date,
+    'Barrel 2 End Cap Installed Date': row.barrel2_end_cap_installed_date,
+    'Barrel 2 Length': row.barrel2_length,
+    'Barrel 2 Diameter': row.barrel2_diameter,
+    'Plunger Type': row.plunger_type,
+    'Plunger Rebuild / Repaired': yesNo(row.plunger_rebuild_repaired),
+    'Plunger Installed Date': row.plunger_installed_date,
+    'Plunger Length': row.plunger_length,
+    'Plunger Diameter': row.plunger_diameter,
+    'Plunger Barrel Type': row.plunger_barrel_type,
+    'Plunger Barrel Rebuild / Repaired': yesNo(row.plunger_barrel_rebuild_repaired),
+    'Plunger Barrel Installed Date': row.plunger_barrel_installed_date,
+    'Plunger Barrel End Cap Installed Date': row.plunger_barrel_end_cap_installed_date,
+    'Plunger Barrel Length': row.plunger_barrel_length,
+    'Plunger Barrel Diameter': row.plunger_barrel_diameter,
     Notes: row.notes,
     'Critical Notes': row.critical_notes,
   };
@@ -5560,6 +5732,8 @@ function machineImportRecordFromRow(record: Record<string, string>, headers: str
     shotSizeOz: value('Shot Size (oz)','Shot','Shot (oz)','Shot Size Oz'),
     tonnage: value('Tonnage','Ton','Tons'),
     barrelDiameter: value('Barrel/Screw Diameter','Barrel','Screw Diameter','Barrel Diameter'),
+    hasDoubleShotInjection: value('Double Shot Injection','Double Shot','Has Double Shot Injection','has_double_shot_injection'),
+    hasPlungerInjection: value('Plunger Injection','Plunger','Has Plunger Injection','has_plunger_injection'),
     location: value('Location'),
     status: value('Status'),
     voltageValue: value('Voltage'),
@@ -5579,6 +5753,28 @@ function machineImportRecordFromRow(record: Record<string, string>, headers: str
     barrelEndCapInstalledDate: value('Barrel End Cap Installed Date','Barrel End Cap Install Date'),
     barrelLength: value('Barrel Length'),
     screwLength: value('Screw Length'),
+    screw2Type: value('Screw 2 Type','Screw2 Type','Unit 2 Screw Type'),
+    screw2TipType: value('Screw 2 Tip Type','Screw2 Tip Type','Unit 2 Screw Tip Type'),
+    screw2RebuildRepaired: value('Screw 2 Rebuild / Repaired','Screw 2 Rebuild Repaired','Screw2 Rebuild Repaired','Screw 2 Rebuilt','Screw 2 Repaired'),
+    screw2InstalledDate: value('Screw 2 Installed Date','Screw 2 Install Date','Screw2 Installed Date','Unit 2 Screw Installed Date'),
+    screw2TipInstalledDate: value('Screw 2 Tip Installed Date','Screw 2 Tip Install Date','Screw2 Tip Installed Date','Unit 2 Screw Tip Installed Date'),
+    screw2Length: value('Screw 2 Length','Screw2 Length','Unit 2 Screw Length'),
+    barrel2RebuildRepaired: value('Barrel 2 Rebuild / Repaired','Barrel 2 Rebuild Repaired','Barrel2 Rebuild Repaired','Barrel 2 Rebuilt','Barrel 2 Repaired'),
+    barrel2InstalledDate: value('Barrel 2 Installed Date','Barrel 2 Install Date','Barrel2 Installed Date','Unit 2 Barrel Installed Date'),
+    barrel2EndCapInstalledDate: value('Barrel 2 End Cap Installed Date','Barrel 2 End Cap Install Date','Barrel2 End Cap Installed Date','Unit 2 Barrel End Cap Installed Date'),
+    barrel2Length: value('Barrel 2 Length','Barrel2 Length','Unit 2 Barrel Length'),
+    barrel2Diameter: value('Barrel 2 Diameter','Barrel2 Diameter','Unit 2 Barrel Diameter'),
+    plungerType: value('Plunger Type'),
+    plungerRebuildRepaired: value('Plunger Rebuild / Repaired','Plunger Rebuild Repaired','Plunger Rebuilt','Plunger Repaired'),
+    plungerInstalledDate: value('Plunger Installed Date','Plunger Install Date'),
+    plungerLength: value('Plunger Length'),
+    plungerDiameter: value('Plunger Diameter'),
+    plungerBarrelType: value('Plunger Barrel Type','Cylinder Barrel Type','Plunger Cylinder Barrel Type'),
+    plungerBarrelRebuildRepaired: value('Plunger Barrel Rebuild / Repaired','Plunger Barrel Rebuild Repaired','Cylinder Barrel Rebuild / Repaired','Cylinder Barrel Rebuild Repaired'),
+    plungerBarrelInstalledDate: value('Plunger Barrel Installed Date','Plunger Barrel Install Date','Cylinder Barrel Installed Date','Cylinder Barrel Install Date'),
+    plungerBarrelEndCapInstalledDate: value('Plunger Barrel End Cap Installed Date','Plunger Barrel End Cap Install Date','Cylinder Barrel End Cap Installed Date'),
+    plungerBarrelLength: value('Plunger Barrel Length','Cylinder Barrel Length'),
+    plungerBarrelDiameter: value('Plunger Barrel Diameter','Cylinder Barrel Diameter'),
     notes: value('Notes','Note'),
     criticalNotes: value('Critical Notes','Critical Note','Red Notes','Red Note'),
     present: {
@@ -5592,6 +5788,8 @@ function machineImportRecordFromRow(record: Record<string, string>, headers: str
       shotSizeOz: has('Shot Size (oz)','Shot','Shot (oz)','Shot Size Oz'),
       tonnage: has('Tonnage','Ton','Tons'),
       barrelDiameter: has('Barrel/Screw Diameter','Barrel','Screw Diameter','Barrel Diameter'),
+      hasDoubleShotInjection: has('Double Shot Injection','Double Shot','Has Double Shot Injection','has_double_shot_injection'),
+      hasPlungerInjection: has('Plunger Injection','Plunger','Has Plunger Injection','has_plunger_injection'),
       location: has('Location'),
       status: has('Status'),
       voltageValue: has('Voltage'),
@@ -5611,6 +5809,28 @@ function machineImportRecordFromRow(record: Record<string, string>, headers: str
       barrelEndCapInstalledDate: has('Barrel End Cap Installed Date','Barrel End Cap Install Date'),
       barrelLength: has('Barrel Length'),
       screwLength: has('Screw Length'),
+      screw2Type: has('Screw 2 Type','Screw2 Type','Unit 2 Screw Type'),
+      screw2TipType: has('Screw 2 Tip Type','Screw2 Tip Type','Unit 2 Screw Tip Type'),
+      screw2RebuildRepaired: has('Screw 2 Rebuild / Repaired','Screw 2 Rebuild Repaired','Screw2 Rebuild Repaired','Screw 2 Rebuilt','Screw 2 Repaired'),
+      screw2InstalledDate: has('Screw 2 Installed Date','Screw 2 Install Date','Screw2 Installed Date','Unit 2 Screw Installed Date'),
+      screw2TipInstalledDate: has('Screw 2 Tip Installed Date','Screw 2 Tip Install Date','Screw2 Tip Installed Date','Unit 2 Screw Tip Installed Date'),
+      screw2Length: has('Screw 2 Length','Screw2 Length','Unit 2 Screw Length'),
+      barrel2RebuildRepaired: has('Barrel 2 Rebuild / Repaired','Barrel 2 Rebuild Repaired','Barrel2 Rebuild Repaired','Barrel 2 Rebuilt','Barrel 2 Repaired'),
+      barrel2InstalledDate: has('Barrel 2 Installed Date','Barrel 2 Install Date','Barrel2 Installed Date','Unit 2 Barrel Installed Date'),
+      barrel2EndCapInstalledDate: has('Barrel 2 End Cap Installed Date','Barrel 2 End Cap Install Date','Barrel2 End Cap Installed Date','Unit 2 Barrel End Cap Installed Date'),
+      barrel2Length: has('Barrel 2 Length','Barrel2 Length','Unit 2 Barrel Length'),
+      barrel2Diameter: has('Barrel 2 Diameter','Barrel2 Diameter','Unit 2 Barrel Diameter'),
+      plungerType: has('Plunger Type'),
+      plungerRebuildRepaired: has('Plunger Rebuild / Repaired','Plunger Rebuild Repaired','Plunger Rebuilt','Plunger Repaired'),
+      plungerInstalledDate: has('Plunger Installed Date','Plunger Install Date'),
+      plungerLength: has('Plunger Length'),
+      plungerDiameter: has('Plunger Diameter'),
+      plungerBarrelType: has('Plunger Barrel Type','Cylinder Barrel Type','Plunger Cylinder Barrel Type'),
+      plungerBarrelRebuildRepaired: has('Plunger Barrel Rebuild / Repaired','Plunger Barrel Rebuild Repaired','Cylinder Barrel Rebuild / Repaired','Cylinder Barrel Rebuild Repaired'),
+      plungerBarrelInstalledDate: has('Plunger Barrel Installed Date','Plunger Barrel Install Date','Cylinder Barrel Installed Date','Cylinder Barrel Install Date'),
+      plungerBarrelEndCapInstalledDate: has('Plunger Barrel End Cap Installed Date','Plunger Barrel End Cap Install Date','Cylinder Barrel End Cap Installed Date'),
+      plungerBarrelLength: has('Plunger Barrel Length','Cylinder Barrel Length'),
+      plungerBarrelDiameter: has('Plunger Barrel Diameter','Cylinder Barrel Diameter'),
       notes: has('Notes','Note'),
       criticalNotes: has('Critical Notes','Critical Note','Red Notes','Red Note'),
     },
@@ -5668,6 +5888,8 @@ function machineInputFromImport(row: MachineImportRow, existing?: MachineAssetRo
   applyText('shotSizeOz', 'shotSizeOz', row.shotSizeOz);
   applyText('tonnage', 'tonnage', row.tonnage);
   applyText('barrelDiameter', 'barrelDiameter', row.barrelDiameter);
+  if (row.present.hasDoubleShotInjection) body.hasDoubleShotInjection = machineImportBoolean(row.hasDoubleShotInjection);
+  if (row.present.hasPlungerInjection) body.hasPlungerInjection = machineImportBoolean(row.hasPlungerInjection);
   applyText('location', 'location', row.location);
   applyText('status', 'status', row.status);
   applyText('voltageValue', 'voltageValue', row.voltageValue);
@@ -5685,10 +5907,32 @@ function machineInputFromImport(row: MachineImportRow, existing?: MachineAssetRo
   applyText('barrelEndCapInstalledDate', 'barrelEndCapInstalledDate', row.barrelEndCapInstalledDate);
   applyText('barrelLength', 'barrelLength', row.barrelLength);
   applyText('screwLength', 'screwLength', row.screwLength);
+  applyText('screw2Type', 'screw2Type', row.screw2Type);
+  applyText('screw2TipType', 'screw2TipType', row.screw2TipType);
+  applyText('screw2InstalledDate', 'screw2InstalledDate', row.screw2InstalledDate);
+  applyText('screw2TipInstalledDate', 'screw2TipInstalledDate', row.screw2TipInstalledDate);
+  applyText('screw2Length', 'screw2Length', row.screw2Length);
+  applyText('barrel2InstalledDate', 'barrel2InstalledDate', row.barrel2InstalledDate);
+  applyText('barrel2EndCapInstalledDate', 'barrel2EndCapInstalledDate', row.barrel2EndCapInstalledDate);
+  applyText('barrel2Length', 'barrel2Length', row.barrel2Length);
+  applyText('barrel2Diameter', 'barrel2Diameter', row.barrel2Diameter);
+  applyText('plungerType', 'plungerType', row.plungerType);
+  applyText('plungerInstalledDate', 'plungerInstalledDate', row.plungerInstalledDate);
+  applyText('plungerLength', 'plungerLength', row.plungerLength);
+  applyText('plungerDiameter', 'plungerDiameter', row.plungerDiameter);
+  applyText('plungerBarrelType', 'plungerBarrelType', row.plungerBarrelType);
+  applyText('plungerBarrelInstalledDate', 'plungerBarrelInstalledDate', row.plungerBarrelInstalledDate);
+  applyText('plungerBarrelEndCapInstalledDate', 'plungerBarrelEndCapInstalledDate', row.plungerBarrelEndCapInstalledDate);
+  applyText('plungerBarrelLength', 'plungerBarrelLength', row.plungerBarrelLength);
+  applyText('plungerBarrelDiameter', 'plungerBarrelDiameter', row.plungerBarrelDiameter);
   applyText('notes', 'notes', row.notes);
   applyText('criticalNotes', 'criticalNotes', row.criticalNotes);
   if (row.present.screwRebuildRepaired) body.screwRebuildRepaired = machineImportBoolean(row.screwRebuildRepaired);
   if (row.present.barrelRebuildRepaired) body.barrelRebuildRepaired = machineImportBoolean(row.barrelRebuildRepaired);
+  if (row.present.screw2RebuildRepaired) body.screw2RebuildRepaired = machineImportBoolean(row.screw2RebuildRepaired);
+  if (row.present.barrel2RebuildRepaired) body.barrel2RebuildRepaired = machineImportBoolean(row.barrel2RebuildRepaired);
+  if (row.present.plungerRebuildRepaired) body.plungerRebuildRepaired = machineImportBoolean(row.plungerRebuildRepaired);
+  if (row.present.plungerBarrelRebuildRepaired) body.plungerBarrelRebuildRepaired = machineImportBoolean(row.plungerBarrelRebuildRepaired);
   return validateMachineAssetInput(body);
 }
 function addMachineImportError(summary: MachineImportSummary, message: string) {
@@ -5737,6 +5981,7 @@ function importMachineAssetRows(req: AuthRequest, rows: MachineImportRow[], mode
           const changes = machineAssetChangedHistoryValues(existing, updated);
           summary.updatedCount += 1;
           recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue: changes.oldValue, newValue: changes.newValue, reasonNote: 'Machine asset imported from CSV/XLSX.' });
+          recordMachineInjectionSetupHistory(existing, updated, actor, 'Machine asset imported from CSV/XLSX.');
         } else {
           const deletedCandidate = machineAssetMatchesByNumber(row.assetNumber, true).find(asset => Number(asset.deleted) !== 0) ?? null;
           const input = machineInputFromImport(row, deletedCandidate);
@@ -5765,6 +6010,13 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
   screw_tip: { column: 'screw_tip_installed_date', action: 'new_screw_tip_installed', label: 'Screw Tip' },
   barrel: { column: 'barrel_installed_date', action: 'new_barrel_installed', label: 'Barrel' },
   barrel_end_cap: { column: 'barrel_end_cap_installed_date', action: 'new_barrel_end_cap_installed', label: 'Barrel End Cap' },
+  screw2: { column: 'screw2_installed_date', action: 'new_screw2_installed', label: 'Screw 2' },
+  screw2_tip: { column: 'screw2_tip_installed_date', action: 'new_screw2_tip_installed', label: 'Screw 2 Tip' },
+  barrel2: { column: 'barrel2_installed_date', action: 'new_barrel2_installed', label: 'Barrel 2' },
+  barrel2_end_cap: { column: 'barrel2_end_cap_installed_date', action: 'new_barrel2_end_cap_installed', label: 'Barrel 2 End Cap' },
+  plunger: { column: 'plunger_installed_date', action: 'new_plunger_installed', label: 'Plunger' },
+  plunger_barrel: { column: 'plunger_barrel_installed_date', action: 'new_plunger_barrel_installed', label: 'Plunger Barrel' },
+  plunger_barrel_end_cap: { column: 'plunger_barrel_end_cap_installed_date', action: 'new_plunger_barrel_end_cap_installed', label: 'Plunger Barrel End Cap' },
 };
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
@@ -6193,7 +6445,9 @@ app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machi
     updateMachineAsset(id, input, actor, timestamp);
     const updated = machineAssetById(id)!;
     const changes = machineAssetChangedHistoryValues(existing, updated);
-    recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue: changes.oldValue, newValue: changes.newValue, reasonNote: textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']) });
+    const reasonNote = textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']);
+    recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue: changes.oldValue, newValue: changes.newValue, reasonNote });
+    recordMachineInjectionSetupHistory(existing, updated, actor, reasonNote);
     audit(req,'machine asset update','machine_asset',id,{assetNumber:input.assetNumber});
     scheduleAutoBackup('machine asset update', actor);
     res.json({ok:true,asset:publicMachineAsset(updated)});
