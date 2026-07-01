@@ -967,3 +967,72 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .inventory-search { top: 68px; }
   .inventory-table-wrap { max-height: calc(100vh - 188px); }
 }
+
+/* PATCH: Machine card Screw / Barrel alignment
+   Layout target:
+   Screw New      Barrel New
+   Screw          Barrel
+   Tip            End Cap
+*/
+.machine-condition-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.machine-condition-strip .machine-setup-badge {
+  grid-column: 1 / -1;
+  justify-self: start;
+  max-width: 100%;
+}
+
+.machine-condition-strip .machine-condition-label {
+  width: 100%;
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 8px;
+  text-align: center;
+}
+
+.machine-component-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.machine-component-summary-grid > div {
+  min-height: 56px;
+  align-content: center;
+}
+
+/* Standard injection assets render as Screw, Tip, Barrel, End Cap.
+   Reorder only 4-box standard cards into Screw/Barrel then Tip/End Cap. */
+.machine-component-summary-grid:not(:has(> div:nth-child(5))) > div:nth-child(1) {
+  order: 1;
+}
+
+.machine-component-summary-grid:not(:has(> div:nth-child(5))) > div:nth-child(3) {
+  order: 2;
+}
+
+.machine-component-summary-grid:not(:has(> div:nth-child(5))) > div:nth-child(2) {
+  order: 3;
+}
+
+.machine-component-summary-grid:not(:has(> div:nth-child(5))) > div:nth-child(4) {
+  order: 4;
+}
+
+@media (max-width: 520px) {
+  .machine-condition-strip,
+  .machine-component-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .machine-component-summary-grid > div {
+    order: initial !important;
+  }
+}
+
