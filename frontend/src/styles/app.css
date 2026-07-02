@@ -1,14 +1,27 @@
 :root {
-  color: #e8f6ff;
-  background: #071425;
+  color: #eef8ff;
+  background: #02070f;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mcc-topbar-safe-offset: 96px;
   --mcc-modal-bottom-safe: 18px;
   --mcc-modal-available-height: calc(100dvh - var(--mcc-topbar-safe-offset) - var(--mcc-modal-bottom-safe));
-  --mcc-liquid-background: radial-gradient(circle at 18% 10%, rgba(93,222,255,.24), transparent 27%), radial-gradient(circle at 84% 16%, rgba(54,229,170,.12), transparent 31%), radial-gradient(circle at 96% 78%, rgba(255,153,64,.1), transparent 26%), radial-gradient(circle at 58% 92%, rgba(30,107,255,.18), transparent 36%), linear-gradient(145deg, #020b16 0%, #071425 48%, #04101f 100%);
-  --mcc-liquid-reflection: linear-gradient(118deg, rgba(255,255,255,.1), rgba(68,215,255,.045) 24%, transparent 43%), radial-gradient(ellipse at 42% 14%, rgba(198,247,255,.13), transparent 36%), radial-gradient(ellipse at 8% 86%, rgba(68,215,255,.09), transparent 36%), radial-gradient(ellipse at 100% 52%, rgba(255,178,94,.08), transparent 28%);
-  --mcc-liquid-sheen: linear-gradient(164deg, transparent 0 23%, rgba(255,255,255,.04) 24%, rgba(68,215,255,.022) 35%, transparent 47% 62%, rgba(255,255,255,.026) 63%, transparent 78%), repeating-linear-gradient(115deg, rgba(255,255,255,.016) 0 1px, transparent 1px 28px);
-  --mcc-modal-glass-backdrop: radial-gradient(circle at 18% 12%, rgba(68,215,255,.12), transparent 34%), radial-gradient(circle at 98% 78%, rgba(255,153,64,.07), transparent 28%), linear-gradient(135deg, rgba(1,8,17,.86), rgba(2,14,28,.76));
+  --mcc-cyan: #44d7ff;
+  --mcc-teal: #36e5aa;
+  --mcc-blue: #1e6bff;
+  --mcc-amber: #ffb45f;
+  --mcc-red: #ff6f86;
+  --mcc-steel: #9ec7d8;
+  --mcc-graphite: #06101c;
+  --mcc-graphite-deep: #02070f;
+  --mcc-glass-fill: linear-gradient(145deg, rgba(28, 43, 57, 0.68), rgba(4, 13, 24, 0.82));
+  --mcc-glass-fill-strong: linear-gradient(145deg, rgba(31, 49, 64, 0.82), rgba(4, 12, 23, 0.92));
+  --mcc-glass-border: rgba(210, 235, 255, 0.16);
+  --mcc-glass-highlight: rgba(255, 255, 255, 0.1);
+  --mcc-control-shadow: 0 18px 46px rgba(0,0,0,.34), inset 0 1px 0 var(--mcc-glass-highlight);
+  --mcc-liquid-background: radial-gradient(circle at 14% 7%, rgba(68,215,255,.26), transparent 30%), radial-gradient(ellipse at 88% 13%, rgba(54,229,170,.13), transparent 33%), radial-gradient(circle at 95% 76%, rgba(255,180,95,.15), transparent 28%), radial-gradient(ellipse at 56% 102%, rgba(30,107,255,.18), transparent 42%), linear-gradient(145deg, #02070f 0%, #07111e 43%, #040b14 100%);
+  --mcc-liquid-reflection: linear-gradient(118deg, rgba(255,255,255,.11), rgba(68,215,255,.055) 24%, transparent 45%), radial-gradient(ellipse at 42% 14%, rgba(198,247,255,.15), transparent 36%), radial-gradient(ellipse at 8% 86%, rgba(68,215,255,.09), transparent 36%), radial-gradient(ellipse at 100% 52%, rgba(255,180,95,.11), transparent 28%);
+  --mcc-liquid-sheen: linear-gradient(164deg, transparent 0 22%, rgba(255,255,255,.05) 23%, rgba(68,215,255,.026) 35%, transparent 48% 62%, rgba(255,180,95,.03) 63%, transparent 78%), repeating-linear-gradient(115deg, rgba(255,255,255,.018) 0 1px, transparent 1px 28px), repeating-linear-gradient(0deg, rgba(158,199,216,.025) 0 1px, transparent 1px 54px);
+  --mcc-modal-glass-backdrop: radial-gradient(circle at 18% 12%, rgba(68,215,255,.14), transparent 34%), radial-gradient(circle at 98% 78%, rgba(255,180,95,.1), transparent 28%), linear-gradient(135deg, rgba(1,8,17,.9), rgba(2,14,28,.82));
 }
 
 html, body, #root { width: 100%; max-width: 100%; min-height: 100%; overflow-x: hidden; }
@@ -1110,6 +1123,795 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 
   .machine-component-summary-grid > div {
     order: initial !important;
+  }
+}
+
+/* PATCH: Maintenance modern art UI refresh */
+:root {
+  --mcc-graphite-950: #03070d;
+  --mcc-graphite-900: #050d17;
+  --mcc-graphite-800: #0b1724;
+  --mcc-steel-700: #243545;
+  --mcc-steel-500: #7ea4b8;
+  --mcc-glass-fill: linear-gradient(145deg, rgba(24, 37, 50, 0.66), rgba(5, 13, 24, 0.82));
+  --mcc-glass-fill-strong: linear-gradient(145deg, rgba(29, 45, 60, 0.76), rgba(5, 13, 24, 0.9));
+  --mcc-glass-border: rgba(210, 235, 255, 0.16);
+  --mcc-glass-border-strong: rgba(123, 220, 255, 0.34);
+  --mcc-glass-highlight: rgba(255, 255, 255, 0.11);
+  --mcc-cyan: #44d7ff;
+  --mcc-teal: #36e5aa;
+  --mcc-blue: #1e6bff;
+  --mcc-amber: #ffb45f;
+  --mcc-warning: #ffd36f;
+  --mcc-danger: #ff758a;
+  --mcc-good: #36e5aa;
+  --mcc-readable: #f3fbff;
+  --mcc-muted: #a9c5d6;
+  --mcc-panel-shadow: 0 20px 54px rgba(0, 0, 0, 0.36), inset 0 1px 0 var(--mcc-glass-highlight);
+  --mcc-panel-shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.08);
+  --mcc-liquid-background:
+    radial-gradient(circle at 16% 8%, rgba(68, 215, 255, 0.23), transparent 26%),
+    radial-gradient(circle at 78% 14%, rgba(54, 229, 170, 0.14), transparent 28%),
+    radial-gradient(circle at 96% 74%, rgba(255, 151, 70, 0.15), transparent 25%),
+    radial-gradient(circle at 42% 108%, rgba(30, 107, 255, 0.18), transparent 34%),
+    linear-gradient(150deg, #01050a 0%, #07111d 35%, #101823 61%, #030a13 100%);
+  --mcc-liquid-reflection:
+    linear-gradient(112deg, rgba(255,255,255,.11), rgba(68,215,255,.045) 18%, transparent 34%),
+    linear-gradient(22deg, transparent 0 46%, rgba(255,180,95,.07) 47%, transparent 62%),
+    radial-gradient(ellipse at 34% 12%, rgba(203,248,255,.14), transparent 36%),
+    radial-gradient(ellipse at 88% 42%, rgba(54,229,170,.08), transparent 30%);
+  --mcc-liquid-sheen:
+    linear-gradient(164deg, transparent 0 18%, rgba(255,255,255,.035) 19%, rgba(68,215,255,.024) 30%, transparent 42% 58%, rgba(255,180,95,.028) 59%, transparent 74%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.012) 0 1px, transparent 1px 54px),
+    repeating-linear-gradient(0deg, rgba(68,215,255,.01) 0 1px, transparent 1px 48px);
+  --mcc-modal-glass-backdrop:
+    radial-gradient(circle at 20% 12%, rgba(68,215,255,.15), transparent 34%),
+    radial-gradient(circle at 96% 76%, rgba(255,153,64,.1), transparent 28%),
+    linear-gradient(135deg, rgba(1,8,17,.9), rgba(2,14,28,.78));
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% -20%, rgba(68, 215, 255, 0.09), transparent 42%),
+    #01050a;
+  color: var(--mcc-readable);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mcc-shell::before,
+.auth-shell::before {
+  opacity: 1;
+  filter: saturate(118%);
+}
+
+.mcc-shell::after,
+.auth-shell::after {
+  opacity: .48;
+  mix-blend-mode: screen;
+}
+
+.mcc-main {
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.025), transparent 22% 78%, rgba(255,180,95,.025)),
+    linear-gradient(180deg, rgba(255,255,255,.018), transparent 160px);
+}
+
+.mcc-card,
+.mcc-full-width-panel,
+.auth-card,
+.machine-asset-card,
+.vendor-card,
+.backup-tier-card,
+.backup-status-panel,
+.backup-list-row,
+.restore-panel,
+.inventory-tools-panel,
+.inventory-tool-summary,
+.machine-form-section,
+.machine-replacement-panel,
+.machine-component-box,
+.vendor-contact-edit-card,
+.vendor-contact-card,
+.vendor-detail-row,
+.vendor-contact-info-grid div,
+.vendor-card-detail-grid div,
+.vendor-contact-count-box,
+.vendor-email-box,
+.requisition-review-row,
+.requisition-line-row,
+.requisition-created-panel,
+.history-preview-row {
+  position: relative;
+  border-color: var(--mcc-glass-border);
+  background: var(--mcc-glass-fill);
+  box-shadow: var(--mcc-panel-shadow-soft);
+  backdrop-filter: blur(16px) saturate(126%);
+}
+
+.mcc-card::before,
+.mcc-full-width-panel::before,
+.auth-card::before,
+.machine-asset-card::before,
+.vendor-card::before,
+.backup-tier-card::before,
+.inventory-tools-panel::before,
+.machine-form-section::before,
+.machine-component-box::before,
+.machine-replacement-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.11), transparent 36%),
+    linear-gradient(90deg, rgba(68,215,255,.08), transparent 48%, rgba(255,180,95,.055));
+  opacity: .72;
+}
+
+.mcc-card > *,
+.mcc-full-width-panel > *,
+.auth-card > *,
+.machine-asset-card > *,
+.vendor-card > *,
+.backup-tier-card > *,
+.inventory-tools-panel > *,
+.machine-form-section > *,
+.machine-component-box > *,
+.machine-replacement-panel > * {
+  position: relative;
+}
+
+.mcc-card,
+.mcc-full-width-panel,
+.auth-card {
+  border-radius: 14px;
+}
+
+.auth-card {
+  border-color: rgba(123, 220, 255, 0.28);
+  background:
+    linear-gradient(145deg, rgba(27, 38, 52, 0.8), rgba(5, 13, 24, 0.9)),
+    radial-gradient(circle at 16% 0%, rgba(68,215,255,.16), transparent 34%);
+  box-shadow: var(--mcc-panel-shadow), 0 0 70px rgba(68,215,255,.1);
+}
+
+.mcc-page-topbar,
+.command-menu,
+.command-launcher-button,
+.command-menu-user,
+.inventory-focus-toolbar,
+.machine-toolbar-card,
+.vendors-toolbar-card,
+.inventory-table-card,
+.vendors-table-card,
+.requisitions-table-card,
+.history-search-card,
+.history-filter-card,
+.history-table-card,
+.modal-backdrop .mcc-card {
+  border-color: var(--mcc-glass-border-strong);
+  background: linear-gradient(145deg, rgba(18, 31, 45, 0.84), rgba(4, 13, 25, 0.9));
+  box-shadow: var(--mcc-panel-shadow);
+  backdrop-filter: blur(18px) saturate(132%);
+}
+
+.mcc-page-topbar {
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(19, 32, 46, 0.82), rgba(4, 13, 25, 0.9)),
+    linear-gradient(90deg, rgba(68,215,255,.11), transparent 46%, rgba(255,180,95,.08));
+}
+
+.page-heading,
+.mcc-page-header,
+.mcc-header {
+  border-left-color: rgba(68, 215, 255, 0.88);
+  border-top: 1px solid rgba(255,255,255,.08);
+  border-right: 1px solid rgba(123, 220, 255, .12);
+  border-bottom: 1px solid rgba(123, 220, 255, .13);
+  background:
+    linear-gradient(90deg, rgba(17, 32, 47, .88), rgba(8, 28, 45, .62) 54%, rgba(255,180,95,.05)),
+    radial-gradient(circle at 8% 20%, rgba(68,215,255,.13), transparent 30%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 16px 38px rgba(0,0,0,.2);
+}
+
+.eyebrow,
+.mcc-card span,
+.form-field,
+.machine-card-identity span,
+.machine-spec-grid dt,
+.machine-wear-grid > div:not(.machine-condition-badge) span,
+.vendor-card-detail-grid span,
+.vendor-detail-row span,
+.backup-tier-heading span:first-child,
+.backup-status-panel span,
+.restore-panel span,
+.history-preview-row span {
+  color: #8fe8ff;
+}
+
+.mcc-card p,
+.page-heading p,
+.form-help,
+.form-message,
+.machine-age-label,
+.machine-toolbar-note,
+.backup-tier-heading p,
+.backup-status-panel p,
+.backup-list-row p,
+.backup-list-row small,
+.restore-panel p,
+.vendor-contact-card-heading span {
+  color: #b8d3df;
+}
+
+input,
+select,
+textarea,
+.form-field select,
+.machine-unit-display,
+.show-deleted-toggle,
+.segmented-control,
+.requisition-preview-tabs,
+.inventory-url {
+  border-color: rgba(143, 205, 233, 0.27);
+  color: var(--mcc-readable);
+  background:
+    linear-gradient(180deg, rgba(17, 29, 42, 0.92), rgba(4, 13, 25, 0.92)),
+    radial-gradient(circle at 14% 0%, rgba(68,215,255,.08), transparent 42%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 10px 22px rgba(0,0,0,.12);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #789caf;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: rgba(68, 215, 255, 0.48);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(54, 229, 170, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 0 0 1px rgba(54,229,170,.18), 0 0 22px rgba(68,215,255,.18);
+}
+
+.primary-button,
+.secondary-button,
+.link-button,
+.danger-button,
+.compact-button,
+.machine-action-badge,
+.mcc-date-header button,
+.mcc-date-footer button,
+.mcc-date-grid button,
+.requisition-preview-tabs button,
+.segmented-control button {
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease, color .16s ease;
+}
+
+.primary-button,
+.segmented-control button.active,
+.native-status-badge.active,
+.inventory-row-actions .compact-button.selected {
+  color: #02111d;
+  border-color: rgba(151, 241, 255, 0.72);
+  background:
+    linear-gradient(135deg, #49dcff 0%, #36e5aa 52%, #1e6bff 100%);
+  box-shadow: 0 10px 24px rgba(68,215,255,.18), inset 0 1px 0 rgba(255,255,255,.36);
+}
+
+.secondary-button,
+.link-button,
+.compact-button,
+.machine-action-badge,
+.pager-button {
+  color: #dff7ff;
+  border-color: rgba(143, 205, 233, 0.32);
+  background: linear-gradient(180deg, rgba(14, 39, 58, 0.82), rgba(5, 16, 29, 0.76));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.danger-button,
+.status-canceled,
+.machine-status-badge.status-removed {
+  color: #ffe3e7;
+  border-color: rgba(255, 117, 138, 0.6);
+  background: linear-gradient(145deg, rgba(126, 32, 48, .78), rgba(43, 13, 25, .88));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 0 18px rgba(255,117,138,.08);
+}
+
+.primary-button:hover,
+.secondary-button:hover,
+.link-button:hover,
+.danger-button:hover,
+.machine-action-badge:hover,
+.compact-button:hover,
+.segmented-control button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(68, 215, 255, 0.78);
+  box-shadow: 0 13px 28px rgba(0,0,0,.24), 0 0 22px rgba(68,215,255,.16), inset 0 1px 0 rgba(255,255,255,.14);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: .58;
+  filter: saturate(.8);
+}
+
+.command-launcher-button {
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(27, 42, 56, .9), rgba(4, 14, 26, .88)),
+    radial-gradient(circle at 50% 8%, rgba(68,215,255,.18), transparent 46%);
+}
+
+.launcher-gear,
+.command-menu-icon-wrap {
+  border-color: rgba(126, 230, 255, 0.48);
+  background:
+    linear-gradient(145deg, rgba(7, 76, 107, .8), rgba(8, 33, 52, .9)),
+    radial-gradient(circle, rgba(68,215,255,.3), transparent 64%);
+}
+
+.command-menu {
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(21, 35, 49, .94), rgba(4, 13, 25, .97)),
+    radial-gradient(circle at 92% 12%, rgba(255,180,95,.12), transparent 30%);
+}
+
+.command-menu-item {
+  border-radius: 12px;
+  border-color: rgba(143, 205, 233, 0.22);
+  background: linear-gradient(145deg, rgba(20, 38, 53, .78), rgba(5, 16, 29, .82));
+}
+
+.command-menu-item:hover,
+.command-menu-item.active {
+  border-color: rgba(68, 215, 255, .72);
+  background:
+    linear-gradient(145deg, rgba(10, 75, 103, .62), rgba(5, 28, 43, .88)),
+    radial-gradient(circle at 12% 16%, rgba(54,229,170,.13), transparent 36%);
+}
+
+.table-card,
+.mcc-table-shell,
+.inventory-table-wrap,
+.vendors-table-wrap,
+.requisitions-table-wrap,
+.history-table-wrap {
+  border: 1px solid rgba(123, 220, 255, 0.16);
+  background: rgba(4, 13, 25, 0.68);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+table {
+  color: #dcefff;
+}
+
+th,
+.inventory-table-wrap th,
+.vendors-table-wrap th,
+.requisitions-table-wrap th {
+  color: #9eefff;
+  background:
+    linear-gradient(180deg, rgba(17, 32, 47, .98), rgba(5, 16, 29, .98)),
+    linear-gradient(90deg, rgba(68,215,255,.08), transparent);
+  border-bottom-color: rgba(68, 215, 255, .28);
+}
+
+td {
+  border-bottom-color: rgba(143, 205, 233, 0.13);
+}
+
+tr:hover td {
+  background: rgba(68, 215, 255, 0.045);
+}
+
+.status-pill,
+.native-status-badge,
+.view-only-badge,
+.backup-health-badge,
+.backup-type-pill,
+.backup-area-badge,
+.requisition-status,
+.role-badge,
+.machine-age-pill,
+.machine-status-badge,
+.new-part-badge {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 0 16px rgba(0,0,0,.12);
+}
+
+.status-pill,
+.status-received,
+.vendor-status-enabled,
+.backup-health-badge.healthy,
+.backup-area-badge.protected,
+.machine-status-badge.status-active {
+  color: #d9ffe9 !important;
+  border-color: rgba(54, 229, 170, .5);
+  background: linear-gradient(145deg, rgba(18, 97, 71, .48), rgba(5, 21, 27, .72));
+}
+
+.view-only-badge,
+.status-requested,
+.vendor-status-disabled,
+.backup-health-badge.attention,
+.backup-area-badge.pending {
+  color: #fff2c2 !important;
+  border-color: rgba(255, 211, 111, .54);
+  background: linear-gradient(145deg, rgba(112, 75, 18, .48), rgba(24, 21, 15, .76));
+}
+
+.status-ordered,
+.backup-type-pill.auto,
+.backup-type-pill.scheduled {
+  color: #dff7ff;
+  border-color: rgba(68, 215, 255, .48);
+  background: linear-gradient(145deg, rgba(5, 61, 86, .5), rgba(5, 16, 29, .76));
+}
+
+.modal-backdrop {
+  background: var(--mcc-modal-glass-backdrop);
+  backdrop-filter: blur(14px) saturate(118%);
+}
+
+.modal-backdrop .mcc-card,
+.inventory-modal,
+.vendor-modal,
+.requisition-modal,
+.requisition-preview-modal,
+.machine-modal,
+.machine-small-modal,
+.machine-color-modal,
+.machine-logs-modal,
+.machine-setup-modal,
+.machine-import-result-modal,
+.restore-modal,
+.reset-modal,
+.reason-modal {
+  border-color: rgba(210, 235, 255, .18);
+  background:
+    linear-gradient(145deg, rgba(24, 37, 50, 0.9), rgba(5, 13, 24, 0.96)),
+    radial-gradient(circle at 18% 0%, rgba(68,215,255,.12), transparent 32%);
+  box-shadow: 0 26px 70px rgba(0,0,0,.44), inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.mcc-date-popover {
+  border-color: rgba(123, 220, 255, 0.42);
+  background:
+    linear-gradient(145deg, rgba(18, 31, 45, .98), rgba(4, 13, 25, .98)),
+    radial-gradient(circle at 12% 0%, rgba(68,215,255,.14), transparent 34%);
+  box-shadow: 0 24px 58px rgba(0,0,0,.48), 0 0 34px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.09);
+}
+
+.machine-library-page {
+  gap: 16px;
+}
+
+.machine-toolbar-card {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  padding: 16px;
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(23, 38, 52, .86), rgba(5, 13, 24, .92)),
+    radial-gradient(circle at 12% 12%, rgba(68,215,255,.12), transparent 34%),
+    radial-gradient(circle at 96% 100%, rgba(255,180,95,.09), transparent 28%);
+}
+
+.machine-toolbar-card::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(68,215,255,.52), rgba(54,229,170,.32), transparent);
+  pointer-events: none;
+}
+
+.machine-card-grid {
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(318px, 100%), 1fr));
+}
+
+.machine-asset-card {
+  overflow: hidden;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--brand-color) 34%, rgba(210,235,255,.14));
+  background:
+    linear-gradient(145deg, rgba(28, 42, 54, .72), rgba(5, 13, 24, .9)),
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--brand-color) 18%, transparent), transparent 34%),
+    linear-gradient(90deg, color-mix(in srgb, var(--brand-color) 8%, transparent), transparent 42%);
+  box-shadow:
+    0 22px 46px rgba(0,0,0,.32),
+    0 0 0 1px color-mix(in srgb, var(--brand-color) 12%, transparent) inset,
+    inset 0 1px 0 rgba(255,255,255,.13);
+}
+
+.machine-asset-card::before {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.16), transparent 28%),
+    linear-gradient(100deg, transparent 0 8%, color-mix(in srgb, var(--brand-color) 16%, transparent) 9%, transparent 22% 72%, rgba(255,180,95,.06));
+}
+
+.machine-asset-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, var(--brand-color), rgba(54,229,170,.72), rgba(255,180,95,.42));
+  box-shadow: 0 0 22px color-mix(in srgb, var(--brand-color) 34%, transparent);
+  pointer-events: none;
+}
+
+.machine-asset-card.machine-import-highlight {
+  border-color: rgba(54,229,170,.82);
+  box-shadow:
+    0 22px 46px rgba(0,0,0,.32),
+    0 0 0 1px rgba(54,229,170,.44) inset,
+    0 0 28px rgba(54,229,170,.22);
+}
+
+.machine-card-head {
+  align-items: flex-start;
+}
+
+.machine-asset-number {
+  color: #f7fdff;
+  font-size: 1.05rem;
+  text-decoration-color: color-mix(in srgb, var(--brand-color) 58%, rgba(255,255,255,.24));
+  text-shadow: 0 0 14px color-mix(in srgb, var(--brand-color) 18%, transparent);
+}
+
+.machine-card-brand-name {
+  color: color-mix(in srgb, var(--brand-color) 92%, #ffffff 8%);
+  font-size: 1.26rem;
+  text-shadow:
+    0 0 10px color-mix(in srgb, var(--brand-color) 26%, transparent),
+    0 1px 0 rgba(0,0,0,.38);
+}
+
+.machine-brand-engel .machine-card-brand-name {
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(255,255,255,.28), 0 0 18px rgba(68,215,255,.12);
+}
+
+.machine-age-pill {
+  border-color: rgba(255, 211, 111, .36);
+  color: #fff2c2;
+  background: linear-gradient(145deg, rgba(80, 62, 26, .5), rgba(7, 25, 45, .58));
+}
+
+.machine-card-identity {
+  padding: 10px;
+  border: 1px solid rgba(143,205,233,.14);
+  border-radius: 8px;
+  background: rgba(4,13,25,.34);
+}
+
+.machine-card-identity div {
+  font-size: .86rem;
+}
+
+.machine-spec-grid {
+  gap: 10px;
+}
+
+.machine-spec-grid div {
+  min-height: 64px;
+  align-content: center;
+  gap: 5px;
+  padding: 11px 12px;
+  border-color: rgba(143,205,233,.2);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(17, 32, 47, .76), rgba(4, 13, 25, .72)),
+    radial-gradient(circle at 0% 0%, rgba(68,215,255,.1), transparent 44%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 10px 20px rgba(0,0,0,.16);
+}
+
+.machine-spec-grid div:nth-child(1) {
+  border-color: rgba(68,215,255,.3);
+}
+
+.machine-spec-grid div:nth-child(2) {
+  border-color: rgba(54,229,170,.28);
+}
+
+.machine-spec-grid div:nth-child(3) {
+  border-color: rgba(255,211,111,.26);
+}
+
+.machine-spec-grid div:nth-child(4) {
+  border-color: rgba(30,107,255,.3);
+}
+
+.machine-spec-grid dt {
+  letter-spacing: .055em;
+}
+
+.machine-spec-grid dd {
+  color: #ffffff;
+  font-size: .96rem;
+  text-shadow: 0 0 12px rgba(68,215,255,.12);
+}
+
+.machine-wear-grid {
+  gap: 9px;
+}
+
+.machine-condition-badge,
+.machine-wear-grid > div:not(.machine-condition-badge) {
+  min-height: 58px;
+  align-content: center;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(14, 31, 44, .8), rgba(4, 13, 25, .68));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 10px 18px rgba(0,0,0,.14);
+}
+
+.machine-condition-badge span,
+.machine-wear-grid > div:not(.machine-condition-badge) span {
+  letter-spacing: .055em;
+}
+
+.machine-condition-badge.condition-new {
+  border-color: rgba(54,229,170,.66);
+  background: linear-gradient(145deg, rgba(18,97,71,.5), rgba(4,13,25,.64));
+}
+
+.machine-condition-badge.condition-new strong {
+  color: #a7ffd8;
+}
+
+.machine-condition-badge.condition-used {
+  border-color: rgba(255,180,95,.66);
+  background: linear-gradient(145deg, rgba(112,75,18,.52), rgba(4,13,25,.64));
+}
+
+.machine-condition-badge.condition-used strong {
+  color: #ffd36f;
+}
+
+.machine-condition-badge.condition-worn {
+  border-color: rgba(255,117,138,.7);
+  background: linear-gradient(145deg, rgba(126,32,48,.56), rgba(4,13,25,.66));
+}
+
+.machine-condition-badge.condition-worn strong {
+  color: #ffb7c1;
+}
+
+.machine-condition-badge.condition-rebuilt_repaired {
+  border-color: rgba(68,215,255,.62);
+  background: linear-gradient(145deg, rgba(5,61,86,.58), rgba(112,75,18,.24), rgba(4,13,25,.68));
+}
+
+.machine-condition-badge.condition-rebuilt_repaired strong {
+  color: #bff3ff;
+}
+
+.machine-component-box {
+  overflow: hidden;
+  border-left-width: 3px;
+  border-radius: 10px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--component-accent) 13%, rgba(22, 35, 48, .8)), rgba(4,13,25,.78)),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--component-accent) 16%, transparent), transparent 36%);
+}
+
+.machine-component-box::before {
+  height: auto;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.12), transparent 30%),
+    linear-gradient(90deg, var(--component-accent), transparent 48%);
+  opacity: .62;
+}
+
+.machine-card-actions .compact-button,
+.machine-toolbar-actions .compact-button,
+.vendors-toolbar-actions .primary-button,
+.vendors-toolbar-actions .secondary-button,
+.vendors-toolbar-actions .link-button {
+  border-radius: 9px;
+}
+
+.vendor-card {
+  border-radius: 10px;
+}
+
+.vendor-card.disabled {
+  border-color: rgba(255,180,95,.4);
+  background: linear-gradient(145deg, rgba(70, 48, 20, .74), rgba(5,13,24,.88));
+}
+
+.vendor-card.deleted {
+  border-color: rgba(255,117,138,.42);
+  background: linear-gradient(145deg, rgba(70, 27, 38, .76), rgba(5,13,24,.88));
+}
+
+.inventory-tools-card,
+.inventory-setup-card,
+.inventory-import-summary,
+.backup-progress-panel,
+.backup-result-panel,
+.backup-protection-panel {
+  background: var(--mcc-glass-fill);
+  border-color: rgba(210, 235, 255, 0.14);
+  box-shadow: var(--mcc-panel-shadow-soft);
+  backdrop-filter: blur(14px) saturate(122%);
+}
+
+.inventory-toast,
+.form-message {
+  border-color: rgba(54, 229, 170, .36);
+  background: linear-gradient(145deg, rgba(18,97,71,.36), rgba(4,13,25,.72));
+}
+
+.inventory-toast.error,
+.form-message.error {
+  border-color: rgba(255,117,138,.4);
+  background: linear-gradient(145deg, rgba(126,32,48,.36), rgba(4,13,25,.74));
+}
+
+.backup-progress-panel.error,
+.backup-result-panel.error {
+  border-color: rgba(255,117,138,.46);
+  background: linear-gradient(145deg, rgba(126,32,48,.36), rgba(4,13,25,.72));
+}
+
+.backup-progress-panel.success,
+.backup-result-panel.success {
+  border-color: rgba(54,229,170,.44);
+  background: linear-gradient(145deg, rgba(18,97,71,.34), rgba(4,13,25,.72));
+}
+
+.backup-step-list li,
+.backup-protection-times p,
+.backup-tier-meta p,
+.backup-protected-area,
+.backup-row,
+.machine-color-row,
+.machine-import-summary-grid div,
+.machine-import-rejection-list,
+.machine-placeholder-grid section {
+  border-color: rgba(143,205,233,.18);
+  background: linear-gradient(145deg, rgba(15, 31, 44, .7), rgba(4,13,25,.66));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary-button,
+  .secondary-button,
+  .link-button,
+  .danger-button,
+  .compact-button,
+  .machine-action-badge,
+  .command-menu-item,
+  .command-launcher-button,
+  .launcher-gear,
+  .mcc-date-header button,
+  .mcc-date-footer button,
+  .mcc-date-grid button,
+  .requisition-preview-tabs button,
+  .segmented-control button {
+    transition: none !important;
   }
 }
 
