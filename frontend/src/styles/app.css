@@ -5,19 +5,23 @@
   --mcc-topbar-safe-offset: 96px;
   --mcc-modal-bottom-safe: 18px;
   --mcc-modal-available-height: calc(100dvh - var(--mcc-topbar-safe-offset) - var(--mcc-modal-bottom-safe));
+  --mcc-liquid-background: radial-gradient(circle at 18% 10%, rgba(93,222,255,.24), transparent 27%), radial-gradient(circle at 84% 16%, rgba(54,229,170,.12), transparent 31%), radial-gradient(circle at 96% 78%, rgba(255,153,64,.1), transparent 26%), radial-gradient(circle at 58% 92%, rgba(30,107,255,.18), transparent 36%), linear-gradient(145deg, #020b16 0%, #071425 48%, #04101f 100%);
+  --mcc-liquid-reflection: linear-gradient(118deg, rgba(255,255,255,.1), rgba(68,215,255,.045) 24%, transparent 43%), radial-gradient(ellipse at 42% 14%, rgba(198,247,255,.13), transparent 36%), radial-gradient(ellipse at 8% 86%, rgba(68,215,255,.09), transparent 36%), radial-gradient(ellipse at 100% 52%, rgba(255,178,94,.08), transparent 28%);
+  --mcc-liquid-sheen: linear-gradient(164deg, transparent 0 23%, rgba(255,255,255,.04) 24%, rgba(68,215,255,.022) 35%, transparent 47% 62%, rgba(255,255,255,.026) 63%, transparent 78%), repeating-linear-gradient(115deg, rgba(255,255,255,.016) 0 1px, transparent 1px 28px);
+  --mcc-modal-glass-backdrop: radial-gradient(circle at 18% 12%, rgba(68,215,255,.12), transparent 34%), radial-gradient(circle at 98% 78%, rgba(255,153,64,.07), transparent 28%), linear-gradient(135deg, rgba(1,8,17,.86), rgba(2,14,28,.76));
 }
 
 html, body, #root { width: 100%; max-width: 100%; min-height: 100%; overflow-x: hidden; }
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #020b16; }
 body { font-size: 15px; }
 button { font: inherit; }
 button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 
-.mcc-shell { position: relative; isolation: isolate; width: 100%; max-width: 100vw; min-height: 100vh; overflow-x: hidden; background: radial-gradient(circle at 18% 10%, rgba(93,222,255,.24), transparent 27%), radial-gradient(circle at 84% 16%, rgba(54,229,170,.12), transparent 31%), radial-gradient(circle at 96% 78%, rgba(255,153,64,.1), transparent 26%), radial-gradient(circle at 58% 92%, rgba(30,107,255,.18), transparent 36%), linear-gradient(145deg, #020b16 0%, #071425 48%, #04101f 100%); }
-.mcc-shell::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(118deg, rgba(255,255,255,.1), rgba(68,215,255,.045) 24%, transparent 43%), radial-gradient(ellipse at 42% 14%, rgba(198,247,255,.13), transparent 36%), radial-gradient(ellipse at 8% 86%, rgba(68,215,255,.09), transparent 36%), radial-gradient(ellipse at 100% 52%, rgba(255,178,94,.08), transparent 28%); filter: blur(.25px); opacity: .92; }
-.mcc-shell::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(164deg, transparent 0 23%, rgba(255,255,255,.04) 24%, rgba(68,215,255,.022) 35%, transparent 47% 62%, rgba(255,255,255,.026) 63%, transparent 78%), repeating-linear-gradient(115deg, rgba(255,255,255,.016) 0 1px, transparent 1px 28px); opacity: .38; backdrop-filter: blur(1.5px); }
-.mcc-shell > * { position: relative; z-index: 1; }
+.mcc-shell, .auth-shell { position: relative; isolation: isolate; width: 100%; max-width: 100vw; min-height: 100vh; overflow-x: hidden; background: var(--mcc-liquid-background); }
+.mcc-shell::before, .auth-shell::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--mcc-liquid-reflection); filter: blur(.25px); opacity: .92; }
+.mcc-shell::after, .auth-shell::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--mcc-liquid-sheen); opacity: .38; backdrop-filter: blur(1.5px); }
+.mcc-shell > *, .auth-shell > * { position: relative; z-index: 1; }
 .command-shell { position: relative; z-index: 1; overflow-x: hidden; }
 .mcc-sidebar { width: 290px; padding: 24px; background: rgba(3, 13, 27, 0.88); border-right: 1px solid rgba(77, 208, 255, 0.22); }
 .mcc-brand { position: relative; display: flex; align-items: center; min-height: 58px; margin-bottom: 24px; padding: 7px 0 7px 18px; }
@@ -186,7 +190,7 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
   .mcc-bubble-transition.is-warping::after { opacity: 0; }
   .status-pulse-dot { animation: none; }
 }
-.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top right, #0d3a5c 0, #071425 42%, #020b16 100%); }
+.auth-shell { display: grid; place-items: center; padding: 24px; }
 .auth-card { width: min(560px, 100%); padding: 34px; border: 1px solid rgba(77, 208, 255, 0.24); border-radius: 28px; background: rgba(5, 22, 40, 0.88); box-shadow: 0 24px 70px rgba(0,0,0,.35); }
 .auth-card h1 { margin: 0 0 22px; font-size: clamp(1.8rem, 4vw, 2.35rem); }
 .auth-form, .user-form { display: grid; gap: 16px; }
@@ -647,7 +651,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .requisition-toggle input { width: 16px; min-height: 16px; accent-color: #44d7ff; }
 .requisition-toggle span { margin: 0 !important; color: inherit !important; font-size: .74rem !important; }
 .requisition-toggle.disabled { color: #8db9ce; border-color: rgba(143, 205, 233, 0.22); background: rgba(7, 25, 45, 0.58); }
-.modal-backdrop { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; align-items: start; padding: var(--mcc-topbar-safe-offset) 22px var(--mcc-modal-bottom-safe); background: rgba(1, 8, 17, 0.72); overflow-y: auto; overscroll-behavior: contain; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; align-items: start; padding: var(--mcc-topbar-safe-offset) 22px var(--mcc-modal-bottom-safe); background: var(--mcc-modal-glass-backdrop); backdrop-filter: blur(10px); overflow-y: auto; overscroll-behavior: contain; }
 .inventory-modal { width: min(760px, 100%); max-height: var(--mcc-modal-available-height); overflow-y: auto; display: grid; gap: 16px; }
 .modal-heading { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
 .modal-heading h3 { margin: 0; color: #fff; font-size: 1.16rem; line-height: 1.2; }
