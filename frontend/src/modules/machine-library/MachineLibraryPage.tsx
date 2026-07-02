@@ -58,6 +58,9 @@ function ageYears(value: string) {
 function safeCssHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#44D7FF';
 }
+function isEngelBrand(value: string) {
+  return value.trim().toLowerCase() === 'engel';
+}
 function downloadTemplate() {
   window.location.href = '/api/machine-library/export/template';
 }
@@ -252,7 +255,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
       </section>
       <div className="machine-card-grid">
         {assets.map(asset=>(
-          <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
+          <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''} ${isEngelBrand(asset.brand) ? 'machine-brand-engel' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
             <div className="machine-card-head">
               <button className="machine-asset-number" type="button" onClick={()=>void loadLogs(asset)}>{asset.assetNumber}</button>
               <span className={`machine-status-badge status-${asset.status}`}>{asset.status}</span>
@@ -377,7 +380,7 @@ function UnitDimensionField({label,value,set,disabled}:{label:string;value:strin
   </div>;
 }
 function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string)=>void;onClose:()=>void}) {
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><h3>Machine Brand Colors</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>{brandSettings.map(setting=><div className="machine-color-row" key={setting.brandName}><span className="machine-color-swatch" style={{background:safeCssHex(colorDrafts[setting.brandName] ?? setting.colorHex)}} /><strong>{setting.brandName}</strong><input value={colorDrafts[setting.brandName] ?? setting.colorHex} disabled={!canEdit} onChange={event=>setColorDrafts(current=>({...current,[setting.brandName]:event.target.value}))} /><button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit}>Save</button></div>)}</section></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><h3>Machine Brand Colors</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>{brandSettings.map(setting=><div className="machine-color-row" key={setting.brandName}><span className={`machine-color-swatch ${isEngelBrand(setting.brandName) ? 'machine-color-swatch-engel' : ''}`} style={{background:safeCssHex(colorDrafts[setting.brandName] ?? setting.colorHex)}} /><strong>{setting.brandName}</strong><input value={colorDrafts[setting.brandName] ?? setting.colorHex} disabled={!canEdit} onChange={event=>setColorDrafts(current=>({...current,[setting.brandName]:event.target.value}))} /><button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit}>Save</button></div>)}</section></div>;
 }
 function ReplacementModal({replacement,setReplacement,onSubmit}:{replacement:{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string};setReplacement:Dispatch<SetStateAction<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>>;onSubmit:(event:FormEvent)=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-small-modal" onSubmit={onSubmit}><p className="eyebrow">Replacement Update</p><h3>Update New {replacementLabels[replacement.field]} Install Date</h3><DateWithAge label="Install Date *" value={replacement.installDate} set={installDate=>setReplacement(current=>current&&({...current,installDate}))} disabled={false}/><Area label="Reason / Note" value={replacement.reasonNote} set={reasonNote=>setReplacement(current=>current&&({...current,reasonNote}))} disabled={false}/><div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setReplacement(null)}>Cancel</button><button className="primary-button" type="submit">Update {replacementLabels[replacement.field]} Date</button></div></form></div>;

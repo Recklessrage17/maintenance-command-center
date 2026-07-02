@@ -346,6 +346,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-asset-card { --brand-color: #44D7FF; position: relative; min-width: 0; display: grid; gap: 13px; padding: 15px; border: 1px solid color-mix(in srgb, var(--brand-color) 58%, rgba(85, 191, 236, 0.2)); border-left: 6px solid var(--brand-color); border-radius: 8px; background: linear-gradient(180deg, rgba(11, 39, 64, 0.92), rgba(5, 20, 38, 0.94)); box-shadow: 0 16px 34px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.05); }
 .machine-asset-card.machine-import-highlight { border-color: rgba(54,229,170,.72); box-shadow: 0 16px 34px rgba(0,0,0,.24), 0 0 0 1px rgba(54,229,170,.42) inset, 0 0 22px rgba(54,229,170,.2); }
 .machine-asset-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--brand-color), rgba(68, 215, 255, 0)); opacity: .78; }
+.machine-asset-card.machine-brand-engel::before { background: linear-gradient(90deg, var(--brand-color) 0 68%, rgba(255,255,255,.96) 68% 82%, rgba(68, 215, 255, 0) 100%); opacity: .92; }
 .machine-card-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .machine-asset-number { appearance: none; max-width: 100%; padding: 0; border: 0; color: #e9fbff; background: transparent; font: inherit; font-size: 1.02rem; font-weight: 950; text-align: left; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 4px; cursor: pointer; overflow-wrap: anywhere; }
 .machine-asset-number:hover, .machine-asset-number:focus-visible { color: #ffffff; text-decoration-color: var(--brand-color); outline: none; }
@@ -432,7 +433,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .modal-actions .primary-button, .modal-actions .secondary-button { width: auto; min-width: 130px; }
 .machine-color-row { display: grid; grid-template-columns: 34px minmax(100px, .45fr) minmax(130px, 1fr) auto; gap: 10px; align-items: center; padding: 9px; border: 1px solid rgba(85,191,236,.16); border-radius: 10px; background: rgba(4,18,34,.38); }
 .machine-color-row strong { margin: 0; color: #fff; font-size: .92rem; }
-.machine-color-swatch { width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,.48); box-shadow: 0 0 0 1px rgba(4,18,34,.88) inset, 0 0 14px rgba(68,215,255,.16); }
+.machine-color-swatch { position: relative; overflow: hidden; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255,255,255,.48); box-shadow: 0 0 0 1px rgba(4,18,34,.88) inset, 0 0 14px rgba(68,215,255,.16); }
+.machine-color-swatch-engel::after { content: ""; position: absolute; top: 5px; right: 6px; bottom: 5px; width: 5px; border-radius: 999px; background: rgba(255,255,255,.96); box-shadow: 0 0 8px rgba(255,255,255,.26); }
 .machine-log-list { display: grid; gap: 8px; }
 .machine-log-row { display: grid; gap: 4px; padding: 10px; border: 1px solid rgba(85,191,236,.16); border-radius: 10px; background: rgba(4,18,34,.38); }
 .machine-log-row span { color: #83cfea; font-size: .72rem; font-weight: 950; text-transform: uppercase; }
