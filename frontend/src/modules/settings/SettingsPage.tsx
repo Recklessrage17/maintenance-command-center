@@ -7,10 +7,18 @@ type NetworkLinks = {
   primaryLanUrl: string | null;
 };
 
-type BackupType = 'startup' | 'scheduled' | 'auto' | 'manual' | 'pre_restore';
+type BackupCategory = 'daily' | 'weekly' | 'master' | 'legacy';
+type BackupType = string;
+type BackupHealth = {
+  ok: boolean;
+  label: 'Healthy' | 'Needs Attention' | 'Hidden';
+  message: string;
+};
 type BackupSummary = {
   id: string;
   name: string;
+  category: BackupCategory;
+  categoryLabel: string;
   type: BackupType;
   typeLabel: string;
   createdAt: string;
@@ -21,6 +29,20 @@ type BackupSummary = {
   includedFolders: string[];
   notes: string;
   restorable: boolean;
+  folderLabel: string;
+};
+type BackupGroupStatus = {
+  category: BackupCategory;
+  categoryLabel: string;
+  visible: boolean;
+  latestBackup: BackupSummary | null;
+  lastAutoBackup: BackupSummary | null;
+  count: number;
+  health: BackupHealth;
+  folderLabel: string;
+  folderPath: string;
+  autoBackupPending: boolean;
+  nextScheduledBackupAt: string | null;
 };
 type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
 type ProtectedArea = {
@@ -31,6 +53,9 @@ type ProtectedArea = {
 };
 type BackupStatus = {
   ok: boolean;
+  daily: BackupGroupStatus;
+  weekly: BackupGroupStatus;
+  master: BackupGroupStatus;
   latestBackup: BackupSummary | null;
   lastAutoBackup: BackupSummary | null;
   lastManualBackup: BackupSummary | null;
@@ -42,11 +67,22 @@ type BackupStatus = {
   autoBackupPending: boolean;
   protectedAreas: ProtectedArea[];
   nextScheduledBackupAt: string | null;
+  nextWeeklyBackupAt: string | null;
+  nextMasterBackupAt: string | null;
   databaseSize: number;
   backupHealth: string;
   autoBackupDelaySeconds: number;
-  scheduledBackupIntervalMinutes: number;
+  scheduledBackupIntervalMinutes: number | null;
   permissions: {
+    canViewDaily: boolean;
+    canCreateDaily: boolean;
+    canRestoreDaily: boolean;
+    canViewWeekly: boolean;
+    canCreateWeekly: boolean;
+    canRestoreWeekly: boolean;
+    canViewMaster: boolean;
+    canCreateMaster: boolean;
+    canRestoreMaster: boolean;
     canViewBackups: boolean;
     canCreateBackup: boolean;
     canRestoreBackup: boolean;
@@ -127,7 +163,30 @@ const resetStepLabels = [
   'Complete',
 ];
 const emptyBackupCounts: Record<BackupType, number> = { startup: 0, scheduled: 0, auto: 0, manual: 0, pre_restore: 0 };
-const emptyBackupPermissions = { canViewBackups: false, canCreateBackup: false, canRestoreBackup: false };
+const backupCategoryLabels: Record<Exclude<BackupCategory, 'legacy'>, string> = {
+  daily: 'Daily Backup',
+  weekly: 'Weekly Full Backup',
+  master: 'MCC Master Backup',
+};
+const backupCategoryDescriptions: Record<Exclude<BackupCategory, 'legacy'>, string> = {
+  daily: 'Automatic backups after MCC data changes, with a short debounce for rapid edits.',
+  weekly: 'Full backup scheduled every Friday at 1:00 PM on this MCC computer.',
+  master: 'Monthly master full backup scheduled for the first day of each month at 1:00 PM.',
+};
+const emptyBackupPermissions = {
+  canViewDaily: false,
+  canCreateDaily: false,
+  canRestoreDaily: false,
+  canViewWeekly: false,
+  canCreateWeekly: false,
+  canRestoreWeekly: false,
+  canViewMaster: false,
+  canCreateMaster: false,
+  canRestoreMaster: false,
+  canViewBackups: false,
+  canCreateBackup: false,
+  canRestoreBackup: false,
+};
 const defaultBranding: BrandingSettings = {
   companyName: 'JBT',
   companySubtitle: 'Maintenance Command Center',
@@ -164,13 +223,32 @@ function normalizeBranding(value: unknown): BrandingSettings {
   };
 }
 
+function isBackupCategory(value: string): value is BackupCategory {
+  return ['daily','weekly','master','legacy'].includes(value);
+}
+
+function backupCategoryLabel(category: BackupCategory) {
+  return category === 'legacy' ? 'Legacy Master Backup' : backupCategoryLabels[category];
+}
+
+function categoryFromType(type: string): BackupCategory {
+  if (type.startsWith('daily_') || type === 'auto') return 'daily';
+  if (type.startsWith('weekly_')) return 'weekly';
+  if (type.startsWith('master_') || type === 'pre_restore' || type === 'startup' || type === 'scheduled' || type === 'manual') return 'master';
+  return 'legacy';
+}
+
 function normalizeBackupSummary(value: unknown): BackupSummary | null {
   const data = asRecord(value);
-  const type = String(data.type ?? 'manual') as BackupType;
+  const type = String(data.type ?? 'manual');
+  const rawCategory = String(data.category ?? '');
+  const category = isBackupCategory(rawCategory) ? rawCategory : categoryFromType(type);
   if (!data.id && !data.name && !data.createdAt) return null;
   return {
     id: String(data.id ?? data.name ?? ''),
     name: String(data.name ?? data.id ?? 'MCC master backup'),
+    category,
+    categoryLabel: String(data.categoryLabel ?? backupCategoryLabel(category)),
     type,
     typeLabel: String(data.typeLabel ?? typeLabel(type)),
     createdAt: String(data.createdAt ?? ''),
@@ -181,6 +259,50 @@ function normalizeBackupSummary(value: unknown): BackupSummary | null {
     includedFolders: Array.isArray(data.includedFolders) ? data.includedFolders.map(String) : [],
     notes: String(data.notes ?? ''),
     restorable: Boolean(data.restorable ?? false),
+    folderLabel: String(data.folderLabel ?? ''),
+  };
+}
+
+function normalizeBackupHealth(value: unknown): BackupHealth {
+  const data = asRecord(value);
+  const label = data.label === 'Healthy' || data.label === 'Hidden' ? data.label : 'Needs Attention';
+  return {
+    ok: data.ok === true || label === 'Healthy',
+    label,
+    message: String(data.message ?? (label === 'Healthy' ? 'Backup storage is ready.' : 'Backup needs attention.')),
+  };
+}
+
+function emptyBackupGroup(category: Exclude<BackupCategory, 'legacy'>): BackupGroupStatus {
+  return {
+    category,
+    categoryLabel: backupCategoryLabel(category),
+    visible: false,
+    latestBackup: null,
+    lastAutoBackup: null,
+    count: 0,
+    health: { ok: false, label: 'Hidden', message: 'Not available for this role.' },
+    folderLabel: '',
+    folderPath: '',
+    autoBackupPending: false,
+    nextScheduledBackupAt: null,
+  };
+}
+
+function normalizeBackupGroup(value: unknown, category: Exclude<BackupCategory, 'legacy'>): BackupGroupStatus {
+  const data = asRecord(value);
+  return {
+    category,
+    categoryLabel: String(data.categoryLabel ?? backupCategoryLabel(category)),
+    visible: Boolean(data.visible),
+    latestBackup: normalizeBackupSummary(data.latestBackup),
+    lastAutoBackup: normalizeBackupSummary(data.lastAutoBackup),
+    count: Number(data.count ?? 0),
+    health: normalizeBackupHealth(data.health),
+    folderLabel: String(data.folderLabel ?? ''),
+    folderPath: String(data.folderPath ?? data.folderLabel ?? ''),
+    autoBackupPending: Boolean(data.autoBackupPending),
+    nextScheduledBackupAt: data.nextScheduledBackupAt ? String(data.nextScheduledBackupAt) : null,
   };
 }
 
@@ -201,35 +323,52 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
   const counts = asRecord(data.backupCountsByType);
   const permissions = asRecord(data.permissions);
   const lastResult = asRecord(data.lastBackupResult);
+  const backupCountsByType: Record<BackupType, number> = {
+    ...emptyBackupCounts,
+    daily_auto: Number(counts.daily_auto ?? 0),
+    daily_manual: Number(counts.daily_manual ?? 0),
+    weekly_scheduled: Number(counts.weekly_scheduled ?? 0),
+    weekly_manual: Number(counts.weekly_manual ?? 0),
+    master_scheduled: Number(counts.master_scheduled ?? 0),
+    master_manual: Number(counts.master_manual ?? 0),
+  };
   return {
     ok: data.ok !== false,
+    daily: normalizeBackupGroup(data.daily, 'daily'),
+    weekly: normalizeBackupGroup(data.weekly, 'weekly'),
+    master: normalizeBackupGroup(data.master, 'master'),
     latestBackup: normalizeBackupSummary(data.latestBackup),
     lastAutoBackup: normalizeBackupSummary(data.lastAutoBackup),
     lastManualBackup: normalizeBackupSummary(data.lastManualBackup),
     lastPreResetBackup: normalizeBackupSummary(data.lastPreResetBackup),
     lastPreRestoreBackup: normalizeBackupSummary(data.lastPreRestoreBackup),
     backupFolderExists: Boolean(data.backupFolderExists),
-    backupCountsByType: {
-      startup: Number(counts.startup ?? 0),
-      scheduled: Number(counts.scheduled ?? 0),
-      auto: Number(counts.auto ?? 0),
-      manual: Number(counts.manual ?? 0),
-      pre_restore: Number(counts.pre_restore ?? 0),
-    },
+    backupCountsByType,
     lastBackupResult: {
       ok: lastResult.ok !== false,
-      message: String(lastResult.message ?? 'No master backup has run yet.'),
+      message: String(lastResult.message ?? 'No tiered backup has run yet.'),
       backupId: lastResult.backupId ? String(lastResult.backupId) : undefined,
       createdAt: lastResult.createdAt ? String(lastResult.createdAt) : undefined,
     },
     autoBackupPending: Boolean(data.autoBackupPending),
     protectedAreas: Array.isArray(data.protectedAreas) ? data.protectedAreas.map(normalizeProtectedArea).filter((area): area is ProtectedArea => Boolean(area)) : [],
     nextScheduledBackupAt: data.nextScheduledBackupAt ? String(data.nextScheduledBackupAt) : null,
+    nextWeeklyBackupAt: data.nextWeeklyBackupAt ? String(data.nextWeeklyBackupAt) : null,
+    nextMasterBackupAt: data.nextMasterBackupAt ? String(data.nextMasterBackupAt) : null,
     databaseSize: Number(data.databaseSize ?? 0),
     backupHealth: String(data.backupHealth ?? 'Checking...'),
     autoBackupDelaySeconds: Number(data.autoBackupDelaySeconds ?? 45),
-    scheduledBackupIntervalMinutes: Number(data.scheduledBackupIntervalMinutes ?? 60),
+    scheduledBackupIntervalMinutes: data.scheduledBackupIntervalMinutes === null ? null : Number(data.scheduledBackupIntervalMinutes ?? 0),
     permissions: {
+      canViewDaily: Boolean(permissions.canViewDaily),
+      canCreateDaily: Boolean(permissions.canCreateDaily),
+      canRestoreDaily: Boolean(permissions.canRestoreDaily),
+      canViewWeekly: Boolean(permissions.canViewWeekly),
+      canCreateWeekly: Boolean(permissions.canCreateWeekly),
+      canRestoreWeekly: Boolean(permissions.canRestoreWeekly),
+      canViewMaster: Boolean(permissions.canViewMaster),
+      canCreateMaster: Boolean(permissions.canCreateMaster),
+      canRestoreMaster: Boolean(permissions.canRestoreMaster),
       canViewBackups: Boolean(permissions.canViewBackups),
       canCreateBackup: Boolean(permissions.canCreateBackup),
       canRestoreBackup: Boolean(permissions.canRestoreBackup),
@@ -253,8 +392,8 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
 export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
-  const [backups,setBackups]=useState<BackupSummary[]>([]);
-  const [showBackups,setShowBackups]=useState(false);
+  const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
+  const [visibleBackupList,setVisibleBackupList]=useState<Exclude<BackupCategory, 'legacy'>|null>(null);
   const [restoreTarget,setRestoreTarget]=useState<BackupSummary|null>(null);
   const [restoreConfirmation,setRestoreConfirmation]=useState('');
   const [msg,setMsg]=useState('');
@@ -271,7 +410,6 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   const detectedLanUrls = links?.detectedLanUrls ?? [];
   const primaryLanUrl = links?.primaryLanUrl ?? detectedLanUrls[0] ?? '';
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
-  const backupCounts = backupStatus?.backupCountsByType ?? emptyBackupCounts;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
   const resetConfigs = useMemo<ResetConfig[]>(()=>[
     {
@@ -299,6 +437,11 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
     { section: 'facility_info', title: 'Reset Facility Info Data', description: 'Wipes allowlisted facility records if those tables exist. Uploaded files are not removed.', confirmation: 'RESET FACILITY INFO', count: counts => futureCountLabel(counts, 'facility_info'), options: [{ key: 'includeHistory', label: 'Also reset facility history logs', description: 'Deletes Facility Info history log rows too.' }] },
     { section: 'preventive_maintenance', title: 'Reset Preventive Maintenance Data', description: 'Wipes allowlisted PM records if those tables exist.', confirmation: 'RESET PM', count: counts => futureCountLabel(counts, 'preventive_maintenance'), options: [{ key: 'includeHistory', label: 'Also reset PM history logs', description: 'Deletes Preventive Maintenance history log rows too.' }] },
   ],[]);
+  const backupCards = backupStatus ? [
+    { category: 'daily' as const, title: backupCategoryLabels.daily, description: backupCategoryDescriptions.daily, status: backupStatus.daily, canView: backupPermissions.canViewDaily, canCreate: backupPermissions.canCreateDaily, canRestore: backupPermissions.canRestoreDaily, createLabel: 'Create Daily Backup Now' },
+    { category: 'weekly' as const, title: backupCategoryLabels.weekly, description: backupCategoryDescriptions.weekly, status: backupStatus.weekly, canView: backupPermissions.canViewWeekly, canCreate: backupPermissions.canCreateWeekly, canRestore: backupPermissions.canRestoreWeekly, createLabel: 'Create Weekly Backup Now' },
+    { category: 'master' as const, title: backupCategoryLabels.master, description: backupCategoryDescriptions.master, status: backupStatus.master, canView: backupPermissions.canViewMaster, canCreate: backupPermissions.canCreateMaster, canRestore: backupPermissions.canRestoreMaster, createLabel: 'Create Master Backup Now' },
+  ].filter(card=>card.canView && card.status.visible) : [];
 
   function loadLinks() {
     setLoading(true);
@@ -370,35 +513,35 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
       .catch(e=>setResetMsg(e.message));
   }
 
-  function loadBackups(options: { quiet?: boolean } = {}) {
+  function loadBackups(category: Exclude<BackupCategory, 'legacy'>, options: { quiet?: boolean } = {}) {
     if (!options.quiet) setBackupLoading(true);
-    return api('/api/backup/list')
+    return api(`/api/backup/list?category=${encodeURIComponent(category)}`)
       .then(data=>{
         const backupList = Array.isArray(data.backups) ? (data.backups as unknown[]).map(normalizeBackupSummary).filter((backup): backup is BackupSummary => Boolean(backup)) : [];
-        setBackups(backupList);
-        setShowBackups(true);
+        setBackupLists(current=>({...current,[category]:backupList}));
+        setVisibleBackupList(category);
         setMsg('');
       })
       .catch(e=>setMsg(e.message))
       .finally(()=>{ if (!options.quiet) setBackupLoading(false); });
   }
 
-  async function createManualBackup() {
+  async function createManualBackup(category: Exclude<BackupCategory, 'legacy'>) {
     if (manualBackupProgress.state === 'running') return;
     setBackupLoading(true);
     setMsg('');
-    setManualBackupProgress({state:'running',activeStep:0,message:'Creating MCC Master Backup'});
+    setManualBackupProgress({state:'running',activeStep:0,message:`Creating ${backupCategoryLabel(category)}`});
     try {
-      const data = await api('/api/backup/create',{method:'POST',body:JSON.stringify({})});
+      const data = await api('/api/backup/create',{method:'POST',body:JSON.stringify({category})});
       const nextStatus = normalizeBackupStatus(data.status ?? data);
       setBackupStatus(nextStatus);
       const message = String(data.message ?? (data.ok === false ? 'Backup failed.' : 'Manual backup created successfully.'));
       if (data.ok === false) throw new Error(message);
       setManualBackupProgress({state:'success',activeStep:backupStepLabels.length - 1,message,completedAt:new Date().toISOString()});
-      setLastManualBackupResult({ok:true,message:'Last manual backup succeeded.',createdAt:new Date().toISOString()});
+      setLastManualBackupResult({ok:true,message:'Last backup succeeded.',createdAt:new Date().toISOString()});
       setMsg(message);
       await loadBackupStatus({quiet:true});
-      if (showBackups) await loadBackups({quiet:true});
+      if (visibleBackupList === category) await loadBackups(category,{quiet:true});
     } catch (e) {
       const rawMessage = (e as Error).message || 'Backup failed.';
       const message = rawMessage.replace(/\s+/g, ' ').slice(0, 180);
@@ -406,7 +549,7 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
         ? 'Backup failed. Settings is still safe. Check server console/logs.'
         : `Backup failed. Settings is still safe. ${message}`;
       setManualBackupProgress({state:'error',activeStep:Math.min(manualBackupProgress.activeStep, backupStepLabels.length - 2),message:safeMessage,completedAt:new Date().toISOString()});
-      setLastManualBackupResult({ok:false,message:'Last manual backup failed.',createdAt:new Date().toISOString()});
+      setLastManualBackupResult({ok:false,message:'Last backup failed.',createdAt:new Date().toISOString()});
       setMsg(safeMessage);
       await loadBackupStatus({quiet:true}).catch(()=>undefined);
     } finally {
@@ -416,7 +559,7 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
 
   function verifyBackup(backup: BackupSummary) {
     setBackupLoading(true);
-    api('/api/backup/verify',{method:'POST',body:JSON.stringify({backupId:backup.id})})
+    api('/api/backup/verify',{method:'POST',body:JSON.stringify({category:backup.category,backupId:backup.id})})
       .then(data=>setMsg(data.message ?? 'Backup verified.'))
       .catch(e=>setMsg(e.message))
       .finally(()=>setBackupLoading(false));
@@ -425,13 +568,13 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   function restoreBackup() {
     if (!restoreTarget) return;
     setBackupLoading(true);
-    api('/api/backup/restore',{method:'POST',body:JSON.stringify({backupId:restoreTarget.id,confirmation:restoreConfirmation})})
+    api('/api/backup/restore',{method:'POST',body:JSON.stringify({category:restoreTarget.category,backupId:restoreTarget.id,confirmation:restoreConfirmation})})
       .then(data=>{
-        setMsg(data.message ?? 'Backup restored. Refresh MCC before continuing.');
+        setMsg(data.message ?? 'Backup restored. Refresh MCC and log in again if needed.');
         setRestoreTarget(null);
         setRestoreConfirmation('');
-        setBackups([]);
-        setShowBackups(false);
+        setBackupLists({});
+        setVisibleBackupList(null);
         loadBackupStatus();
       })
       .catch(e=>setMsg(e.message))
@@ -608,147 +751,169 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
         {msg&&<p className="form-message">{msg}</p>}
       </article>
 
-      <article className="mcc-card wide-card backup-card">
-        <div className="share-card-heading">
-          <div>
-            <span>MCC Master Backup</span>
-            <strong>Automatic database protection</strong>
-            <p>Startup, hourly, automatic write-triggered, and manual backups protect MCC data without showing private system paths.</p>
-          </div>
-          <div className="backup-action-row">
-            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
-            <button className="primary-button compact-button" type="button" onClick={()=>void createManualBackup()} disabled={backupLoading || !backupPermissions.canCreateBackup}>{manualBackupProgress.state === 'running' ? 'Creating...' : 'Create Manual Backup'}</button>
-          </div>
-        </div>
-
-        {manualBackupProgress.state!=='idle'&&(
-          <section className={`backup-progress-panel ${manualBackupProgress.state}`} aria-live="polite">
-            <div className="backup-progress-heading">
-              <div>
-                <span>{manualBackupProgress.state==='running'?'Creating MCC Master Backup':'MCC Master Backup'}</span>
-                <strong>{manualBackupProgress.message}</strong>
-              </div>
-              {manualBackupProgress.state==='running'&&<span className="backup-spinner" aria-hidden="true" />}
-            </div>
-            <ol className="backup-step-list">
-              {backupStepLabels.map((step,index)=>{
-                const done = manualBackupProgress.state==='success' || index < manualBackupProgress.activeStep;
-                const running = manualBackupProgress.state==='running' && index === manualBackupProgress.activeStep;
-                const failed = manualBackupProgress.state==='error' && index === manualBackupProgress.activeStep;
-                return <li className={failed ? 'failed' : running ? 'running' : done ? 'done' : ''} key={step}>{step}</li>;
-              })}
-            </ol>
-          </section>
-        )}
-
-        <div className="backup-status-grid">
-          <section className="backup-status-panel">
-            <span>Backup health</span>
-            <strong>{backupStatus?.backupHealth ?? 'Checking...'}</strong>
-            <p>{backupStatus?.backupFolderExists ? 'Backup storage is ready.' : 'Backup storage is not ready.'}</p>
-          </section>
-          <section className="backup-status-panel">
-            <span>Latest backup</span>
-            <strong>{backupStatus?.latestBackup ? backupStatus.latestBackup.typeLabel : 'None yet'}</strong>
-            <p>{formatDateTime(backupStatus?.latestBackup?.createdAt)}</p>
-          </section>
-          <section className="backup-status-panel">
-            <span>Live database</span>
-            <strong>{formatBytes(backupStatus?.databaseSize ?? 0)}</strong>
-            <p>Next scheduled backup: {formatDateTime(backupStatus?.nextScheduledBackupAt)}</p>
-          </section>
-        </div>
-
-        <div className="backup-count-row">
-          {(['manual','auto','scheduled','startup','pre_restore'] as BackupType[]).map(type=>(
-            <span className={`backup-type-pill ${type}`} key={type}>{typeLabel(type)}: {backupCounts[type] ?? 0}</span>
-          ))}
-        </div>
-
-        <section className="backup-protection-panel">
-          <div className="backup-protection-heading">
+      {backupCards.length>0&&(
+        <article className="mcc-card wide-card backup-card backup-center-card">
+          <div className="share-card-heading">
             <div>
-              <span>Auto Protection</span>
-              <strong>{backupStatus?.autoBackupPending ? 'Pending write backup' : 'Enabled'}</strong>
+              <span>Backup Center</span>
+              <strong>Tiered MCC data protection</strong>
+              <p>Daily change backups, Friday weekly backups, and monthly master backups are separated by role and folder.</p>
             </div>
-            <span className={`backup-area-badge ${backupStatus?.autoBackupPending ? 'pending' : 'protected'}`}>{backupStatus?.autoBackupPending ? 'Pending' : 'Protected'}</span>
+            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
           </div>
-          <div className="backup-protection-times">
-            <p><strong>Last backup</strong><span>{formatDateTime(backupStatus?.latestBackup?.createdAt)}</span></p>
-            <p><strong>Last auto backup</strong><span>{formatDateTime(backupStatus?.lastAutoBackup?.createdAt)}</span></p>
-            <p><strong>Last manual backup</strong><span>{formatDateTime(backupStatus?.lastManualBackup?.createdAt)}</span></p>
-            <p><strong>Last pre-reset/pre-restore</strong><span>{formatDateTime(backupStatus?.lastPreResetBackup?.createdAt ?? backupStatus?.lastPreRestoreBackup?.createdAt)}</span></p>
-          </div>
-          <div className="backup-protected-area-grid">
-            {(backupStatus?.protectedAreas ?? []).map(area=>(
-              <div className="backup-protected-area" key={area.key}>
-                <span className={`backup-area-badge ${area.status}`}>{protectedAreaStatusLabel(area.status)}</span>
-                <strong>{area.label}</strong>
-                <small>{area.detail}</small>
-              </div>
-            ))}
-          </div>
-        </section>
 
-        <section className="network-notes backup-notes">
-          <strong>Automatic safety</strong>
-          <ul>
-            <li>Startup backup runs when MCC starts successfully.</li>
-            <li>Scheduled backup runs every {backupStatus?.scheduledBackupIntervalMinutes ?? 60} minutes while MCC is running.</li>
-            <li>Write-triggered backup waits about {backupStatus?.autoBackupDelaySeconds ?? 45} seconds after MCC data changes.</li>
-            <li>A pre-restore backup is created before any restore is applied.</li>
-          </ul>
-        </section>
-
-        <div className="backup-action-row">
-          <button className="secondary-button" type="button" onClick={()=>void loadBackups()} disabled={backupLoading || !backupPermissions.canViewBackups}>{showBackups ? 'Refresh Backups' : 'View Backups'}</button>
-          {showBackups&&<button className="link-button" type="button" onClick={()=>{setShowBackups(false);setRestoreTarget(null);}}>Hide Backups</button>}
-        </div>
-
-        {showBackups&&(
-          <div className="backup-list">
-            {backups.map(backup=>(
-              <section className="backup-list-row" key={backup.id}>
+          {manualBackupProgress.state!=='idle'&&(
+            <section className={`backup-progress-panel ${manualBackupProgress.state}`} aria-live="polite">
+              <div className="backup-progress-heading">
                 <div>
-                  <span className={`backup-type-pill ${backup.type}`}>{backup.typeLabel}</span>
-                  <strong>{formatDateTime(backup.createdAt)}</strong>
-                  <p>{formatBytes(backup.sizeBytes)} total / {formatBytes(backup.databaseSizeBytes)} database</p>
-                  <small>{backup.notes || 'No notes'}</small>
+                  <span>{manualBackupProgress.state==='running'?'Creating backup':'Backup result'}</span>
+                  <strong>{manualBackupProgress.message}</strong>
                 </div>
-                <div className="backup-row-actions">
-                  <button className="secondary-button compact-button" type="button" onClick={()=>verifyBackup(backup)} disabled={backupLoading}>Verify</button>
-                  <button className="danger-button compact-button" type="button" onClick={()=>{setRestoreTarget(backup);setRestoreConfirmation('');}} disabled={backupLoading || !backupPermissions.canRestoreBackup || !backup.restorable}>Restore</button>
-                </div>
-              </section>
-            ))}
-            {!backups.length&&<p className="form-message">No master backups found yet.</p>}
-          </div>
-        )}
+                {manualBackupProgress.state==='running'&&<span className="backup-spinner" aria-hidden="true" />}
+              </div>
+              <ol className="backup-step-list">
+                {backupStepLabels.map((step,index)=>{
+                  const done = manualBackupProgress.state==='success' || index < manualBackupProgress.activeStep;
+                  const running = manualBackupProgress.state==='running' && index === manualBackupProgress.activeStep;
+                  const failed = manualBackupProgress.state==='error' && index === manualBackupProgress.activeStep;
+                  return <li className={failed ? 'failed' : running ? 'running' : done ? 'done' : ''} key={step}>{step}</li>;
+                })}
+              </ol>
+            </section>
+          )}
 
-        {restoreTarget&&(
-          <section className="restore-panel">
-            <span>Restore confirmation</span>
-            <strong>{restoreTarget.typeLabel} backup from {formatDateTime(restoreTarget.createdAt)}</strong>
-            <p>A pre-restore safety backup will be created before restoring. Type RESTORE MCC to continue.</p>
-            <label className="form-field">
-              <span>Confirmation</span>
-              <input value={restoreConfirmation} onChange={event=>setRestoreConfirmation(event.target.value)} placeholder="RESTORE MCC" />
-            </label>
-            <div className="backup-action-row">
-              <button className="danger-button" type="button" onClick={restoreBackup} disabled={backupLoading || restoreConfirmation !== 'RESTORE MCC'}>Restore Backup</button>
-              <button className="link-button" type="button" onClick={()=>setRestoreTarget(null)}>Cancel</button>
+          <div className="backup-status-grid">
+            <section className="backup-status-panel">
+              <span>Backup health</span>
+              <strong>{backupStatus?.backupHealth ?? 'Checking...'}</strong>
+              <p>{backupStatus?.backupFolderExists ? 'Backup storage is ready.' : 'Backup storage is not ready.'}</p>
+            </section>
+            <section className="backup-status-panel">
+              <span>Latest visible backup</span>
+              <strong>{backupStatus?.latestBackup ? backupStatus.latestBackup.typeLabel : 'None yet'}</strong>
+              <p>{formatDateTime(backupStatus?.latestBackup?.createdAt)}</p>
+            </section>
+            <section className="backup-status-panel">
+              <span>Live database</span>
+              <strong>{formatBytes(backupStatus?.databaseSize ?? 0)}</strong>
+              <p>Auto backup delay: {backupStatus?.autoBackupDelaySeconds ?? 45} seconds</p>
+            </section>
+          </div>
+
+          <div className="backup-center-grid">
+            {backupCards.map(card=>{
+              const listVisible = visibleBackupList === card.category;
+              const cardBackups = backupLists[card.category] ?? [];
+              const latest = card.status.latestBackup;
+              return (
+                <section className="backup-tier-card" key={card.category}>
+                  <div className="backup-tier-heading">
+                    <div>
+                      <span>{card.title}</span>
+                      <strong>{card.status.categoryLabel}</strong>
+                      <p>{card.description}</p>
+                    </div>
+                    <span className={`backup-health-badge ${card.status.health.ok ? 'healthy' : 'attention'}`}>{card.status.health.label}</span>
+                  </div>
+
+                  <div className="backup-tier-meta">
+                    <p><strong>Last backup</strong><span>{formatDateTime(latest?.createdAt)}</span></p>
+                    <p><strong>{card.category === 'daily' ? 'Auto backup' : 'Next backup'}</strong><span>{card.category === 'daily' ? (card.status.autoBackupPending ? 'Pending after recent change' : 'No pending change backup') : formatDateTime(card.status.nextScheduledBackupAt)}</span></p>
+                    <p><strong>Backup count</strong><span>{card.status.count}</span></p>
+                    <p><strong>Folder</strong><span>{card.status.folderLabel || '-'}</span></p>
+                  </div>
+
+                  <p className="backup-health-detail">{card.status.health.message}</p>
+
+                  <div className="backup-action-row">
+                    <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackups(card.category)} disabled={backupLoading}>{listVisible ? 'Refresh' : 'View Backups'}</button>
+                    {listVisible&&<button className="link-button compact-button" type="button" onClick={()=>{setVisibleBackupList(null);setRestoreTarget(null);}}>Hide</button>}
+                    {card.canCreate&&<button className="primary-button compact-button" type="button" onClick={()=>void createManualBackup(card.category)} disabled={backupLoading}>{manualBackupProgress.state === 'running' ? 'Creating...' : card.createLabel}</button>}
+                    <button className="secondary-button compact-button" type="button" onClick={()=>latest&&verifyBackup(latest)} disabled={backupLoading || !latest}>Verify</button>
+                    {card.canRestore&&<button className="danger-button compact-button" type="button" onClick={()=>{if(latest){setRestoreTarget(latest);setRestoreConfirmation('');}}} disabled={backupLoading || !latest?.restorable}>Restore</button>}
+                  </div>
+
+                  {listVisible&&(
+                    <div className="backup-list tiered-backup-list">
+                      {cardBackups.map(backup=>(
+                        <section className="backup-list-row" key={`${backup.category}-${backup.id}`}>
+                          <div>
+                            <span className={`backup-type-pill ${backup.type}`}>{backup.category === 'legacy' ? 'Legacy - ' : ''}{backup.typeLabel}</span>
+                            <strong>{formatDateTime(backup.createdAt)}</strong>
+                            <p>{formatBytes(backup.sizeBytes)} total / {formatBytes(backup.databaseSizeBytes)} database</p>
+                            <small>{backup.notes || 'No notes'} - {backup.restorable ? 'Restorable' : 'Not restorable'}</small>
+                          </div>
+                          <div className="backup-row-actions">
+                            <button className="secondary-button compact-button" type="button" onClick={()=>verifyBackup(backup)} disabled={backupLoading}>Verify</button>
+                            {card.canRestore&&<button className="danger-button compact-button" type="button" onClick={()=>{setRestoreTarget(backup);setRestoreConfirmation('');}} disabled={backupLoading || !backup.restorable}>Restore</button>}
+                          </div>
+                        </section>
+                      ))}
+                      {!cardBackups.length&&<p className="form-message">No {card.title.toLowerCase()} backups found yet.</p>}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+
+          <section className="backup-protection-panel">
+            <div className="backup-protection-heading">
+              <div>
+                <span>Protected MCC areas</span>
+                <strong>{backupStatus?.daily.autoBackupPending ? 'Daily auto backup pending' : 'Backup coverage ready'}</strong>
+              </div>
+              <span className={`backup-area-badge ${backupStatus?.daily.autoBackupPending ? 'pending' : 'protected'}`}>{backupStatus?.daily.autoBackupPending ? 'Pending' : 'Protected'}</span>
+            </div>
+            <div className="backup-protected-area-grid">
+              {(backupStatus?.protectedAreas ?? []).map(area=>(
+                <div className="backup-protected-area" key={area.key}>
+                  <span className={`backup-area-badge ${area.status}`}>{protectedAreaStatusLabel(area.status)}</span>
+                  <strong>{area.label}</strong>
+                  <small>{area.detail}</small>
+                </div>
+              ))}
             </div>
           </section>
-        )}
 
-        {displayedBackupResult&&(
-          <section className={displayedBackupResult.ok ? 'backup-result-panel success' : 'backup-result-panel error'}>
-            <span>Last result</span>
-            <strong>{lastManualBackupResult?.message ?? (displayedBackupResult.ok ? 'Last backup succeeded' : 'Last backup failed')}</strong>
-            <p>{lastManualBackupResult ? formatDateTime(lastManualBackupResult.createdAt) : displayedBackupResult.message}</p>
+          {msg&&<p className="form-message">{msg}</p>}
+
+          {displayedBackupResult&&(
+            <section className={displayedBackupResult.ok ? 'backup-result-panel success' : 'backup-result-panel error'}>
+              <span>Last result</span>
+              <strong>{lastManualBackupResult?.message ?? (displayedBackupResult.ok ? 'Last backup succeeded' : 'Last backup failed')}</strong>
+              <p>{lastManualBackupResult ? formatDateTime(lastManualBackupResult.createdAt) : displayedBackupResult.message}</p>
+            </section>
+          )}
+        </article>
+      )}
+
+      {restoreTarget&&(
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="mcc-card inventory-modal restore-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Restore backup</p>
+                <h3>{restoreTarget.categoryLabel}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>setRestoreTarget(null)} disabled={backupLoading}>Close</button>
+            </div>
+            <section className="restore-warning-panel">
+              <strong>{restoreTarget.typeLabel} from {formatDateTime(restoreTarget.createdAt)}</strong>
+              <p>Restoring will replace current MCC data and files with the selected backup. A pre-restore safety backup will be created first.</p>
+              <p>Never continue unless everyone is out of MCC and the selected backup is the one you intend to restore.</p>
+            </section>
+            <label className="form-field">
+              <span>Type RESTORE MCC to continue</span>
+              <input value={restoreConfirmation} onChange={event=>setRestoreConfirmation(event.target.value)} placeholder="RESTORE MCC" disabled={backupLoading} />
+            </label>
+            <div className="modal-actions">
+              <button className="danger-button" type="button" onClick={restoreBackup} disabled={backupLoading || restoreConfirmation !== 'RESTORE MCC'}>{backupLoading ? 'Restoring...' : 'Restore Backup'}</button>
+              <button className="secondary-button" type="button" onClick={()=>setRestoreTarget(null)} disabled={backupLoading}>Cancel</button>
+            </div>
           </section>
-        )}
-      </article>
+        </div>
+      )}
 
       {isOwnerAdmin&&(
         <article className="mcc-card wide-card danger-zone-card">

@@ -274,7 +274,7 @@ function cookie(req: Request, name: string) { return req.headers.cookie?.split('
 function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run('INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES (?,?,?,?)', [id,userId,exp,now()]); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); }
 function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) run('DELETE FROM sessions WHERE id=?', [req.sessionId]); res.clearCookie('mcc_session', { path: '/' }); }
 function audit(req: Request, action: string, targetType?: string, targetId?: string|number, details: Record<string, unknown> = {}) { const u = (req as AuthRequest).user; run('INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [u?.id ?? null,u?.email ?? '',action,targetType ?? '',String(targetId ?? ''),JSON.stringify(details),req.ip ?? '',req.get('user-agent') ?? '',now()]); auditWriteBackup(req, action); }
-function shouldScheduleMasterBackupFromAudit(action: string) {
+function shouldScheduleDailyBackupFromAudit(action: string) {
   const value = action.toLowerCase();
   if (value.startsWith('failed ') || value.includes(' login') || value === 'login' || value === 'logout') return false;
   if (value.includes('export') || value.includes('pdf') || value.includes('backup') || value.includes('restore')) return false;
@@ -290,7 +290,7 @@ function shouldScheduleMasterBackupFromAudit(action: string) {
     || (value.includes('requisition') && !value.includes('previewed'));
 }
 function auditWriteBackup(req: Request, action: string) {
-  if (shouldScheduleMasterBackupFromAudit(action)) scheduleAutoBackup(`audit:${action}`, (req as AuthRequest).user ?? null);
+  if (shouldScheduleDailyBackupFromAudit(action)) scheduleAutoBackup(`audit:${action}`, (req as AuthRequest).user ?? null);
 }
 type HistorySection = 'inventory' | 'vendors' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 type HistoryLogInput = {
@@ -1612,10 +1612,31 @@ function createAndAuditNativeBackup(req: Request, reason: string) {
     throw error;
   }
 }
-type MasterBackupType = 'startup' | 'scheduled' | 'auto' | 'manual' | 'pre_restore';
-type MasterBackupManifest = {
+type BackupCategory = 'daily' | 'weekly' | 'master' | 'legacy';
+type CreatableBackupCategory = Exclude<BackupCategory, 'legacy'>;
+type LegacyMasterBackupType = 'startup' | 'scheduled' | 'auto' | 'manual' | 'pre_restore';
+type BackupType =
+  | 'daily_auto'
+  | 'daily_manual'
+  | 'weekly_scheduled'
+  | 'weekly_manual'
+  | 'master_scheduled'
+  | 'master_manual'
+  | 'pre_restore'
+  | 'startup'
+  | 'scheduled'
+  | 'auto'
+  | 'manual'
+  | 'legacy';
+type BackupHealth = {
+  ok: boolean;
+  label: 'Healthy' | 'Needs Attention' | 'Hidden';
+  message: string;
+};
+type BackupManifest = {
   appName: string;
-  backupType: MasterBackupType;
+  backupCategory?: BackupCategory;
+  backupType: BackupType;
   createdAt: string;
   createdBy: { id: number; fullName: string; email: string; role: Role } | null;
   appVersion: string;
@@ -1627,10 +1648,12 @@ type MasterBackupManifest = {
   checksumSha256: string;
   notes: string;
 };
-type MasterBackupSummary = {
+type BackupSummary = {
   id: string;
   name: string;
-  type: MasterBackupType;
+  category: BackupCategory;
+  categoryLabel: string;
+  type: BackupType;
   typeLabel: string;
   createdAt: string;
   sizeBytes: number;
@@ -1641,6 +1664,7 @@ type MasterBackupSummary = {
   checksumSha256: string;
   notes: string;
   restorable: boolean;
+  folderLabel: string;
 };
 type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
 type ProtectedBackupArea = {
@@ -1651,17 +1675,62 @@ type ProtectedBackupArea = {
 };
 type BackupOperationResult = {
   ok: boolean;
-  type?: MasterBackupType;
+  category?: BackupCategory;
+  type?: BackupType;
   backupId?: string;
   createdAt?: string;
   message: string;
 };
-const masterBackupDir = path.join(backupsDir, 'master');
+const dailyBackupDir = path.join(backupsDir, 'daily');
+const weeklyBackupDir = path.join(backupsDir, 'MCC Full Back up _ Weekly');
+const masterFullBackupDir = path.join(backupsDir, 'MCC Master back up');
+const legacyMasterBackupDir = path.join(backupsDir, 'master');
 const corruptBackupDir = path.join(backupsDir, 'corrupt');
-const masterBackupPrefix = 'MCC_Master_Backup_';
-const scheduledBackupIntervalMs = 60 * 60 * 1000;
+const backupCategoryDetails: Record<CreatableBackupCategory, { label: string; folderLabel: string; dir: string; prefix: string }> = {
+  daily: { label: 'Daily / Auto Change Backup', folderLabel: 'backend/backups/daily', dir: dailyBackupDir, prefix: 'MCC_Daily_Backup_' },
+  weekly: { label: 'Weekly Full Backup', folderLabel: 'backend/backups/MCC Full Back up _ Weekly', dir: weeklyBackupDir, prefix: 'MCC_Weekly_Full_Backup_' },
+  master: { label: 'MCC Master Full Backup', folderLabel: 'backend/backups/MCC Master back up', dir: masterFullBackupDir, prefix: 'MCC_Master_Backup_' },
+};
+const legacyBackupDetail = { label: 'Legacy Master Backup', folderLabel: 'backend/backups/master', dir: legacyMasterBackupDir, prefix: 'MCC_Master_Backup_' };
+const backupCategories: BackupCategory[] = ['daily','weekly','master','legacy'];
+const creatableBackupCategories: CreatableBackupCategory[] = ['daily','weekly','master'];
+const knownBackupTypes: BackupType[] = [
+  'weekly_scheduled',
+  'master_scheduled',
+  'weekly_manual',
+  'master_manual',
+  'daily_manual',
+  'daily_auto',
+  'pre_restore',
+  'scheduled',
+  'startup',
+  'manual',
+  'auto',
+  'legacy',
+];
+const backupTypeLabels: Record<BackupType, string> = {
+  daily_auto: 'Daily / Auto Change',
+  daily_manual: 'Daily Manual',
+  weekly_scheduled: 'Weekly Scheduled',
+  weekly_manual: 'Weekly Manual',
+  master_scheduled: 'Monthly Master',
+  master_manual: 'Master Manual',
+  pre_restore: 'Pre-Restore Safety',
+  startup: 'Legacy Startup',
+  scheduled: 'Legacy Hourly',
+  auto: 'Legacy Auto',
+  manual: 'Legacy Manual',
+  legacy: 'Legacy',
+};
 const autoBackupDelayMs = 45 * 1000;
-const backupRetention: Record<MasterBackupType, number> = { startup: 10, scheduled: 30, auto: 50, manual: 30, pre_restore: 20 };
+const weeklyBackupHour = 13;
+const masterBackupHour = 13;
+const maxBackupScheduleDelayMs = 24 * 60 * 60 * 1000;
+const backupRetention: Record<CreatableBackupCategory, Partial<Record<BackupType, number>>> = {
+  daily: { daily_auto: 60, daily_manual: 30 },
+  weekly: { weekly_scheduled: 26, weekly_manual: 12 },
+  master: { master_scheduled: 24, master_manual: 30, pre_restore: 20, startup: 10 },
+};
 const masterBackupFolderCandidates = ['uploads','documents','files'];
 const backupDataAreaDefinitions = [
   { key: 'inventoryParts', label: 'Inventory', tables: ['inventory_parts'] },
@@ -1678,15 +1747,34 @@ const backupDataAreaDefinitions = [
 let autoBackupTimer: NodeJS.Timeout | undefined;
 let autoBackupReason = '';
 let autoBackupActor: User | null = null;
-let nextScheduledBackupAt: string | null = null;
-let lastBackupResult: BackupOperationResult = { ok: true, message: 'No master backup has run yet.' };
+let weeklyBackupTimer: NodeJS.Timeout | undefined;
+let masterBackupTimer: NodeJS.Timeout | undefined;
+let nextWeeklyBackupAt: string | null = null;
+let nextMasterBackupAt: string | null = null;
+let lastBackupResult: BackupOperationResult = { ok: true, message: 'No tiered backup has run yet.' };
 let backupInProgress = false;
 
-function masterBackupTypeLabel(type: MasterBackupType) {
-  return type.split('_').map(value=>value.charAt(0).toUpperCase() + value.slice(1)).join(' ');
+function backupCategoryLabel(category: BackupCategory) {
+  return category === 'legacy' ? legacyBackupDetail.label : backupCategoryDetails[category].label;
 }
-function ensureMasterBackupDir() {
-  fs.mkdirSync(masterBackupDir, { recursive: true });
+function backupFolderLabel(category: BackupCategory) {
+  return category === 'legacy' ? legacyBackupDetail.folderLabel : backupCategoryDetails[category].folderLabel;
+}
+function backupTypeLabel(type: BackupType) {
+  return backupTypeLabels[type] ?? type.split('_').map(value=>value.charAt(0).toUpperCase() + value.slice(1)).join(' ');
+}
+function backupDirectory(category: BackupCategory) {
+  return category === 'legacy' ? legacyBackupDetail.dir : backupCategoryDetails[category].dir;
+}
+function backupPrefix(category: BackupCategory) {
+  return category === 'legacy' ? legacyBackupDetail.prefix : backupCategoryDetails[category].prefix;
+}
+function ensureBackupDirs() {
+  fs.mkdirSync(backupsDir, { recursive: true });
+  for (const category of creatableBackupCategories) fs.mkdirSync(backupDirectory(category), { recursive: true });
+}
+function ensureBackupCategoryDir(category: CreatableBackupCategory) {
+  fs.mkdirSync(backupDirectory(category), { recursive: true });
 }
 function sqliteLiteral(value: string) {
   return `'${value.replace(/'/g, "''")}'`;
@@ -1707,6 +1795,9 @@ function copyDirectoryIfPresent(sourcePath: string, targetPath: string) {
   if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isDirectory()) return false;
   fs.cpSync(sourcePath, targetPath, { recursive: true });
   return true;
+}
+function removeDirectoryIfPresent(targetPath: string) {
+  if (fs.existsSync(targetPath)) fs.rmSync(targetPath, { recursive: true, force: true });
 }
 function tableCount(tableName: string) {
   try {
@@ -1760,35 +1851,73 @@ function databaseQuickCheck() {
     return { ok: false, message: safeErrorMessage(error, [], 'Database check failed.') };
   }
 }
-function backupPathFromId(id: unknown) {
+function backupCategoryFromValue(value: unknown, fallback: BackupCategory = 'master') {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return fallback;
+  if (backupCategories.includes(text as BackupCategory)) return text as BackupCategory;
+  throw new Error('Invalid backup category.');
+}
+function manifestBackupCategory(value: unknown, fallback: BackupCategory) {
+  try {
+    return backupCategoryFromValue(value, fallback);
+  } catch {
+    return fallback;
+  }
+}
+function backupTypeFromValue(value: unknown, fallback: BackupType = 'legacy') {
+  const text = String(value ?? '').trim();
+  return knownBackupTypes.includes(text as BackupType) ? text as BackupType : fallback;
+}
+function backupTypeFromFolderName(name: string): BackupType | null {
+  return knownBackupTypes.find(type=>name.endsWith(`_${type}`)) ?? null;
+}
+function backupIdHasUnsafePathSegment(id: string) {
+  return !id || id.includes('/') || id.includes('\\') || id.includes('..') || id !== path.basename(id);
+}
+function backupPathFromId(category: BackupCategory, id: unknown) {
   const clean = String(id ?? '').trim();
-  if (!/^MCC_Master_Backup_[A-Za-z0-9T_-]+_(startup|scheduled|auto|manual|pre_restore)$/.test(clean)) throw new Error('Backup not found.');
-  const resolved = path.resolve(masterBackupDir, clean);
-  if (path.dirname(resolved) !== path.resolve(masterBackupDir)) throw new Error('Backup not found.');
+  if (backupIdHasUnsafePathSegment(clean) || !clean.startsWith(backupPrefix(category))) throw new Error('Backup not found.');
+  const root = path.resolve(backupDirectory(category));
+  const resolved = path.resolve(root, clean);
+  if (path.dirname(resolved) !== root) throw new Error('Backup not found.');
   return resolved;
 }
-function readMasterBackupManifest(folderPath: string): MasterBackupManifest | null {
+function resolveBackupCategoryForRequest(category: unknown, backupId: unknown) {
+  if (String(category ?? '').trim()) return backupCategoryFromValue(category);
+  const clean = String(backupId ?? '').trim();
+  if (!backupIdHasUnsafePathSegment(clean)) {
+    for (const candidate of backupCategories) {
+      try {
+        const candidatePath = backupPathFromId(candidate, clean);
+        if (fs.existsSync(candidatePath)) return candidate;
+      } catch {}
+    }
+  }
+  return 'master';
+}
+function readBackupManifest(folderPath: string): BackupManifest | null {
   try {
     const manifestPath = path.join(folderPath, 'manifest.json');
     if (!fs.existsSync(manifestPath)) return null;
-    return JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as MasterBackupManifest;
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as BackupManifest;
   } catch {
     return null;
   }
 }
-function summaryFromMasterBackupFolder(folderPath: string): MasterBackupSummary | null {
+function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCategory): BackupSummary | null {
   const name = path.basename(folderPath);
-  const manifest = readMasterBackupManifest(folderPath);
-  const match = name.match(/_(startup|scheduled|auto|manual|pre_restore)$/);
-  const type = (manifest?.backupType ?? match?.[1]) as MasterBackupType | undefined;
-  if (!type) return null;
+  const manifest = readBackupManifest(folderPath);
+  const category = fallbackCategory === 'legacy' ? 'legacy' : manifestBackupCategory(manifest?.backupCategory, fallbackCategory);
+  const type = backupTypeFromValue(manifest?.backupType, backupTypeFromFolderName(name) ?? (category === 'legacy' ? 'legacy' : 'manual'));
   const dbFile = path.join(folderPath, 'mcc.sqlite');
   const stat = fs.statSync(folderPath);
   return {
     id: name,
     name,
+    category,
+    categoryLabel: backupCategoryLabel(category),
     type,
-    typeLabel: masterBackupTypeLabel(type),
+    typeLabel: backupTypeLabel(type),
     createdAt: manifest?.createdAt ?? stat.birthtime.toISOString(),
     sizeBytes: folderSizeBytes(folderPath),
     databaseSizeBytes: manifest?.databaseSizeBytes ?? (fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0),
@@ -1798,42 +1927,62 @@ function summaryFromMasterBackupFolder(folderPath: string): MasterBackupSummary 
     checksumSha256: manifest?.checksumSha256 ?? '',
     notes: manifest?.notes ?? '',
     restorable: fs.existsSync(dbFile),
+    folderLabel: backupFolderLabel(category),
   };
 }
-function listMasterBackupsInternal() {
-  if (!fs.existsSync(masterBackupDir)) return [];
-  return fs.readdirSync(masterBackupDir, { withFileTypes: true })
-    .filter(entry=>entry.isDirectory() && entry.name.startsWith(masterBackupPrefix))
-    .map(entry=>summaryFromMasterBackupFolder(path.join(masterBackupDir, entry.name)))
-    .filter((backup): backup is MasterBackupSummary => Boolean(backup))
+function listBackupDirectory(category: BackupCategory) {
+  const root = backupDirectory(category);
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter(entry=>entry.isDirectory() && entry.name.startsWith(backupPrefix(category)))
+    .map(entry=>summaryFromBackupFolder(path.join(root, entry.name), category))
+    .filter((backup): backup is BackupSummary => Boolean(backup))
     .sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
 }
+function listBackupsByCategory(category: BackupCategory, options: { includeLegacy?: boolean } = {}) {
+  const backups = listBackupDirectory(category);
+  if (category === 'master' && options.includeLegacy) return [...backups, ...listBackupDirectory('legacy')].sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
+  return backups;
+}
+function listMasterBackupsInternal() {
+  return listBackupsByCategory('master', { includeLegacy: true });
+}
 function backupCountsByType(backups = listMasterBackupsInternal()) {
-  const counts: Record<MasterBackupType, number> = { startup: 0, scheduled: 0, auto: 0, manual: 0, pre_restore: 0 };
-  for (const backup of backups) counts[backup.type] += 1;
+  const counts = Object.fromEntries(knownBackupTypes.map(type=>[type, 0])) as Record<BackupType, number>;
+  for (const backup of backups) counts[backup.type] = (counts[backup.type] ?? 0) + 1;
   return counts;
 }
-function removeMasterBackupFolder(folderPath: string) {
+function removeBackupFolder(category: CreatableBackupCategory, folderPath: string) {
   const resolved = path.resolve(folderPath);
-  const root = path.resolve(masterBackupDir);
+  const root = path.resolve(backupDirectory(category));
   if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe backup retention target.');
   fs.rmSync(resolved, { recursive: true, force: true });
 }
-function applyMasterBackupRetention() {
-  const backups = listMasterBackupsInternal();
-  for (const type of Object.keys(backupRetention) as MasterBackupType[]) {
+function applyBackupRetention(category: CreatableBackupCategory) {
+  const backups = listBackupsByCategory(category);
+  const retention = backupRetention[category];
+  for (const type of Object.keys(retention) as BackupType[]) {
+    const limit = retention[type] ?? 0;
+    if (limit <= 0) continue;
     const typed = backups.filter(backup=>backup.type===type).sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
-    typed.slice(backupRetention[type]).forEach(backup=>removeMasterBackupFolder(path.join(masterBackupDir, backup.id)));
+    typed.slice(limit).forEach(backup=>removeBackupFolder(category, path.join(backupDirectory(category), backup.id)));
   }
 }
-function createMasterBackup(input: { type: MasterBackupType; actor?: User | null; notes?: string }) {
-  if (backupInProgress) throw new Error('Another master backup is already running.');
+function defaultManualBackupType(category: CreatableBackupCategory): BackupType {
+  if (category === 'daily') return 'daily_manual';
+  if (category === 'weekly') return 'weekly_manual';
+  return 'master_manual';
+}
+function createBackup(input: { category: CreatableBackupCategory; type?: BackupType; actor?: User | null; notes?: string }) {
+  if (backupInProgress) throw new Error('Another backup is already running.');
   backupInProgress = true;
+  const category = input.category;
+  const type = input.type ?? defaultManualBackupType(category);
   try {
-    ensureMasterBackupDir();
+    ensureBackupCategoryDir(category);
     const createdAt = now();
-    const folderName = `${masterBackupPrefix}${safeFolderStamp()}_${input.type}`;
-    const targetDir = path.join(masterBackupDir, folderName);
+    const folderName = `${backupPrefix(category)}${safeFolderStamp()}_${type}`;
+    const targetDir = path.join(backupDirectory(category), folderName);
     fs.mkdirSync(targetDir, { recursive: false });
     const backupDbPath = path.join(targetDir, 'mcc.sqlite');
     db.exec('PRAGMA wal_checkpoint(FULL);');
@@ -1849,9 +1998,10 @@ function createMasterBackup(input: { type: MasterBackupType; actor?: User | null
       }
     }
     const databaseSizeBytes = fs.statSync(backupDbPath).size;
-    const manifest: MasterBackupManifest = {
+    const manifest: BackupManifest = {
       appName,
-      backupType: input.type,
+      backupCategory: category,
+      backupType: type,
       createdAt,
       createdBy: actorForManifest(input.actor),
       appVersion: version,
@@ -1864,16 +2014,27 @@ function createMasterBackup(input: { type: MasterBackupType; actor?: User | null
       notes: input.notes ?? '',
     };
     fs.writeFileSync(path.join(targetDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    applyMasterBackupRetention();
-    const summary = summaryFromMasterBackupFolder(targetDir);
-    lastBackupResult = { ok: true, type: input.type, backupId: folderName, createdAt, message: `${masterBackupTypeLabel(input.type)} backup created.` };
+    applyBackupRetention(category);
+    const summary = summaryFromBackupFolder(targetDir, category);
+    lastBackupResult = { ok: true, category, type, backupId: folderName, createdAt, message: `${backupTypeLabel(type)} backup created.` };
     return summary!;
   } catch (error) {
-    lastBackupResult = { ok: false, type: input.type, createdAt: now(), message: safeBackupClientError(error, 'Master backup failed.') };
+    lastBackupResult = { ok: false, category, type, createdAt: now(), message: safeBackupClientError(error, 'Backup failed.') };
     throw error;
   } finally {
     backupInProgress = false;
   }
+}
+function legacyMasterTypeToTiered(type: LegacyMasterBackupType): { category: CreatableBackupCategory; type: BackupType } {
+  if (type === 'auto') return { category: 'daily', type: 'daily_auto' };
+  if (type === 'scheduled') return { category: 'master', type: 'master_scheduled' };
+  if (type === 'manual') return { category: 'master', type: 'master_manual' };
+  if (type === 'pre_restore') return { category: 'master', type: 'pre_restore' };
+  return { category: 'master', type: 'startup' };
+}
+function createMasterBackup(input: { type: LegacyMasterBackupType; actor?: User | null; notes?: string }) {
+  const tiered = legacyMasterTypeToTiered(input.type);
+  return createBackup({ category: tiered.category, type: tiered.type, actor: input.actor, notes: input.notes });
 }
 function scheduleAutoBackup(reason: string, actor?: User | null) {
   autoBackupReason = reason;
@@ -1882,9 +2043,9 @@ function scheduleAutoBackup(reason: string, actor?: User | null) {
   autoBackupTimer = setTimeout(()=>{
     autoBackupTimer = undefined;
     try {
-      createMasterBackup({ type: 'auto', actor: autoBackupActor, notes: autoBackupReason || 'Automatic backup after MCC data changes.' });
+      createBackup({ category: 'daily', type: 'daily_auto', actor: autoBackupActor, notes: autoBackupReason || 'Automatic backup after MCC data changes.' });
     } catch (error) {
-      console.log(`MCC auto backup failed: ${safeErrorMessage(error)}`);
+      console.log(`MCC daily auto backup failed: ${safeErrorMessage(error)}`);
     } finally {
       autoBackupReason = '';
       autoBackupActor = null;
@@ -1892,27 +2053,56 @@ function scheduleAutoBackup(reason: string, actor?: User | null) {
   }, autoBackupDelayMs);
   autoBackupTimer.unref?.();
 }
-function verifyMasterBackup(id: unknown) {
-  const folderPath = backupPathFromId(id);
+function verifyBackup(category: BackupCategory, id: unknown) {
+  const folderPath = backupPathFromId(category, id);
   if (!fs.existsSync(folderPath)) throw new Error('Backup not found.');
-  const summary = summaryFromMasterBackupFolder(folderPath);
+  const summary = summaryFromBackupFolder(folderPath, category);
   if (!summary?.restorable) throw new Error('Backup database file is missing.');
   const dbFile = path.join(folderPath, 'mcc.sqlite');
-  const manifest = readMasterBackupManifest(folderPath);
+  const manifest = readBackupManifest(folderPath);
   const checksumSha256 = sha256File(dbFile);
   const checksumMatches = !manifest?.checksumSha256 || manifest.checksumSha256 === checksumSha256;
   return { ok: checksumMatches, backup: summary, checksumSha256, message: checksumMatches ? 'Backup verified.' : 'Backup checksum does not match the manifest.' };
 }
-function restoreMasterBackup(input: { backupId: unknown; actor: User; confirmation: unknown }) {
+function verifyMasterBackup(id: unknown) {
+  return verifyBackup('master', id);
+}
+function appDataFolderPath(folderName: string) {
+  if (!masterBackupFolderCandidates.includes(folderName)) throw new Error('Unsafe restore folder.');
+  const backendRoot = path.resolve(__dirname, '../../');
+  const resolved = path.resolve(backendRoot, folderName);
+  if (!resolved.startsWith(`${backendRoot}${path.sep}`)) throw new Error('Unsafe restore folder.');
+  return resolved;
+}
+function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: { removeMissing: boolean }) {
+  const restoredFolders: string[] = [];
+  const backupFilesRoot = path.join(backupFolderPath, 'files');
+  for (const folderName of masterBackupFolderCandidates) {
+    const sourcePath = path.join(backupFilesRoot, folderName);
+    const targetPath = appDataFolderPath(folderName);
+    if (fs.existsSync(sourcePath) && fs.statSync(sourcePath).isDirectory()) {
+      removeDirectoryIfPresent(targetPath);
+      fs.cpSync(sourcePath, targetPath, { recursive: true });
+      restoredFolders.push(folderName);
+    } else if (options.removeMissing) {
+      removeDirectoryIfPresent(targetPath);
+    }
+  }
+  fs.mkdirSync(brandingUploadsDir, { recursive: true });
+  return restoredFolders;
+}
+function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
   if (String(input.confirmation ?? '').trim() !== 'RESTORE MCC') throw new Error('Type RESTORE MCC to confirm restore.');
-  const verification = verifyMasterBackup(input.backupId);
+  const verification = verifyBackup(input.category, input.backupId);
   if (!verification.ok) throw new Error(verification.message);
-  const backupDbPath = path.join(backupPathFromId(input.backupId), 'mcc.sqlite');
-  const preRestoreBackup = createMasterBackup({ type: 'pre_restore', actor: input.actor, notes: `Before restoring ${verification.backup.name}` });
-  const preRestoreDbPath = path.join(masterBackupDir, preRestoreBackup.id, 'mcc.sqlite');
-  let reopened = false;
-  db.close();
+  const backupFolderPath = backupPathFromId(input.category, input.backupId);
+  const backupDbPath = path.join(backupFolderPath, 'mcc.sqlite');
+  const preRestoreBackup = createBackup({ category: 'master', type: 'pre_restore', actor: input.actor, notes: `Before restoring ${verification.backup.name}` });
+  const preRestoreFolderPath = backupPathFromId('master', preRestoreBackup.id);
+  const preRestoreDbPath = path.join(preRestoreFolderPath, 'mcc.sqlite');
+  let restoredFolders: string[] = [];
   try {
+    db.close();
     for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
       if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true });
     }
@@ -1921,47 +2111,133 @@ function restoreMasterBackup(input: { backupId: unknown; actor: User; confirmati
     db.exec('PRAGMA journal_mode=WAL;');
     initDb();
     migrateDb();
-    reopened = true;
-    try { audit({ user: input.actor, ip: '', get: () => '' } as unknown as Request, 'master restore completed', 'backup', verification.backup.id, { preRestoreBackupId: preRestoreBackup.id }); } catch {}
-    lastBackupResult = { ok: true, type: 'pre_restore', backupId: preRestoreBackup.id, createdAt: now(), message: `Restored ${verification.backup.name}.` };
-    return { restoredBackup: verification.backup, preRestoreBackup };
+    restoredFolders = restoreWhitelistedFoldersFromBackup(backupFolderPath, { removeMissing: true });
+    try { audit({ user: input.actor, ip: '', get: () => '' } as unknown as Request, 'backup restore completed', 'backup', verification.backup.id, { preRestoreBackupId: preRestoreBackup.id, category: input.category, restoredFolders }); } catch {}
+    lastBackupResult = { ok: true, category: input.category, type: verification.backup.type, backupId: verification.backup.id, createdAt: now(), message: `Restored ${verification.backup.name}.` };
+    return { restoredBackup: verification.backup, preRestoreBackup, restoredFolders };
   } catch (error) {
-    if (!reopened && fs.existsSync(preRestoreDbPath)) {
+    try { db.close(); } catch {}
+    try {
       for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
         if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true });
       }
-      fs.copyFileSync(preRestoreDbPath, dbPath);
-      db = new DatabaseSync(dbPath);
-      db.exec('PRAGMA journal_mode=WAL;');
-      initDb();
-      migrateDb();
+      if (fs.existsSync(preRestoreDbPath)) fs.copyFileSync(preRestoreDbPath, dbPath);
+      if (fs.existsSync(dbPath)) {
+        db = new DatabaseSync(dbPath);
+        db.exec('PRAGMA journal_mode=WAL;');
+        initDb();
+        migrateDb();
+      }
+      restoreWhitelistedFoldersFromBackup(preRestoreFolderPath, { removeMissing: true });
+    } catch (rollbackError) {
+      console.log(`MCC pre-restore rollback failed: ${safeErrorMessage(rollbackError)}`);
     }
     throw error;
   }
 }
-function masterBackupStatus() {
-  ensureMasterBackupDir();
-  const backups = listMasterBackupsInternal();
+function restoreMasterBackup(input: { backupId: unknown; actor: User; confirmation: unknown }) {
+  return restoreBackup({ category: 'master', backupId: input.backupId, actor: input.actor, confirmation: input.confirmation });
+}
+function backupGroupHealth(category: BackupCategory, backups: BackupSummary[]): BackupHealth {
+  const root = backupDirectory(category);
+  if (!fs.existsSync(root)) return { ok: false, label: 'Needs Attention', message: `${backupCategoryLabel(category)} folder is missing.` };
+  const health = databaseQuickCheck();
+  if (!health.ok) return { ok: false, label: 'Needs Attention', message: health.message };
+  if (!backups.some(backup=>backup.restorable)) return { ok: false, label: 'Needs Attention', message: 'No restorable backup found yet.' };
+  return { ok: true, label: 'Healthy', message: 'Latest backup storage is ready.' };
+}
+function hiddenBackupGroup(category: BackupCategory) {
+  return {
+    category,
+    categoryLabel: backupCategoryLabel(category),
+    visible: false,
+    latestBackup: null,
+    lastAutoBackup: null,
+    count: 0,
+    health: { ok: false, label: 'Hidden', message: 'Not available for this role.' } as BackupHealth,
+    folderLabel: '',
+    folderPath: '',
+    autoBackupPending: false,
+    nextScheduledBackupAt: null,
+  };
+}
+function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, actor: User) {
+  if (!canViewBackupCategory(actor, category)) return hiddenBackupGroup(category);
+  const backups = listBackupsByCategory(category, { includeLegacy: category === 'master' });
+  return {
+    category,
+    categoryLabel: backupCategoryLabel(category),
+    visible: true,
+    latestBackup: backups[0] ?? null,
+    lastAutoBackup: category === 'daily' ? backups.find(backup=>backup.type === 'daily_auto' || backup.type === 'auto') ?? null : null,
+    count: backups.length,
+    health: backupGroupHealth(category, backups),
+    folderLabel: backupFolderLabel(category),
+    folderPath: backupFolderLabel(category),
+    autoBackupPending: category === 'daily' ? Boolean(autoBackupTimer) : false,
+    nextScheduledBackupAt: category === 'weekly' ? nextWeeklyBackupAt : category === 'master' ? nextMasterBackupAt : null,
+  };
+}
+function backupPermissionStatus(actor: User) {
+  const canViewDaily = canViewBackupCategory(actor, 'daily');
+  const canCreateDaily = canCreateBackupCategory(actor, 'daily');
+  const canRestoreDaily = canRestoreBackupCategory(actor, 'daily');
+  const canViewWeekly = canViewBackupCategory(actor, 'weekly');
+  const canCreateWeekly = canCreateBackupCategory(actor, 'weekly');
+  const canRestoreWeekly = canRestoreBackupCategory(actor, 'weekly');
+  const canViewMaster = canViewBackupCategory(actor, 'master');
+  const canCreateMaster = canCreateBackupCategory(actor, 'master');
+  const canRestoreMaster = canRestoreBackupCategory(actor, 'master');
+  return {
+    canViewDaily,
+    canCreateDaily,
+    canRestoreDaily,
+    canViewWeekly,
+    canCreateWeekly,
+    canRestoreWeekly,
+    canViewMaster,
+    canCreateMaster,
+    canRestoreMaster,
+    canViewBackups: canViewDaily || canViewWeekly || canViewMaster,
+    canCreateBackup: canCreateMaster,
+    canRestoreBackup: canRestoreMaster,
+  };
+}
+function masterBackupStatus(actor?: User) {
+  ensureBackupDirs();
+  const visibleBackups = actor
+    ? (['daily','weekly','master'] as const).flatMap(category=>canViewBackupCategory(actor, category) ? listBackupsByCategory(category, { includeLegacy: category === 'master' }) : [])
+    : listMasterBackupsInternal();
+  const backups = visibleBackups.sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
   const latestBackup = backups[0] ?? null;
   const dbStat = fs.existsSync(dbPath) ? fs.statSync(dbPath) : null;
   const health = databaseQuickCheck();
+  const daily = actor ? backupGroupStatus('daily', actor) : hiddenBackupGroup('daily');
+  const weekly = actor ? backupGroupStatus('weekly', actor) : hiddenBackupGroup('weekly');
+  const master = actor ? backupGroupStatus('master', actor) : hiddenBackupGroup('master');
   return {
     ok: true,
+    daily,
+    weekly,
+    master,
     latestBackup,
-    lastAutoBackup: backups.find(backup=>backup.type === 'auto') ?? null,
-    lastManualBackup: backups.find(backup=>backup.type === 'manual') ?? null,
-    lastPreResetBackup: backups.find(backup=>backup.type === 'manual' && /pre-reset backup/i.test(backup.notes)) ?? null,
+    lastAutoBackup: backups.find(backup=>backup.type === 'daily_auto' || backup.type === 'auto') ?? null,
+    lastManualBackup: backups.find(backup=>backup.type === 'daily_manual' || backup.type === 'weekly_manual' || backup.type === 'master_manual' || backup.type === 'manual') ?? null,
+    lastPreResetBackup: backups.find(backup=>(backup.type === 'master_manual' || backup.type === 'manual') && /pre-reset backup/i.test(backup.notes)) ?? null,
     lastPreRestoreBackup: backups.find(backup=>backup.type === 'pre_restore') ?? null,
-    backupFolderExists: fs.existsSync(masterBackupDir),
+    backupFolderExists: fs.existsSync(backupsDir),
     backupCountsByType: backupCountsByType(backups),
     lastBackupResult,
     autoBackupPending: Boolean(autoBackupTimer),
     protectedAreas: masterBackupProtectedAreas(),
-    nextScheduledBackupAt,
+    nextScheduledBackupAt: nextWeeklyBackupAt,
+    nextWeeklyBackupAt,
+    nextMasterBackupAt,
     databaseSize: dbStat?.size ?? 0,
     backupHealth: health.ok ? 'Healthy' : `Needs attention: ${health.message}`,
     autoBackupDelaySeconds: Math.round(autoBackupDelayMs / 1000),
-    scheduledBackupIntervalMinutes: Math.round(scheduledBackupIntervalMs / 60000),
+    scheduledBackupIntervalMinutes: null,
+    permissions: actor ? backupPermissionStatus(actor) : undefined,
   };
 }
 function quarantineLiveDatabaseIfUnhealthy() {
@@ -1978,25 +2254,116 @@ function quarantineLiveDatabaseIfUnhealthy() {
   lastBackupResult = { ok: false, createdAt: now(), message: `Live database needs attention: ${health.message}` };
   return true;
 }
-function startMasterBackupScheduler() {
-  ensureMasterBackupDir();
-  if (quarantineLiveDatabaseIfUnhealthy()) return;
+function backupCreatedAtDate(backup: BackupSummary) {
+  const date = new Date(backup.createdAt);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function hasSuccessfulBackupSince(category: Exclude<BackupCategory, 'legacy'>, start: Date, options: { includeLegacy?: boolean } = {}) {
+  return listBackupsByCategory(category, { includeLegacy: options.includeLegacy }).some(backup=>{
+    if (!backup.restorable) return false;
+    const createdAt = backupCreatedAtDate(backup);
+    return Boolean(createdAt && createdAt >= start);
+  });
+}
+function nextFridayOnePm(from = new Date()) {
+  const target = new Date(from.getFullYear(), from.getMonth(), from.getDate(), weeklyBackupHour, 0, 0, 0);
+  const daysUntilFriday = (5 - target.getDay() + 7) % 7;
+  target.setDate(target.getDate() + daysUntilFriday);
+  if (target <= from) target.setDate(target.getDate() + 7);
+  return target;
+}
+function currentWeeklyWindowStart(from = new Date()) {
+  const target = new Date(from.getFullYear(), from.getMonth(), from.getDate(), weeklyBackupHour, 0, 0, 0);
+  const daysSinceFriday = (target.getDay() - 5 + 7) % 7;
+  target.setDate(target.getDate() - daysSinceFriday);
+  if (target > from) target.setDate(target.getDate() - 7);
+  return target;
+}
+function nextMonthlyMasterOnePm(from = new Date()) {
+  let target = new Date(from.getFullYear(), from.getMonth(), 1, masterBackupHour, 0, 0, 0);
+  if (target <= from) target = new Date(from.getFullYear(), from.getMonth() + 1, 1, masterBackupHour, 0, 0, 0);
+  return target;
+}
+function currentMonthlyScheduleTime(from = new Date()) {
+  return new Date(from.getFullYear(), from.getMonth(), 1, masterBackupHour, 0, 0, 0);
+}
+function currentMonthStart(from = new Date()) {
+  return new Date(from.getFullYear(), from.getMonth(), 1, 0, 0, 0, 0);
+}
+function createMissedWeeklyBackupIfNeeded() {
+  const windowStart = currentWeeklyWindowStart();
+  if (hasSuccessfulBackupSince('weekly', windowStart)) return;
   try {
-    createMasterBackup({ type: 'startup', notes: 'Created when MCC server started.' });
+    createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Missed Friday 1:00 PM weekly full backup created on startup.' });
   } catch (error) {
-    console.log(`MCC startup backup failed: ${safeErrorMessage(error)}`);
+    console.log(`MCC missed weekly backup failed: ${safeErrorMessage(error)}`);
   }
-  nextScheduledBackupAt = new Date(Date.now() + scheduledBackupIntervalMs).toISOString();
-  const timer = setInterval(()=>{
-    try {
-      createMasterBackup({ type: 'scheduled', notes: 'Hourly scheduled backup.' });
-    } catch (error) {
-      console.log(`MCC scheduled backup failed: ${safeErrorMessage(error)}`);
-    } finally {
-      nextScheduledBackupAt = new Date(Date.now() + scheduledBackupIntervalMs).toISOString();
+}
+function createMissedMasterBackupIfNeeded() {
+  const currentTime = new Date();
+  if (currentTime < currentMonthlyScheduleTime(currentTime)) return;
+  if (hasSuccessfulBackupSince('master', currentMonthStart(currentTime), { includeLegacy: true })) return;
+  try {
+    createBackup({ category: 'master', type: 'master_scheduled', notes: 'Missed monthly master backup created on startup.' });
+  } catch (error) {
+    console.log(`MCC missed monthly master backup failed: ${safeErrorMessage(error)}`);
+  }
+}
+function armWeeklyBackupTimer(target: Date) {
+  const delay = Math.max(1000, Math.min(target.getTime() - Date.now(), maxBackupScheduleDelayMs));
+  weeklyBackupTimer = setTimeout(()=>{
+    if (Date.now() < target.getTime() - 1000) {
+      armWeeklyBackupTimer(target);
+      return;
     }
-  }, scheduledBackupIntervalMs);
-  timer.unref?.();
+    try {
+      createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Scheduled Friday 1:00 PM weekly full backup.' });
+    } catch (error) {
+      console.log(`MCC weekly backup failed: ${safeErrorMessage(error)}`);
+    } finally {
+      scheduleWeeklyBackupTimer();
+    }
+  }, delay);
+  weeklyBackupTimer.unref?.();
+}
+function scheduleWeeklyBackupTimer() {
+  if (weeklyBackupTimer) clearTimeout(weeklyBackupTimer);
+  const target = nextFridayOnePm();
+  nextWeeklyBackupAt = target.toISOString();
+  armWeeklyBackupTimer(target);
+}
+function armMasterBackupTimer(target: Date) {
+  const delay = Math.max(1000, Math.min(target.getTime() - Date.now(), maxBackupScheduleDelayMs));
+  masterBackupTimer = setTimeout(()=>{
+    if (Date.now() < target.getTime() - 1000) {
+      armMasterBackupTimer(target);
+      return;
+    }
+    try {
+      if (!hasSuccessfulBackupSince('master', currentMonthStart(), { includeLegacy: true })) {
+        createBackup({ category: 'master', type: 'master_scheduled', notes: 'Scheduled monthly master full backup.' });
+      }
+    } catch (error) {
+      console.log(`MCC monthly master backup failed: ${safeErrorMessage(error)}`);
+    } finally {
+      scheduleMasterBackupTimer();
+    }
+  }, delay);
+  masterBackupTimer.unref?.();
+}
+function scheduleMasterBackupTimer() {
+  if (masterBackupTimer) clearTimeout(masterBackupTimer);
+  const target = nextMonthlyMasterOnePm();
+  nextMasterBackupAt = target.toISOString();
+  armMasterBackupTimer(target);
+}
+function startBackupSchedulers() {
+  ensureBackupDirs();
+  if (quarantineLiveDatabaseIfUnhealthy()) return;
+  createMissedWeeklyBackupIfNeeded();
+  createMissedMasterBackupIfNeeded();
+  scheduleWeeklyBackupTimer();
+  scheduleMasterBackupTimer();
 }
 function parseCsvRows(content: string) {
   const rows: string[][] = [];
@@ -4458,14 +4825,36 @@ function canViewHistory(actor: User) {
 function canExportHistory(actor: User) {
   return actor.role === 'Admin' || actor.role === 'Manager';
 }
+function isOwnerAdmin(actor: User) {
+  return Boolean(actor.is_owner_admin);
+}
+function canViewBackupCategory(actor: User, category: BackupCategory) {
+  if (isOwnerAdmin(actor)) return true;
+  if (category === 'daily') return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+  if (category === 'weekly') return roleRank(actor.role) >= roleRank('Manager');
+  return actor.role === 'Admin';
+}
+function canCreateBackupCategory(actor: User, category: BackupCategory) {
+  if (category === 'legacy') return false;
+  if (isOwnerAdmin(actor)) return true;
+  if (category === 'daily') return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+  if (category === 'weekly') return roleRank(actor.role) >= roleRank('Manager');
+  return actor.role === 'Admin';
+}
+function canRestoreBackupCategory(actor: User, category: BackupCategory) {
+  if (isOwnerAdmin(actor)) return true;
+  if (category === 'daily') return roleRank(actor.role) >= roleRank('Manager');
+  if (category === 'weekly') return roleRank(actor.role) >= roleRank('Manager');
+  return actor.role === 'Admin';
+}
 function canViewMasterBackups(actor: User) {
-  return roleRank(actor.role) >= roleRank('Manager');
+  return canViewBackupCategory(actor, 'master');
 }
 function canCreateMasterBackups(actor: User) {
-  return roleRank(actor.role) >= roleRank('Manager');
+  return canCreateBackupCategory(actor, 'master');
 }
 function canRestoreMasterBackups(actor: User) {
-  return actor.role === 'Admin';
+  return canRestoreBackupCategory(actor, 'master');
 }
 type ResetSection =
   | 'inventory'
@@ -5840,56 +6229,58 @@ app.post('/api/history/export/pdf', requireAuth, requirePermission('history.expo
 });
 app.get('/api/backup/status', requireAuth, requirePermission('settings.view'), (req:AuthRequest,res)=>{
   try {
-    res.json({
-      ...masterBackupStatus(),
-      permissions: {
-        canViewBackups: canViewMasterBackups(req.user!),
-        canCreateBackup: canCreateMasterBackups(req.user!),
-        canRestoreBackup: canRestoreMasterBackups(req.user!),
-      },
-    });
+    res.json(masterBackupStatus(req.user!));
   } catch (error) {
     res.status(500).json({ok:false,error:safeErrorMessage(error, [], 'Backup status failed.')});
   }
 });
 app.get('/api/backup/list', requireAuth, (req:AuthRequest,res)=>{
-  if (!canViewMasterBackups(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   try {
-    res.json({ok:true,backups:listMasterBackupsInternal()});
+    const category = backupCategoryFromValue(req.query.category, 'master');
+    if (!canViewBackupCategory(req.user!, category)) return res.status(403).json({ok:false,error:'Permission denied.'});
+    res.json({ok:true,category,backups:listBackupsByCategory(category, { includeLegacy: category === 'master' })});
   } catch (error) {
-    res.status(500).json({ok:false,error:safeErrorMessage(error, [], 'Backup list failed.')});
+    res.status(/category/i.test(safeErrorMessage(error)) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup list failed.')});
   }
 });
 app.post('/api/backup/create', requireAuth, (req:AuthRequest,res)=>{
-  if (!canCreateMasterBackups(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   try {
-    const backup = createMasterBackup({ type: 'manual', actor: req.user!, notes: 'Manual backup from MCC Settings.' });
-    try { audit(req,'master backup created','backup',backup.id,{backupType:backup.type}); } catch (auditError) { console.log(`MCC manual backup audit failed: ${safeErrorMessage(auditError, [], 'Audit failed.')}`); }
-    res.status(201).json({ok:true,backup,status:masterBackupStatus(),message:'Manual backup created successfully.'});
+    const body = isRecord(req.body) ? req.body : {};
+    const category = backupCategoryFromValue(body.category, 'master');
+    if (category === 'legacy') return res.status(400).json({ok:false,error:'Legacy backups are read-only.'});
+    if (!canCreateBackupCategory(req.user!, category)) return res.status(403).json({ok:false,error:'Permission denied.'});
+    const backup = createBackup({ category, type: defaultManualBackupType(category), actor: req.user!, notes: `${backupCategoryLabel(category)} created from MCC Settings.` });
+    try { audit(req,`${category} backup created`,'backup',backup.id,{backupCategory:backup.category,backupType:backup.type}); } catch (auditError) { console.log(`MCC manual backup audit failed: ${safeErrorMessage(auditError, [], 'Audit failed.')}`); }
+    res.status(201).json({ok:true,backup,status:masterBackupStatus(req.user!),message:`${backupCategoryLabel(category)} created successfully.`});
   } catch (error) {
-    const message = safeBackupClientError(error, 'Backup failed.');
-    try { audit(req,'master backup failed','backup','manual',{error:message}); } catch {}
-    res.status(/already running/i.test(message) ? 409 : 500).json({ok:false,error:message});
+    const rawMessage = safeErrorMessage(error, [], 'Backup failed.');
+    const message = /category|read-only/i.test(rawMessage) ? rawMessage : safeBackupClientError(error, 'Backup failed.');
+    try { audit(req,'backup failed','backup','manual',{error:message}); } catch {}
+    res.status(/already running/i.test(message) ? 409 : /category|read-only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.post('/api/backup/verify', requireAuth, (req:AuthRequest,res)=>{
-  if (!canViewMasterBackups(req.user!)) return res.status(403).json({error:'Permission denied.'});
   try {
-    res.json(verifyMasterBackup(isRecord(req.body) ? req.body.backupId : ''));
+    const body = isRecord(req.body) ? req.body : {};
+    const category = resolveBackupCategoryForRequest(body.category, body.backupId);
+    if (!canViewBackupCategory(req.user!, category)) return res.status(403).json({error:'Permission denied.'});
+    res.json(verifyBackup(category, body.backupId));
   } catch (error) {
-    res.status(/not found|missing/i.test(safeErrorMessage(error)) ? 404 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup verification failed.')});
+    const message = safeErrorMessage(error);
+    res.status(/not found|missing/i.test(message) ? 404 : /category/i.test(message) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup verification failed.')});
   }
 });
 app.post('/api/backup/restore', requireAuth, (req:AuthRequest,res)=>{
-  if (!canRestoreMasterBackups(req.user!)) return res.status(403).json({error:'Permission denied.'});
   try {
     const body = isRecord(req.body) ? req.body : {};
-    const result = restoreMasterBackup({ backupId: body.backupId, confirmation: body.confirmation, actor: req.user! });
-    res.json({ok:true,...result,message:'Backup restored. Refresh MCC and log in again if the restored session is no longer active.'});
+    const category = resolveBackupCategoryForRequest(body.category, body.backupId);
+    if (!canRestoreBackupCategory(req.user!, category)) return res.status(403).json({error:'Permission denied.'});
+    const result = restoreBackup({ category, backupId: body.backupId, confirmation: body.confirmation, actor: req.user! });
+    res.json({ok:true,...result,message:'Backup restored. Refresh MCC and log in again if needed.'});
   } catch (error) {
     const message = safeErrorMessage(error, [], 'Restore failed.');
     try { audit(req,'master restore failed','backup',isRecord(req.body) ? String(req.body.backupId ?? '') : '',{error:message}); } catch {}
-    res.status(/confirm|not found|missing|checksum/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/confirm|not found|missing|checksum|category/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.get('/api/settings/branding', requireAuth, (_req,res)=>{
@@ -6724,5 +7115,5 @@ app.listen(port,()=>{
   console.log(`${appName} running at http://localhost:${port}`);
   console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);
   console.log(`SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
-  startMasterBackupScheduler();
+  startBackupSchedulers();
 });
