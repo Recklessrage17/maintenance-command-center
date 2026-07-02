@@ -667,12 +667,6 @@ export function VendorsPage({userRole=''}:{userRole?:string}) {
 
   return (
     <div className="page-stack vendors-page">
-      <div className="page-heading">
-        <p className="eyebrow">Vendors</p>
-        <h2>Vendors</h2>
-        <p>Manage vendor companies, contacts, phone numbers, and addresses used by MCC inventory and requisitions.</p>
-      </div>
-
       {notice&&<div className={`inventory-toast ${notice.kind === 'error' ? 'error' : ''}`}><span>{notice.text}</span><button className="link-button compact-button" type="button" onClick={()=>setNotice(null)}>Dismiss</button></div>}
 
       <section className="mcc-card vendors-toolbar-card">

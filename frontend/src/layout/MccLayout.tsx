@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { RoleBadge } from '../components/RoleBadge';
+import { mccPageMetadata, type MccSection } from './pageMetadata';
 
-export type MccSection = 'dashboard' | 'inventory' | 'vendors' | 'requisitions' | 'history' | 'machine-library' | 'equipment-library' | 'facility-info' | 'users' | 'settings';
+export type { MccSection };
 type LauncherMode = 'hover' | 'pinned' | null;
 type BrandingSettings = {
   companyName: string;
@@ -28,6 +29,8 @@ const baseNav: Array<{ id: MccSection; label: string; management?: boolean }> = 
 ];
 export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory));
+ const currentPage=mccPageMetadata[activeSection];
+ const pageTooltipId=`mcc-page-tooltip-${activeSection}`;
  const [launcherOpen,setLauncherOpen]=useState(false);
  const [warpingSection,setWarpingSection]=useState<MccSection|null>(null);
  const [pageEntering,setPageEntering]=useState(false);
@@ -196,6 +199,15 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
          </div>
        </nav>
      </div>
+     <header className="mcc-page-topbar" aria-label="Current page">
+       <div className="mcc-current-page">
+         <h1>{currentPage.title}</h1>
+         <span className="mcc-page-help-wrap">
+           <button className="mcc-page-help" type="button" aria-label={`About ${currentPage.title}`} aria-describedby={pageTooltipId}>i</button>
+           <span className="mcc-page-tooltip" id={pageTooltipId} role="tooltip">{currentPage.description}</span>
+         </span>
+       </div>
+     </header>
      <main className="mcc-main mcc-workspace-frame">
        <section className={pageEntering?'mcc-content mcc-workspace mcc-page-enter':'mcc-content mcc-workspace'}>{children}</section>
      </main>

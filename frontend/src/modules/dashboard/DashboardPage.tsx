@@ -55,11 +55,6 @@ export function DashboardPage() {
 
   return (
     <div className="page-stack">
-      <div className="page-heading">
-        <p className="eyebrow">Dashboard</p>
-        <h2>Maintenance dashboard</h2>
-        <p>Active maintenance items that need attention.</p>
-      </div>
       {dashboardCards.length>0 ? (
         <div className="card-grid dashboard-card-grid">
           {dashboardCards.map((card) => (

@@ -92,12 +92,6 @@ export function UsersPage(){
 
   return (
     <div className="page-stack">
-      <div className="page-heading">
-        <p className="eyebrow">Admin / Users</p>
-        <h2>User Management</h2>
-        <p>Create local MCC users, assign ranks, protect the owner admin, and keep disabled users visible until they are deleted.</p>
-      </div>
-
       <form className="mcc-card user-form user-create-form" onSubmit={create}>
         <label className="form-field">
           <span>Full name</span>

@@ -234,11 +234,6 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
 
   return (
     <div className="page-stack machine-library-page">
-      <div className="page-heading machine-heading">
-        <p className="eyebrow">Machine Library</p>
-        <h2>Machine Assets</h2>
-        <p>Injection molding machine records, technical specs, replacement tracking, brand colors, and machine-specific history.</p>
-      </div>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
       <section className="mcc-card machine-toolbar-card">
         <label className="form-field machine-search"><span>Search assets</span><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>

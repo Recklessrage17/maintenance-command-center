@@ -629,12 +629,6 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
 
   return (
     <div className="page-stack settings-page">
-      <div className="page-heading">
-        <p className="eyebrow">Settings</p>
-        <h2>MCC Settings</h2>
-        <p>Share local access details, protect MCC data, and manage company branding without exposing private system settings.</p>
-      </div>
-
       <article className="mcc-card wide-card branding-card">
         <div className="share-card-heading">
           <div>

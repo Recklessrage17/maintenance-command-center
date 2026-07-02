@@ -314,11 +314,6 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
   if (!selectedSection) {
     return (
       <div className="page-stack history-page">
-        <div className="page-heading history-heading">
-          <p className="eyebrow">MCC audit trail</p>
-          <h2>History Logs</h2>
-          <p>Audit-ready records for MCC activity.</p>
-        </div>
         {summaryError&&<p className="form-message error">{summaryError}</p>}
         {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}</p>}
         <section className="mcc-card history-search-card">
@@ -359,13 +354,9 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
 
   return (
     <div className="page-stack history-page">
-      <div className="page-heading history-heading">
+      <div className="history-section-bar">
         <button className="secondary-button compact-button history-back-button" type="button" onClick={onBackToLanding}>Back to History Logs</button>
-        <div>
-          <p className="eyebrow">History section</p>
-          <h2>{sectionConfig?.label ?? 'History'} History Log</h2>
-          <p>Search and export records for this MCC section only.</p>
-        </div>
+        <strong>{sectionConfig?.label ?? 'History'} History Log</strong>
       </div>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}</p>}
       <section className="mcc-card history-filter-card">

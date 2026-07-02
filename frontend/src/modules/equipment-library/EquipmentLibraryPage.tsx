@@ -9,11 +9,6 @@ const equipmentCards = [
 export function EquipmentLibraryPage() {
   return (
     <div className="page-stack">
-      <div className="page-heading">
-        <p className="eyebrow">Equipment Library</p>
-        <h2>Equipment Library</h2>
-        <p>Auxiliary and support equipment records, PMs, parts, and documents.</p>
-      </div>
       <div className="card-grid module-card-grid">
         {equipmentCards.map((card) => (
           <article className="mcc-card module-shell-card" key={card.title}>

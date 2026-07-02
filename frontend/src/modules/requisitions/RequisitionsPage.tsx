@@ -451,14 +451,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
 
   return (
     <div className="page-stack requisitions-page">
-      <div className="page-heading requisitions-heading">
-        <div>
-          <p className="eyebrow">MCC requisitions</p>
-          <h2>Requisitions</h2>
-          <p>Requisitions are managed inside Maintenance Command Center.</p>
-        </div>
-        {!canWrite&&<span className="view-only-badge">View-only access.</span>}
-      </div>
+      {!canWrite&&<span className="view-only-badge requisitions-access-badge">View-only access.</span>}
 
       <div className="card-grid requisition-summary-grid">
         <article className="mcc-card"><span>Requested</span><strong>{summary.requestedCount}</strong><p>Waiting for order action.</p></article>

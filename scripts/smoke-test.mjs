@@ -35,8 +35,9 @@ async function fetchShellHtml() {
 }
 
 async function assertSourceWiring() {
-  const [layout, app, inventory, vendors, history, pm, assets, prints] = await Promise.all([
+  const [layout, metadata, app, inventory, vendors, history, pm, assets, prints] = await Promise.all([
     readFile('frontend/src/layout/MccLayout.tsx', 'utf8'),
+    readFile('frontend/src/layout/pageMetadata.ts', 'utf8'),
     readFile('frontend/src/App.tsx', 'utf8'),
     readFile('frontend/src/modules/inventory/InventoryPage.tsx', 'utf8'),
     readFile('frontend/src/modules/vendors/VendorsPage.tsx', 'utf8'),
@@ -58,17 +59,22 @@ async function assertSourceWiring() {
   for (const [label, sectionId, component] of requiredTabs) {
     assert(layout.includes(`label: '${label}'`), `Missing ${label} tab in MCC navigation.`);
     assert(layout.includes(sectionId), `Missing ${label} section id in MCC section type/navigation.`);
+    assert(metadata.includes(`title: '${label}'`) || metadata.includes(`navLabel: '${label}'`), `Missing ${label} page metadata.`);
     assert(app.includes(component), `Missing ${label} page component wiring in App.tsx.`);
   }
 
   assert(inventory.includes('InventoryPage'), 'Inventory page module did not load for smoke inspection.');
-  assert(vendors.includes('Manage vendor companies'), 'Vendors page module did not load for smoke inspection.');
+  assert(vendors.includes('VendorsPage'), 'Vendors page module did not load for smoke inspection.');
   assert(layout.includes("i.id !== 'history' || canViewHistory"), 'History Logs navigation is not gated by role.');
   assert(app.includes('canViewHistory') && app.includes("user.role === 'Admin' || user.role === 'Manager'"), 'History Logs route is not limited to Admin/Manager users.');
   assert(history.includes('History Logs'), 'History Logs page module did not load for smoke inspection.');
-  assert(pm.includes('Injection molding machine records, technical specs, replacement tracking, brand colors, and machine-specific history.'), 'Machine Library page shell is missing.');
-  assert(assets.includes('Auxiliary and support equipment records, PMs, parts, and documents.'), 'Equipment Library page shell is missing.');
-  assert(prints.includes('Building prints, facility documents, and plant reference information.'), 'Facility Info page shell is missing.');
+  assert(pm.includes('MachineLibraryPage'), 'Machine Library page module did not load for smoke inspection.');
+  assert(assets.includes('EquipmentLibraryPage'), 'Equipment Library page module did not load for smoke inspection.');
+  assert(prints.includes('FacilityInfoPage'), 'Facility Info page module did not load for smoke inspection.');
+  assert(metadata.includes('Manage vendor companies'), 'Vendors page metadata is missing.');
+  assert(metadata.includes('Injection molding machine records, technical specs, replacement tracking, brand colors, and machine-specific history.'), 'Machine Library page metadata is missing.');
+  assert(metadata.includes('Auxiliary and support equipment records, PMs, parts, and documents.'), 'Equipment Library page metadata is missing.');
+  assert(metadata.includes('Building prints, facility documents, and plant reference information.'), 'Facility Info page metadata is missing.');
 }
 
 const isWindows = process.platform === 'win32';

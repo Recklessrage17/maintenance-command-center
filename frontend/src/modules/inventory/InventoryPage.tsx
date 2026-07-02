@@ -1155,8 +1155,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
       <div className="inventory-focus-toolbar">
         <button className="secondary-button compact-button inventory-back-button" type="button" onClick={onBackToDashboard}>Back to Command Center</button>
         <div className="inventory-focus-title">
-          <p className="eyebrow">Inventory workspace</p>
-          <h2>Inventory</h2>
           <div className="inventory-focus-meta">
             <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
             <span>Selected: {selectedParts.length}</span>
