@@ -20,6 +20,11 @@ const blankAssetForm: AssetForm = {
   assetNumber: '', assetName: '', brand: '', model: '', serialNumber: '', machineYear: '', machineType: 'Injection Molding Machine', powerType: '', shotSizeOz: '', tonnage: 0, barrelDiameter: '', location: '', department: '', status: 'active', voltageValue: '', voltageType: '', fullLoadAmp: '', machineLength: '', machineWidth: '', machineHeight: '', fullDieHeightLength: '', screwType: '', screwTipType: '', screwTipInstalledDate: '', screwInstalledDate: '', barrelInstalledDate: '', barrelEndCapInstalledDate: '', barrelLength: '', screwLength: '', screwRebuildRepaired: false, barrelRebuildRepaired: false, screwConditionStatus: 'new', barrelConditionStatus: 'new', hasDoubleShotInjection: false, hasPlungerInjection: false, screw2Type: '', screw2TipType: '', screw2RebuildRepaired: false, screw2ConditionStatus: 'new', screw2InstalledDate: '', screw2TipInstalledDate: '', screw2Length: '', barrel2Diameter: '', barrel2RebuildRepaired: false, barrel2ConditionStatus: 'new', barrel2InstalledDate: '', barrel2EndCapInstalledDate: '', barrel2Length: '', plungerType: '', plungerRebuildRepaired: false, plungerConditionStatus: 'new', plungerInstalledDate: '', plungerLength: '', plungerDiameter: '', plungerBarrelType: '', plungerBarrelRebuildRepaired: false, plungerBarrelConditionStatus: 'new', plungerBarrelInstalledDate: '', plungerBarrelEndCapInstalledDate: '', plungerBarrelLength: '', plungerBarrelDiameter: '', notes: '', criticalNotes: '',
 };
 const replacementLabels: Record<ReplacementField, string> = { screw: 'Screw', screw_tip: 'Screw Tip', barrel: 'Barrel', barrel_end_cap: 'Barrel End Cap', screw2: 'Screw 2', screw2_tip: 'Screw 2 Tip', barrel2: 'Barrel 2', barrel2_end_cap: 'Barrel 2 End Cap', plunger: 'Plunger', plunger_barrel: 'Plunger Barrel', plunger_barrel_end_cap: 'Plunger Barrel End Cap' };
+const replacementGroups: Array<{ title: string; enabled: (form: AssetForm) => boolean; fields: ReplacementField[] }> = [
+  { title: 'Unit 1', enabled: () => true, fields: ['screw','screw_tip','barrel','barrel_end_cap'] },
+  { title: 'Unit 2 / Secondary Injection', enabled: form => form.hasDoubleShotInjection, fields: ['screw2','screw2_tip','barrel2','barrel2_end_cap'] },
+  { title: 'Plunger Injection', enabled: form => form.hasPlungerInjection, fields: ['plunger','plunger_barrel','plunger_barrel_end_cap'] },
+];
 const editableRoles = new Set(['Maintenance Tech 3','Manager','Admin']);
 const deleteRoles = new Set(['Manager','Admin']);
 const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
@@ -90,6 +95,17 @@ function isoDateValue(value: string) {
 }
 function formatUnitNumber(value: number, decimals: number) {
   return Number(value.toFixed(decimals)).toLocaleString(undefined, { maximumFractionDigits: decimals });
+}
+function localIsoDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+function parseIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 function parseDimensionValue(value: string) {
   const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|"|ft|foot|feet|')$/i);
@@ -317,7 +333,7 @@ function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onRepl
     {!form.hasDoubleShotInjection&&<section className="machine-form-section"><span>Screw / Barrel</span><div className="machine-screw-barrel-grid"><ScrewBox title="Screw Box" form={form} setField={setField} disabled={disabled} typeKey="screwType" tipTypeKey="screwTipType" rebuildKey="screwRebuildRepaired" conditionKey="screwConditionStatus" installedDateKey="screwInstalledDate" tipInstalledDateKey="screwTipInstalledDate" lengthKey="screwLength" conditionLabel="Screw condition" /><BarrelBox title="Barrel Box" form={form} setField={setField} disabled={disabled} diameterKey="barrelDiameter" rebuildKey="barrelRebuildRepaired" conditionKey="barrelConditionStatus" installedDateKey="barrelInstalledDate" endCapDateKey="barrelEndCapInstalledDate" lengthKey="barrelLength" conditionLabel="Barrel condition" /></div><MeasurementRow canEdit={canEdit} label="Measurement Inspection" onInspection={onInspection}/></section>}
     {form.hasDoubleShotInjection&&<><section className="machine-form-section"><span>Injection Unit 1</span><div className="machine-screw-barrel-grid"><ScrewBox title="Screw 1 Box" form={form} setField={setField} disabled={disabled} typeKey="screwType" tipTypeKey="screwTipType" rebuildKey="screwRebuildRepaired" conditionKey="screwConditionStatus" installedDateKey="screwInstalledDate" tipInstalledDateKey="screwTipInstalledDate" lengthKey="screwLength" conditionLabel="Screw 1 condition" /><BarrelBox title="Barrel 1 Box" form={form} setField={setField} disabled={disabled} diameterKey="barrelDiameter" rebuildKey="barrelRebuildRepaired" conditionKey="barrelConditionStatus" installedDateKey="barrelInstalledDate" endCapDateKey="barrelEndCapInstalledDate" lengthKey="barrelLength" conditionLabel="Barrel 1 condition" /></div><MeasurementRow canEdit={canEdit} label="Unit 1 Measurement Inspection" onInspection={onInspection}/></section><section className="machine-form-section"><span>Injection Unit 2</span><div className="machine-screw-barrel-grid"><ScrewBox title="Screw 2 Box" form={form} setField={setField} disabled={disabled} typeKey="screw2Type" tipTypeKey="screw2TipType" rebuildKey="screw2RebuildRepaired" conditionKey="screw2ConditionStatus" installedDateKey="screw2InstalledDate" tipInstalledDateKey="screw2TipInstalledDate" lengthKey="screw2Length" conditionLabel="Screw 2 condition" /><BarrelBox title="Barrel 2 Box" form={form} setField={setField} disabled={disabled} diameterKey="barrel2Diameter" rebuildKey="barrel2RebuildRepaired" conditionKey="barrel2ConditionStatus" installedDateKey="barrel2InstalledDate" endCapDateKey="barrel2EndCapInstalledDate" lengthKey="barrel2Length" conditionLabel="Barrel 2 condition" /></div><MeasurementRow canEdit={canEdit} label="Unit 2 Measurement Inspection" onInspection={onInspection}/></section></>}
     {form.hasPlungerInjection&&<section className="machine-form-section"><span>Plunger Injection</span><div className="machine-screw-barrel-grid"><PlungerBox title="Plunger Box" form={form} setField={setField} disabled={disabled}/><PlungerBarrelBox title="Plunger Barrel / Cylinder Barrel Box" form={form} setField={setField} disabled={disabled}/></div><MeasurementRow canEdit={canEdit} label="Plunger Measurement Inspection" onInspection={onInspection}/></section>}
-    {asset&&<section className="machine-replacement-panel"><span>Replacement Updates</span>{(['screw','screw_tip','barrel','barrel_end_cap',...(form.hasDoubleShotInjection ? ['screw2','screw2_tip','barrel2','barrel2_end_cap'] : []),...(form.hasPlungerInjection ? ['plunger','plunger_barrel','plunger_barrel_end_cap'] : [])] as ReplacementField[]).map(field=><button className="machine-action-badge" type="button" key={field} onClick={()=>onReplacement(asset,field)} disabled={!canEdit}>New {replacementLabels[field]}</button>)}</section>}
+    {asset&&<ReplacementUpdatesPanel asset={asset} form={form} canEdit={canEdit} onReplacement={onReplacement} />}
     <MachineSection title="Notes / Critical Notes"><Area tone="note" label="Notes" value={form.notes} set={v=>setField('notes',v)} disabled={disabled}/><Area tone="critical" label="Critical Notes" value={form.criticalNotes} set={v=>setField('criticalNotes',v)} disabled={disabled}/></MachineSection>
     <div className="machine-placeholder-grid"><section>Linked Inventory Parts coming next</section><section>Machine PM schedules coming next</section><section>Machine documents coming next</section><section>History preview available from Logs</section></div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!canEdit}>{asset?'Save Machine Asset':'Create Machine Asset'}</button></div>
@@ -355,6 +371,10 @@ function PlungerBarrelBox({title,form,setField,disabled}:{title:string;form:Asse
 function MeasurementRow({canEdit,label,onInspection}:{canEdit:boolean;label:string;onInspection:()=>void}) {
   return <div className="measurement-inspection-row">{canEdit&&<button className="machine-action-badge measurement-inspection-button" type="button" onClick={onInspection}>{label}</button>}<small>Measurement Inspection later will update New to Used to Worn for screw, barrel, and plunger components.</small></div>;
 }
+function ReplacementUpdatesPanel({asset,form,canEdit,onReplacement}:{asset:MachineAsset;form:AssetForm;canEdit:boolean;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void}) {
+  const groups = replacementGroups.filter(group=>group.enabled(form));
+  return <section className="machine-replacement-panel"><span>Replacement Updates</span><div className="machine-replacement-groups">{groups.map(group=><div className="machine-replacement-group" key={group.title}><strong>{group.title}</strong><div className="machine-replacement-actions">{group.fields.map(field=><button className="machine-action-badge" type="button" key={field} onClick={()=>onReplacement(asset,field)} disabled={!canEdit}><span aria-hidden="true">+</span>New {replacementLabels[field]}</button>)}</div></div>)}</div></section>;
+}
 function MachineSection({title,children}:{title:string;children:ReactNode}) { return <section className="machine-form-section"><span>{title}</span><div className="machine-form-grid">{children}</div></section>; }
 function Text({label,value,set,disabled}:{label:string;value:string;set:(value:string)=>void;disabled:boolean}) { return <label className="form-field"><span>{label}</span><input value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
 function DecimalInput({label,value,set,disabled}:{label:string;value:string;set:(value:string)=>void;disabled:boolean}) { return <label className="form-field"><span>{label}</span><input type="number" step="0.01" inputMode="decimal" value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
@@ -364,7 +384,49 @@ function Check({label,checked,set,disabled}:{label:string;checked:boolean;set:(c
 function DateWithAge({label,value,set,disabled}:{label:string;value:string;set:(value:string)=>void;disabled:boolean}) {
   const isoValue = isoDateValue(value);
   const useDatePicker = isoValue !== null;
-  return <label className="form-field machine-date-field"><span>{label}</span><input className={useDatePicker ? 'mcc-date-input' : undefined} type={useDatePicker ? 'date' : 'text'} value={useDatePicker ? isoValue : value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD or known text" /><small className="machine-age-label">Year count: {ageYears(value)}</small></label>;
+  if (!useDatePicker) return <label className="form-field machine-date-field"><span>{label}</span><input value={value} disabled={disabled} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD or known text" /><small className="machine-age-label">Year count: {ageYears(value)}</small></label>;
+  return <MccDateField label={label} value={isoValue} set={set} disabled={disabled} ageText={ageYears(value)} />;
+}
+function MccDateField({label,value,set,disabled,ageText}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;ageText:string}) {
+  const today = useMemo(()=>new Date(),[]);
+  const selectedDate = parseIsoDate(value);
+  const [open,setOpen]=useState(false);
+  const [viewDate,setViewDate]=useState<Date>(selectedDate ?? today);
+  const wrapRef=useRef<HTMLLabelElement>(null);
+  const viewYear = viewDate.getFullYear();
+  const viewMonth = viewDate.getMonth();
+  const monthStart = new Date(viewYear, viewMonth, 1);
+  const gridStart = new Date(viewYear, viewMonth, 1 - monthStart.getDay());
+  const days = Array.from({length:42},(_,index)=>new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
+  const selectedIso = selectedDate ? localIsoDate(selectedDate) : '';
+  const todayIso = localIsoDate(today);
+  useEffect(()=>{
+    if(!open) return;
+    setViewDate(selectedDate ?? today);
+  },[open,selectedIso,today]);
+  useEffect(()=>{
+    if(!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if(wrapRef.current&&!wrapRef.current.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if(event.key==='Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown',onPointerDown);
+    document.addEventListener('keydown',onKeyDown);
+    return ()=>{
+      document.removeEventListener('pointerdown',onPointerDown);
+      document.removeEventListener('keydown',onKeyDown);
+    };
+  },[open]);
+  function chooseDate(date: Date) {
+    set(localIsoDate(date));
+    setOpen(false);
+  }
+  function moveMonth(offset: number) {
+    setViewDate(current=>new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  }
+  return <label className={open?'form-field machine-date-field mcc-date-open':'form-field machine-date-field'} ref={wrapRef}><span>{label}</span><div className="mcc-date-control"><input className="mcc-date-input" type="text" inputMode="numeric" value={value} disabled={disabled} onFocus={()=>setOpen(true)} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD" /><button className="mcc-date-trigger" type="button" aria-label={`Open ${label} calendar`} disabled={disabled} onClick={()=>setOpen(current=>!current)}><span className="mcc-date-icon" aria-hidden="true" /></button>{open&&<div className="mcc-date-popover" role="dialog" aria-label={`${label} calendar`}><div className="mcc-date-header"><button type="button" onClick={()=>moveMonth(-1)} aria-label="Previous month">&lt;</button><strong>{viewDate.toLocaleString(undefined,{month:'long',year:'numeric'})}</strong><button type="button" onClick={()=>moveMonth(1)} aria-label="Next month">&gt;</button></div><div className="mcc-date-weekdays" aria-hidden="true">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><span key={day}>{day}</span>)}</div><div className="mcc-date-grid">{days.map(day=>{ const iso=localIsoDate(day); const outside=day.getMonth()!==viewMonth; return <button className={`${outside?'outside ':''}${iso===todayIso?'today ':''}${iso===selectedIso?'selected ':''}`.trim()} type="button" key={iso} onClick={()=>chooseDate(day)} aria-label={day.toLocaleDateString(undefined,{dateStyle:'full'})} aria-pressed={iso===selectedIso}>{day.getDate()}</button>; })}</div><div className="mcc-date-footer"><button type="button" onClick={()=>{ set(''); setOpen(false); }}>Clear</button><button type="button" onClick={()=>chooseDate(today)}>Today</button></div></div>}</div><small className="machine-age-label">Year count: {ageText}</small></label>;
 }
 function ConditionBadge({label,status}:{label:string;status:ConditionStatus}) {
   return <div className={`machine-condition-badge condition-${status}`}><span>{label}</span><strong>{conditionLabels[status]}</strong></div>;
