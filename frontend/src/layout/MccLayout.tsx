@@ -49,6 +49,14 @@ function ModuleIcon({ section }: { section: MccSection }) {
   );
 }
 
+
+function scrubJbtBrandText(value: unknown, fallback = '') {
+  const text = String(value ?? '').trim();
+  if (!text) return fallback;
+  if (/^JBT(\s+USA)?$/i.test(text) || /^USA$/i.test(text)) return fallback;
+  return text;
+}
+
 export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory));
  const currentPage=mccPageMetadata[activeSection];

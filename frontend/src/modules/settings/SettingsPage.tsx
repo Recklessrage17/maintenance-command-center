@@ -208,14 +208,22 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+
+function scrubJbtBrandText(value: unknown, fallback = '') {
+  const text = String(value ?? '').trim();
+  if (!text) return fallback;
+  if (/^JBT(\s+USA)?$/i.test(text) || /^USA$/i.test(text)) return fallback;
+  return text;
+}
+
 function normalizeBranding(value: unknown): BrandingSettings {
   const data = asRecord(value);
   const logoMode = data.logoMode === 'image' && data.logoUrl ? 'image' : 'text';
   const iconAnimation = ['none','glow','rotate','pulse'].includes(String(data.iconAnimation)) ? String(data.iconAnimation) as BrandingSettings['iconAnimation'] : 'none';
   return {
-    companyName: String(data.companyName ?? defaultBranding.companyName).slice(0, 20) || defaultBranding.companyName,
+    companyName: scrubJbtBrandText(data.companyName, defaultBranding.companyName).slice(0, 20) || defaultBranding.companyName,
     companySubtitle: String(data.companySubtitle ?? defaultBranding.companySubtitle).slice(0, 40),
-    companyAccentText: String(data.companyAccentText ?? defaultBranding.companyAccentText).slice(0, 8),
+    companyAccentText: scrubJbtBrandText(data.companyAccentText, '').slice(0, 8),
     logoMode,
     logoUrl: String(data.logoUrl ?? ''),
     logoFileName: String(data.logoFileName ?? ''),
@@ -634,7 +642,7 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
           <div>
             <span>Company Branding</span>
             <strong>Launcher logo and company name</strong>
-            <p>Keep JBT USA as the default, or switch the launcher to another company name and safe uploaded icon.</p>
+            <p>Keep MCC as the default, or switch the launcher to another company name and safe uploaded icon.</p>
           </div>
           <div className="branding-preview">
             <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
@@ -683,7 +691,7 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
 
         <div className="backup-action-row">
           <button className="primary-button compact-button" type="button" onClick={()=>void saveBranding()} disabled={!isOwnerAdmin || brandingLoading || !branding.companyName.trim()}>{brandingLoading ? 'Saving...' : 'Save Branding'}</button>
-          <button className="secondary-button compact-button" type="button" onClick={()=>void saveBranding(defaultBranding,true)} disabled={!isOwnerAdmin || brandingLoading}>Reset to Default JBT</button>
+          <button className="secondary-button compact-button" type="button" onClick={()=>void saveBranding(defaultBranding,true)} disabled={!isOwnerAdmin || brandingLoading}>Reset to Default MCC</button>
         </div>
         {!isOwnerAdmin&&<p className="form-help">Owner Admin access is required to change branding.</p>}
         {brandingMsg&&<p className="form-message">{brandingMsg}</p>}
