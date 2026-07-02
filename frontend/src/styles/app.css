@@ -177,6 +177,11 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .form-field { display: grid; gap: 8px; color: #bfe9ff; font-size: .9rem; font-weight: 800; }
 .required-marker { color: #ff5d6c; font: inherit; font-weight: 900; line-height: 1; }
 input, select, textarea { width: 100%; min-height: 48px; border: 1px solid rgba(92, 180, 220, 0.34); border-radius: 12px; padding: 0 14px; color: #f3fbff; background: rgba(7, 25, 45, 0.92); font: inherit; font-size: .93rem; }
+input[type="date"] { color-scheme: dark; padding-right: 10px; border-color: rgba(68, 215, 255, 0.44); background: linear-gradient(180deg, rgba(8, 34, 58, 0.96), rgba(4, 18, 34, 0.96)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); cursor: text; }
+input[type="date"]:hover { border-color: rgba(68, 215, 255, 0.72); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(68, 215, 255, 0.08); }
+input[type="date"]:focus { outline: none; border-color: rgba(54, 229, 170, 0.82); box-shadow: 0 0 0 1px rgba(54, 229, 170, 0.18) inset, 0 0 22px rgba(68, 215, 255, 0.18); }
+input[type="date"]::-webkit-calendar-picker-indicator { width: 20px; height: 20px; padding: 4px; border-radius: 8px; cursor: pointer; opacity: .95; filter: invert(91%) sepia(46%) saturate(1517%) hue-rotate(158deg) brightness(104%) contrast(103%) drop-shadow(0 0 4px rgba(68, 215, 255, 0.55)); }
+input[type="date"]::-webkit-calendar-picker-indicator:hover { background: rgba(68, 215, 255, 0.16); filter: invert(100%) brightness(120%) drop-shadow(0 0 6px rgba(68, 215, 255, 0.7)); }
 textarea { min-height: 92px; padding: 12px 14px; resize: vertical; }
 .primary-button, .secondary-button, .link-button, .danger-button { min-height: 44px; border-radius: 12px; border: 1px solid rgba(52, 200, 255, 0.48); cursor: pointer; font-weight: 800; font-size: .93rem; }
 .primary-button { color: #001523; background: linear-gradient(135deg, #44d7ff, #3c7dff); }
@@ -387,22 +392,30 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-import-rejection-list { display: grid; gap: 7px; padding: 10px; border: 1px solid rgba(255,211,111,.26); border-radius: 10px; background: rgba(91,70,19,.18); }
 .machine-import-rejection-list p { margin: 0; color: #fff2c2; font-size: .86rem; line-height: 1.35; overflow-wrap: anywhere; }
 .machine-import-rejection-list small { color: #d8c994; font-size: .78rem; font-weight: 850; }
-.machine-component-box { min-width: 0; display: grid; gap: 10px; align-content: start; padding: 12px; border: 1px solid rgba(85,191,236,.22); border-radius: 10px; background: rgba(7,25,45,.48); }
-.machine-component-box h4 { margin: 0; color: #f3fbff; font-size: .96rem; line-height: 1.2; }
+.machine-component-box { --component-accent: #44d7ff; position: relative; overflow: hidden; min-width: 0; display: grid; gap: 12px; align-content: start; padding: 14px; border: 1px solid color-mix(in srgb, var(--component-accent) 52%, rgba(85,191,236,.18)); border-left: 4px solid var(--component-accent); border-radius: 12px; background: linear-gradient(180deg, color-mix(in srgb, var(--component-accent) 14%, rgba(7,25,45,.78)), rgba(4,18,34,.68)); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 14px 28px rgba(0,0,0,.16); }
+.machine-component-box::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--component-accent), rgba(68,215,255,0)); opacity: .86; }
+.machine-component-box h4 { display: flex; align-items: center; gap: 8px; margin: 0; padding-bottom: 8px; border-bottom: 1px solid color-mix(in srgb, var(--component-accent) 28%, rgba(143,205,233,.12)); color: #f3fbff; font-size: 1rem; line-height: 1.2; }
+.machine-component-box h4::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--component-accent); box-shadow: 0 0 14px color-mix(in srgb, var(--component-accent) 62%, transparent); }
+.machine-component-box.component-screw { --component-accent: #44d7ff; }
+.machine-component-box.component-barrel { --component-accent: #36e5aa; }
+.machine-component-box.component-screw-secondary { --component-accent: #8c7cff; }
+.machine-component-box.component-barrel-secondary { --component-accent: #2bd6d6; }
+.machine-component-box.component-plunger { --component-accent: #ffd36f; }
+.machine-component-box.component-plunger-barrel { --component-accent: #ff9f43; }
 .machine-check-field { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid rgba(143,205,233,.16); border-radius: 9px; color: #dff7ff; background: rgba(4,18,34,.36); font-size: .86rem; font-weight: 900; }
 .machine-check-field input { width: 18px; min-height: 18px; accent-color: #36e5aa; }
 .machine-check-field span { margin: 0; color: inherit; font-size: inherit; }
-.machine-condition-badge { min-width: 0; display: grid; gap: 4px; padding: 9px 10px; border: 1px solid rgba(143,205,233,.24); border-radius: 9px; background: rgba(4,18,34,.42); }
+.machine-condition-badge { min-width: 0; display: grid; gap: 4px; padding: 10px; border: 1px solid rgba(143,205,233,.3); border-radius: 10px; background: linear-gradient(180deg, rgba(6,28,48,.62), rgba(4,18,34,.54)); box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
 .machine-condition-badge span { margin: 0; color: #83cfea; font-size: .66rem; font-weight: 950; text-transform: uppercase; }
 .machine-condition-badge strong { margin: 0; font-size: .92rem; line-height: 1.2; }
 .machine-condition-badge.condition-new strong { color: #8affc8; }
-.machine-condition-badge.condition-new { border-color: rgba(54,229,170,.38); background: rgba(18,97,71,.22); }
+.machine-condition-badge.condition-new { border-color: rgba(54,229,170,.5); background: linear-gradient(180deg, rgba(18,97,71,.32), rgba(4,18,34,.48)); }
 .machine-condition-badge.condition-used strong { color: #ffd36f; }
-.machine-condition-badge.condition-used { border-color: rgba(255,188,82,.42); background: rgba(91,70,19,.28); }
+.machine-condition-badge.condition-used { border-color: rgba(255,188,82,.54); background: linear-gradient(180deg, rgba(91,70,19,.38), rgba(4,18,34,.5)); }
 .machine-condition-badge.condition-worn strong { color: #ff9aa6; }
-.machine-condition-badge.condition-worn { border-color: rgba(255,117,138,.44); background: rgba(111,52,60,.28); }
+.machine-condition-badge.condition-worn { border-color: rgba(255,117,138,.58); background: linear-gradient(180deg, rgba(111,52,60,.4), rgba(4,18,34,.52)); }
 .machine-condition-badge.condition-rebuilt_repaired strong { color: #8fe8ff; }
-.machine-condition-badge.condition-rebuilt_repaired { border-color: rgba(255,211,111,.42); background: linear-gradient(135deg, rgba(5,61,86,.48), rgba(91,70,19,.22)); }
+.machine-condition-badge.condition-rebuilt_repaired { border-color: rgba(255,211,111,.52); background: linear-gradient(135deg, rgba(5,61,86,.58), rgba(91,70,19,.3)); }
 .measurement-inspection-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .measurement-inspection-row small { color: #9ec7d8; font-size: .78rem; font-weight: 850; }
 .measurement-inspection-button { border-color: rgba(68,215,255,.58); color: #e8fbff; background: linear-gradient(135deg, rgba(5,61,86,.72), rgba(18,97,71,.32)); }
@@ -421,8 +434,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-card-notes { display: grid; gap: 5px; min-width: 0; padding: 8px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: rgba(4,18,34,.3); }
 .machine-card-notes p { margin: 0; font-size: .8rem; line-height: 1.35; overflow-wrap: anywhere; }
 .machine-wear-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.machine-wear-grid > div:not(.machine-condition-badge) { min-width: 0; display: grid; gap: 3px; padding: 8px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: rgba(4,18,34,.3); }
-.machine-wear-grid > div:not(.machine-condition-badge) span { margin: 0; color: #83cfea; font-size: .64rem; font-weight: 950; text-transform: uppercase; }
+.machine-wear-grid > div:not(.machine-condition-badge) { min-width: 0; display: grid; gap: 4px; padding: 9px; border: 1px solid rgba(143,205,233,.24); border-radius: 9px; background: linear-gradient(180deg, rgba(7,25,45,.62), rgba(4,18,34,.46)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
+.machine-wear-grid > div:not(.machine-condition-badge) span { margin: 0; color: #8fe8ff; font-size: .64rem; font-weight: 950; letter-spacing: .04em; text-transform: uppercase; }
 .machine-wear-grid > div:not(.machine-condition-badge) strong { margin: 0; color: #f3fbff; font-size: .8rem; line-height: 1.2; overflow-wrap: anywhere; }
 .machine-replacement-panel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px; border: 1px solid rgba(54,229,170,.22); border-radius: 10px; background: rgba(18,97,71,.16); }
 .machine-action-badge { min-height: 30px; padding: 0 10px; border: 1px solid rgba(68,215,255,.38); border-radius: 999px; color: #dff7ff; background: rgba(5,61,86,.42); cursor: pointer; font: inherit; font-size: .76rem; font-weight: 950; }
