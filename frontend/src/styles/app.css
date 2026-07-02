@@ -181,6 +181,7 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
   }
   .mcc-bubble-transition.is-warping::before { opacity: .7; }
   .mcc-bubble-transition.is-warping::after { opacity: 0; }
+  .status-pulse-dot { animation: none; }
 }
 .auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top right, #0d3a5c 0, #071425 42%, #020b16 100%); }
 .auth-card { width: min(560px, 100%); padding: 34px; border: 1px solid rgba(77, 208, 255, 0.24); border-radius: 28px; background: rgba(5, 22, 40, 0.88); box-shadow: 0 24px 70px rgba(0,0,0,.35); }
@@ -346,6 +347,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @keyframes brand-soft-glow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(68, 215, 255, 0)); } 50% { filter: drop-shadow(0 0 12px rgba(68, 215, 255, .44)); } }
 @keyframes brand-slow-rotate { to { transform: rotate(360deg); } }
 @keyframes brand-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes statusPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(54,229,170,.35); } 50% { box-shadow: 0 0 0 5px rgba(54,229,170,0); } }
 .module-card-grid { width: 100%; max-width: none; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .module-shell-card { min-height: 0; padding: 14px 16px; border-radius: 14px; }
 .module-shell-card strong { font-size: 1.1rem; }
@@ -360,20 +362,24 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-toolbar-note { grid-column: 1 / -1; margin: 0; }
 .hidden-file-input { display: none; }
 .machine-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); gap: 14px; }
-.machine-asset-card { --brand-color: #44D7FF; position: relative; min-width: 0; display: grid; gap: 13px; padding: 15px; border: 1px solid color-mix(in srgb, var(--brand-color) 58%, rgba(85, 191, 236, 0.2)); border-left: 6px solid var(--brand-color); border-radius: 8px; background: linear-gradient(180deg, rgba(11, 39, 64, 0.92), rgba(5, 20, 38, 0.94)); box-shadow: 0 16px 34px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.05); }
+.machine-asset-card { --brand-color: #44D7FF; position: relative; min-width: 0; display: grid; gap: 13px; padding: 15px; border: 1px solid rgba(85,191,236,.24); border-radius: 8px; background: linear-gradient(180deg, rgba(11, 39, 64, 0.92), rgba(5, 20, 38, 0.94)); box-shadow: 0 16px 34px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.05); }
 .machine-asset-card.machine-import-highlight { border-color: rgba(54,229,170,.72); box-shadow: 0 16px 34px rgba(0,0,0,.24), 0 0 0 1px rgba(54,229,170,.42) inset, 0 0 22px rgba(54,229,170,.2); }
-.machine-asset-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--brand-color), rgba(68, 215, 255, 0)); opacity: .78; }
-.machine-asset-card.machine-brand-engel::before { background: linear-gradient(90deg, var(--brand-color) 0 68%, rgba(255,255,255,.96) 68% 82%, rgba(68, 215, 255, 0) 100%); opacity: .92; }
 .machine-card-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .machine-asset-number { appearance: none; max-width: 100%; padding: 0; border: 0; color: #e9fbff; background: transparent; font: inherit; font-size: 1.02rem; font-weight: 950; text-align: left; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 4px; cursor: pointer; overflow-wrap: anywhere; }
 .machine-asset-number:hover, .machine-asset-number:focus-visible { color: #ffffff; text-decoration-color: var(--brand-color); outline: none; }
-.machine-status-badge { display: inline-flex; width: fit-content; min-height: 26px; align-items: center; padding: 0 9px; border: 1px solid rgba(143,205,233,.3); border-radius: 999px; color: #dff7ff; background: rgba(7,25,45,.72); font-size: .7rem; font-weight: 950; text-transform: uppercase; white-space: nowrap; }
-.machine-status-badge.status-active { color: #c8f5e6; border-color: rgba(54,229,170,.42); background: rgba(18,97,71,.28); }
-.machine-status-badge.status-down { color: #fff2c2; border-color: rgba(255,211,111,.5); background: rgba(91,70,19,.38); }
-.machine-status-badge.status-disabled, .machine-status-badge.status-removed { color: #ffcfcb; border-color: rgba(255,117,138,.42); background: rgba(111,52,60,.38); }
+.machine-status-badge { display: inline-flex; width: fit-content; min-height: 26px; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid rgba(143,205,233,.3); border-radius: 999px; color: #dff7ff; background: rgba(7,25,45,.72); font-size: .72rem; font-weight: 950; white-space: nowrap; }
+.machine-status-badge.status-active { color: #c8f5e6; border-color: rgba(54,229,170,.52); background: rgba(18,97,71,.3); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.machine-status-badge.status-down { color: #ffe1b8; border-color: rgba(255,139,110,.52); background: rgba(111,52,36,.36); }
+.machine-status-badge.status-disabled { color: #d4e2ea; border-color: rgba(143,161,174,.36); background: rgba(84,100,112,.24); }
+.machine-status-badge.status-removed { color: #ffcfcb; border-color: rgba(255,117,138,.42); background: rgba(111,52,60,.38); }
+.status-pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #36e5aa; box-shadow: 0 0 0 rgba(54,229,170,.45); animation: statusPulse 1.8s ease-in-out infinite; }
 .machine-card-title { display: grid; gap: 5px; min-width: 0; }
-.machine-card-title strong { color: #fff; font-size: 1.22rem; line-height: 1.15; }
-.machine-card-title span { color: #aac4d2; font-size: .86rem; line-height: 1.35; overflow-wrap: anywhere; }
+.machine-card-brand-name { color: var(--brand-color); font-size: 1.22rem; font-weight: 950; line-height: 1.15; text-shadow: 0 0 10px color-mix(in srgb, var(--brand-color) 22%, transparent); overflow-wrap: anywhere; }
+.machine-brand-engel .machine-card-brand-name { text-shadow: 0 0 10px rgba(255,255,255,.16); }
+.machine-card-identity { display: grid; gap: 4px; min-width: 0; }
+.machine-card-identity div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: start; min-width: 0; color: #aac4d2; font-size: .84rem; line-height: 1.35; }
+.machine-card-identity span { color: #8fe8ff; font-weight: 900; white-space: nowrap; }
+.machine-card-identity strong { min-width: 0; color: #f3fbff; font-size: .84rem; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; word-break: break-word; }
 .machine-spec-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .machine-spec-grid div { min-width: 0; display: grid; gap: 3px; padding: 8px; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; background: rgba(4,18,34,.36); }
 .machine-spec-grid dt { color: #83cfea; font-size: .65rem; font-weight: 950; text-transform: uppercase; }

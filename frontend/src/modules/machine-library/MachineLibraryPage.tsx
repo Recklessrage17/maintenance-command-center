@@ -66,6 +66,10 @@ function safeCssHex(value: string) {
 function isEngelBrand(value: string) {
   return value.trim().toLowerCase() === 'engel';
 }
+function machineStatusLabel(status: string) {
+  const normalized = status || 'active';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
 function downloadTemplate() {
   window.location.href = '/api/machine-library/export/template';
 }
@@ -274,9 +278,15 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
           <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''} ${isEngelBrand(asset.brand) ? 'machine-brand-engel' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
             <div className="machine-card-head">
               <button className="machine-asset-number" type="button" onClick={()=>void loadLogs(asset)}>{asset.assetNumber}</button>
-              <span className={`machine-status-badge status-${asset.status}`}>{asset.status}</span>
+              <span className={`machine-status-badge status-${asset.status}`}>{asset.status === 'active'&&<span className="status-pulse-dot" />}{machineStatusLabel(asset.status)}</span>
             </div>
-            <div className="machine-card-title"><strong>{asset.brand || 'Unknown'}</strong><span>{asset.model || 'Model not set'} / S/N: {asset.serialNumber || '-'}</span></div>
+            <div className="machine-card-title">
+              <strong className="machine-card-brand-name">{asset.brand || 'Unknown'}</strong>
+              <div className="machine-card-identity">
+                <div><span>Model:</span><strong>{asset.model || '-'}</strong></div>
+                <div><span>Serial #:</span><strong>{asset.serialNumber || '-'}</strong></div>
+              </div>
+            </div>
             <dl className="machine-spec-grid">
               <div><dt>Tonnage</dt><dd>{asset.tonnage || '-'}</dd></div><div><dt>Shot Size</dt><dd>{displayShotSize(asset.shotSizeOz)} oz</dd></div><div><dt>Barrel</dt><dd>{asset.barrelDiameter || '-'}</dd></div><div><dt>Power</dt><dd>{asset.powerType || '-'}</dd></div>
             </dl>
