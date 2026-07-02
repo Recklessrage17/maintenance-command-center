@@ -5386,7 +5386,7 @@ type MachineAssetRow = {
 const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
 const voltageTypes = new Set(['AC','DC','']);
-const machineRequiredDefaultBrandColors: Record<string, string> = { Toyo: '#1E6BFF', Engel: '#1E6BFF' };
+const machineRequiredDefaultBrandColors: Record<string, string> = { Toyo: '#1E6BFF', Engel: '#FFFFFF' };
 const machineDefaultBrandColors: Record<string, string> = { ...machineRequiredDefaultBrandColors, Arburg: '#38D7B3', Husky: '#FFD45A', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
 const machineRequiredImportHeaderGroups = [
   ['Press','Asset Number','Asset Number / Press Number'],
