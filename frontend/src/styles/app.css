@@ -14,8 +14,11 @@ body { font-size: 15px; }
 button { font: inherit; }
 button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 
-.mcc-shell { width: 100%; max-width: 100vw; min-height: 100vh; overflow-x: hidden; background: radial-gradient(circle at top right, #0d3a5c 0, #071425 36%, #04101f 100%); }
-.command-shell { position: relative; overflow-x: hidden; }
+.mcc-shell { position: relative; isolation: isolate; width: 100%; max-width: 100vw; min-height: 100vh; overflow-x: hidden; background: radial-gradient(circle at 18% 12%, rgba(68,215,255,.22), transparent 28%), radial-gradient(circle at 88% 8%, rgba(54,229,170,.12), transparent 30%), radial-gradient(circle at 72% 76%, rgba(30,107,255,.18), transparent 34%), linear-gradient(145deg, #03101f 0%, #071425 46%, #04101f 100%); }
+.mcc-shell::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(120deg, rgba(255,255,255,.08), rgba(68,215,255,.035) 28%, transparent 46%), radial-gradient(ellipse at 42% 18%, rgba(180,245,255,.13), transparent 38%), radial-gradient(ellipse at 22% 88%, rgba(68,215,255,.1), transparent 34%); filter: blur(.2px); opacity: .9; }
+.mcc-shell::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: linear-gradient(165deg, transparent 0 24%, rgba(255,255,255,.035) 25%, transparent 39% 61%, rgba(68,215,255,.035) 62%, transparent 78%), repeating-linear-gradient(115deg, rgba(255,255,255,.018) 0 1px, transparent 1px 24px); opacity: .42; backdrop-filter: blur(1px); }
+.mcc-shell > * { position: relative; z-index: 1; }
+.command-shell { position: relative; z-index: 1; overflow-x: hidden; }
 .mcc-sidebar { width: 290px; padding: 24px; background: rgba(3, 13, 27, 0.88); border-right: 1px solid rgba(77, 208, 255, 0.22); }
 .mcc-brand { position: relative; display: flex; align-items: center; min-height: 58px; margin-bottom: 24px; padding: 7px 0 7px 18px; }
 .mcc-brand::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 7px; border-radius: 999px; background: linear-gradient(180deg, #44d7ff 0%, #1c86ff 58%, #36e5aa 100%); box-shadow: 0 0 18px rgba(68, 215, 255, 0.34); }
@@ -376,14 +379,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-card-title { display: grid; gap: 5px; min-width: 0; }
 .machine-card-brand-name { color: var(--brand-color); font-size: 1.22rem; font-weight: 950; line-height: 1.15; text-shadow: 0 0 10px color-mix(in srgb, var(--brand-color) 22%, transparent); overflow-wrap: anywhere; }
 .machine-brand-engel .machine-card-brand-name { text-shadow: 0 0 10px rgba(255,255,255,.16); }
+.machine-card-year-age { margin: 0; color: #aac4d2; font-size: .8rem; font-weight: 850; line-height: 1.3; overflow-wrap: normal; word-break: normal; }
 .machine-card-identity { display: grid; gap: 4px; min-width: 0; }
 .machine-card-identity div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: start; min-width: 0; color: #aac4d2; font-size: .84rem; line-height: 1.35; }
 .machine-card-identity span { color: #8fe8ff; font-weight: 900; white-space: nowrap; }
 .machine-card-identity strong { min-width: 0; color: #f3fbff; font-size: .84rem; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; word-break: break-word; }
-.machine-spec-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
-.machine-spec-grid div { min-width: 0; display: grid; gap: 3px; padding: 8px; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; background: rgba(4,18,34,.36); }
-.machine-spec-grid dt { color: #83cfea; font-size: .65rem; font-weight: 950; text-transform: uppercase; }
-.machine-spec-grid dd { margin: 0; color: #f3fbff; font-size: .86rem; font-weight: 900; overflow-wrap: anywhere; }
+.machine-spec-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 0; }
+.machine-spec-grid div { min-width: 0; display: grid; gap: 4px; padding: 9px 10px; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; background: rgba(4,18,34,.36); }
+.machine-spec-grid dt { color: #83cfea; font-size: .65rem; font-weight: 950; text-transform: uppercase; overflow-wrap: normal; word-break: normal; }
+.machine-spec-grid dd { margin: 0; color: #f3fbff; font-size: .88rem; font-weight: 900; line-height: 1.25; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .machine-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .machine-card-actions .compact-button { width: auto; }
 .machine-empty-card { min-height: 120px; grid-column: 1 / -1; }
@@ -875,6 +879,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 520px) { .mcc-main { padding: 138px 12px 12px; } .inventory-focus-shell .mcc-main { padding: 138px 10px 10px; } .mcc-card { padding: 14px; border-radius: 14px; } .card-grid, .requisition-summary-grid, .history-filter-card { grid-template-columns: 1fr; } .page-heading h2, .mcc-header h1 { font-size: 1.25rem; } .primary-button, .secondary-button, .link-button, .danger-button { width: 100%; } .header-actions { width: 100%; } .user-pill { width: 100%; } .history-table-toolbar .compact-button, .requisition-selection-toolbar .compact-button { flex: 1 1 100%; } }
 @media (max-width: 620px) { .share-card-heading, .share-url-row { grid-template-columns: 1fr; } .share-card-heading { display: grid; } .share-url-row .compact-button, .share-card-heading .compact-button { justify-self: start; } }
 @media (max-width: 480px) { .command-launcher { left: 8px; right: 8px; top: 8px; gap: 8px; } .command-brand { flex: 1 1 auto; min-width: 0; min-height: 54px; padding-left: 14px; } .command-brand .mcc-brand-mark > span { font-size: .56rem; } .command-launcher-button { width: 58px; min-height: 58px; border-radius: 16px; } .launcher-gear { width: 31px; height: 31px; font-size: 1.16rem; } .command-menu { top: 66px; max-height: calc(100vh - 82px); padding: 12px; border-radius: 18px; } .command-menu-heading { padding-bottom: 11px; } .command-menu-user { align-items: stretch; flex-wrap: wrap; } .command-menu-user-main { flex: 1 1 180px; } .command-menu-item { min-height: 58px; border-radius: 14px; } .mcc-page-topbar { top: 72px; left: 8px; right: 8px; } .mcc-page-tooltip { top: 124px; left: 8px; right: 8px; } .mcc-main, .inventory-focus-shell .mcc-main { padding: 132px 8px 10px; } .page-stack { gap: 12px; } .page-heading { min-height: auto; padding: 14px 14px 14px 16px; border-radius: 0 14px 14px 0; } .auth-shell { padding: 12px; } .auth-card { padding: 18px; border-radius: 20px; } .inventory-table-card, .requisitions-table-card { padding: 10px; } .modal-backdrop { padding: var(--mcc-topbar-safe-offset) 10px var(--mcc-modal-bottom-safe); } .inventory-modal, .requisition-modal { max-height: var(--mcc-modal-available-height); } }
+@media (max-width: 420px) { .machine-spec-grid { grid-template-columns: 1fr; } }
 .requisition-review-list { display: grid; gap: 8px; }
 .requisition-review-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 110px; gap: 10px; align-items: center; padding: 9px 10px; border: 1px solid rgba(85, 191, 236, 0.16); border-radius: 10px; background: rgba(4, 18, 34, 0.42); }
 .requisition-review-row strong { margin: 0; color: #f3fbff; font-size: .86rem; }
