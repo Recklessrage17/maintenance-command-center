@@ -188,9 +188,9 @@ const emptyBackupPermissions = {
   canRestoreBackup: false,
 };
 const defaultBranding: BrandingSettings = {
-  companyName: 'JBT',
+  companyName: 'MCC',
   companySubtitle: 'Maintenance Command Center',
-  companyAccentText: 'USA',
+  companyAccentText: '',
   logoMode: 'text',
   logoUrl: '',
   logoFileName: '',

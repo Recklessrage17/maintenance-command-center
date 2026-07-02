@@ -12,7 +12,7 @@ type BrandingSettings = {
   logoUrl: string;
   iconAnimation: 'none' | 'glow' | 'rotate' | 'pulse';
 };
-const defaultBranding: BrandingSettings = { companyName: 'JBT', companySubtitle: 'Maintenance Command Center', companyAccentText: 'USA', logoMode: 'text', logoUrl: '', iconAnimation: 'none' };
+const defaultBranding: BrandingSettings = { companyName: 'MCC', companySubtitle: 'Maintenance Command Center', companyAccentText: '', logoMode: 'text', logoUrl: '', iconAnimation: 'none' };
 const MENU_WARP_MS = 190;
 const PAGE_ENTER_MS = 260;
 const baseNav: Array<{ id: MccSection; label: string; microLabel: string; management?: boolean }> = [
@@ -147,9 +147,9 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
    function normalize(value: unknown): BrandingSettings {
      const data = value && typeof value === 'object' && !Array.isArray(value) ? value as Partial<BrandingSettings> : {};
      return {
-       companyName: String(data.companyName ?? defaultBranding.companyName).slice(0,20) || defaultBranding.companyName,
+       companyName: scrubJbtBrandText(data.companyName, defaultBranding.companyName).slice(0,20) || defaultBranding.companyName,
        companySubtitle: String(data.companySubtitle ?? defaultBranding.companySubtitle).slice(0,40),
-       companyAccentText: String(data.companyAccentText ?? defaultBranding.companyAccentText).slice(0,8),
+       companyAccentText: scrubJbtBrandText(data.companyAccentText, '').slice(0,8),
        logoMode: data.logoMode === 'image' && data.logoUrl ? 'image' : 'text',
        logoUrl: String(data.logoUrl ?? ''),
        iconAnimation: ['none','glow','rotate','pulse'].includes(String(data.iconAnimation)) ? data.iconAnimation as BrandingSettings['iconAnimation'] : 'none',
