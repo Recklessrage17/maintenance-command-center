@@ -5386,7 +5386,8 @@ type MachineAssetRow = {
 const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
 const voltageTypes = new Set(['AC','DC','']);
-const machineDefaultBrandColors: Record<string, string> = { Toyo: '#67D8FF', Arburg: '#38D7B3', Husky: '#FFD45A', Engel: '#8FB6D8', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
+const machineRequiredDefaultBrandColors: Record<string, string> = { Toyo: '#1E6BFF', Engel: '#FFFFFF' };
+const machineDefaultBrandColors: Record<string, string> = { ...machineRequiredDefaultBrandColors, Arburg: '#38D7B3', Husky: '#FFD45A', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
 const machineRequiredImportHeaderGroups = [
   ['Press','Asset Number','Asset Number / Press Number'],
   ['Shot (oz)','Shot Size (oz)','Shot Size Oz','Shot'],
@@ -5409,6 +5410,11 @@ function safeHexColor(value: unknown, fallback = '#44D7FF') {
 function seedMachineBrandSettings(actor?: User | null) {
   const timestamp = now();
   for (const [brandName, colorHex] of Object.entries(machineDefaultBrandColors)) run('INSERT OR IGNORE INTO machine_brand_settings (brand_name,color_hex,created_at,updated_at,updated_by_user_id) VALUES (?,?,?,?,?)', [brandName,colorHex,timestamp,timestamp,actor?.id ?? null]);
+  for (const [brandName, colorHex] of Object.entries(machineRequiredDefaultBrandColors)) {
+    run(`INSERT INTO machine_brand_settings (brand_name,color_hex,created_at,updated_at,updated_by_user_id) VALUES (?,?,?,?,?)
+      ON CONFLICT(brand_name) DO UPDATE SET color_hex=excluded.color_hex, updated_at=excluded.updated_at, updated_by_user_id=COALESCE(excluded.updated_by_user_id, updated_by_user_id)
+      WHERE upper(color_hex) <> upper(excluded.color_hex)`, [brandName,colorHex,timestamp,timestamp,actor?.id ?? null]);
+  }
 }
 seedMachineBrandSettings();
 function normalizeMachineBrand(value: string) {
