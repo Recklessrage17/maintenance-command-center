@@ -1133,8 +1133,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   --mcc-graphite-800: #0b1724;
   --mcc-steel-700: #243545;
   --mcc-steel-500: #7ea4b8;
-  --mcc-glass-fill: linear-gradient(145deg, rgba(24, 37, 50, 0.66), rgba(5, 13, 24, 0.82));
-  --mcc-glass-fill-strong: linear-gradient(145deg, rgba(29, 45, 60, 0.76), rgba(5, 13, 24, 0.9));
+  --mcc-glass-fill: linear-gradient(145deg, rgba(29, 43, 55, 0.7), rgba(4, 12, 22, 0.86));
+  --mcc-glass-fill-strong: linear-gradient(145deg, rgba(35, 52, 65, 0.82), rgba(4, 12, 22, 0.94));
   --mcc-glass-border: rgba(210, 235, 255, 0.16);
   --mcc-glass-border-strong: rgba(123, 220, 255, 0.34);
   --mcc-glass-highlight: rgba(255, 255, 255, 0.11);
@@ -1147,14 +1147,14 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   --mcc-good: #36e5aa;
   --mcc-readable: #f3fbff;
   --mcc-muted: #a9c5d6;
-  --mcc-panel-shadow: 0 20px 54px rgba(0, 0, 0, 0.36), inset 0 1px 0 var(--mcc-glass-highlight);
-  --mcc-panel-shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255,255,255,0.08);
+  --mcc-panel-shadow: 0 22px 58px rgba(0, 0, 0, 0.4), 0 0 34px rgba(68, 215, 255, 0.08), inset 0 1px 0 var(--mcc-glass-highlight);
+  --mcc-panel-shadow-soft: 0 16px 38px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255,255,255,0.08);
   --mcc-liquid-background:
-    radial-gradient(circle at 16% 8%, rgba(68, 215, 255, 0.23), transparent 26%),
-    radial-gradient(circle at 78% 14%, rgba(54, 229, 170, 0.14), transparent 28%),
-    radial-gradient(circle at 96% 74%, rgba(255, 151, 70, 0.15), transparent 25%),
-    radial-gradient(circle at 42% 108%, rgba(30, 107, 255, 0.18), transparent 34%),
-    linear-gradient(150deg, #01050a 0%, #07111d 35%, #101823 61%, #030a13 100%);
+    radial-gradient(circle at 16% 8%, rgba(68, 215, 255, 0.26), transparent 27%),
+    radial-gradient(circle at 78% 14%, rgba(54, 229, 170, 0.16), transparent 29%),
+    radial-gradient(circle at 96% 74%, rgba(255, 151, 70, 0.18), transparent 26%),
+    radial-gradient(circle at 42% 108%, rgba(30, 107, 255, 0.21), transparent 35%),
+    linear-gradient(150deg, #01050a 0%, #07111d 33%, #111a25 61%, #030a13 100%);
   --mcc-liquid-reflection:
     linear-gradient(112deg, rgba(255,255,255,.11), rgba(68,215,255,.045) 18%, transparent 34%),
     linear-gradient(22deg, transparent 0 46%, rgba(255,180,95,.07) 47%, transparent 62%),
@@ -1208,6 +1208,13 @@ body {
 .restore-panel,
 .inventory-tools-panel,
 .inventory-tool-summary,
+.inventory-setup-card,
+.inventory-import-summary,
+.dashboard-clear-card,
+.share-card,
+.branding-card,
+.danger-zone-card,
+.network-notes,
 .machine-form-section,
 .machine-replacement-panel,
 .machine-component-box,
@@ -1232,10 +1239,16 @@ body {
 .mcc-card::before,
 .mcc-full-width-panel::before,
 .auth-card::before,
+.dashboard-clear-card::before,
+.share-card::before,
+.branding-card::before,
+.danger-zone-card::before,
 .machine-asset-card::before,
 .vendor-card::before,
 .backup-tier-card::before,
 .inventory-tools-panel::before,
+.inventory-setup-card::before,
+.inventory-import-summary::before,
 .machine-form-section::before,
 .machine-component-box::before,
 .machine-replacement-panel::before {
@@ -1253,10 +1266,16 @@ body {
 .mcc-card > *,
 .mcc-full-width-panel > *,
 .auth-card > *,
+.dashboard-clear-card > *,
+.share-card > *,
+.branding-card > *,
+.danger-zone-card > *,
 .machine-asset-card > *,
 .vendor-card > *,
 .backup-tier-card > *,
 .inventory-tools-panel > *,
+.inventory-setup-card > *,
+.inventory-import-summary > *,
 .machine-form-section > *,
 .machine-component-box > *,
 .machine-replacement-panel > * {
@@ -1266,7 +1285,7 @@ body {
 .mcc-card,
 .mcc-full-width-panel,
 .auth-card {
-  border-radius: 14px;
+  border-radius: 8px;
 }
 
 .auth-card {
@@ -1298,7 +1317,7 @@ body {
 }
 
 .mcc-page-topbar {
-  border-radius: 16px;
+  border-radius: 10px;
   background:
     linear-gradient(145deg, rgba(19, 32, 46, 0.82), rgba(4, 13, 25, 0.9)),
     linear-gradient(90deg, rgba(68,215,255,.11), transparent 46%, rgba(255,180,95,.08));
@@ -1449,7 +1468,7 @@ textarea:disabled {
 }
 
 .command-launcher-button {
-  border-radius: 16px;
+  border-radius: 10px;
   background:
     linear-gradient(145deg, rgba(27, 42, 56, .9), rgba(4, 14, 26, .88)),
     radial-gradient(circle at 50% 8%, rgba(68,215,255,.18), transparent 46%);
@@ -1464,7 +1483,7 @@ textarea:disabled {
 }
 
 .command-menu {
-  border-radius: 18px;
+  border-radius: 12px;
   background:
     linear-gradient(145deg, rgba(21, 35, 49, .94), rgba(4, 13, 25, .97)),
     radial-gradient(circle at 92% 12%, rgba(255,180,95,.12), transparent 30%);
@@ -1543,6 +1562,13 @@ tr:hover td {
   background: linear-gradient(145deg, rgba(18, 97, 71, .48), rgba(5, 21, 27, .72));
 }
 
+.machine-status-badge.status-down,
+.machine-status-badge.status-disabled {
+  color: #ffe3e7;
+  border-color: rgba(255, 117, 138, .58);
+  background: linear-gradient(145deg, rgba(126, 32, 48, .56), rgba(5, 16, 29, .78));
+}
+
 .view-only-badge,
 .status-requested,
 .vendor-status-disabled,
@@ -1604,11 +1630,16 @@ tr:hover td {
   top: 0;
   z-index: 8;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 8px;
+  border-color: rgba(159, 232, 255, .34);
   background:
-    linear-gradient(145deg, rgba(23, 38, 52, .86), rgba(5, 13, 24, .92)),
-    radial-gradient(circle at 12% 12%, rgba(68,215,255,.12), transparent 34%),
-    radial-gradient(circle at 96% 100%, rgba(255,180,95,.09), transparent 28%);
+    linear-gradient(145deg, rgba(27, 45, 58, .9), rgba(4, 12, 22, .94)),
+    radial-gradient(circle at 12% 12%, rgba(68,215,255,.16), transparent 34%),
+    radial-gradient(circle at 96% 100%, rgba(255,180,95,.12), transparent 28%);
+  box-shadow:
+    0 20px 52px rgba(0,0,0,.34),
+    0 0 28px rgba(68,215,255,.12),
+    inset 0 1px 0 rgba(255,255,255,.12);
 }
 
 .machine-toolbar-card::after {
@@ -1623,24 +1654,27 @@ tr:hover td {
 }
 
 .machine-card-grid {
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(min(318px, 100%), 1fr));
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(326px, 100%), 1fr));
 }
 
 .machine-asset-card {
   overflow: hidden;
-  gap: 14px;
-  padding: 16px;
-  border-radius: 10px;
-  border-color: color-mix(in srgb, var(--brand-color) 34%, rgba(210,235,255,.14));
+  gap: 15px;
+  padding: 17px;
+  border-radius: 8px;
+  border-color: color-mix(in srgb, var(--brand-color) 42%, rgba(210,235,255,.16));
   background:
-    linear-gradient(145deg, rgba(28, 42, 54, .72), rgba(5, 13, 24, .9)),
-    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--brand-color) 18%, transparent), transparent 34%),
-    linear-gradient(90deg, color-mix(in srgb, var(--brand-color) 8%, transparent), transparent 42%);
+    linear-gradient(180deg, rgba(255,255,255,.07), transparent 28%),
+    linear-gradient(145deg, rgba(31, 47, 59, .78), rgba(4, 12, 22, .94)),
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--brand-color) 24%, transparent), transparent 35%),
+    linear-gradient(90deg, color-mix(in srgb, var(--brand-color) 10%, transparent), transparent 42%);
   box-shadow:
-    0 22px 46px rgba(0,0,0,.32),
-    0 0 0 1px color-mix(in srgb, var(--brand-color) 12%, transparent) inset,
+    0 24px 54px rgba(0,0,0,.36),
+    0 0 0 1px color-mix(in srgb, var(--brand-color) 14%, transparent) inset,
+    0 0 28px color-mix(in srgb, var(--brand-color) 12%, transparent),
     inset 0 1px 0 rgba(255,255,255,.13);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
 
 .machine-asset-card::before {
@@ -1658,6 +1692,16 @@ tr:hover td {
   background: linear-gradient(180deg, var(--brand-color), rgba(54,229,170,.72), rgba(255,180,95,.42));
   box-shadow: 0 0 22px color-mix(in srgb, var(--brand-color) 34%, transparent);
   pointer-events: none;
+}
+
+.machine-asset-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--brand-color) 62%, rgba(210,235,255,.22));
+  box-shadow:
+    0 28px 62px rgba(0,0,0,.42),
+    0 0 0 1px color-mix(in srgb, var(--brand-color) 22%, transparent) inset,
+    0 0 36px color-mix(in srgb, var(--brand-color) 20%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.16);
 }
 
 .machine-asset-card.machine-import-highlight {
@@ -1714,16 +1758,30 @@ tr:hover td {
 }
 
 .machine-spec-grid div {
-  min-height: 64px;
+  position: relative;
+  overflow: hidden;
+  min-height: 74px;
   align-content: center;
   gap: 5px;
-  padding: 11px 12px;
-  border-color: rgba(143,205,233,.2);
+  padding: 12px 13px;
+  border-color: rgba(143,205,233,.24);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(17, 32, 47, .76), rgba(4, 13, 25, .72)),
-    radial-gradient(circle at 0% 0%, rgba(68,215,255,.1), transparent 44%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 10px 20px rgba(0,0,0,.16);
+    linear-gradient(180deg, rgba(255,255,255,.055), transparent 34%),
+    linear-gradient(145deg, rgba(17, 36, 50, .82), rgba(3, 11, 20, .76)),
+    radial-gradient(circle at 0% 0%, rgba(68,215,255,.13), transparent 44%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.13),
+    0 12px 24px rgba(0,0,0,.18);
+}
+
+.machine-spec-grid div::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(68,215,255,.86), rgba(54,229,170,.5), transparent);
+  pointer-events: none;
 }
 
 .machine-spec-grid div:nth-child(1) {
@@ -1744,31 +1802,45 @@ tr:hover td {
 
 .machine-spec-grid dt {
   letter-spacing: .055em;
+  color: #9eefff;
 }
 
 .machine-spec-grid dd {
   color: #ffffff;
-  font-size: .96rem;
+  font-size: 1rem;
+  line-height: 1.18;
   text-shadow: 0 0 12px rgba(68,215,255,.12);
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .machine-wear-grid {
-  gap: 9px;
+  gap: 10px;
 }
 
 .machine-condition-badge,
 .machine-wear-grid > div:not(.machine-condition-badge) {
-  min-height: 58px;
+  min-height: 64px;
   align-content: center;
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(14, 31, 44, .8), rgba(4, 13, 25, .68));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 10px 18px rgba(0,0,0,.14);
+    linear-gradient(180deg, rgba(255,255,255,.05), transparent 34%),
+    linear-gradient(145deg, rgba(14, 31, 44, .84), rgba(3, 11, 20, .72));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.11),
+    0 12px 22px rgba(0,0,0,.16);
 }
 
 .machine-condition-badge span,
 .machine-wear-grid > div:not(.machine-condition-badge) span {
   letter-spacing: .055em;
+  color: #9eefff;
+}
+
+.machine-wear-grid > div:not(.machine-condition-badge) strong {
+  color: #ffffff;
+  font-size: .86rem;
+  line-height: 1.22;
 }
 
 .machine-condition-badge.condition-new {
@@ -1810,7 +1882,7 @@ tr:hover td {
 .machine-component-box {
   overflow: hidden;
   border-left-width: 3px;
-  border-radius: 10px;
+  border-radius: 8px;
   background:
     linear-gradient(145deg, color-mix(in srgb, var(--component-accent) 13%, rgba(22, 35, 48, .8)), rgba(4,13,25,.78)),
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--component-accent) 16%, transparent), transparent 36%);
@@ -1833,7 +1905,7 @@ tr:hover td {
 }
 
 .vendor-card {
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .vendor-card.disabled {
@@ -1903,6 +1975,7 @@ tr:hover td {
   .danger-button,
   .compact-button,
   .machine-action-badge,
+  .machine-asset-card,
   .command-menu-item,
   .command-launcher-button,
   .launcher-gear,
