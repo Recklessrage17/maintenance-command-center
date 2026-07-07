@@ -73,20 +73,21 @@
 
 .screw-diagram-wrap {
   overflow: hidden;
-  padding: clamp(8px, 0.9vw, 12px) clamp(10px, 1.2vw, 18px);
+  padding: 10px 14px;
   border-radius: 10px;
   background: #030d17;
 }
 
 .screw-diagram-svg {
+  display: none;
+}
+
+.screw-diagram-reference-img {
   display: block;
-  width: clamp(740px, 62vw, 980px);
-  min-width: 0;
+  width: min(100%, 1060px);
   height: auto;
-  max-height: min(275px, 33vh);
   margin: 0 auto;
-  aspect-ratio: 1100 / 360;
-  overflow: visible;
+  object-fit: contain;
 }
 
 .screw-side-label {
@@ -265,9 +266,8 @@
     width: min(95vw, 1600px);
   }
 
-  .screw-diagram-svg {
-    width: clamp(820px, 58vw, 1040px);
-    max-height: min(290px, 34vh);
+  .screw-diagram-reference-img {
+    width: min(100%, 1060px);
   }
 }
 
@@ -284,13 +284,7 @@
     grid-template-columns: 1fr;
   }
 
-  .screw-diagram-wrap {
-    overflow-x: auto;
-    padding-inline: 18px;
-  }
-
-  .screw-diagram-svg {
-    width: 900px;
-    max-width: none;
+  .screw-diagram-reference-img {
+    width: 100%;
   }
 }
