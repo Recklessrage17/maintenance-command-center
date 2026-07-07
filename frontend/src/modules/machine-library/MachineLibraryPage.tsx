@@ -287,7 +287,9 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
           <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''} ${isEngelBrand(asset.brand) ? 'machine-brand-engel' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
             <div className="machine-card-head">
               <button className="machine-asset-number" type="button" onClick={()=>void loadLogs(asset)}>{asset.assetNumber}</button>
-              <span className={`machine-status-badge status-${asset.status}`}>{asset.status === 'active'&&<span className="status-pulse-dot" />}{machineStatusLabel(asset.status)}</span>
+              {asset.status === 'active'
+                ? <span className="machine-status-badge status-active" title="Active" aria-label="Active"><span className="status-pulse-dot" /></span>
+                : <span className={`machine-status-badge status-${asset.status}`}>{machineStatusLabel(asset.status)}</span>}
             </div>
             <div className="machine-card-title">
               <div className="machine-card-brand-row">
