@@ -10,6 +10,7 @@ type ImportMode = 'add_new_only' | 'upsert';
 type ImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
 type MachineImportSummary = { addedCount: number; updatedCount: number; skippedCount: number; rejectedDuplicateCount: number; errors?: string[]; rejectedDuplicates?: ImportRejectedDuplicate[]; changedAssetNumbers?: string[] };
 type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz'> & { shotSizeOz: string };
+type InspectionContext = { assetNumber: string; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean };
 type ReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'barrelLength' | 'screwLength' | 'screw2Length' | 'barrel2Length' | 'plungerLength' | 'plungerDiameter' | 'plungerBarrelLength' | 'plungerBarrelDiameter';
 type StringFormKey = { [K in keyof AssetForm]: AssetForm[K] extends string ? K : never }[keyof AssetForm];
@@ -92,6 +93,15 @@ function injectionSetupLabel(asset: Pick<MachineAsset, 'hasDoubleShotInjection' 
   if (asset.hasPlungerInjection) return 'Plunger';
   return '';
 }
+function inspectionContext(asset: Pick<MachineAsset | AssetForm, 'assetNumber' | 'hasDoubleShotInjection' | 'hasPlungerInjection'>): InspectionContext {
+  return { assetNumber: asset.assetNumber || 'Machine Asset', hasDoubleShotInjection: asset.hasDoubleShotInjection, hasPlungerInjection: asset.hasPlungerInjection };
+}
+function inspectionComponents(target: Pick<InspectionContext, 'hasDoubleShotInjection' | 'hasPlungerInjection'>) {
+  const components = ['Screw', 'Screw Tip', 'Barrel', 'Barrel End Cap'];
+  if (target.hasDoubleShotInjection) components.push('Secondary Screw', 'Secondary Screw Tip', 'Secondary Barrel', 'Secondary Barrel End Cap');
+  if (target.hasPlungerInjection) components.push('Plunger', 'Plunger Barrel');
+  return components;
+}
 function componentSummary(type: string, date: string) {
   return `${type || '-'} / ${ageYears(date)}`;
 }
@@ -157,6 +167,8 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [showEditor,setShowEditor]=useState(false);
   const [showColors,setShowColors]=useState(false);
   const [colorDrafts,setColorDrafts]=useState<Record<string,string>>({});
+  const [detailAsset,setDetailAsset]=useState<MachineAsset|null>(null);
+  const [inspection,setInspection]=useState<InspectionContext|null>(null);
   const [logs,setLogs]=useState<{asset:MachineAsset;records:HistoryRecord[]}|null>(null);
   const [replacement,setReplacement]=useState<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>(null);
   const fileRef = useRef<HTMLInputElement|null>(null);
@@ -282,11 +294,11 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
         <p className="form-help machine-toolbar-note">Add New Only rejects existing Asset Numbers. Upsert updates existing assets and creates new ones. Duplicate Asset Numbers inside one file are always rejected after the first valid row.</p>
         {!canEdit&&<p className="form-help machine-toolbar-note">Tier 3, Manager, Admin, or Owner Admin access is required to add or edit machine assets.</p>}
       </section>
-      <div className="machine-card-grid">
+      <div className={`machine-card-grid ${assets.length === 1 ? 'single-result' : 'multi-results'}`}>
         {assets.map(asset=>(
-          <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''} ${isEngelBrand(asset.brand) ? 'machine-brand-engel' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id}>
+          <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''} ${isEngelBrand(asset.brand) ? 'machine-brand-engel' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id} role="button" tabIndex={0} aria-label={`View details for ${asset.assetNumber}`} onClick={()=>setDetailAsset(asset)} onKeyDown={event=>{ if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDetailAsset(asset); } }}>
             <div className="machine-card-head">
-              <button className="machine-asset-number" type="button" onClick={()=>void loadLogs(asset)}>{asset.assetNumber}</button>
+              <button className="machine-asset-number" type="button" onClick={event=>{ event.stopPropagation(); void loadLogs(asset); }}>{asset.assetNumber}</button>
               {asset.status === 'active'
                 ? <span className="machine-status-badge status-active" title="Active" aria-label="Active"><span className="status-pulse-dot" /></span>
                 : <span className={`machine-status-badge status-${asset.status}`}>{machineStatusLabel(asset.status)}</span>}
@@ -327,22 +339,50 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
             </div>
             {(asset.notes || asset.criticalNotes)&&<div className="machine-card-notes">{asset.notes&&<p className="machine-note-text">{asset.notes}</p>}{asset.criticalNotes&&<p className="machine-critical-text">{asset.criticalNotes}</p>}</div>}
             <div className="machine-card-actions">
-              <button className="primary-button compact-button" type="button" onClick={()=>openEdit(asset)}>{canEdit?'View/Edit':'View'}</button>
-              <button className="secondary-button compact-button" type="button" onClick={()=>void loadLogs(asset)}>Logs</button>
-              {canDelete&&asset.status!=='disabled'&&<button className="secondary-button compact-button" type="button" onClick={()=>void disableAsset(asset)}>Disable</button>}
+              <button className="primary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); openEdit(asset); }}>{canEdit?'View/Edit':'View'}</button>
+              <button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); void loadLogs(asset); }}>Logs</button>
+              {canDelete&&asset.status!=='disabled'&&<button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); void disableAsset(asset); }}>Disable</button>}
             </div>
           </article>
         ))}
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}
       </div>
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
-      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspection={()=>setMessage({kind:'success',text:'Measurement Inspection form is coming next.'})} />}
+      {detailAsset&&<MachineDetailModal asset={detailAsset} canEdit={canEdit} onClose={()=>setDetailAsset(null)} onEdit={()=>{ const asset = detailAsset; setDetailAsset(null); openEdit(asset); }} onLogs={()=>{ const asset = detailAsset; setDetailAsset(null); void loadLogs(asset); }} onInspection={()=>setInspection(inspectionContext(detailAsset))} />}
+      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspection={()=>setInspection(inspectionContext(editing ?? form))} />}
+      {inspection&&<MeasurementInspectionModal target={inspection} onClose={()=>setInspection(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
       {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} onSubmit={updateReplacement} />}
       {logs&&<LogsModal logs={logs} onClose={()=>setLogs(null)} onBackToAsset={()=>{ setForm(assetToForm(logs.asset)); setEditing(logs.asset); setLogs(null); setShowEditor(true); }} />}
     </div>
   );
+}
+
+function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:()=>void}) {
+  const unitLabel = injectionSetupLabel(asset) || 'Standard Injection';
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-modal machine-detail-modal">
+    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3>{asset.assetNumber}</h3><p>{asset.brand || 'Brand'} / {asset.model || 'Model'} / S/N: {asset.serialNumber || '-'}</p></div><div className="machine-detail-header-actions"><button className="secondary-button compact-button" type="button" onClick={onLogs}>Logs</button><button className="primary-button compact-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div></div>
+    <div className="machine-detail-summary">
+      <DetailItem label="Status" value={machineStatusLabel(asset.status)} />
+      <DetailItem label="Setup" value={unitLabel} />
+      <DetailItem label="Year / Age" value={`${asset.machineYear || '-'} / ${machineYearAge(asset.machineYear)}`} />
+      <DetailItem label="Location" value={asset.location || '-'} />
+    </div>
+    <DetailSection title="Basic Info"><DetailItem label="Asset Name" value={asset.assetName || '-'} /><DetailItem label="Brand" value={asset.brand || '-'} /><DetailItem label="Model" value={asset.model || '-'} /><DetailItem label="Serial #" value={asset.serialNumber || '-'} /><DetailItem label="Machine Type" value={asset.machineType || '-'} /><DetailItem label="Power Type" value={asset.powerType || '-'} /><DetailItem label="Tonnage" value={asset.tonnage || '-'} /><DetailItem label="Shot Size" value={`${displayShotSize(asset.shotSizeOz)} oz`} /><DetailItem label="Barrel / Screw Diameter" value={asset.barrelDiameter || '-'} /></DetailSection>
+    <DetailSection title="Electrical / Dimensions"><DetailItem label="Voltage" value={asset.voltageValue || '-'} /><DetailItem label="Voltage Type" value={asset.voltageType || '-'} /><DetailItem label="Full Load Amp" value={asset.fullLoadAmp || '-'} /><DetailItem label="Machine Length" value={asset.machineLength || '-'} /><DetailItem label="Machine Width" value={asset.machineWidth || '-'} /><DetailItem label="Machine Height" value={asset.machineHeight || '-'} /><DetailItem label="Full Die Height Length / Range" value={asset.fullDieHeightLength || '-'} /></DetailSection>
+    <DetailSection title="Screw / Barrel"><DetailItem label="Screw Type" value={asset.screwType || '-'} /><DetailItem label="Screw Tip Type" value={asset.screwTipType || '-'} /><DetailItem label="Screw Installed" value={asset.screwInstalledDate || '-'} /><DetailItem label="Screw Tip Installed" value={asset.screwTipInstalledDate || '-'} /><DetailItem label="Screw Length" value={asset.screwLength || '-'} /><DetailItem label="Barrel Installed" value={asset.barrelInstalledDate || '-'} /><DetailItem label="Barrel End Cap Installed" value={asset.barrelEndCapInstalledDate || '-'} /><DetailItem label="Barrel Length" value={asset.barrelLength || '-'} /><ConditionBadge label="Screw condition" status={effectiveCondition(asset.screwRebuildRepaired, asset.screwConditionStatus)} /><ConditionBadge label="Barrel condition" status={effectiveCondition(asset.barrelRebuildRepaired, asset.barrelConditionStatus)} /></DetailSection>
+    {asset.hasDoubleShotInjection&&<DetailSection title="Secondary Injection"><DetailItem label="Screw 2 Type" value={asset.screw2Type || '-'} /><DetailItem label="Screw 2 Tip Type" value={asset.screw2TipType || '-'} /><DetailItem label="Screw 2 Installed" value={asset.screw2InstalledDate || '-'} /><DetailItem label="Screw 2 Tip Installed" value={asset.screw2TipInstalledDate || '-'} /><DetailItem label="Screw 2 Length" value={asset.screw2Length || '-'} /><DetailItem label="Barrel 2 Diameter" value={asset.barrel2Diameter || '-'} /><DetailItem label="Barrel 2 Installed" value={asset.barrel2InstalledDate || '-'} /><DetailItem label="Barrel 2 End Cap Installed" value={asset.barrel2EndCapInstalledDate || '-'} /><DetailItem label="Barrel 2 Length" value={asset.barrel2Length || '-'} /><ConditionBadge label="Screw 2 condition" status={effectiveCondition(asset.screw2RebuildRepaired, asset.screw2ConditionStatus)} /><ConditionBadge label="Barrel 2 condition" status={effectiveCondition(asset.barrel2RebuildRepaired, asset.barrel2ConditionStatus)} /></DetailSection>}
+    {asset.hasPlungerInjection&&<DetailSection title="Plunger Injection"><DetailItem label="Plunger Type" value={asset.plungerType || '-'} /><DetailItem label="Plunger Installed" value={asset.plungerInstalledDate || '-'} /><DetailItem label="Plunger Length" value={asset.plungerLength || '-'} /><DetailItem label="Plunger Diameter" value={asset.plungerDiameter || '-'} /><DetailItem label="Plunger Barrel Type" value={asset.plungerBarrelType || '-'} /><DetailItem label="Plunger Barrel Installed" value={asset.plungerBarrelInstalledDate || '-'} /><DetailItem label="Plunger Barrel End Cap Installed" value={asset.plungerBarrelEndCapInstalledDate || '-'} /><DetailItem label="Plunger Barrel Length" value={asset.plungerBarrelLength || '-'} /><DetailItem label="Plunger Barrel Diameter" value={asset.plungerBarrelDiameter || '-'} /><ConditionBadge label="Plunger condition" status={effectiveCondition(asset.plungerRebuildRepaired, asset.plungerConditionStatus)} /><ConditionBadge label="Plunger Barrel condition" status={effectiveCondition(asset.plungerBarrelRebuildRepaired, asset.plungerBarrelConditionStatus)} /></DetailSection>}
+    <DetailSection title="Notes / Critical Notes"><DetailItem label="Notes" value={asset.notes || '-'} tone="note" /><DetailItem label="Critical Notes" value={asset.criticalNotes || '-'} tone="critical" /></DetailSection>
+    <button className="machine-inspection-card" type="button" onClick={onInspection}><strong>Measurement Inspection</strong><span>Alpha placeholder / coming next</span><small>Future inspection data will compare measurements and update component condition status from New to Used to Worn.</small></button>
+    <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
+  </section></div>;
+}
+function DetailSection({title,children}:{title:string;children:ReactNode}) { return <section className="machine-detail-section"><span>{title}</span><div className="machine-detail-grid">{children}</div></section>; }
+function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-item ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span>{label}</span><strong>{value}</strong></div>; }
+function MeasurementInspectionModal({target,onClose}:{target:InspectionContext;onClose:()=>void}) {
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal measurement-inspection-modal"><div className="modal-heading"><div><p className="eyebrow">Alpha Placeholder / Coming Next</p><h3>Measurement Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p>Inspection tracking will be added later. It will compare measurements and update condition status from New to Used to Worn for screw, barrel, and plunger components.</p><div className="measurement-component-list">{inspectionComponents(target).map(component=><span key={component}>{component}</span>)}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Close</button></div></section></div>;
 }
 
 function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onReplacement,onInspection}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onInspection:()=>void}) {
