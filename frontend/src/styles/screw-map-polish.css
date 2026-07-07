@@ -1,0 +1,168 @@
+/* Screw measurement map polish overrides
+   Keeps the React SVG interactive while making the inspection map use the screen better. */
+.measurement-modal-backdrop {
+  align-items: flex-start;
+  padding: var(--mcc-topbar-safe-offset) 18px var(--mcc-modal-bottom-safe);
+}
+
+.measurement-inspection-modal {
+  width: min(1640px, calc(100vw - 36px));
+  max-width: none;
+  min-height: min(900px, var(--mcc-modal-available-height));
+  max-height: var(--mcc-modal-available-height);
+}
+
+.measurement-form-shell,
+.screw-inspection-form,
+.screw-diagram-panel {
+  min-width: 0;
+}
+
+.screw-diagram-panel {
+  padding: 16px;
+  border-color: rgba(68, 215, 255, 0.24);
+  background:
+    radial-gradient(circle at 34% 10%, rgba(68, 215, 255, 0.10), transparent 34%),
+    radial-gradient(circle at 78% 22%, rgba(255, 179, 57, 0.08), transparent 32%),
+    linear-gradient(145deg, rgba(5, 18, 28, 0.76), rgba(2, 8, 14, 0.92));
+}
+
+.screw-diagram-controls {
+  gap: 12px;
+}
+
+.screw-diagram-control-column {
+  min-height: 150px;
+  border-radius: 12px;
+}
+
+.screw-diagram-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 12px;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 52% 48%, rgba(68, 215, 255, 0.07), transparent 38%),
+    linear-gradient(180deg, rgba(5, 17, 30, 0.92), rgba(2, 8, 14, 0.96));
+  scrollbar-color: rgba(68, 215, 255, 0.48) rgba(3, 10, 18, 0.86);
+}
+
+.screw-diagram-svg {
+  width: 100%;
+  min-width: 1180px;
+  max-height: none;
+  aspect-ratio: 1100 / 360;
+  overflow: visible;
+}
+
+/* The current SVG viewBox clips side labels; pull them into the drawing instead of letting them cut off. */
+.screw-side-label.drive-label {
+  transform: translateX(30px);
+}
+
+.screw-side-label.tip-label {
+  transform: translateX(-112px);
+}
+
+.screw-side-label text {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.screw-zone-fill {
+  opacity: 0.18;
+}
+
+.screw-od-envelope {
+  stroke-width: 1.15;
+  opacity: 0.78;
+}
+
+.screw-root-core {
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.34));
+}
+
+/* Make existing flight shapes read more like thinner helical ribs. */
+.screw-flight-band {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleX(0.72);
+  opacity: 0.86;
+  filter: drop-shadow(0 7px 7px rgba(0, 0, 0, 0.42));
+}
+
+.screw-flight-shadow {
+  stroke-width: 2.2;
+  opacity: 0.32;
+}
+
+.screw-root-highlight {
+  stroke-width: 3.2;
+  opacity: 0.42;
+}
+
+.screw-root-shadow {
+  stroke-width: 3;
+  opacity: 0.48;
+}
+
+.screw-flat-end {
+  opacity: 0.92;
+}
+
+.screw-flat-face {
+  stroke-width: 2;
+  opacity: 0.62;
+}
+
+.screw-measure-label rect {
+  filter: drop-shadow(0 0 12px rgba(68, 215, 255, 0.18));
+}
+
+.screw-measure-label.root-label rect {
+  filter: drop-shadow(0 0 12px rgba(255, 179, 57, 0.16));
+}
+
+.screw-measure-label text {
+  paint-order: stroke;
+  stroke: rgba(2, 8, 14, 0.72);
+  stroke-width: 3px;
+}
+
+.screw-section-caption text:first-child {
+  paint-order: stroke;
+  stroke: rgba(2, 8, 14, 0.72);
+  stroke-width: 3px;
+}
+
+.screw-diagram-legend {
+  margin-top: 2px;
+}
+
+@media (min-width: 1500px) {
+  .measurement-inspection-modal {
+    width: min(1760px, calc(100vw - 28px));
+  }
+
+  .screw-diagram-svg {
+    min-width: 1320px;
+  }
+}
+
+@media (max-width: 900px) {
+  .measurement-modal-backdrop {
+    padding-inline: 10px;
+  }
+
+  .measurement-inspection-modal {
+    width: calc(100vw - 20px);
+  }
+
+  .screw-diagram-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .screw-diagram-svg {
+    min-width: 980px;
+  }
+}
