@@ -148,20 +148,18 @@
 
 .screw-diagram-wrap {
   overflow: hidden;
-  padding: clamp(8px, 0.8vw, 12px);
-  border-color: rgba(68, 215, 255, 0.22);
+  padding: 4px 6px;
+  border: 0;
   border-radius: 10px;
-  background:
-    linear-gradient(180deg, rgba(8, 25, 38, 0.88), rgba(3, 10, 18, 0.92)),
-    repeating-linear-gradient(90deg, rgba(143, 205, 233, 0.04) 0 1px, transparent 1px 64px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: transparent;
+  box-shadow: none;
 }
 
 .screw-diagram-reference-img {
   display: block;
-  width: min(100%, 1180px);
+  width: min(100%, 1320px);
   height: auto;
-  max-height: clamp(280px, 28vw, 390px);
+  max-height: clamp(240px, 24vw, 330px);
   margin: 0 auto;
   object-fit: contain;
 }
