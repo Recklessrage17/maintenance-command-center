@@ -669,15 +669,18 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .screw-zone-fill.metering { fill: #ffd36f; }
 .screw-zone-divider { stroke: rgba(223,247,255,.28); stroke-width: 1; stroke-dasharray: 5 6; }
 .screw-od-envelope { fill: none; stroke: rgba(68,215,255,.54); stroke-width: 1.4; stroke-linecap: round; stroke-dasharray: 8 9; }
-.screw-drive-shank, .screw-shoulder-ring, .screw-flat-end { fill: url(#screwCapFill); stroke: rgba(238,251,255,.28); stroke-width: 1; }
-.screw-spline-groove { fill: #c9dbe3; opacity: .6; }
+.screw-drive-shank, .screw-shoulder-ring, .screw-drive-collar, .screw-flat-end { fill: url(#screwCapFill); stroke: rgba(238,251,255,.4); stroke-width: 1; }
+.screw-spline-groove { fill: none; stroke: #c9dbe3; stroke-width: 4.5; stroke-linecap: round; opacity: .7; }
 .screw-root-core { fill: url(#screwBodyFill); stroke: rgba(238,251,255,.2); stroke-width: 1; opacity: .97; }
-.screw-root-highlight, .screw-root-shadow, .screw-root-edge, .screw-flight-rim { fill: none; stroke-linecap: round; }
+.screw-root-highlight, .screw-root-shadow, .screw-root-edge, .screw-flight-rim, .screw-flight-shadow, .screw-flat-face { fill: none; stroke-linecap: round; }
 .screw-root-highlight { stroke: rgba(255,255,255,.28); stroke-width: 2; }
 .screw-root-shadow { stroke: rgba(3,10,18,.34); stroke-width: 2.4; }
 .screw-root-edge { stroke: rgba(223,247,255,.42); stroke-width: 1.2; }
 .screw-root-edge.bottom { stroke: rgba(3,10,18,.36); }
+.screw-flight-band { fill: url(#screwFlightFill); stroke: rgba(238,251,255,.38); stroke-width: 1; opacity: .94; }
+.screw-flight-shadow { stroke: rgba(3,10,18,.54); stroke-width: 4; }
 .screw-flight-rim { stroke: rgba(255,255,255,.42); stroke-width: 1.8; opacity: .58; }
+.screw-flat-face { stroke: rgba(242,247,248,.55); stroke-width: 2.4; }
 .screw-side-label text { fill: #d7e5eb; font-size: 18px; font-weight: 850; letter-spacing: 0; text-transform: uppercase; }
 .screw-measure-label rect { fill: rgba(5,16,29,.9); stroke-width: 1.2; }
 .screw-measure-label text { font-size: 18px; font-weight: 950; letter-spacing: 0; text-transform: uppercase; }
