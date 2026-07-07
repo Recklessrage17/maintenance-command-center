@@ -95,79 +95,78 @@
 
 .screw-zone-fill.feed {
   fill: #0d7fa8;
-  opacity: 0.16;
+  opacity: 0.11;
 }
 
 .screw-zone-fill.transition {
   fill: #0fa77f;
-  opacity: 0.16;
+  opacity: 0.11;
 }
 
 .screw-zone-fill.metering {
   fill: #b8861f;
-  opacity: 0.18;
+  opacity: 0.13;
 }
 
 .screw-od-envelope {
-  stroke: rgba(68, 215, 255, 0.45);
-  stroke-width: 1;
-  opacity: 0.76;
+  stroke: rgba(68, 215, 255, 0.52);
+  stroke-width: 1.2;
+  opacity: 0.84;
 }
 
 .screw-zone-divider {
-  opacity: 0.26;
+  opacity: 0.24;
 }
 
-/* Solid screw root/core. Scale the root vertically so the feed side reads thicker and the taper feels more natural. */
+/* Technical line-drawing core: show the root edges instead of a filled tapered body. */
 .screw-root-core {
-  fill: rgba(185, 205, 211, 0.96);
-  stroke: rgba(238, 251, 255, 0.36);
-  stroke-width: 1;
+  fill: rgba(0, 0, 0, 0);
+  stroke: rgba(0, 0, 0, 0);
+  stroke-width: 0;
   opacity: 1;
   filter: none;
-  transform-box: fill-box;
-  transform-origin: center;
-  transform: scaleY(1.9);
+  transform: none;
 }
 
 .screw-root-highlight {
-  stroke: rgba(255, 255, 255, 0.76);
-  stroke-width: 4.8;
-  opacity: 0.72;
+  stroke: rgba(235, 247, 250, 0.78);
+  stroke-width: 3;
+  opacity: 0.86;
 }
 
 .screw-root-shadow {
-  stroke: rgba(0, 0, 0, 0.46);
-  stroke-width: 3.2;
-  opacity: 0.48;
+  stroke: rgba(151, 173, 181, 0.84);
+  stroke-width: 3;
+  opacity: 0.86;
 }
 
 .screw-root-edge {
-  stroke: rgba(232, 247, 252, 0.54);
-  stroke-width: 1.4;
-  opacity: 0.7;
+  stroke: rgba(238, 251, 255, 0.82);
+  stroke-width: 3.2;
+  opacity: 0.9;
+  fill: none;
 }
 
-/* Solid flights: darker steel fill with bright edge, not transparent ghost ribs. */
+/* Solid flight outlines like the inspection reference sheet. */
 .screw-flight-ribs {
   opacity: 1;
 }
 
 .screw-flight-band {
-  fill: rgba(132, 151, 156, 0.9);
-  stroke: rgba(230, 246, 250, 0.82);
-  stroke-width: 1;
-  opacity: 0.96;
+  fill: rgba(160, 183, 190, 0.42);
+  stroke: rgba(235, 247, 250, 0.9);
+  stroke-width: 1.6;
+  opacity: 1;
   transform-box: fill-box;
   transform-origin: center;
-  transform: scaleX(0.34) skewX(-6deg);
+  transform: scaleX(0.5) skewX(-4deg);
   filter: none;
 }
 
 .screw-flight-shadow {
-  stroke: rgba(0, 0, 0, 0.42);
-  stroke-width: 1.15;
-  opacity: 0.28;
+  stroke: rgba(6, 16, 23, 0.65);
+  stroke-width: 1.7;
+  opacity: 0.35;
 }
 
 .screw-drive-shank,
