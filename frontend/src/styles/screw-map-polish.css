@@ -38,101 +38,110 @@
 
 .screw-diagram-wrap {
   overflow: hidden;
-  padding: clamp(12px, 1.4vw, 24px) clamp(20px, 2.6vw, 46px);
+  padding: clamp(10px, 1.1vw, 18px) clamp(18px, 2vw, 34px);
   border-radius: 14px;
   background:
-    radial-gradient(circle at 52% 48%, rgba(68, 215, 255, 0.07), transparent 38%),
+    radial-gradient(circle at 52% 48%, rgba(68, 215, 255, 0.06), transparent 34%),
     linear-gradient(180deg, rgba(5, 17, 30, 0.92), rgba(2, 8, 14, 0.96));
 }
 
 .screw-diagram-svg {
   display: block;
-  width: min(100%, 1460px);
+  width: min(100%, 1260px);
   min-width: 0;
   height: auto;
-  max-height: 520px;
+  max-height: 430px;
   margin: 0 auto;
   aspect-ratio: 1100 / 360;
   overflow: visible;
 }
 
-/* Keep side labels inside the viewBox so the full screw reads left-to-right without cutoffs. */
-.screw-side-label.drive-label {
-  transform: translateX(92px);
-}
-
-.screw-side-label.tip-label {
-  transform: translateX(-205px);
-}
-
-.screw-side-label text {
-  font-size: 13.5px;
-  letter-spacing: 0.02em;
-  paint-order: stroke;
-  stroke: rgba(2, 8, 14, 0.74);
-  stroke-width: 3px;
+/* Hide clipped side labels for now. The flat end and drive spline are visible enough and this prevents ugly cut-off text. */
+.screw-side-label {
+  display: none;
 }
 
 .screw-zone-fill {
-  opacity: 0.14;
+  opacity: 0.11;
 }
 
 .screw-od-envelope {
-  stroke-width: 1.05;
-  opacity: 0.74;
+  stroke-width: 1;
+  opacity: 0.62;
 }
 
 .screw-zone-divider {
-  opacity: 0.42;
+  opacity: 0.35;
 }
 
 .screw-root-core {
-  opacity: 0.92;
-  filter: drop-shadow(0 12px 15px rgba(0, 0, 0, 0.34));
+  opacity: 0.98;
+  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.34));
 }
 
 /* Make the existing SVG flight shapes read as slim helical ribs instead of tall sheet-metal fins. */
 .screw-flight-ribs {
-  opacity: 0.86;
+  opacity: 0.72;
 }
 
 .screw-flight-band {
   transform-box: fill-box;
   transform-origin: center;
-  transform: scaleX(0.42) skewX(-5deg);
-  opacity: 0.62;
-  filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.45));
-  stroke-width: 0.55;
+  transform: scaleX(0.25) skewX(-8deg);
+  opacity: 0.42;
+  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.42));
+  stroke-width: 0.35;
 }
 
 .screw-flight-shadow {
-  stroke-width: 1.45;
-  opacity: 0.22;
+  stroke-width: 0.8;
+  opacity: 0.14;
 }
 
 .screw-root-highlight {
-  stroke-width: 3.8;
-  opacity: 0.48;
+  stroke-width: 4.6;
+  opacity: 0.56;
 }
 
 .screw-root-shadow {
-  stroke-width: 2.8;
-  opacity: 0.44;
+  stroke-width: 2.2;
+  opacity: 0.38;
 }
 
 .screw-root-edge {
-  opacity: 0.64;
+  opacity: 0.52;
+}
+
+.screw-drive-shank,
+.screw-shoulder-ring,
+.screw-drive-collar,
+.screw-flat-end {
+  opacity: 0.82;
+}
+
+.screw-drive-shank,
+.screw-shoulder-ring,
+.screw-drive-collar {
+  transform: translateX(28px);
+}
+
+.screw-spline-groove {
+  opacity: 0.48;
+  stroke-width: 3.2;
+  transform: translateX(28px);
 }
 
 .screw-flat-end {
-  opacity: 0.92;
-  transform: translateX(-10px);
+  opacity: 0.88;
+  transform: translateX(-36px) scaleX(0.7);
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .screw-flat-face {
-  stroke-width: 2;
-  opacity: 0.62;
-  transform: translateX(-10px);
+  stroke-width: 1.6;
+  opacity: 0.52;
+  transform: translateX(-42px);
 }
 
 .screw-measure-label rect {
@@ -151,11 +160,11 @@
 }
 
 .screw-measure-label line {
-  stroke-width: 2.25;
+  stroke-width: 2.15;
 }
 
 .screw-measure-label circle {
-  opacity: 0.9;
+  opacity: 0.88;
 }
 
 .screw-section-caption text:first-child {
@@ -180,8 +189,8 @@
   }
 
   .screw-diagram-svg {
-    width: min(100%, 1540px);
-    max-height: 560px;
+    width: min(100%, 1340px);
+    max-height: 470px;
   }
 }
 
