@@ -1,14 +1,14 @@
-/* Basic screw measurement map overrides.
-   Goal: clean shop-floor readable diagram, not a heavy 3D render. */
+/* Compact basic screw measurement map overrides.
+   Goal: shop-floor readable diagram with solid flights and clear section colors. */
 .measurement-modal-backdrop {
   align-items: flex-start;
   padding: var(--mcc-topbar-safe-offset) 18px var(--mcc-modal-bottom-safe);
 }
 
 .measurement-inspection-modal {
-  width: min(1600px, calc(100vw - 36px));
+  width: min(1500px, calc(100vw - 36px));
   max-width: none;
-  min-height: min(860px, var(--mcc-modal-available-height));
+  min-height: min(780px, var(--mcc-modal-available-height));
   max-height: var(--mcc-modal-available-height);
 }
 
@@ -19,7 +19,8 @@
 }
 
 .screw-diagram-panel {
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
   border-color: rgba(117, 177, 198, 0.22);
   background: linear-gradient(145deg, rgba(6, 18, 28, 0.82), rgba(2, 8, 14, 0.94));
 }
@@ -29,107 +30,140 @@
 }
 
 .screw-diagram-control-column {
-  min-height: 132px;
+  min-height: 112px;
+  padding: 9px;
   border-radius: 10px;
   background: rgba(4, 13, 22, 0.72);
 }
 
+.screw-diagram-control-column.zone-feed {
+  border-color: rgba(45, 191, 255, 0.56);
+  box-shadow: inset 4px 0 0 rgba(45, 191, 255, 0.36);
+}
+
+.screw-diagram-control-column.zone-transition {
+  border-color: rgba(54, 216, 173, 0.56);
+  box-shadow: inset 4px 0 0 rgba(54, 216, 173, 0.36);
+}
+
+.screw-diagram-control-column.zone-metering {
+  border-color: rgba(255, 179, 57, 0.62);
+  box-shadow: inset 4px 0 0 rgba(255, 179, 57, 0.38);
+}
+
+.screw-diagram-control-column strong {
+  min-height: 18px;
+}
+
+.screw-diagram-pill {
+  min-height: 34px;
+  padding-block: 3px;
+}
+
 .screw-diagram-wrap {
   overflow: hidden;
-  padding: 18px 22px;
+  padding: 12px 18px;
   border-radius: 10px;
   background: #030d17;
 }
 
 .screw-diagram-svg {
   display: block;
-  width: min(100%, 1180px);
+  width: min(100%, 1000px);
   min-width: 0;
   height: auto;
-  max-height: 380px;
+  max-height: 315px;
   margin: 0 auto;
   aspect-ratio: 1100 / 360;
   overflow: visible;
 }
 
-/* Basic view: remove the cut-off side words and let the shape speak. */
 .screw-side-label {
   display: none;
 }
 
-/* Subtle section blocks only, so the screw is easy to read. */
-.screw-zone-fill {
-  opacity: 0.07;
+.screw-zone-fill.feed {
+  fill: #0d7fa8;
+  opacity: 0.16;
+}
+
+.screw-zone-fill.transition {
+  fill: #0fa77f;
+  opacity: 0.16;
+}
+
+.screw-zone-fill.metering {
+  fill: #b8861f;
+  opacity: 0.18;
 }
 
 .screw-od-envelope {
-  stroke: rgba(68, 215, 255, 0.42);
+  stroke: rgba(68, 215, 255, 0.45);
   stroke-width: 1;
-  opacity: 0.72;
+  opacity: 0.76;
 }
 
 .screw-zone-divider {
-  opacity: 0.28;
+  opacity: 0.26;
 }
 
-/* Make the core/root the main visual. */
+/* Solid screw root/core. */
 .screw-root-core {
-  fill: rgba(194, 212, 218, 0.84);
-  stroke: rgba(238, 251, 255, 0.28);
+  fill: rgba(185, 205, 211, 0.94);
+  stroke: rgba(238, 251, 255, 0.32);
   stroke-width: 1;
-  opacity: 0.98;
+  opacity: 1;
   filter: none;
 }
 
 .screw-root-highlight {
-  stroke: rgba(255, 255, 255, 0.62);
-  stroke-width: 3.6;
-  opacity: 0.62;
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 3.4;
+  opacity: 0.68;
 }
 
 .screw-root-shadow {
-  stroke: rgba(0, 0, 0, 0.42);
-  stroke-width: 2.1;
+  stroke: rgba(0, 0, 0, 0.44);
+  stroke-width: 2;
   opacity: 0.44;
 }
 
 .screw-root-edge {
-  stroke: rgba(232, 247, 252, 0.46);
+  stroke: rgba(232, 247, 252, 0.5);
   stroke-width: 1;
-  opacity: 0.62;
+  opacity: 0.66;
 }
 
-/* Basic flight look: thin rib outlines instead of ghosty 3D blades. */
+/* Solid flights: darker steel fill with bright edge, not transparent ghost ribs. */
 .screw-flight-ribs {
-  opacity: 0.78;
+  opacity: 1;
 }
 
 .screw-flight-band {
-  fill: rgba(176, 204, 211, 0.16);
-  stroke: rgba(214, 235, 240, 0.56);
-  stroke-width: 1.15;
-  opacity: 0.72;
+  fill: rgba(132, 151, 156, 0.9);
+  stroke: rgba(230, 246, 250, 0.82);
+  stroke-width: 1;
+  opacity: 0.96;
   transform-box: fill-box;
   transform-origin: center;
-  transform: scaleX(0.36) skewX(-6deg);
+  transform: scaleX(0.34) skewX(-6deg);
   filter: none;
 }
 
 .screw-flight-shadow {
-  stroke: rgba(0, 0, 0, 0.38);
-  stroke-width: 1.1;
-  opacity: 0.2;
+  stroke: rgba(0, 0, 0, 0.42);
+  stroke-width: 1.15;
+  opacity: 0.28;
 }
 
-/* Basic drive and flat end. */
 .screw-drive-shank,
 .screw-shoulder-ring,
 .screw-drive-collar,
 .screw-flat-end {
-  fill: rgba(138, 158, 166, 0.82);
-  stroke: rgba(226, 244, 250, 0.34);
+  fill: rgba(138, 158, 166, 0.88);
+  stroke: rgba(226, 244, 250, 0.38);
   stroke-width: 1;
-  opacity: 0.9;
+  opacity: 0.94;
   filter: none;
 }
 
@@ -140,9 +174,9 @@
 }
 
 .screw-spline-groove {
-  stroke: rgba(210, 230, 236, 0.62);
+  stroke: rgba(210, 230, 236, 0.68);
   stroke-width: 3;
-  opacity: 0.58;
+  opacity: 0.64;
   transform: translateX(34px);
 }
 
@@ -153,13 +187,12 @@
 }
 
 .screw-flat-face {
-  stroke: rgba(242, 247, 248, 0.58);
+  stroke: rgba(242, 247, 248, 0.6);
   stroke-width: 1.4;
-  opacity: 0.6;
+  opacity: 0.62;
   transform: translateX(-50px);
 }
 
-/* Keep measurement callouts clean and readable. */
 .screw-measure-label rect {
   fill: rgba(4, 18, 34, 0.94);
   filter: none;
@@ -182,7 +215,7 @@
 }
 
 .screw-measure-label circle {
-  opacity: 0.84;
+  opacity: 0.9;
 }
 
 .screw-section-caption text:first-child {
@@ -198,17 +231,18 @@
 }
 
 .screw-diagram-legend {
-  margin-top: 2px;
+  margin-top: 0;
+  padding-block: 5px;
 }
 
 @media (min-width: 1500px) {
   .measurement-inspection-modal {
-    width: min(1700px, calc(100vw - 28px));
+    width: min(1600px, calc(100vw - 28px));
   }
 
   .screw-diagram-svg {
-    width: min(100%, 1260px);
-    max-height: 420px;
+    width: min(100%, 1080px);
+    max-height: 335px;
   }
 }
 
@@ -231,7 +265,7 @@
   }
 
   .screw-diagram-svg {
-    width: 980px;
+    width: 900px;
     max-width: none;
   }
 }
