@@ -52,7 +52,7 @@ export default function ScrewMeasurementMap({ onAddReading }: ScrewMeasurementMa
       <div className="screw-diagram-wrap">
         <img
           className="screw-diagram-reference-img"
-          src="/screw-map-v5-simple.svg"
+          src="/screw-map-no-callouts.svg"
           alt="Screw measurement reference with feed, transition, and metering sections"
         />
       </div>
