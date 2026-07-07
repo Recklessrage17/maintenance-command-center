@@ -43,7 +43,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(brandingUploadsDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
-app.use(express.json({ limit: '50kb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
   setHeaders(res) {
@@ -5322,12 +5322,6 @@ const measurementPdfFieldLabels: Record<string, string> = {
   screwLength: 'Screw Length',
   flightSectionLength: 'Flight Section Length',
   leadGapMeasurement: 'Lead Gap Measurement',
-  feedRootSmallestDia: 'Feed Root Smallest Dia',
-  transitionRootSmallestDia: 'Transition Root Smallest Dia',
-  meteringRootSmallestDia: 'Metering Root Smallest Dia',
-  feedFlightSmallestDia: 'Feed Flight Smallest Dia',
-  transitionFlightSmallestDia: 'Transition Flight Smallest Dia',
-  meteringFlightSmallestDia: 'Metering Flight Smallest Dia',
   splineCheck: 'Spline Check',
   splineNotes: 'Spline Notes',
   screwComments: 'Screw Comments',
@@ -5343,6 +5337,7 @@ const measurementPdfFieldLabels: Record<string, string> = {
   checkRingDia: 'Check Ring Dia',
   seatCondition: 'Seat Condition',
   tipThreadInspection: 'Tip Thread Inspection',
+  tipThreadNotes: 'Tip Thread Notes',
   checkRingDiameter: 'Check Ring Diameter',
   tipDiameter: 'Tip Diameter',
   tipLength: 'Tip Length',
@@ -5361,6 +5356,8 @@ const measurementPdfFieldLabels: Record<string, string> = {
   cylinderBarrelLength: 'Cylinder Barrel Length',
   cylinderBarrelNotes: 'Cylinder Barrel Notes',
 };
+const measurementPdfScrewSectionLabels: Record<string, string> = { metering: 'Metering', transition: 'Transition', feed: 'Feed' };
+const measurementPdfScrewKindLabels: Record<string, string> = { flight: 'Flight', root: 'Root' };
 function measurementPdfMode(body: Record<string, unknown>): MeasurementPdfMode {
   return String(body.mode ?? '').toLowerCase() === 'blank' ? 'blank' : 'filled';
 }
@@ -5396,6 +5393,30 @@ function measurementPdfValue(value: unknown) {
   const converted = [inches,mm].filter(Boolean).join(' / ');
   return [raw,converted].filter(Boolean).join(' | ');
 }
+function measurementPdfSmallest(values: unknown[]) {
+  const parsed = values.filter(isRecord).map(value=>value.value).filter(isRecord).filter(value=>typeof value.valueInches === 'number' && Number.isFinite(value.valueInches));
+  if (!parsed.length) return '';
+  const smallest = parsed.reduce((current,value)=>Number(value.valueInches) < Number(current.valueInches) ? value : current);
+  return measurementPdfValue(smallest);
+}
+function measurementPdfScrewReadingEntries(record: Record<string, unknown>) {
+  const readings = isRecord(record.screwReadings) ? record.screwReadings : {};
+  const entries: Array<{ label: string; value: string }> = [];
+  for (const kind of ['flight','root']) {
+    const kindRecord = isRecord(readings[kind]) ? readings[kind] : {};
+    for (const section of ['metering','transition','feed']) {
+      const sectionReadings = Array.isArray(kindRecord[section]) ? kindRecord[section] as unknown[] : [];
+      entries.push({ label: `${measurementPdfScrewKindLabels[kind]} ${measurementPdfScrewSectionLabels[section]} Smallest Dia`, value: measurementPdfSmallest(sectionReadings) || 'No readings' });
+      sectionReadings.filter(isRecord).forEach((reading,index)=>{
+        const label = cleanPdfText(reading.label) || `Point ${index + 1}`;
+        const value = measurementPdfValue(reading.value);
+        const notes = cleanPdfText(reading.notes);
+        entries.push({ label: `${measurementPdfScrewKindLabels[kind]} ${measurementPdfScrewSectionLabels[section]} ${label}`, value: [value, notes && `Notes ${notes}`].filter(Boolean).join(' | ') });
+      });
+    }
+  }
+  return entries;
+}
 function measurementPdfReasonText(record: Record<string, unknown>) {
   const reasonRecord = isRecord(record.reasonForPull) ? record.reasonForPull : {};
   const selected = Object.entries(reasonRecord).filter(([,value])=>Boolean(value)).map(([key])=>key);
@@ -5418,6 +5439,7 @@ function measurementPdfRecordEntries(record: Record<string, unknown>) {
       entries.push({ label: measurementPdfLabel(key), value: text });
     }
   }
+  if (cleanPdfText(record.componentType) === 'screw' || cleanPdfText(record.componentType) === 'screw_2') entries.push(...measurementPdfScrewReadingEntries(record));
   const stations = Array.isArray(record.stations) ? record.stations.filter(isRecord) : [];
   stations.forEach((station,index)=>{
     const distance = measurementPdfValue(station.distance);
@@ -5432,12 +5454,12 @@ function measurementPdfRecordEntries(record: Record<string, unknown>) {
 function measurementPdfBlankEntries(component: string) {
   const common = ['Inspector Name','Date Measured','Date Installed','OLD / NEW','Comments'];
   const componentFields: Record<string, string[]> = {
-    screw: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Feed Root Smallest Dia','Transition Root Smallest Dia','Metering Root Smallest Dia','Feed Flight Smallest Dia','Transition Flight Smallest Dia','Metering Flight Smallest Dia','Spline Check','Spline Notes','Screw Comments'],
-    screw_2: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Feed Root Smallest Dia','Transition Root Smallest Dia','Metering Root Smallest Dia','Feed Flight Smallest Dia','Transition Flight Smallest Dia','Metering Flight Smallest Dia','Spline Check','Spline Notes','Screw Comments'],
+    screw: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Flight Metering Readings','Flight Transition Readings','Flight Feed Readings','Root Metering Readings','Root Transition Readings','Root Feed Readings','Flight Smallest Dia Summary','Root Smallest Dia Summary','Spline Check','Spline Notes','Screw Comments'],
+    screw_2: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Flight Metering Readings','Flight Transition Readings','Flight Feed Readings','Root Metering Readings','Root Transition Readings','Root Feed Readings','Flight Smallest Dia Summary','Root Smallest Dia Summary','Spline Check','Spline Notes','Screw Comments'],
     barrel: ['Barrel Part #','OEM Barrel Bore','Barrel Length','Barrel Bore / Screw Diameter','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Station 5 Distance / ID','Station 6 Distance / ID','Barrel Notes','Barrel Comments'],
     barrel_2: ['Barrel Part #','OEM Barrel Bore','Barrel Length','Barrel Bore / Screw Diameter','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Station 5 Distance / ID','Station 6 Distance / ID','Barrel Notes','Barrel Comments'],
-    tip: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Inspection','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
-    tip_2: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Inspection','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
+    tip: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Check','Tip Thread Notes','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
+    tip_2: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Check','Tip Thread Notes','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
     plunger: ['Plunger Type','Plunger Diameter','Plunger Length','Plunger Overall Length','Plunger Rebuild / Repaired','Plunger Condition','Plunger Barrel Type','Cylinder Barrel Bore','Cylinder Barrel Length','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Plunger Notes','Cylinder Barrel Notes'],
   };
   return [...common,...(componentFields[component] ?? [])].map(label=>({label,value:''}));
@@ -6398,10 +6420,15 @@ app.post('/api/machine-library/measurement-inspection/pdf', requireAuth, require
     const target = measurementPdfTarget(body);
     const buffer = await buildMeasurementInspectionPdf(body, req.user!);
     const fileName = `MCC_Measurement_Inspection_${safeFileToken(target.assetNumber)}_${mode}_${downloadDateStamp()}.pdf`;
-    audit(req,'measurement inspection pdf generated','machine_asset',target.assetNumber,{mode,componentCount:measurementPdfComponents(body).length});
+    try {
+      audit(req,'measurement inspection pdf generated','machine_asset',target.assetNumber,{mode,componentCount:measurementPdfComponents(body).length});
+    } catch (auditError) {
+      console.error('Measurement PDF audit logging failed', auditError);
+    }
     sendDownload(res,fileName,'application/pdf',buffer);
   } catch (error) {
-    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+    console.error('Measurement PDF generation failed', error);
+    res.status(500).json({ok:false,error:'Measurement PDF generation failed. Check server console for details.',detail:safeErrorMessage(error)});
   }
 });
 app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.write'), (_req,res)=>{

@@ -15,10 +15,14 @@ type MeasurementComponentType = 'screw' | 'barrel' | 'tip' | 'plunger' | 'screw_
 type MeasurementUnit = 'in' | 'mm';
 type MeasurementOldNew = 'old' | 'new' | 'rebuilt_repaired';
 type MeasurementStationInterval = '3' | '6' | 'custom';
+type ScrewMeasurementKind = 'flight' | 'root';
+type ScrewSectionKey = 'metering' | 'transition' | 'feed';
 type MeasurementValue = { rawInput: string; valueInches: number | null; valueMm: number | null; unitDetected: MeasurementUnit | ''; validationMessage: string };
 type InspectionContext = { id?: number; assetNumber: string; brand: string; model: string; serialNumber: string; machineYear: string; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean; barrelLength: string; barrel2Length: string; plungerBarrelLength: string; barrelDiameter: string; barrel2Diameter: string; plungerDiameter: string };
 type MeasurementCardDefinition = { type: MeasurementComponentType; title: string; badge: string; description: string };
 type MeasurementStation = { id: string; distance: MeasurementValue; insideDiameter: MeasurementValue; notes: string };
+type ScrewMeasurementReading = { id: string; label: string; value: MeasurementValue; notes: string };
+type ScrewMeasurementReadings = Record<ScrewMeasurementKind, Record<ScrewSectionKey, ScrewMeasurementReading[]>>;
 type MeasurementInspectionRecord = {
   componentType: MeasurementComponentType;
   status: 'draft' | 'completed';
@@ -35,6 +39,7 @@ type MeasurementInspectionRecord = {
   stationInterval: MeasurementStationInterval;
   customStationInterval: MeasurementValue;
   stations: MeasurementStation[];
+  screwReadings: ScrewMeasurementReadings;
 };
 type MeasurementInspectionRecordMap = Record<string, MeasurementInspectionRecord>;
 type MeasurementInspectionState = { target: InspectionContext; componentType: MeasurementComponentType };
@@ -80,13 +85,16 @@ const screwMeasurementFields = [
   ['screwLength','Screw Length'],
   ['flightSectionLength','Flight Section Length'],
   ['leadGapMeasurement','Lead Gap Measurement'],
-  ['feedRootSmallestDia','Feed Root Smallest Dia'],
-  ['transitionRootSmallestDia','Transition Root Smallest Dia'],
-  ['meteringRootSmallestDia','Metering Root Smallest Dia'],
-  ['feedFlightSmallestDia','Feed Flight Smallest Dia'],
-  ['transitionFlightSmallestDia','Transition Flight Smallest Dia'],
-  ['meteringFlightSmallestDia','Metering Flight Smallest Dia'],
 ] as const;
+const screwSections: Array<{ key: ScrewSectionKey; label: string; shortLabel: string }> = [
+  { key: 'metering', label: 'Metering Section', shortLabel: 'Metering' },
+  { key: 'transition', label: 'Transition Section', shortLabel: 'Transition' },
+  { key: 'feed', label: 'Feed Section', shortLabel: 'Feed' },
+];
+const screwMeasurementKinds: Array<{ key: ScrewMeasurementKind; label: string; shortLabel: string; accent: string }> = [
+  { key: 'flight', label: 'Flight Measurements', shortLabel: 'Flight OD', accent: 'flight' },
+  { key: 'root', label: 'Root Measurements', shortLabel: 'Root Dia', accent: 'root' },
+];
 const barrelIdentityFields = [
   ['barrelPartNumber','Barrel Part #'],
 ] as const;
@@ -327,6 +335,29 @@ function measurementHelperText(value: MeasurementValue) {
   if (value.valueInches === null || value.valueMm === null || !value.unitDetected) return '';
   return value.unitDetected === 'mm' ? `${formatUnitNumber(value.valueInches, 3)} in` : `${formatUnitNumber(value.valueMm, 2)} mm`;
 }
+function emptyScrewReadings(): ScrewMeasurementReadings {
+  return {
+    flight: { metering: [], transition: [], feed: [] },
+    root: { metering: [], transition: [], feed: [] },
+  };
+}
+function screwReadingsForRecord(record: MeasurementInspectionRecord) {
+  return record.screwReadings ?? emptyScrewReadings();
+}
+function createScrewReading(kind: ScrewMeasurementKind, section: ScrewSectionKey, index: number): ScrewMeasurementReading {
+  const sectionLabel = screwSections.find(item=>item.key===section)?.shortLabel ?? section;
+  const kindLabel = kind === 'flight' ? 'Flight' : 'Root';
+  return { id: `${kind}-${section}-${Date.now()}-${Math.random().toString(16).slice(2)}`, label: `${sectionLabel} ${kindLabel} ${index}`, value: measurementValueFromRaw(''), notes: '' };
+}
+function smallestScrewReading(readings: ScrewMeasurementReading[]) {
+  const values = readings.map(reading=>reading.value).filter(value=>!value.validationMessage && value.valueInches !== null && value.valueMm !== null);
+  if (!values.length) return null;
+  return values.reduce((smallest,value)=>value.valueInches! < smallest.valueInches! ? value : smallest);
+}
+function measurementValueDisplay(value: MeasurementValue | null) {
+  if (!value || value.valueInches === null || value.valueMm === null) return 'No readings';
+  return `${formatUnitNumber(value.valueInches, 3)} in / ${formatUnitNumber(value.valueMm, 2)} mm`;
+}
 function measurementRecordKey(target: InspectionContext, componentType: MeasurementComponentType) {
   return `${target.id ?? (target.assetNumber || 'draft')}:${componentType}`;
 }
@@ -375,6 +406,7 @@ function defaultMeasurementRecord(target: InspectionContext, componentType: Meas
     stationInterval: '3',
     customStationInterval: measurementValueFromRaw(''),
     stations: [],
+    screwReadings: emptyScrewReadings(),
   };
   if (componentType === 'screw' || componentType === 'screw_2') {
     return { ...base, textFields: { ...fieldMap(screwIdentityFields), splineNotes: '', screwComments: '' }, measurements: measurementMap(screwMeasurementFields), selectFields: { splineCheck: '' } };
@@ -385,7 +417,7 @@ function defaultMeasurementRecord(target: InspectionContext, componentType: Meas
     return { ...base, stationInterval: interval.valueInches === 6 ? '6' : '3', textFields: { ...fieldMap(barrelIdentityFields), barrelNotes: '', barrelComments: '' }, measurements, stations: stationRowsFromLength(measurements.barrelLength, interval) };
   }
   if (isTip) {
-    return { ...base, textFields: { ...fieldMap(tipIdentityFields), tipComments: '' }, measurements: measurementMap(tipMeasurementFields), selectFields: { tipThreadInspection: '' } };
+    return { ...base, textFields: { ...fieldMap(tipIdentityFields), tipThreadNotes: '', tipComments: '' }, measurements: measurementMap(tipMeasurementFields), selectFields: { tipThreadInspection: '' } };
   }
   if (isPlunger) {
     const measurements = measurementMap(plungerMeasurementFields, { plungerDiameter: target.plungerDiameter, cylinderBarrelLength: plungerBarrelLength });
@@ -929,8 +961,8 @@ function MeasurementInspectionModal({target,initialComponentType,records,setReco
       const payload = { mode, target, components: cards.map(card=>card.type), records: mode === 'blank' ? [] : targetMeasurementRecords(snapshot,target) };
       const res = await fetch('/api/machine-library/measurement-inspection/pdf',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if (!res.ok) {
-        const data = await res.json().catch(()=>({}));
-        throw new Error(data.error || 'Measurement PDF generation failed.');
+        const data = await res.json().catch(async()=>({ error: await res.text().catch(()=>`HTTP ${res.status}`) }));
+        throw new Error(data.error || `Measurement PDF generation failed with HTTP ${res.status}.`);
       }
       const blob = await res.blob();
       const fileName = downloadFileName(res.headers.get('Content-Disposition')) || `MCC_Measurement_Inspection_${target.assetNumber.replace(/\W+/g,'_')}_${mode}.pdf`;
@@ -944,7 +976,8 @@ function MeasurementInspectionModal({target,initialComponentType,records,setReco
       window.URL.revokeObjectURL(url);
       setPdfMessage(mode === 'blank' ? 'Blank measurement PDF generated.' : 'Filled measurement PDF generated.');
     } catch (error) {
-      setPdfMessage((error as Error).message);
+      console.error('Measurement PDF generation failed', error);
+      setPdfMessage('Measurement PDF generation failed. Check console for details.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -995,13 +1028,136 @@ function MeasurementComponentForm({record,onText,onMeasurement,onSelect,onRecord
   return <PlungerInspectionForm record={record} onText={onText} onMeasurement={onMeasurement} onStation={onStation} onAddStation={onAddStation} onRemoveStation={onRemoveStation} onGenerateStations={onGenerateStations} />;
 }
 function ScrewInspectionForm({record,onText,onMeasurement,onSelect,onRecord}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onSelect:(key:string,value:string)=>void;onRecord:(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord)=>void}) {
-  return <section className="measurement-form-section"><MeasurementSectionHeading title="Reason for Pull" /><div className="measurement-reason-grid">{measurementReasons.map(reason=><label className="machine-check-field" key={reason}><input type="checkbox" checked={Boolean(record.reasonForPull[reason])} onChange={event=>onRecord(current=>({...current,reasonForPull:{...current.reasonForPull,[reason]:event.target.checked}}))} /><span>{reason}</span></label>)}</div>{record.reasonForPull.Other&&<Text label="Other Reason" value={record.reasonForPullOther} set={value=>onRecord(current=>({...current,reasonForPullOther:value}))} disabled={false}/>}<MeasurementSectionHeading title="Screw Identity" /><FieldGrid>{screwIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Screw Measurements" /><MeasurementFieldGrid>{screwMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><MeasurementSectionHeading title="Spline Check" /><FieldGrid><Select label="Spline Check" value={record.selectFields.splineCheck ?? ''} set={value=>onSelect('splineCheck',value)} options={['','Good','Worn','Damaged']} disabled={false}/><Area label="Spline Notes" value={record.textFields.splineNotes ?? ''} set={value=>onText('splineNotes',value)} disabled={false}/><Area label="Screw Comments" value={record.textFields.screwComments ?? ''} set={value=>onText('screwComments',value)} disabled={false}/></FieldGrid></section>;
+  function addReading(kind: ScrewMeasurementKind, section: ScrewSectionKey) {
+    onRecord(current=>{
+      const readings = screwReadingsForRecord(current);
+      const currentSection = readings[kind][section] ?? [];
+      return {
+        ...current,
+        status: current.status === 'completed' ? 'draft' : current.status,
+        screwReadings: {
+          ...readings,
+          [kind]: {
+            ...readings[kind],
+            [section]: [...currentSection, createScrewReading(kind, section, currentSection.length + 1)],
+          },
+        },
+      };
+    });
+  }
+  function updateReading(kind: ScrewMeasurementKind, section: ScrewSectionKey, readingId: string, patch: Partial<ScrewMeasurementReading>) {
+    onRecord(current=>{
+      const readings = screwReadingsForRecord(current);
+      return {
+        ...current,
+        status: current.status === 'completed' ? 'draft' : current.status,
+        screwReadings: {
+          ...readings,
+          [kind]: {
+            ...readings[kind],
+            [section]: (readings[kind][section] ?? []).map(reading=>reading.id===readingId ? {...reading,...patch} : reading),
+          },
+        },
+      };
+    });
+  }
+  function removeReading(kind: ScrewMeasurementKind, section: ScrewSectionKey, readingId: string) {
+    onRecord(current=>{
+      const readings = screwReadingsForRecord(current);
+      return {
+        ...current,
+        screwReadings: {
+          ...readings,
+          [kind]: {
+            ...readings[kind],
+            [section]: (readings[kind][section] ?? []).filter(reading=>reading.id!==readingId),
+          },
+        },
+      };
+    });
+  }
+  return <section className="measurement-form-section screw-inspection-form">
+    <MeasurementSectionHeading title="Reason for Pull" />
+    <div className="measurement-reason-grid">{measurementReasons.map(reason=><label className="machine-check-field" key={reason}><input type="checkbox" checked={Boolean(record.reasonForPull[reason])} onChange={event=>onRecord(current=>({...current,reasonForPull:{...current.reasonForPull,[reason]:event.target.checked},status:current.status==='completed'?'draft':current.status}))} /><span>{reason}</span></label>)}</div>
+    {record.reasonForPull.Other&&<Text label="Other Reason" value={record.reasonForPullOther} set={value=>onRecord(current=>({...current,reasonForPullOther:value,status:current.status==='completed'?'draft':current.status}))} disabled={false}/>}
+    <MeasurementSectionHeading title="Screw Identity" />
+    <FieldGrid>{screwIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid>
+    <MeasurementSectionHeading title="Screw Measurements" />
+    <MeasurementFieldGrid>{screwMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid>
+    <ScrewMeasurementDiagram onAddReading={addReading} />
+    <ScrewSmallestSummary record={record} />
+    <ScrewMeasurementAreas record={record} onAddReading={addReading} onUpdateReading={updateReading} onRemoveReading={removeReading} />
+    <MeasurementSectionHeading title="Spline Check" />
+    <FieldGrid><Select label="Spline Check" value={record.selectFields.splineCheck ?? ''} set={value=>onSelect('splineCheck',value)} options={['','Good','Worn','Damaged']} disabled={false}/><Area label="Spline Notes" value={record.textFields.splineNotes ?? ''} set={value=>onText('splineNotes',value)} disabled={false}/><Area label="Screw Comments" value={record.textFields.screwComments ?? ''} set={value=>onText('screwComments',value)} disabled={false}/></FieldGrid>
+  </section>;
+}
+function ScrewMeasurementDiagram({onAddReading}:{onAddReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey)=>void}) {
+  return <section className="screw-diagram-panel">
+    <div className="measurement-section-heading"><h4>Visual Screw Measurement Map</h4></div>
+    <div className="screw-diagram-wrap">
+      <svg className="screw-diagram-svg" viewBox="0 0 900 230" role="img" aria-label="Screw side view showing feed, transition, and metering measurement locations">
+        <defs>
+          <linearGradient id="screwBodyFill" x1="0" x2="1"><stop offset="0%" stopColor="#5c7484" /><stop offset="52%" stopColor="#9bb8c5" /><stop offset="100%" stopColor="#5f7888" /></linearGradient>
+        </defs>
+        <rect x="105" y="96" width="650" height="36" rx="18" fill="url(#screwBodyFill)" opacity=".92" />
+        <polygon points="755,94 838,114 755,134" fill="#8ea9b7" opacity=".9" />
+        <rect x="52" y="88" width="64" height="52" rx="7" fill="#718b99" />
+        <rect x="34" y="100" width="22" height="28" rx="5" fill="#4d6573" />
+        {Array.from({length:19}).map((_,index)=>{
+          const x = 124 + index * 32;
+          return <path key={x} d={`M ${x} 91 L ${x + 24} 72 L ${x + 34} 138 L ${x + 8} 157 Z`} fill={index < 7 ? '#77d7ff' : index < 13 ? '#80d7c7' : '#ffd36f'} opacity=".58" stroke="#dff7ff" strokeOpacity=".18" />;
+        })}
+        <line x1="112" y1="114" x2="752" y2="114" stroke="#1a2d3a" strokeWidth="3" strokeLinecap="round" opacity=".7" />
+        <g className="screw-section-guides">
+          <line x1="318" y1="48" x2="318" y2="176" />
+          <line x1="540" y1="48" x2="540" y2="176" />
+          <text x="200" y="42">Feed</text>
+          <text x="410" y="42">Transition</text>
+          <text x="625" y="42">Metering</text>
+        </g>
+        <g className="screw-measure-arrow flight-arrow"><line x1="650" y1="70" x2="650" y2="88" /><circle cx="650" cy="70" r="5" /></g>
+        <g className="screw-measure-arrow root-arrow"><line x1="405" y1="164" x2="405" y2="125" /><circle cx="405" cy="164" r="5" /></g>
+      </svg>
+      <div className="screw-diagram-buttons">
+        {screwMeasurementKinds.map(kind=>screwSections.map(section=><button className={`screw-diagram-pill ${kind.accent}`} type="button" key={`${kind.key}-${section.key}`} onClick={()=>onAddReading(kind.key,section.key)}><span>{section.shortLabel}</span>{kind.shortLabel}</button>))}
+      </div>
+    </div>
+    <div className="screw-diagram-legend"><span className="flight">Flight OD = measure top/outer edge of flight</span><span className="root">Root Dia = measure valley between flights</span></div>
+  </section>;
+}
+function ScrewSmallestSummary({record}:{record:MeasurementInspectionRecord}) {
+  const readings = screwReadingsForRecord(record);
+  return <section className="screw-smallest-summary">
+    {screwMeasurementKinds.map(kind=><div className={`screw-smallest-group ${kind.accent}`} key={kind.key}><strong>{kind.label} Smallest Dia</strong><div>{screwSections.map(section=>{ const smallest = smallestScrewReading(readings[kind.key][section.key] ?? []); return <span key={section.key}><em>{section.shortLabel}</em>{measurementValueDisplay(smallest)}</span>; })}</div></div>)}
+  </section>;
+}
+function ScrewMeasurementAreas({record,onAddReading,onUpdateReading,onRemoveReading}:{record:MeasurementInspectionRecord;onAddReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey)=>void;onUpdateReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey,readingId:string,patch:Partial<ScrewMeasurementReading>)=>void;onRemoveReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey,readingId:string)=>void}) {
+  const readings = screwReadingsForRecord(record);
+  return <div className="screw-measurement-area-grid">
+    {screwMeasurementKinds.map(kind=><section className={`screw-measurement-area ${kind.accent}`} key={kind.key}>
+      <MeasurementSectionHeading title={kind.label} />
+      <div className="screw-section-grid">
+        {screwSections.map(section=><ScrewMeasurementSectionCard kind={kind.key} section={section.key} title={section.label} readings={readings[kind.key][section.key] ?? []} key={section.key} onAddReading={onAddReading} onUpdateReading={onUpdateReading} onRemoveReading={onRemoveReading} />)}
+      </div>
+    </section>)}
+  </div>;
+}
+function ScrewMeasurementSectionCard({kind,section,title,readings,onAddReading,onUpdateReading,onRemoveReading}:{kind:ScrewMeasurementKind;section:ScrewSectionKey;title:string;readings:ScrewMeasurementReading[];onAddReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey)=>void;onUpdateReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey,readingId:string,patch:Partial<ScrewMeasurementReading>)=>void;onRemoveReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey,readingId:string)=>void}) {
+  const smallest = smallestScrewReading(readings);
+  return <article className="screw-section-card">
+    <div className="screw-section-card-heading"><strong>{title}</strong><span>{measurementValueDisplay(smallest)}</span></div>
+    <button className="secondary-button compact-button" type="button" onClick={()=>onAddReading(kind,section)}>Add Reading</button>
+    <div className="screw-reading-list">
+      {readings.map((reading,index)=><div className="screw-reading-row" key={reading.id}><label className="form-field"><span>Reading label</span><input value={reading.label} onChange={event=>onUpdateReading(kind,section,reading.id,{label:event.target.value})} /></label><MeasurementInput label={`Point ${index + 1}`} value={reading.value} set={value=>onUpdateReading(kind,section,reading.id,{value})} /><label className="form-field"><span>Note</span><input value={reading.notes} onChange={event=>onUpdateReading(kind,section,reading.id,{notes:event.target.value})} /></label><button className="link-button compact-button" type="button" onClick={()=>onRemoveReading(kind,section,reading.id)}>Remove</button></div>)}
+      {!readings.length&&<p className="form-help">No readings yet.</p>}
+    </div>
+  </article>;
 }
 function BarrelInspectionForm({record,onText,onMeasurement,onStation,onAddStation,onRemoveStation,onGenerateStations,onRecord}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onStation:(stationId:string,patch:Partial<MeasurementStation>)=>void;onAddStation:()=>void;onRemoveStation:(stationId:string)=>void;onGenerateStations:()=>void;onRecord:(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord)=>void}) {
   return <section className="measurement-form-section"><MeasurementSectionHeading title="Barrel Identity" /><FieldGrid>{barrelIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Barrel Measurements" /><MeasurementFieldGrid>{barrelMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><StationControls record={record} onRecord={onRecord} onGenerateStations={onGenerateStations} onAddStation={onAddStation} /><StationTable stations={record.stations} distanceLabel="Station distance from feed throat/front" measurementLabel="Inside Diameter measurement" onStation={onStation} onRemove={onRemoveStation} /><FieldGrid><Area label="Barrel Notes" value={record.textFields.barrelNotes ?? ''} set={value=>onText('barrelNotes',value)} disabled={false}/><Area label="Barrel Comments" value={record.textFields.barrelComments ?? ''} set={value=>onText('barrelComments',value)} disabled={false}/></FieldGrid></section>;
 }
 function TipInspectionForm({record,onText,onMeasurement,onSelect}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onSelect:(key:string,value:string)=>void}) {
-  return <section className="measurement-form-section"><MeasurementSectionHeading title="Tip Identity" /><FieldGrid>{tipIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Tip Thread Inspection" /><FieldGrid><Select label="Tip Thread Inspection" value={record.selectFields.tipThreadInspection ?? ''} set={value=>onSelect('tipThreadInspection',value)} options={['','Good','Worn','Damaged']} disabled={false}/></FieldGrid><MeasurementSectionHeading title="Tip Measurements" /><MeasurementFieldGrid>{tipMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><Area label="Tip Comments" value={record.textFields.tipComments ?? ''} set={value=>onText('tipComments',value)} disabled={false}/></section>;
+  return <section className="measurement-form-section"><MeasurementSectionHeading title="Tip Identity" /><FieldGrid>{tipIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Tip Thread Inspection" /><FieldGrid><Select label="Tip Thread Check" value={record.selectFields.tipThreadInspection ?? ''} set={value=>onSelect('tipThreadInspection',value)} options={['','Good','Worn','Damaged']} disabled={false}/><Area label="Tip Thread Notes" value={record.textFields.tipThreadNotes ?? ''} set={value=>onText('tipThreadNotes',value)} disabled={false}/></FieldGrid><MeasurementSectionHeading title="Tip Measurements" /><MeasurementFieldGrid>{tipMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><Area label="Tip Comments" value={record.textFields.tipComments ?? ''} set={value=>onText('tipComments',value)} disabled={false}/></section>;
 }
 function PlungerInspectionForm({record,onText,onMeasurement,onStation,onAddStation,onRemoveStation,onGenerateStations}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onStation:(stationId:string,patch:Partial<MeasurementStation>)=>void;onAddStation:()=>void;onRemoveStation:(stationId:string)=>void;onGenerateStations:()=>void}) {
   return <section className="measurement-form-section"><MeasurementSectionHeading title="Plunger" /><FieldGrid>{plungerTextFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Plunger Measurements" /><MeasurementFieldGrid>{plungerMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><MeasurementSectionHeading title="Plunger Barrel / Cylinder Barrel Stations" /><div className="measurement-station-actions"><button className="secondary-button compact-button" type="button" onClick={onGenerateStations}>Generate Cylinder Stations</button><button className="secondary-button compact-button" type="button" onClick={onAddStation}>Add Station</button></div><StationTable stations={record.stations} distanceLabel="Station distance" measurementLabel="Inside Diameter measurement" onStation={onStation} onRemove={onRemoveStation} /><FieldGrid><Area label="Plunger Notes" value={record.textFields.plungerNotes ?? ''} set={value=>onText('plungerNotes',value)} disabled={false}/><Area label="Plunger Comments" value={record.textFields.plungerComments ?? ''} set={value=>onText('plungerComments',value)} disabled={false}/><Area label="Cylinder Barrel Notes" value={record.textFields.cylinderBarrelNotes ?? ''} set={value=>onText('cylinderBarrelNotes',value)} disabled={false}/></FieldGrid></section>;
