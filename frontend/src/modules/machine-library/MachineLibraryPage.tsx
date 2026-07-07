@@ -397,8 +397,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
 function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:()=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
   const [currentAsset,setCurrentAsset]=useState(asset);
   const [draft,setDraft]=useState<AssetForm>(()=>assetToForm(asset));
-  const [hoveredSection,setHoveredSection]=useState<MachineDetailSectionKey|null>(null);
-  const [pinnedSection,setPinnedSection]=useState<MachineDetailSectionKey|null>('basic');
+  const [openSection,setOpenSection]=useState<MachineDetailSectionKey|null>(null);
   const [editingSection,setEditingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [savingSection,setSavingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [sectionErrors,setSectionErrors]=useState<Partial<Record<MachineDetailEditableSectionKey,string>>>({});
@@ -413,16 +412,14 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
   useEffect(()=>{
     setCurrentAsset(asset);
     setDraft(assetToForm(asset));
-    setHoveredSection(null);
-    setPinnedSection('basic');
+    setOpenSection(null);
     setEditingSection(null);
     setSectionErrors({});
   },[asset.id]);
   useEffect(()=>{
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape' || editingSection) return;
-      setHoveredSection(null);
-      setPinnedSection(null);
+      setOpenSection(null);
     }
     document.addEventListener('keydown',onKeyDown);
     return ()=>document.removeEventListener('keydown',onKeyDown);
@@ -431,23 +428,14 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
   function setDraftField<K extends keyof AssetForm>(key: K, value: AssetForm[K]) {
     setDraft(current=>({...current,[key]:value}));
   }
-  function previewSection(key: MachineDetailSectionKey) {
+  function toggleOpenSection(key: MachineDetailSectionKey) {
     if (editingSection) return;
-    setHoveredSection(key);
-  }
-  function clearPreview() {
-    if (!editingSection) setHoveredSection(null);
-  }
-  function togglePinnedSection(key: MachineDetailSectionKey) {
-    if (editingSection) return;
-    setHoveredSection(null);
-    setPinnedSection(current=>current === key ? null : key);
+    setOpenSection(current=>current === key ? null : key);
   }
   function beginSectionEdit(key: MachineDetailEditableSectionKey) {
     if (!canEdit) return;
     setDraft(assetToForm(currentAsset));
-    setHoveredSection(null);
-    setPinnedSection(key);
+    setOpenSection(key);
     setEditingSection(key);
     setSectionErrors(current=>({...current,[key]:undefined}));
   }
@@ -464,7 +452,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
       const data = await api<{ok:boolean;asset:MachineAsset}>(`/api/machine-library/assets/${currentAsset.id}`,{method:'PUT',body:JSON.stringify(payload)});
       setCurrentAsset(data.asset);
       setDraft(assetToForm(data.asset));
-      setPinnedSection(key);
+      setOpenSection(key);
       setEditingSection(null);
       onAssetUpdated(data.asset);
     } catch (error) {
@@ -616,24 +604,24 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
       <DetailItem label="Year / Age" value={`${currentAsset.machineYear || '-'} / ${machineYearAge(currentAsset.machineYear)}`} />
       <DetailItem label="Location" value={detailValue(currentAsset.location)} />
     </div>
-    <div className="machine-detail-accordion-list" onPointerLeave={clearPreview}>
+    <div className="machine-detail-accordion-list">
       {sections.map(section=>{
         const editableKey = section.editableKey;
         const isEditing = Boolean(editableKey && editingSection === editableKey);
-        const isOpen = isEditing || (editingSection ? false : hoveredSection ? hoveredSection === section.key : pinnedSection === section.key);
+        const isOpen = isEditing || openSection === section.key;
         const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
-        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onPreview={()=>previewSection(section.key)} onToggle={()=>togglePinnedSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
     </div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section></div>;
 }
-function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onPreview,onToggle,onSave,onCancel,saving,error,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onPreview:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;children:ReactNode}) {
+function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,error,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;children:ReactNode}) {
   const panelId = `machine-detail-panel-${sectionKey}`;
-  return <article className={`machine-detail-accordion-card ${expanded ? 'is-open' : ''} ${editing ? 'is-editing' : ''}`} onPointerEnter={event=>{ if (event.pointerType !== 'touch') onPreview(); }}>
+  return <article className={`machine-detail-accordion-card ${expanded ? 'is-open' : ''} ${editing ? 'is-editing' : ''}`}>
     <div className="machine-detail-accordion-header">
-      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle} onFocus={onPreview}>
+      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
         <span className="machine-detail-section-title">{title}</span>
         <span className="machine-detail-section-summary">{summary}</span>
         {status}
@@ -651,7 +639,7 @@ function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded
   </article>;
 }
 function DetailStatusPill({status}:{status:ConditionStatus}) { return <span className={`machine-section-status-pill condition-${status}`}>{conditionLabels[status]}</span>; }
-function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-item ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span>{label}</span><strong>{value}</strong></div>; }
+function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-pill ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span className="machine-detail-pill-label">{label}</span><strong className="machine-detail-pill-value">{value}</strong></div>; }
 function MeasurementInspectionModal({target,onClose}:{target:InspectionContext;onClose:()=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal measurement-inspection-modal"><div className="modal-heading"><div><p className="eyebrow">Alpha Placeholder / Coming Next</p><h3>Measurement Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p>Alpha placeholder. Inspection tracking will later compare screw, barrel, tip, end cap, and plunger measurements and update conditions from New to Used to Worn.</p><div className="measurement-component-list">{inspectionComponents(target).map(component=><span key={component}>{component}</span>)}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Close</button></div></section></div>;
 }
