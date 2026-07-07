@@ -49,18 +49,14 @@ export default function ScrewMeasurementMap({ onAddReading }: ScrewMeasurementMa
         ))}
       </div>
 
-      <div className="screw-diagram-wrap screw-strip-only-wrap">
-        <div className="screw-strip-image-crop" aria-hidden="true">
-          <img
-            className="screw-diagram-reference-img screw-strip-cropped-img"
-            src="/screw-strip-only-v2.svg"
-            alt=""
-          />
-        </div>
-        <div className="screw-strip-section-labels" aria-label="Screw sections">
-          <span className="feed">Feed</span>
-          <span className="transition">Transition</span>
-          <span className="metering">Metering</span>
+      <div className="screw-diagram-wrap">
+        <div className="screw-map-reset-placeholder">
+          <div className="screw-map-reset-line">
+            <span className="feed">Feed</span>
+            <span className="transition">Transition</span>
+            <span className="metering">Metering</span>
+          </div>
+          <p>Screw visual map coming next.</p>
         </div>
       </div>
     </section>

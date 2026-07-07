@@ -155,6 +155,53 @@
   box-shadow: none;
 }
 
+.screw-map-reset-placeholder {
+  display: grid;
+  gap: 12px;
+  place-items: center;
+  min-height: 180px;
+  border: 1px dashed rgba(68, 215, 255, 0.28);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(5, 18, 30, 0.72), rgba(2, 8, 14, 0.86));
+}
+
+.screw-map-reset-line {
+  display: grid;
+  width: min(100%, 900px);
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  text-align: center;
+  text-transform: uppercase;
+  font-weight: 950;
+}
+
+.screw-map-reset-line span {
+  padding: 14px 10px;
+  border-radius: 999px;
+  background: rgba(5, 22, 36, 0.88);
+}
+
+.screw-map-reset-line .feed {
+  color: #44d7ff;
+  border: 1px solid rgba(68, 215, 255, 0.45);
+}
+
+.screw-map-reset-line .transition {
+  color: #36e5aa;
+  border: 1px solid rgba(54, 229, 170, 0.45);
+}
+
+.screw-map-reset-line .metering {
+  color: #ffd36f;
+  border: 1px solid rgba(255, 211, 111, 0.45);
+}
+
+.screw-map-reset-placeholder p {
+  margin: 0;
+  color: rgba(220, 241, 249, 0.72);
+  font-weight: 850;
+}
+
 .screw-diagram-reference-img {
   display: block;
   width: min(100%, 1320px);
