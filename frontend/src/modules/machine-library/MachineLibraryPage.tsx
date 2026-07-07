@@ -1114,35 +1114,33 @@ function ScrewMeasurementDiagram({onAddReading}:{onAddReading:(kind:ScrewMeasure
         <rect className="screw-zone-fill metering" x="565" y="64" width="205" height="130" rx="18" />
         <line className="screw-zone-divider" x1="345" y1="58" x2="345" y2="201" />
         <line className="screw-zone-divider" x1="565" y1="58" x2="565" y2="201" />
-        <rect x="88" y="114" width="700" height="38" rx="19" fill="url(#screwBodyFill)" opacity=".96" />
-        <rect x="124" y="124" width="628" height="10" rx="5" fill="#182c3a" opacity=".34" />
-        <line x1="118" y1="133" x2="760" y2="133" stroke="#dff7ff" strokeWidth="1.4" strokeLinecap="round" opacity=".24" />
-        <polygon points="786,109 850,133 786,157" fill="#89a5b4" opacity=".94" />
-        <polygon points="792,118 832,133 792,148" fill="#d5e8ef" opacity=".28" />
-        <rect x="52" y="103" width="42" height="60" rx="7" fill="#657f8d" />
-        <rect x="29" y="113" width="30" height="40" rx="5" fill="#455d6b" />
-        {[0,1,2,3].map(index=><rect key={index} x={62 + index * 8} y="96" width="5" height="16" rx="2" fill="#9db7c3" opacity=".78" />)}
-        {[0,1,2,3].map(index=><rect key={index} x={62 + index * 8} y="154" width="5" height="16" rx="2" fill="#9db7c3" opacity=".72" />)}
+        <path className="screw-od-envelope" d="M 118 76 L 784 76 M 118 190 L 784 190" />
+        <path className="screw-drive-shank" d="M 36 118 H64 L74 112 H96 C108 112 117 121 117 133 C117 145 108 154 96 154 H74 L64 148 H36 Z" />
+        {[0,1,2,3].map(index=><rect className="screw-spline-groove" key={`upper-${index}`} x={43 + index * 7} y="113" width="3.6" height="11" rx="1.6" />)}
+        {[0,1,2,3].map(index=><rect className="screw-spline-groove" key={`lower-${index}`} x={43 + index * 7} y="142" width="3.6" height="11" rx="1.6" />)}
+        <path className="screw-root-core" d="M 94 124 C 190 124 270 124 345 124 C 430 123 510 115 565 108 L 784 108 C 803 108 814 119 814 133 C 814 147 803 158 784 158 L 565 158 C 510 151 430 143 345 142 C 270 142 190 142 94 142 Z" />
+        <path className="screw-root-highlight" d="M 104 128 C 212 128 300 128 358 128 C 438 126 502 121 568 114 L 752 114" />
+        <path className="screw-root-shadow" d="M 104 139 C 212 139 300 139 358 139 C 438 141 502 147 568 153 L 752 153" />
+        <path className="screw-nose-detail" d="M 784 118 C 797 119 804 125 805 133 C 804 141 797 147 784 148" />
         {Array.from({length:21}).map((_,index)=>{
           const x = 118 + index * 31;
           const feed = index < 8;
           const transition = index >= 8 && index < 15;
-          const transitionStep = transition ? index - 8 : 0;
-          const top = feed ? 76 : transition ? 82 + transitionStep * 3 : 103;
-          const bottom = feed ? 190 : transition ? 184 - transitionStep * 5 : 163;
           const fill = feed ? '#5fcfff' : transition ? '#62dac7' : '#ffd06a';
           return <g key={x}>
-            <path d={`M ${x} 108 L ${x + 24} ${top} L ${x + 40} ${bottom} L ${x + 12} 158 Z`} fill={fill} opacity=".56" stroke="#eefbff" strokeOpacity=".26" />
-            <path d={`M ${x + 7} 111 L ${x + 25} ${top + 9} L ${x + 35} ${bottom - 12} L ${x + 16} 154 Z`} fill="url(#screwFlightHighlight)" opacity=".42" />
+            <path d={`M ${x} 108 L ${x + 24} 76 L ${x + 40} 190 L ${x + 12} 158 Z`} fill={fill} opacity=".52" stroke="#eefbff" strokeOpacity=".24" />
+            <path d={`M ${x + 7} 111 L ${x + 25} 85 L ${x + 35} 178 L ${x + 16} 154 Z`} fill="url(#screwFlightHighlight)" opacity=".38" />
           </g>;
         })}
+        <path className="screw-root-edge top" d="M 96 124 C 190 124 270 124 345 124 C 430 123 510 115 565 108 L 784 108" />
+        <path className="screw-root-edge bottom" d="M 96 142 C 190 142 270 142 345 142 C 430 143 510 151 565 158 L 784 158" />
         <g className="screw-measure-label flight-label">
           <text x="642" y="42">Flight OD</text>
-          <line x1="665" y1="50" x2="650" y2="96" markerEnd="url(#screwFlightArrowHead)" />
+          <line x1="665" y1="50" x2="650" y2="78" markerEnd="url(#screwFlightArrowHead)" />
         </g>
         <g className="screw-measure-label root-label">
           <text x="390" y="224">Root Dia</text>
-          <line x1="420" y1="206" x2="428" y2="145" markerEnd="url(#screwRootArrowHead)" />
+          <line x1="420" y1="206" x2="430" y2="124" markerEnd="url(#screwRootArrowHead)" />
         </g>
       </svg>
     </div>

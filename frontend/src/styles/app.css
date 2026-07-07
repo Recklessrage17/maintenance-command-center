@@ -665,6 +665,16 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .screw-zone-fill.transition { fill: #36e5aa; }
 .screw-zone-fill.metering { fill: #ffd36f; }
 .screw-zone-divider { stroke: rgba(223,247,255,.28); stroke-width: 1; stroke-dasharray: 5 6; }
+.screw-od-envelope { fill: none; stroke: rgba(223,247,255,.34); stroke-width: 1.4; stroke-linecap: round; stroke-dasharray: 8 9; }
+.screw-drive-shank { fill: #5e7888; stroke: rgba(238,251,255,.28); stroke-width: 1; }
+.screw-spline-groove { fill: #c9dbe3; opacity: .6; }
+.screw-root-core { fill: url(#screwBodyFill); stroke: rgba(238,251,255,.2); stroke-width: 1; opacity: .97; }
+.screw-root-highlight, .screw-root-shadow, .screw-root-edge, .screw-nose-detail { fill: none; stroke-linecap: round; }
+.screw-root-highlight { stroke: rgba(255,255,255,.28); stroke-width: 2; }
+.screw-root-shadow { stroke: rgba(3,10,18,.34); stroke-width: 2.4; }
+.screw-root-edge { stroke: rgba(223,247,255,.42); stroke-width: 1.2; }
+.screw-root-edge.bottom { stroke: rgba(3,10,18,.36); }
+.screw-nose-detail { stroke: rgba(223,247,255,.26); stroke-width: 1.4; }
 .screw-measure-label text { font-size: 18px; font-weight: 950; letter-spacing: 0; }
 .screw-measure-label line { stroke-width: 3; stroke-linecap: round; }
 .screw-measure-label.flight-label { fill: #bff3ff; stroke: #44d7ff; }
