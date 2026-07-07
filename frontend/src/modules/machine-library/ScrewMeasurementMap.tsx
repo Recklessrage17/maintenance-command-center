@@ -53,7 +53,7 @@ export default function ScrewMeasurementMap({ onAddReading }: ScrewMeasurementMa
         <div className="screw-strip-image-crop" aria-hidden="true">
           <img
             className="screw-diagram-reference-img screw-strip-cropped-img"
-            src="/screw-map-no-callouts.svg"
+            src="/screw-strip-only-v2.svg"
             alt=""
           />
         </div>
