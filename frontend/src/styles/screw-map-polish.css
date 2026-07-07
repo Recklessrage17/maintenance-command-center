@@ -118,34 +118,34 @@
   opacity: 0.26;
 }
 
-/* Solid screw root/core. Scale the root vertically so the feed side is not too needle-thin. */
+/* Solid screw root/core. Scale the root vertically so the feed side reads thicker and the taper feels more natural. */
 .screw-root-core {
-  fill: rgba(185, 205, 211, 0.94);
-  stroke: rgba(238, 251, 255, 0.32);
+  fill: rgba(185, 205, 211, 0.96);
+  stroke: rgba(238, 251, 255, 0.36);
   stroke-width: 1;
   opacity: 1;
   filter: none;
   transform-box: fill-box;
   transform-origin: center;
-  transform: scaleY(1.32);
+  transform: scaleY(1.9);
 }
 
 .screw-root-highlight {
-  stroke: rgba(255, 255, 255, 0.72);
-  stroke-width: 3.4;
-  opacity: 0.68;
+  stroke: rgba(255, 255, 255, 0.76);
+  stroke-width: 4.8;
+  opacity: 0.72;
 }
 
 .screw-root-shadow {
-  stroke: rgba(0, 0, 0, 0.44);
-  stroke-width: 2;
-  opacity: 0.44;
+  stroke: rgba(0, 0, 0, 0.46);
+  stroke-width: 3.2;
+  opacity: 0.48;
 }
 
 .screw-root-edge {
-  stroke: rgba(232, 247, 252, 0.5);
-  stroke-width: 1;
-  opacity: 0.66;
+  stroke: rgba(232, 247, 252, 0.54);
+  stroke-width: 1.4;
+  opacity: 0.7;
 }
 
 /* Solid flights: darker steel fill with bright edge, not transparent ghost ribs. */
