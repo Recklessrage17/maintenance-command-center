@@ -6,9 +6,9 @@
 }
 
 .measurement-inspection-modal {
-  width: min(1640px, calc(100vw - 36px));
+  width: min(1740px, calc(100vw - 36px));
   max-width: none;
-  min-height: min(900px, var(--mcc-modal-available-height));
+  min-height: min(920px, var(--mcc-modal-available-height));
   max-height: var(--mcc-modal-available-height);
 }
 
@@ -19,7 +19,7 @@
 }
 
 .screw-diagram-panel {
-  padding: 16px;
+  padding: clamp(12px, 1.3vw, 20px);
   border-color: rgba(68, 215, 255, 0.24);
   background:
     radial-gradient(circle at 34% 10%, rgba(68, 215, 255, 0.10), transparent 34%),
@@ -32,87 +32,107 @@
 }
 
 .screw-diagram-control-column {
-  min-height: 150px;
+  min-height: 142px;
   border-radius: 12px;
 }
 
 .screw-diagram-wrap {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 12px;
-  border-radius: 12px;
+  overflow: hidden;
+  padding: clamp(12px, 1.4vw, 24px) clamp(20px, 2.6vw, 46px);
+  border-radius: 14px;
   background:
     radial-gradient(circle at 52% 48%, rgba(68, 215, 255, 0.07), transparent 38%),
     linear-gradient(180deg, rgba(5, 17, 30, 0.92), rgba(2, 8, 14, 0.96));
-  scrollbar-color: rgba(68, 215, 255, 0.48) rgba(3, 10, 18, 0.86);
 }
 
 .screw-diagram-svg {
-  width: 100%;
-  min-width: 1180px;
-  max-height: none;
+  display: block;
+  width: min(100%, 1460px);
+  min-width: 0;
+  height: auto;
+  max-height: 520px;
+  margin: 0 auto;
   aspect-ratio: 1100 / 360;
   overflow: visible;
 }
 
-/* The current SVG viewBox clips side labels; pull them into the drawing instead of letting them cut off. */
+/* Keep side labels inside the viewBox so the full screw reads left-to-right without cutoffs. */
 .screw-side-label.drive-label {
-  transform: translateX(30px);
+  transform: translateX(92px);
 }
 
 .screw-side-label.tip-label {
-  transform: translateX(-112px);
+  transform: translateX(-205px);
 }
 
 .screw-side-label text {
-  font-size: 15px;
+  font-size: 13.5px;
   letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(2, 8, 14, 0.74);
+  stroke-width: 3px;
 }
 
 .screw-zone-fill {
-  opacity: 0.18;
+  opacity: 0.14;
 }
 
 .screw-od-envelope {
-  stroke-width: 1.15;
-  opacity: 0.78;
+  stroke-width: 1.05;
+  opacity: 0.74;
 }
 
-.screw-root-core {
-  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.34));
-}
-
-/* Make existing flight shapes read more like thinner helical ribs. */
-.screw-flight-band {
-  transform-box: fill-box;
-  transform-origin: center;
-  transform: scaleX(0.72);
-  opacity: 0.86;
-  filter: drop-shadow(0 7px 7px rgba(0, 0, 0, 0.42));
-}
-
-.screw-flight-shadow {
-  stroke-width: 2.2;
-  opacity: 0.32;
-}
-
-.screw-root-highlight {
-  stroke-width: 3.2;
+.screw-zone-divider {
   opacity: 0.42;
 }
 
-.screw-root-shadow {
-  stroke-width: 3;
+.screw-root-core {
+  opacity: 0.92;
+  filter: drop-shadow(0 12px 15px rgba(0, 0, 0, 0.34));
+}
+
+/* Make the existing SVG flight shapes read as slim helical ribs instead of tall sheet-metal fins. */
+.screw-flight-ribs {
+  opacity: 0.86;
+}
+
+.screw-flight-band {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleX(0.42) skewX(-5deg);
+  opacity: 0.62;
+  filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.45));
+  stroke-width: 0.55;
+}
+
+.screw-flight-shadow {
+  stroke-width: 1.45;
+  opacity: 0.22;
+}
+
+.screw-root-highlight {
+  stroke-width: 3.8;
   opacity: 0.48;
+}
+
+.screw-root-shadow {
+  stroke-width: 2.8;
+  opacity: 0.44;
+}
+
+.screw-root-edge {
+  opacity: 0.64;
 }
 
 .screw-flat-end {
   opacity: 0.92;
+  transform: translateX(-10px);
 }
 
 .screw-flat-face {
   stroke-width: 2;
   opacity: 0.62;
+  transform: translateX(-10px);
 }
 
 .screw-measure-label rect {
@@ -124,15 +144,30 @@
 }
 
 .screw-measure-label text {
+  font-size: 15px;
   paint-order: stroke;
   stroke: rgba(2, 8, 14, 0.72);
   stroke-width: 3px;
 }
 
+.screw-measure-label line {
+  stroke-width: 2.25;
+}
+
+.screw-measure-label circle {
+  opacity: 0.9;
+}
+
 .screw-section-caption text:first-child {
   paint-order: stroke;
-  stroke: rgba(2, 8, 14, 0.72);
+  stroke: rgba(2, 8, 14, 0.78);
   stroke-width: 3px;
+}
+
+.screw-section-caption text + text {
+  paint-order: stroke;
+  stroke: rgba(2, 8, 14, 0.68);
+  stroke-width: 2.5px;
 }
 
 .screw-diagram-legend {
@@ -141,11 +176,12 @@
 
 @media (min-width: 1500px) {
   .measurement-inspection-modal {
-    width: min(1760px, calc(100vw - 28px));
+    width: min(1820px, calc(100vw - 28px));
   }
 
   .screw-diagram-svg {
-    min-width: 1320px;
+    width: min(100%, 1540px);
+    max-height: 560px;
   }
 }
 
@@ -162,7 +198,13 @@
     grid-template-columns: 1fr;
   }
 
+  .screw-diagram-wrap {
+    overflow-x: auto;
+    padding-inline: 18px;
+  }
+
   .screw-diagram-svg {
-    min-width: 980px;
+    width: 980px;
+    max-width: none;
   }
 }
