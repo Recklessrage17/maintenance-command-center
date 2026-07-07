@@ -108,15 +108,16 @@
 
 .screw-diagram-svg {
   display: block;
-  width: 100%;
+  width: min(100%, 1180px);
   height: auto;
-  max-height: clamp(238px, 23vw, 318px);
-  aspect-ratio: 1120 / 286;
+  max-height: clamp(275px, 26vw, 382px);
+  margin: 0 auto;
+  aspect-ratio: 1120 / 312;
 }
 
 .screw-map-panel-field {
   fill: url(#screwMapPanelGlow);
-  stroke: rgba(143, 205, 233, 0.12);
+  stroke: rgba(143, 205, 233, 0.13);
   stroke-width: 1;
 }
 
@@ -133,7 +134,7 @@
 }
 
 .screw-zone-fill {
-  opacity: 0.11;
+  opacity: 0.14;
 }
 
 .screw-zone-fill.feed {
@@ -151,70 +152,92 @@
 .screw-drive-shank,
 .screw-drive-collar,
 .screw-shoulder-ring,
+.screw-drive-neck,
 .screw-flat-end {
   fill: url(#screwMapDriveFill);
-  stroke: rgba(238, 251, 255, 0.48);
-  stroke-width: 1.1;
+  stroke: rgba(238, 251, 255, 0.52);
+  stroke-width: 1.15;
+}
+
+.screw-drive-neck {
+  fill: rgba(142, 162, 170, 0.92);
 }
 
 .screw-spline-groove {
   fill: none;
-  stroke: rgba(238, 251, 255, 0.72);
+  stroke: rgba(238, 251, 255, 0.74);
   stroke-linecap: round;
-  stroke-width: 4;
+  stroke-width: 5;
 }
 
 .screw-od-envelope {
   fill: none;
-  stroke: rgba(68, 215, 255, 0.5);
+  stroke: rgba(68, 215, 255, 0.55);
   stroke-linecap: square;
   stroke-width: 1.5;
 }
 
-.screw-flight-band {
-  fill: url(#screwMapFlightFill);
-  stroke: rgba(244, 252, 255, 0.72);
-  stroke-width: 1.15;
-}
-
 .screw-root-core {
   fill: url(#screwMapCoreFill);
-  stroke: rgba(238, 251, 255, 0.24);
+  stroke: rgba(238, 251, 255, 0.26);
   stroke-width: 1;
 }
 
 .screw-root-highlight,
+.screw-root-center-highlight,
 .screw-root-shadow,
 .screw-root-edge,
 .screw-flight-rim,
+.screw-flight-shadow,
 .screw-flat-face {
   fill: none;
   stroke-linecap: round;
 }
 
 .screw-root-highlight {
-  stroke: rgba(255, 255, 255, 0.38);
-  stroke-width: 2.2;
+  stroke: rgba(255, 255, 255, 0.46);
+  stroke-width: 2.4;
+}
+
+.screw-root-center-highlight {
+  stroke: rgba(255, 255, 255, 0.36);
+  stroke-width: 2.1;
 }
 
 .screw-root-shadow {
-  stroke: rgba(2, 8, 14, 0.42);
-  stroke-width: 2.7;
+  stroke: rgba(2, 8, 14, 0.44);
+  stroke-width: 2.8;
 }
 
 .screw-root-edge {
-  stroke: rgba(225, 244, 250, 0.62);
-  stroke-width: 1.25;
+  stroke: rgba(225, 244, 250, 0.58);
+  stroke-width: 1.2;
 }
 
 .screw-root-edge.bottom {
-  stroke: rgba(2, 8, 14, 0.4);
+  stroke: rgba(2, 8, 14, 0.36);
+}
+
+.screw-flight-ribs {
+  opacity: 0.98;
+}
+
+.screw-flight-band {
+  fill: url(#screwMapFlightFill);
+  stroke: rgba(244, 252, 255, 0.78);
+  stroke-width: 1.2;
+}
+
+.screw-flight-shadow {
+  stroke: rgba(2, 8, 14, 0.44);
+  stroke-width: 3.6;
+  opacity: 0.62;
 }
 
 .screw-flight-rim {
-  stroke: rgba(255, 255, 255, 0.5);
-  stroke-width: 1.5;
-  opacity: 0.64;
+  stroke: rgba(255, 255, 255, 0.52);
+  stroke-width: 1.4;
+  opacity: 0.66;
 }
 
 .screw-flat-end {
@@ -240,10 +263,22 @@
   text-transform: uppercase;
 }
 
+.screw-section-caption .screw-section-caption-sub {
+  font-size: 9px;
+  font-weight: 850;
+  opacity: 0.88;
+  text-transform: none;
+}
+
 .screw-section-caption.feed path,
 .screw-section-caption.feed text {
   stroke: rgba(45, 191, 255, 0.42);
   fill: #44d7ff;
+}
+
+.screw-section-caption.feed .screw-section-caption-sub {
+  fill: #f3fbff;
+  stroke: none;
 }
 
 .screw-section-caption.transition path,
@@ -252,10 +287,20 @@
   fill: #36e5aa;
 }
 
+.screw-section-caption.transition .screw-section-caption-sub {
+  fill: #f3fbff;
+  stroke: none;
+}
+
 .screw-section-caption.metering path,
 .screw-section-caption.metering text {
   stroke: rgba(255, 211, 111, 0.42);
   fill: #ffd36f;
+}
+
+.screw-section-caption.metering .screw-section-caption-sub {
+  fill: #f3fbff;
+  stroke: none;
 }
 
 @media (min-width: 1500px) {
@@ -284,6 +329,6 @@
   }
 
   .screw-diagram-svg {
-    max-height: 220px;
+    max-height: 250px;
   }
 }
