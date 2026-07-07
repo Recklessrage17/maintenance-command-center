@@ -16,6 +16,8 @@ type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDi
 type StringFormKey = { [K in keyof AssetForm]: AssetForm[K] extends string ? K : never }[keyof AssetForm];
 type BooleanFormKey = { [K in keyof AssetForm]: AssetForm[K] extends boolean ? K : never }[keyof AssetForm];
 type ConditionFormKey = { [K in keyof AssetForm]: AssetForm[K] extends ConditionStatus ? K : never }[keyof AssetForm];
+type MachineDetailEditableSectionKey = 'basic' | 'electrical' | 'screw' | 'screwTip' | 'barrel' | 'barrelEndCap' | 'screw2' | 'screw2Tip' | 'barrel2' | 'barrel2EndCap' | 'plunger' | 'plungerBarrel' | 'plungerBarrelEndCap' | 'notes';
+type MachineDetailSectionKey = MachineDetailEditableSectionKey | 'inspection';
 
 const blankAssetForm: AssetForm = {
   assetNumber: '', assetName: '', brand: '', model: '', serialNumber: '', machineYear: '', machineType: 'Injection Molding Machine', powerType: '', shotSizeOz: '', tonnage: 0, barrelDiameter: '', location: '', department: '', status: 'active', voltageValue: '', voltageType: '', fullLoadAmp: '', machineLength: '', machineWidth: '', machineHeight: '', fullDieHeightLength: '', screwType: '', screwTipType: '', screwTipInstalledDate: '', screwInstalledDate: '', barrelInstalledDate: '', barrelEndCapInstalledDate: '', barrelLength: '', screwLength: '', screwRebuildRepaired: false, barrelRebuildRepaired: false, screwConditionStatus: 'new', barrelConditionStatus: 'new', hasDoubleShotInjection: false, hasPlungerInjection: false, screw2Type: '', screw2TipType: '', screw2RebuildRepaired: false, screw2ConditionStatus: 'new', screw2InstalledDate: '', screw2TipInstalledDate: '', screw2Length: '', barrel2Diameter: '', barrel2RebuildRepaired: false, barrel2ConditionStatus: 'new', barrel2InstalledDate: '', barrel2EndCapInstalledDate: '', barrel2Length: '', plungerType: '', plungerRebuildRepaired: false, plungerConditionStatus: 'new', plungerInstalledDate: '', plungerLength: '', plungerDiameter: '', plungerBarrelType: '', plungerBarrelRebuildRepaired: false, plungerBarrelConditionStatus: 'new', plungerBarrelInstalledDate: '', plungerBarrelEndCapInstalledDate: '', plungerBarrelLength: '', plungerBarrelDiameter: '', notes: '', criticalNotes: '',
@@ -35,6 +37,22 @@ const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
   { key: 'fullDieHeightLength', label: 'Full Die Height Length / Range' },
 ];
 const conditionLabels: Record<ConditionStatus, string> = { new: 'New', used: 'Used', worn: 'Worn', rebuilt_repaired: 'Rebuilt / Repaired' };
+const machineDetailSectionFields: Record<MachineDetailEditableSectionKey, readonly (keyof AssetForm)[]> = {
+  basic: ['assetName','brand','model','serialNumber','machineYear','machineType','powerType','tonnage','shotSizeOz','barrelDiameter','location','status'],
+  electrical: ['voltageValue','voltageType','fullLoadAmp','machineLength','machineWidth','machineHeight','fullDieHeightLength'],
+  screw: ['screwType','screwInstalledDate','screwLength','screwRebuildRepaired','screwConditionStatus'],
+  screwTip: ['screwTipType','screwTipInstalledDate'],
+  barrel: ['barrelDiameter','barrelInstalledDate','barrelLength','barrelRebuildRepaired','barrelConditionStatus'],
+  barrelEndCap: ['barrelEndCapInstalledDate'],
+  screw2: ['screw2Type','screw2InstalledDate','screw2Length','screw2RebuildRepaired','screw2ConditionStatus'],
+  screw2Tip: ['screw2TipType','screw2TipInstalledDate'],
+  barrel2: ['barrel2Diameter','barrel2InstalledDate','barrel2Length','barrel2RebuildRepaired','barrel2ConditionStatus'],
+  barrel2EndCap: ['barrel2EndCapInstalledDate'],
+  plunger: ['plungerType','plungerInstalledDate','plungerLength','plungerDiameter','plungerRebuildRepaired','plungerConditionStatus'],
+  plungerBarrel: ['plungerBarrelType','plungerBarrelInstalledDate','plungerBarrelLength','plungerBarrelDiameter','plungerBarrelRebuildRepaired','plungerBarrelConditionStatus'],
+  plungerBarrelEndCap: ['plungerBarrelEndCapInstalledDate'],
+  notes: ['notes','criticalNotes'],
+};
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) }, ...options });
@@ -98,7 +116,7 @@ function inspectionContext(asset: Pick<MachineAsset | AssetForm, 'assetNumber' |
 }
 function inspectionComponents(target: Pick<InspectionContext, 'hasDoubleShotInjection' | 'hasPlungerInjection'>) {
   const components = ['Screw', 'Screw Tip', 'Barrel', 'Barrel End Cap'];
-  if (target.hasDoubleShotInjection) components.push('Secondary Screw', 'Secondary Screw Tip', 'Secondary Barrel', 'Secondary Barrel End Cap');
+  if (target.hasDoubleShotInjection) components.push('Unit 2 Screw', 'Unit 2 Screw Tip', 'Unit 2 Barrel', 'Unit 2 Barrel End Cap');
   if (target.hasPlungerInjection) components.push('Plunger', 'Plunger Barrel');
   return components;
 }
@@ -108,6 +126,23 @@ function componentSummary(type: string, date: string) {
 function effectiveCondition(rebuildRepaired: boolean, status: ConditionStatus | string): ConditionStatus {
   if (rebuildRepaired) return 'rebuilt_repaired';
   return status === 'used' || status === 'worn' ? status : 'new';
+}
+function detailValue(value: string | number | boolean | null | undefined, fallback = '-') {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text ? text : fallback;
+}
+function detailSummary(...parts: Array<string | false | null | undefined>) {
+  return parts.filter((part): part is string => Boolean(part && part.trim())).join(' / ') || 'Not set';
+}
+function assetDimensionSummary(asset: Pick<MachineAsset, 'machineLength' | 'machineWidth' | 'machineHeight'>) {
+  return asset.machineLength || asset.machineWidth || asset.machineHeight ? 'Dimensions set' : 'Dimensions not set';
+}
+function mergeAssetSectionDraft(asset: MachineAsset, draft: AssetForm, fields: readonly (keyof AssetForm)[]): AssetForm {
+  const payload = assetToForm(asset);
+  for (const key of fields) (payload as Record<string, unknown>)[key] = draft[key];
+  return payload;
 }
 function isoDateValue(value: string) {
   const clean = value.trim();
@@ -348,7 +383,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}
       </div>
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
-      {detailAsset&&<MachineDetailModal asset={detailAsset} canEdit={canEdit} onClose={()=>setDetailAsset(null)} onEdit={()=>{ const asset = detailAsset; setDetailAsset(null); openEdit(asset); }} onLogs={()=>{ const asset = detailAsset; setDetailAsset(null); void loadLogs(asset); }} onInspection={()=>setInspection(inspectionContext(detailAsset))} />}
+      {detailAsset&&<MachineDetailModal asset={detailAsset} canEdit={canEdit} onClose={()=>setDetailAsset(null)} onEdit={()=>{ const asset = detailAsset; setDetailAsset(null); openEdit(asset); }} onLogs={()=>{ const asset = detailAsset; setDetailAsset(null); void loadLogs(asset); }} onInspection={()=>setInspection(inspectionContext(detailAsset))} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} />}
       {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspection={()=>setInspection(inspectionContext(editing ?? form))} />}
       {inspection&&<MeasurementInspectionModal target={inspection} onClose={()=>setInspection(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
@@ -359,30 +394,248 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   );
 }
 
-function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:()=>void}) {
-  const unitLabel = injectionSetupLabel(asset) || 'Standard Injection';
+function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:()=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
+  const [currentAsset,setCurrentAsset]=useState(asset);
+  const [draft,setDraft]=useState<AssetForm>(()=>assetToForm(asset));
+  const [expanded,setExpanded]=useState<Set<MachineDetailSectionKey>>(()=>new Set(['basic']));
+  const [editingSection,setEditingSection]=useState<MachineDetailEditableSectionKey|null>(null);
+  const [savingSection,setSavingSection]=useState<MachineDetailEditableSectionKey|null>(null);
+  const [sectionErrors,setSectionErrors]=useState<Partial<Record<MachineDetailEditableSectionKey,string>>>({});
+  const unitLabel = injectionSetupLabel(currentAsset) || 'Standard Injection';
+  const screwCondition = effectiveCondition(currentAsset.screwRebuildRepaired, currentAsset.screwConditionStatus);
+  const barrelCondition = effectiveCondition(currentAsset.barrelRebuildRepaired, currentAsset.barrelConditionStatus);
+  const screw2Condition = effectiveCondition(currentAsset.screw2RebuildRepaired, currentAsset.screw2ConditionStatus);
+  const barrel2Condition = effectiveCondition(currentAsset.barrel2RebuildRepaired, currentAsset.barrel2ConditionStatus);
+  const plungerCondition = effectiveCondition(currentAsset.plungerRebuildRepaired, currentAsset.plungerConditionStatus);
+  const plungerBarrelCondition = effectiveCondition(currentAsset.plungerBarrelRebuildRepaired, currentAsset.plungerBarrelConditionStatus);
+
+  useEffect(()=>{
+    setCurrentAsset(asset);
+    setDraft(assetToForm(asset));
+    setExpanded(new Set(['basic']));
+    setEditingSection(null);
+    setSectionErrors({});
+  },[asset.id]);
+
+  function setDraftField<K extends keyof AssetForm>(key: K, value: AssetForm[K]) {
+    setDraft(current=>({...current,[key]:value}));
+  }
+  function openSection(key: MachineDetailSectionKey) {
+    setExpanded(current=>{ const next = new Set(current); next.add(key); return next; });
+  }
+  function toggleSection(key: MachineDetailSectionKey) {
+    if (editingSection === key) return;
+    setExpanded(current=>{ const next = new Set(current); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  }
+  function beginSectionEdit(key: MachineDetailEditableSectionKey) {
+    if (!canEdit) return;
+    setDraft(assetToForm(currentAsset));
+    setEditingSection(key);
+    setSectionErrors(current=>({...current,[key]:undefined}));
+    openSection(key);
+  }
+  function cancelSectionEdit() {
+    setDraft(assetToForm(currentAsset));
+    setEditingSection(null);
+  }
+  async function saveSection(key: MachineDetailEditableSectionKey) {
+    if (!canEdit || savingSection) return;
+    setSavingSection(key);
+    setSectionErrors(current=>({...current,[key]:undefined}));
+    try {
+      const payload = mergeAssetSectionDraft(currentAsset,draft,machineDetailSectionFields[key]);
+      const data = await api<{ok:boolean;asset:MachineAsset}>(`/api/machine-library/assets/${currentAsset.id}`,{method:'PUT',body:JSON.stringify(payload)});
+      setCurrentAsset(data.asset);
+      setDraft(assetToForm(data.asset));
+      setEditingSection(null);
+      onAssetUpdated(data.asset);
+    } catch (error) {
+      setSectionErrors(current=>({...current,[key]:(error as Error).message || 'Section save failed.'}));
+    } finally {
+      setSavingSection(null);
+    }
+  }
+
+  const sections: Array<{key:MachineDetailSectionKey;editableKey?:MachineDetailEditableSectionKey;title:string;summary:string;status?:ReactNode;actionLabel?:string;onAction?:()=>void;view:ReactNode;edit?:ReactNode}> = [
+    {
+      key: 'basic',
+      editableKey: 'basic',
+      title: 'Basic Info',
+      summary: detailSummary(currentAsset.assetName || currentAsset.assetNumber, currentAsset.brand || 'Brand unknown', currentAsset.machineYear ? `${currentAsset.machineYear} / ${machineYearAge(currentAsset.machineYear)}` : 'Year unknown'),
+      view: <><DetailItem label="Asset Name" value={detailValue(currentAsset.assetName)} /><DetailItem label="Brand" value={detailValue(currentAsset.brand)} /><DetailItem label="Model" value={detailValue(currentAsset.model)} /><DetailItem label="Serial #" value={detailValue(currentAsset.serialNumber)} /><DetailItem label="Machine Year" value={<>{detailValue(currentAsset.machineYear)} <small className="machine-age-pill machine-age-helper-pill">Age: {machineYearAge(currentAsset.machineYear)}</small></>} /><DetailItem label="Machine Type" value={detailValue(currentAsset.machineType)} /><DetailItem label="Power Type" value={detailValue(currentAsset.powerType)} /><DetailItem label="Tonnage" value={detailValue(currentAsset.tonnage)} /><DetailItem label="Shot Size" value={`${displayShotSize(currentAsset.shotSizeOz)} oz`} /><DetailItem label="Barrel / Screw Diameter" value={detailValue(currentAsset.barrelDiameter)} /><DetailItem label="Location" value={detailValue(currentAsset.location)} /><DetailItem label="Status" value={machineStatusLabel(currentAsset.status)} /></>,
+      edit: <><Text label="Asset Name" value={draft.assetName} set={v=>setDraftField('assetName',v)} disabled={!canEdit}/><Text label="Brand *" value={draft.brand} set={v=>setDraftField('brand',v)} disabled={!canEdit}/><Text label="Model" value={draft.model} set={v=>setDraftField('model',v)} disabled={!canEdit}/><Text label="Serial Number" value={draft.serialNumber} set={v=>setDraftField('serialNumber',v)} disabled={!canEdit}/><Text label="Machine Year" value={draft.machineYear} set={v=>setDraftField('machineYear',v)} disabled={!canEdit} helper={<small className="machine-age-pill machine-age-helper-pill">Age: {machineYearAge(draft.machineYear)}</small>}/><Text label="Machine Type" value={draft.machineType} set={v=>setDraftField('machineType',v)} disabled={!canEdit}/><Select label="Power Type" value={draft.powerType} set={v=>setDraftField('powerType',v)} options={['','Hydraulic','Electric','Hybrid','Other']} disabled={!canEdit}/><Text label="Tonnage" value={String(draft.tonnage)} set={v=>setDraftField('tonnage',Number(v)||0)} disabled={!canEdit}/><DecimalInput label="Shot Size (oz)" value={draft.shotSizeOz} set={v=>setDraftField('shotSizeOz',v)} disabled={!canEdit}/><Text label="Barrel/Screw Diameter" value={draft.barrelDiameter} set={v=>setDraftField('barrelDiameter',v)} disabled={!canEdit}/><Text label="Location" value={draft.location} set={v=>setDraftField('location',v)} disabled={!canEdit}/><Select label="Status" value={draft.status} set={v=>setDraftField('status',v)} options={['active','down','disabled','removed']} disabled={!canEdit}/></>,
+    },
+    {
+      key: 'electrical',
+      editableKey: 'electrical',
+      title: 'Electrical / Dimensions',
+      summary: detailSummary(currentAsset.powerType || 'Power unknown', currentAsset.voltageValue ? `${currentAsset.voltageValue} ${currentAsset.voltageType}`.trim() : 'Voltage unknown', assetDimensionSummary(currentAsset)),
+      view: <><DetailItem label="Voltage" value={detailValue(currentAsset.voltageValue)} /><DetailItem label="Voltage Type" value={detailValue(currentAsset.voltageType)} /><DetailItem label="Full Load Amp" value={detailValue(currentAsset.fullLoadAmp)} /><DetailItem label="Machine Length" value={detailValue(currentAsset.machineLength)} /><DetailItem label="Machine Width" value={detailValue(currentAsset.machineWidth)} /><DetailItem label="Machine Height" value={detailValue(currentAsset.machineHeight)} /><DetailItem label="Full Die Height Length / Range" value={detailValue(currentAsset.fullDieHeightLength)} /></>,
+      edit: <><Text label="Voltage" value={draft.voltageValue} set={v=>setDraftField('voltageValue',v)} disabled={!canEdit}/><Select label="Voltage Type" value={draft.voltageType} set={v=>setDraftField('voltageType',v)} options={['','AC','DC']} disabled={!canEdit}/><Text label="Full Load Amp" value={draft.fullLoadAmp} set={v=>setDraftField('fullLoadAmp',v)} disabled={!canEdit}/><UnitDimensionField label="Machine Length" value={draft.machineLength} set={v=>setDraftField('machineLength',v)} disabled={!canEdit}/><UnitDimensionField label="Machine Width" value={draft.machineWidth} set={v=>setDraftField('machineWidth',v)} disabled={!canEdit}/><UnitDimensionField label="Machine Height" value={draft.machineHeight} set={v=>setDraftField('machineHeight',v)} disabled={!canEdit}/><UnitDimensionField label="Full Die Height Length / Range" value={draft.fullDieHeightLength} set={v=>setDraftField('fullDieHeightLength',v)} disabled={!canEdit}/></>,
+    },
+    {
+      key: 'screw',
+      editableKey: 'screw',
+      title: 'Screw',
+      summary: detailSummary(conditionLabels[screwCondition], currentAsset.screwLength || 'Length unknown', currentAsset.screwInstalledDate || 'Installed date unknown'),
+      status: <DetailStatusPill status={screwCondition} />,
+      view: <><DetailItem label="Screw Type" value={detailValue(currentAsset.screwType)} /><DetailItem label="Screw Installed Date" value={detailValue(currentAsset.screwInstalledDate)} /><DetailItem label="Screw Length" value={detailValue(currentAsset.screwLength)} /><DetailItem label="Screw Rebuild / Repaired" value={detailValue(currentAsset.screwRebuildRepaired)} /><ConditionBadge label="Screw condition" status={screwCondition} /></>,
+      edit: <><Text label="Screw Type" value={draft.screwType} set={v=>setDraftField('screwType',v)} disabled={!canEdit}/><DateWithAge label="Screw Installed Date" value={draft.screwInstalledDate} set={v=>setDraftField('screwInstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Screw Length" value={draft.screwLength} set={v=>setDraftField('screwLength',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Screw Rebuild / Repaired" conditionLabel="Screw Condition" rebuild={draft.screwRebuildRepaired} condition={draft.screwConditionStatus} setRebuild={v=>setDraftField('screwRebuildRepaired',v)} setCondition={v=>setDraftField('screwConditionStatus',v)} disabled={!canEdit}/></>,
+    },
+    {
+      key: 'screwTip',
+      editableKey: 'screwTip',
+      title: 'Screw Tip',
+      summary: detailSummary(currentAsset.screwTipType || 'Type unknown', currentAsset.screwTipInstalledDate || 'Installed date unknown'),
+      view: <><DetailItem label="Screw Tip Type" value={detailValue(currentAsset.screwTipType)} /><DetailItem label="Screw Tip Installed Date" value={detailValue(currentAsset.screwTipInstalledDate)} /></>,
+      edit: <><Text label="Screw Tip Type" value={draft.screwTipType} set={v=>setDraftField('screwTipType',v)} disabled={!canEdit}/><DateWithAge label="Screw Tip Installed Date" value={draft.screwTipInstalledDate} set={v=>setDraftField('screwTipInstalledDate',v)} disabled={!canEdit}/></>,
+    },
+    {
+      key: 'barrel',
+      editableKey: 'barrel',
+      title: 'Barrel',
+      summary: detailSummary(conditionLabels[barrelCondition], currentAsset.barrelDiameter || 'Diameter unknown', currentAsset.barrelInstalledDate || 'Installed date unknown'),
+      status: <DetailStatusPill status={barrelCondition} />,
+      view: <><DetailItem label="Barrel Diameter" value={detailValue(currentAsset.barrelDiameter)} /><DetailItem label="Barrel Installed Date" value={detailValue(currentAsset.barrelInstalledDate)} /><DetailItem label="Barrel Length" value={detailValue(currentAsset.barrelLength)} /><DetailItem label="Barrel Rebuild / Repaired" value={detailValue(currentAsset.barrelRebuildRepaired)} /><ConditionBadge label="Barrel condition" status={barrelCondition} /></>,
+      edit: <><Text label="Barrel Diameter" value={draft.barrelDiameter} set={v=>setDraftField('barrelDiameter',v)} disabled={!canEdit}/><DateWithAge label="Barrel Installed Date" value={draft.barrelInstalledDate} set={v=>setDraftField('barrelInstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Barrel Length" value={draft.barrelLength} set={v=>setDraftField('barrelLength',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Barrel Rebuild / Repaired" conditionLabel="Barrel Condition" rebuild={draft.barrelRebuildRepaired} condition={draft.barrelConditionStatus} setRebuild={v=>setDraftField('barrelRebuildRepaired',v)} setCondition={v=>setDraftField('barrelConditionStatus',v)} disabled={!canEdit}/></>,
+    },
+    {
+      key: 'barrelEndCap',
+      editableKey: 'barrelEndCap',
+      title: 'Barrel End Cap',
+      summary: currentAsset.barrelEndCapInstalledDate || 'Installed date unknown',
+      view: <DetailItem label="Barrel End Cap Installed Date" value={detailValue(currentAsset.barrelEndCapInstalledDate)} />,
+      edit: <DateWithAge label="Barrel End Cap Installed Date" value={draft.barrelEndCapInstalledDate} set={v=>setDraftField('barrelEndCapInstalledDate',v)} disabled={!canEdit}/>,
+    },
+    ...(currentAsset.hasDoubleShotInjection ? [
+      {
+        key: 'screw2' as const,
+        editableKey: 'screw2' as const,
+        title: 'Injection Unit 2 Screw',
+        summary: detailSummary(conditionLabels[screw2Condition], currentAsset.screw2Length || 'Length unknown', currentAsset.screw2InstalledDate || 'Installed date unknown'),
+        status: <DetailStatusPill status={screw2Condition} />,
+        view: <><DetailItem label="Screw 2 Type" value={detailValue(currentAsset.screw2Type)} /><DetailItem label="Screw 2 Installed Date" value={detailValue(currentAsset.screw2InstalledDate)} /><DetailItem label="Screw 2 Length" value={detailValue(currentAsset.screw2Length)} /><DetailItem label="Screw 2 Rebuild / Repaired" value={detailValue(currentAsset.screw2RebuildRepaired)} /><ConditionBadge label="Screw 2 condition" status={screw2Condition} /></>,
+        edit: <><Text label="Screw 2 Type" value={draft.screw2Type} set={v=>setDraftField('screw2Type',v)} disabled={!canEdit}/><DateWithAge label="Screw 2 Installed Date" value={draft.screw2InstalledDate} set={v=>setDraftField('screw2InstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Screw 2 Length" value={draft.screw2Length} set={v=>setDraftField('screw2Length',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Screw 2 Rebuild / Repaired" conditionLabel="Screw 2 Condition" rebuild={draft.screw2RebuildRepaired} condition={draft.screw2ConditionStatus} setRebuild={v=>setDraftField('screw2RebuildRepaired',v)} setCondition={v=>setDraftField('screw2ConditionStatus',v)} disabled={!canEdit}/></>,
+      },
+      {
+        key: 'screw2Tip' as const,
+        editableKey: 'screw2Tip' as const,
+        title: 'Injection Unit 2 Screw Tip',
+        summary: detailSummary(currentAsset.screw2TipType || 'Type unknown', currentAsset.screw2TipInstalledDate || 'Installed date unknown'),
+        view: <><DetailItem label="Screw 2 Tip Type" value={detailValue(currentAsset.screw2TipType)} /><DetailItem label="Screw 2 Tip Installed Date" value={detailValue(currentAsset.screw2TipInstalledDate)} /></>,
+        edit: <><Text label="Screw 2 Tip Type" value={draft.screw2TipType} set={v=>setDraftField('screw2TipType',v)} disabled={!canEdit}/><DateWithAge label="Screw 2 Tip Installed Date" value={draft.screw2TipInstalledDate} set={v=>setDraftField('screw2TipInstalledDate',v)} disabled={!canEdit}/></>,
+      },
+      {
+        key: 'barrel2' as const,
+        editableKey: 'barrel2' as const,
+        title: 'Injection Unit 2 Barrel',
+        summary: detailSummary(conditionLabels[barrel2Condition], currentAsset.barrel2Diameter || 'Diameter unknown', currentAsset.barrel2InstalledDate || 'Installed date unknown'),
+        status: <DetailStatusPill status={barrel2Condition} />,
+        view: <><DetailItem label="Barrel 2 Diameter" value={detailValue(currentAsset.barrel2Diameter)} /><DetailItem label="Barrel 2 Installed Date" value={detailValue(currentAsset.barrel2InstalledDate)} /><DetailItem label="Barrel 2 Length" value={detailValue(currentAsset.barrel2Length)} /><DetailItem label="Barrel 2 Rebuild / Repaired" value={detailValue(currentAsset.barrel2RebuildRepaired)} /><ConditionBadge label="Barrel 2 condition" status={barrel2Condition} /></>,
+        edit: <><Text label="Barrel 2 Diameter" value={draft.barrel2Diameter} set={v=>setDraftField('barrel2Diameter',v)} disabled={!canEdit}/><DateWithAge label="Barrel 2 Installed Date" value={draft.barrel2InstalledDate} set={v=>setDraftField('barrel2InstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Barrel 2 Length" value={draft.barrel2Length} set={v=>setDraftField('barrel2Length',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Barrel 2 Rebuild / Repaired" conditionLabel="Barrel 2 Condition" rebuild={draft.barrel2RebuildRepaired} condition={draft.barrel2ConditionStatus} setRebuild={v=>setDraftField('barrel2RebuildRepaired',v)} setCondition={v=>setDraftField('barrel2ConditionStatus',v)} disabled={!canEdit}/></>,
+      },
+      {
+        key: 'barrel2EndCap' as const,
+        editableKey: 'barrel2EndCap' as const,
+        title: 'Injection Unit 2 Barrel End Cap',
+        summary: currentAsset.barrel2EndCapInstalledDate || 'Installed date unknown',
+        view: <DetailItem label="Barrel 2 End Cap Installed Date" value={detailValue(currentAsset.barrel2EndCapInstalledDate)} />,
+        edit: <DateWithAge label="Barrel 2 End Cap Installed Date" value={draft.barrel2EndCapInstalledDate} set={v=>setDraftField('barrel2EndCapInstalledDate',v)} disabled={!canEdit}/>,
+      },
+    ] : []),
+    ...(currentAsset.hasPlungerInjection ? [
+      {
+        key: 'plunger' as const,
+        editableKey: 'plunger' as const,
+        title: 'Plunger',
+        summary: detailSummary(conditionLabels[plungerCondition], currentAsset.plungerDiameter || 'Diameter unknown', currentAsset.plungerInstalledDate || 'Installed date unknown'),
+        status: <DetailStatusPill status={plungerCondition} />,
+        view: <><DetailItem label="Plunger Type" value={detailValue(currentAsset.plungerType)} /><DetailItem label="Plunger Installed Date" value={detailValue(currentAsset.plungerInstalledDate)} /><DetailItem label="Plunger Length" value={detailValue(currentAsset.plungerLength)} /><DetailItem label="Plunger Diameter" value={detailValue(currentAsset.plungerDiameter)} /><DetailItem label="Plunger Rebuild / Repaired" value={detailValue(currentAsset.plungerRebuildRepaired)} /><ConditionBadge label="Plunger condition" status={plungerCondition} /></>,
+        edit: <><Text label="Plunger Type" value={draft.plungerType} set={v=>setDraftField('plungerType',v)} disabled={!canEdit}/><DateWithAge label="Plunger Installed Date" value={draft.plungerInstalledDate} set={v=>setDraftField('plungerInstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Plunger Length" value={draft.plungerLength} set={v=>setDraftField('plungerLength',v)} disabled={!canEdit}/><UnitDimensionField label="Plunger Diameter" value={draft.plungerDiameter} set={v=>setDraftField('plungerDiameter',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Plunger Rebuild / Repaired" conditionLabel="Plunger Condition" rebuild={draft.plungerRebuildRepaired} condition={draft.plungerConditionStatus} setRebuild={v=>setDraftField('plungerRebuildRepaired',v)} setCondition={v=>setDraftField('plungerConditionStatus',v)} disabled={!canEdit}/></>,
+      },
+      {
+        key: 'plungerBarrel' as const,
+        editableKey: 'plungerBarrel' as const,
+        title: 'Plunger Barrel / Cylinder Barrel',
+        summary: detailSummary(conditionLabels[plungerBarrelCondition], currentAsset.plungerBarrelDiameter || 'Diameter unknown', currentAsset.plungerBarrelInstalledDate || 'Installed date unknown'),
+        status: <DetailStatusPill status={plungerBarrelCondition} />,
+        view: <><DetailItem label="Plunger Barrel Type" value={detailValue(currentAsset.plungerBarrelType)} /><DetailItem label="Plunger Barrel Installed Date" value={detailValue(currentAsset.plungerBarrelInstalledDate)} /><DetailItem label="Plunger Barrel Length" value={detailValue(currentAsset.plungerBarrelLength)} /><DetailItem label="Plunger Barrel Diameter" value={detailValue(currentAsset.plungerBarrelDiameter)} /><DetailItem label="Plunger Barrel Rebuild / Repaired" value={detailValue(currentAsset.plungerBarrelRebuildRepaired)} /><ConditionBadge label="Plunger Barrel condition" status={plungerBarrelCondition} /></>,
+        edit: <><Text label="Plunger Barrel Type" value={draft.plungerBarrelType} set={v=>setDraftField('plungerBarrelType',v)} disabled={!canEdit}/><DateWithAge label="Plunger Barrel Installed Date" value={draft.plungerBarrelInstalledDate} set={v=>setDraftField('plungerBarrelInstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Plunger Barrel Length" value={draft.plungerBarrelLength} set={v=>setDraftField('plungerBarrelLength',v)} disabled={!canEdit}/><UnitDimensionField label="Plunger Barrel Diameter" value={draft.plungerBarrelDiameter} set={v=>setDraftField('plungerBarrelDiameter',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Plunger Barrel Rebuild / Repaired" conditionLabel="Plunger Barrel Condition" rebuild={draft.plungerBarrelRebuildRepaired} condition={draft.plungerBarrelConditionStatus} setRebuild={v=>setDraftField('plungerBarrelRebuildRepaired',v)} setCondition={v=>setDraftField('plungerBarrelConditionStatus',v)} disabled={!canEdit}/></>,
+      },
+      {
+        key: 'plungerBarrelEndCap' as const,
+        editableKey: 'plungerBarrelEndCap' as const,
+        title: 'Plunger Barrel End Cap',
+        summary: currentAsset.plungerBarrelEndCapInstalledDate || 'Installed date unknown',
+        view: <DetailItem label="Plunger Barrel End Cap Installed Date" value={detailValue(currentAsset.plungerBarrelEndCapInstalledDate)} />,
+        edit: <DateWithAge label="Plunger Barrel End Cap Installed Date" value={draft.plungerBarrelEndCapInstalledDate} set={v=>setDraftField('plungerBarrelEndCapInstalledDate',v)} disabled={!canEdit}/>,
+      },
+    ] : []),
+    {
+      key: 'notes',
+      editableKey: 'notes',
+      title: 'Notes / Critical Notes',
+      summary: detailSummary(currentAsset.criticalNotes ? 'Critical notes set' : 'No critical notes', currentAsset.notes ? 'Notes set' : 'No notes'),
+      status: currentAsset.criticalNotes ? <span className="machine-section-alert-pill">Critical</span> : undefined,
+      view: <><DetailItem label="Notes" value={detailValue(currentAsset.notes)} tone="note" /><DetailItem label="Critical Notes" value={detailValue(currentAsset.criticalNotes)} tone="critical" /></>,
+      edit: <><Area tone="note" label="Notes" value={draft.notes} set={v=>setDraftField('notes',v)} disabled={!canEdit}/><Area tone="critical" label="Critical Notes" value={draft.criticalNotes} set={v=>setDraftField('criticalNotes',v)} disabled={!canEdit}/></>,
+    },
+    {
+      key: 'inspection',
+      title: 'Measurement Inspection',
+      summary: 'Alpha placeholder / component condition planning',
+      actionLabel: 'Open',
+      onAction: onInspection,
+      view: <div className="machine-inspection-inline-panel"><strong>Alpha placeholder</strong><p>Alpha placeholder. Inspection tracking will later compare screw, barrel, tip, end cap, and plunger measurements and update conditions from New to Used to Worn.</p><div className="measurement-component-list">{inspectionComponents(currentAsset).map(component=><span key={component}>{component}</span>)}</div><button className="secondary-button compact-button" type="button" onClick={onInspection}>Open</button></div>,
+    },
+  ];
+
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-modal machine-detail-modal">
-    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3>{asset.assetNumber}</h3><p>{asset.brand || 'Brand'} / {asset.model || 'Model'} / S/N: {asset.serialNumber || '-'}</p></div><div className="machine-detail-header-actions"><button className="secondary-button compact-button" type="button" onClick={onLogs}>Logs</button><button className="primary-button compact-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div></div>
+    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3>{currentAsset.assetNumber}</h3><p>{currentAsset.brand || 'Brand'} / {currentAsset.model || 'Model'} / S/N: {currentAsset.serialNumber || '-'}</p></div><div className="machine-detail-header-actions"><button className="secondary-button compact-button" type="button" onClick={onLogs}>Logs</button><button className="primary-button compact-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div></div>
     <div className="machine-detail-summary">
-      <DetailItem label="Status" value={machineStatusLabel(asset.status)} />
+      <DetailItem label="Status" value={machineStatusLabel(currentAsset.status)} />
       <DetailItem label="Setup" value={unitLabel} />
-      <DetailItem label="Year / Age" value={`${asset.machineYear || '-'} / ${machineYearAge(asset.machineYear)}`} />
-      <DetailItem label="Location" value={asset.location || '-'} />
+      <DetailItem label="Year / Age" value={`${currentAsset.machineYear || '-'} / ${machineYearAge(currentAsset.machineYear)}`} />
+      <DetailItem label="Location" value={detailValue(currentAsset.location)} />
     </div>
-    <DetailSection title="Basic Info"><DetailItem label="Asset Name" value={asset.assetName || '-'} /><DetailItem label="Brand" value={asset.brand || '-'} /><DetailItem label="Model" value={asset.model || '-'} /><DetailItem label="Serial #" value={asset.serialNumber || '-'} /><DetailItem label="Machine Type" value={asset.machineType || '-'} /><DetailItem label="Power Type" value={asset.powerType || '-'} /><DetailItem label="Tonnage" value={asset.tonnage || '-'} /><DetailItem label="Shot Size" value={`${displayShotSize(asset.shotSizeOz)} oz`} /><DetailItem label="Barrel / Screw Diameter" value={asset.barrelDiameter || '-'} /></DetailSection>
-    <DetailSection title="Electrical / Dimensions"><DetailItem label="Voltage" value={asset.voltageValue || '-'} /><DetailItem label="Voltage Type" value={asset.voltageType || '-'} /><DetailItem label="Full Load Amp" value={asset.fullLoadAmp || '-'} /><DetailItem label="Machine Length" value={asset.machineLength || '-'} /><DetailItem label="Machine Width" value={asset.machineWidth || '-'} /><DetailItem label="Machine Height" value={asset.machineHeight || '-'} /><DetailItem label="Full Die Height Length / Range" value={asset.fullDieHeightLength || '-'} /></DetailSection>
-    <DetailSection title="Screw / Barrel"><DetailItem label="Screw Type" value={asset.screwType || '-'} /><DetailItem label="Screw Tip Type" value={asset.screwTipType || '-'} /><DetailItem label="Screw Installed" value={asset.screwInstalledDate || '-'} /><DetailItem label="Screw Tip Installed" value={asset.screwTipInstalledDate || '-'} /><DetailItem label="Screw Length" value={asset.screwLength || '-'} /><DetailItem label="Barrel Installed" value={asset.barrelInstalledDate || '-'} /><DetailItem label="Barrel End Cap Installed" value={asset.barrelEndCapInstalledDate || '-'} /><DetailItem label="Barrel Length" value={asset.barrelLength || '-'} /><ConditionBadge label="Screw condition" status={effectiveCondition(asset.screwRebuildRepaired, asset.screwConditionStatus)} /><ConditionBadge label="Barrel condition" status={effectiveCondition(asset.barrelRebuildRepaired, asset.barrelConditionStatus)} /></DetailSection>
-    {asset.hasDoubleShotInjection&&<DetailSection title="Secondary Injection"><DetailItem label="Screw 2 Type" value={asset.screw2Type || '-'} /><DetailItem label="Screw 2 Tip Type" value={asset.screw2TipType || '-'} /><DetailItem label="Screw 2 Installed" value={asset.screw2InstalledDate || '-'} /><DetailItem label="Screw 2 Tip Installed" value={asset.screw2TipInstalledDate || '-'} /><DetailItem label="Screw 2 Length" value={asset.screw2Length || '-'} /><DetailItem label="Barrel 2 Diameter" value={asset.barrel2Diameter || '-'} /><DetailItem label="Barrel 2 Installed" value={asset.barrel2InstalledDate || '-'} /><DetailItem label="Barrel 2 End Cap Installed" value={asset.barrel2EndCapInstalledDate || '-'} /><DetailItem label="Barrel 2 Length" value={asset.barrel2Length || '-'} /><ConditionBadge label="Screw 2 condition" status={effectiveCondition(asset.screw2RebuildRepaired, asset.screw2ConditionStatus)} /><ConditionBadge label="Barrel 2 condition" status={effectiveCondition(asset.barrel2RebuildRepaired, asset.barrel2ConditionStatus)} /></DetailSection>}
-    {asset.hasPlungerInjection&&<DetailSection title="Plunger Injection"><DetailItem label="Plunger Type" value={asset.plungerType || '-'} /><DetailItem label="Plunger Installed" value={asset.plungerInstalledDate || '-'} /><DetailItem label="Plunger Length" value={asset.plungerLength || '-'} /><DetailItem label="Plunger Diameter" value={asset.plungerDiameter || '-'} /><DetailItem label="Plunger Barrel Type" value={asset.plungerBarrelType || '-'} /><DetailItem label="Plunger Barrel Installed" value={asset.plungerBarrelInstalledDate || '-'} /><DetailItem label="Plunger Barrel End Cap Installed" value={asset.plungerBarrelEndCapInstalledDate || '-'} /><DetailItem label="Plunger Barrel Length" value={asset.plungerBarrelLength || '-'} /><DetailItem label="Plunger Barrel Diameter" value={asset.plungerBarrelDiameter || '-'} /><ConditionBadge label="Plunger condition" status={effectiveCondition(asset.plungerRebuildRepaired, asset.plungerConditionStatus)} /><ConditionBadge label="Plunger Barrel condition" status={effectiveCondition(asset.plungerBarrelRebuildRepaired, asset.plungerBarrelConditionStatus)} /></DetailSection>}
-    <DetailSection title="Notes / Critical Notes"><DetailItem label="Notes" value={asset.notes || '-'} tone="note" /><DetailItem label="Critical Notes" value={asset.criticalNotes || '-'} tone="critical" /></DetailSection>
-    <button className="machine-inspection-card" type="button" onClick={onInspection}><strong>Measurement Inspection</strong><span>Alpha placeholder / coming next</span><small>Future inspection data will compare measurements and update component condition status from New to Used to Worn.</small></button>
+    <div className="machine-detail-accordion-list">
+      {sections.map(section=>{
+        const editableKey = section.editableKey;
+        const isEditing = Boolean(editableKey && editingSection === editableKey);
+        const isOpen = expanded.has(section.key) || isEditing;
+        const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
+        const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
+        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onOpen={()=>openSection(section.key)} onToggle={()=>toggleSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+      })}
+    </div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section></div>;
 }
-function DetailSection({title,children}:{title:string;children:ReactNode}) { return <section className="machine-detail-section"><span>{title}</span><div className="machine-detail-grid">{children}</div></section>; }
+function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onOpen,onToggle,onSave,onCancel,saving,error,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onOpen:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;children:ReactNode}) {
+  const panelId = `machine-detail-panel-${sectionKey}`;
+  return <article className={`machine-detail-accordion-card ${expanded ? 'is-open' : ''} ${editing ? 'is-editing' : ''}`} onPointerEnter={event=>{ if (event.pointerType !== 'touch') onOpen(); }}>
+    <div className="machine-detail-accordion-header">
+      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle} onFocus={onOpen}>
+        <span className="machine-detail-section-title">{title}</span>
+        <span className="machine-detail-section-summary">{summary}</span>
+        {status}
+        <span className="machine-accordion-chevron" aria-hidden="true">v</span>
+      </button>
+      <div className="machine-detail-section-actions">
+        {editing&&<><button className="primary-button compact-button" type="button" onClick={onSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button><button className="secondary-button compact-button" type="button" onClick={onCancel} disabled={saving}>Cancel</button></>}
+        {!editing&&actionLabel&&onAction&&<button className="secondary-button compact-button" type="button" onClick={onAction}>{actionLabel}</button>}
+      </div>
+    </div>
+    <div className="machine-detail-accordion-panel" id={panelId} aria-hidden={!expanded}>
+      <div className={editing ? 'machine-detail-grid machine-detail-edit-grid' : 'machine-detail-grid'}>{children}</div>
+      {error&&<p className="form-message error machine-section-error">{error}</p>}
+    </div>
+  </article>;
+}
+function DetailStatusPill({status}:{status:ConditionStatus}) { return <span className={`machine-section-status-pill condition-${status}`}>{conditionLabels[status]}</span>; }
 function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-item ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span>{label}</span><strong>{value}</strong></div>; }
 function MeasurementInspectionModal({target,onClose}:{target:InspectionContext;onClose:()=>void}) {
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal measurement-inspection-modal"><div className="modal-heading"><div><p className="eyebrow">Alpha Placeholder / Coming Next</p><h3>Measurement Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p>Inspection tracking will be added later. It will compare measurements and update condition status from New to Used to Worn for screw, barrel, and plunger components.</p><div className="measurement-component-list">{inspectionComponents(target).map(component=><span key={component}>{component}</span>)}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Close</button></div></section></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal measurement-inspection-modal"><div className="modal-heading"><div><p className="eyebrow">Alpha Placeholder / Coming Next</p><h3>Measurement Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p>Alpha placeholder. Inspection tracking will later compare screw, barrel, tip, end cap, and plunger measurements and update conditions from New to Used to Worn.</p><div className="measurement-component-list">{inspectionComponents(target).map(component=><span key={component}>{component}</span>)}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Close</button></div></section></div>;
 }
 
 function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onReplacement,onInspection}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onInspection:()=>void}) {
@@ -445,6 +698,13 @@ function DecimalInput({label,value,set,disabled}:{label:string;value:string;set:
 function Area({label,value,set,disabled,tone}:{label:string;value:string;set:(value:string)=>void;disabled:boolean;tone?:'note'|'critical'}) { return <label className={`form-field machine-form-wide ${tone === 'critical' ? 'machine-critical-field' : tone === 'note' ? 'machine-note-field' : ''}`}><span>{label}</span><textarea value={value} disabled={disabled} onChange={event=>set(event.target.value)} /></label>; }
 function Select({label,value,set,options,disabled}:{label:string;value:string;set:(value:string)=>void;options:string[];disabled:boolean}) { return <label className="form-field"><span>{label}</span><select value={value} disabled={disabled} onChange={event=>set(event.target.value)}>{options.map(option=><option key={option} value={option}>{option || 'Select'}</option>)}</select></label>; }
 function Check({label,checked,set,disabled}:{label:string;checked:boolean;set:(checked:boolean)=>void;disabled:boolean}) { return <label className="machine-check-field"><input type="checkbox" checked={checked} disabled={disabled} onChange={event=>set(event.target.checked)} /><span>{label}</span></label>; }
+function ConditionSelect({label,value,set,disabled}:{label:string;value:ConditionStatus;set:(value:ConditionStatus)=>void;disabled:boolean}) {
+  return <label className="form-field"><span>{label}</span><select value={value} disabled={disabled} onChange={event=>set(event.target.value as ConditionStatus)}>{(Object.keys(conditionLabels) as ConditionStatus[]).map(option=><option key={option} value={option}>{conditionLabels[option]}</option>)}</select></label>;
+}
+function ComponentConditionEditor({rebuildLabel,conditionLabel,rebuild,condition,setRebuild,setCondition,disabled}:{rebuildLabel:string;conditionLabel:string;rebuild:boolean;condition:ConditionStatus;setRebuild:(value:boolean)=>void;setCondition:(value:ConditionStatus)=>void;disabled:boolean}) {
+  const effective = rebuild ? 'rebuilt_repaired' : condition;
+  return <><Check label={rebuildLabel} checked={rebuild} set={checked=>{ setRebuild(checked); setCondition(checked ? 'rebuilt_repaired' : 'new'); }} disabled={disabled}/><ConditionSelect label={conditionLabel} value={effective} set={value=>{ if (value === 'rebuilt_repaired') { setRebuild(true); setCondition('rebuilt_repaired'); } else { setRebuild(false); setCondition(value); } }} disabled={disabled}/></>;
+}
 function DateWithAge({label,value,set,disabled}:{label:string;value:string;set:(value:string)=>void;disabled:boolean}) {
   const isoValue = isoDateValue(value);
   const useDatePicker = isoValue !== null;

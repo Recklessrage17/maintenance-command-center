@@ -504,6 +504,45 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-detail-section { display: grid; gap: 10px; padding: 13px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: linear-gradient(145deg, rgba(10, 24, 34, .66), rgba(3, 10, 18, .62)); box-shadow: inset 0 1px 0 rgba(255,255,255,.055); }
 .machine-detail-section > span { color: #9eefff; font-size: .72rem; font-weight: 950; text-transform: uppercase; letter-spacing: .055em; }
 .machine-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.machine-detail-accordion-list { display: grid; gap: 10px; min-width: 0; }
+.machine-detail-accordion-card { min-width: 0; overflow: hidden; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; background: linear-gradient(145deg, rgba(18,31,42,.72), rgba(4,13,25,.72)); box-shadow: inset 0 1px 0 rgba(255,255,255,.065), 0 12px 28px rgba(0,0,0,.14); transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+.machine-detail-accordion-card.is-open, .machine-detail-accordion-card:focus-within { border-color: rgba(99,203,255,.34); background: linear-gradient(145deg, rgba(24,37,50,.8), rgba(4,13,25,.78)); box-shadow: inset 0 1px 0 rgba(255,255,255,.085), 0 16px 34px rgba(0,0,0,.18); }
+.machine-detail-accordion-card.is-editing { border-color: rgba(54,229,170,.42); }
+.machine-detail-accordion-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px; }
+.machine-detail-accordion-toggle { appearance: none; width: 100%; min-width: 0; min-height: 52px; display: grid; grid-template-columns: minmax(130px, auto) minmax(0, 1fr) auto auto; gap: 9px; align-items: center; padding: 9px 10px; border: 0; border-radius: 8px; color: #e8fbff; background: rgba(4,18,34,.28); cursor: pointer; font: inherit; text-align: left; }
+.machine-detail-accordion-toggle:hover, .machine-detail-accordion-toggle:focus-visible { outline: none; background: rgba(5,61,86,.38); box-shadow: inset 0 0 0 1px rgba(68,215,255,.22); }
+.machine-detail-section-title, .machine-detail-section-summary, .machine-section-status-pill, .machine-section-alert-pill, .machine-accordion-chevron { margin: 0; }
+.machine-detail-section-title { min-width: 0; color: #e8fbff; font-size: .9rem; font-weight: 950; line-height: 1.15; overflow-wrap: anywhere; }
+.machine-detail-section-summary { min-width: 0; color: #9ec7d8; font-size: .78rem; font-weight: 850; line-height: 1.25; overflow-wrap: anywhere; }
+.machine-section-status-pill, .machine-section-alert-pill { display: inline-flex; width: fit-content; max-width: 100%; min-height: 24px; align-items: center; justify-content: center; padding: 0 9px; border: 1px solid rgba(143,205,233,.26); border-radius: 999px; font-size: .66rem; font-weight: 950; line-height: 1; text-transform: uppercase; white-space: nowrap; }
+.machine-section-status-pill.condition-new { color: #a7ffd8; border-color: rgba(54,229,170,.42); background: rgba(18,97,71,.34); }
+.machine-section-status-pill.condition-used { color: #ffd36f; border-color: rgba(255,180,95,.42); background: rgba(91,70,19,.34); }
+.machine-section-status-pill.condition-worn, .machine-section-alert-pill { color: #ffb7c1; border-color: rgba(255,117,138,.46); background: rgba(111,52,60,.36); }
+.machine-section-status-pill.condition-rebuilt_repaired { color: #bff3ff; border-color: rgba(68,215,255,.42); background: rgba(5,61,86,.4); }
+.machine-accordion-chevron { display: inline-flex; width: 22px; min-height: 22px; align-items: center; justify-content: center; color: #8fe8ff; font-size: .8rem; font-weight: 1000; transition: transform .18s ease; }
+.machine-detail-accordion-card.is-open .machine-accordion-chevron { transform: rotate(180deg); }
+.machine-detail-section-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.machine-detail-section-actions .compact-button { width: auto; white-space: nowrap; }
+.machine-detail-accordion-panel { max-height: 0; overflow: hidden; visibility: hidden; opacity: 0; transform: translateY(-4px); padding: 0 10px; transition: max-height .22s ease, opacity .18s ease, transform .18s ease, padding .18s ease, visibility .18s ease; }
+.machine-detail-accordion-card.is-open .machine-detail-accordion-panel { max-height: 2200px; visibility: visible; opacity: 1; transform: translateY(0); padding: 0 10px 12px; }
+.machine-detail-edit-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+.machine-detail-edit-grid .form-field, .machine-detail-edit-grid .machine-check-field { min-width: 0; }
+.machine-detail-edit-grid .machine-form-wide { grid-column: 1 / -1; }
+.machine-section-error { margin: 10px 0 0; }
+.machine-inspection-inline-panel { grid-column: 1 / -1; min-width: 0; display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(68,215,255,.22); border-radius: 8px; color: #d5eaf2; background: linear-gradient(145deg, rgba(5,61,86,.36), rgba(4,13,25,.62)); }
+.machine-inspection-inline-panel strong { margin: 0; color: #e8fbff; font-size: .96rem; line-height: 1.2; }
+.machine-inspection-inline-panel p { margin: 0; color: #c5dce7; font-size: .86rem; line-height: 1.45; }
+.machine-inspection-inline-panel .compact-button { justify-self: start; width: auto; }
+@media (max-width: 760px) {
+  .machine-detail-accordion-header { grid-template-columns: 1fr; }
+  .machine-detail-accordion-toggle { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  .machine-detail-section-summary { grid-column: 1 / -1; }
+  .machine-section-status-pill, .machine-section-alert-pill { justify-self: start; }
+  .machine-detail-section-actions { justify-content: flex-start; }
+  .machine-detail-section-actions .compact-button { flex: 1 1 120px; }
+  .machine-detail-edit-grid { grid-template-columns: 1fr; }
+  .machine-inspection-inline-panel .compact-button { width: 100%; }
+}
 .machine-detail-item { min-width: 0; display: grid; gap: 4px; align-content: start; padding: 10px; border: 1px solid rgba(143,205,233,.12); border-radius: 8px; background: rgba(4,13,25,.36); }
 .machine-detail-item span { color: #8fe8ff; font-size: .68rem; font-weight: 950; text-transform: uppercase; letter-spacing: .04em; }
 .machine-detail-item strong { color: #f3fbff; font-size: .9rem; line-height: 1.28; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -2063,6 +2102,9 @@ tr:hover td {
   .compact-button,
   .machine-action-badge,
   .machine-asset-card,
+  .machine-detail-accordion-card,
+  .machine-detail-accordion-panel,
+  .machine-accordion-chevron,
   .command-menu-item,
   .command-launcher-button,
   .launcher-gear,
