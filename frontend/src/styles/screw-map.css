@@ -43,44 +43,94 @@
 }
 
 .screw-diagram-controls {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.screw-diagram-control-column {
+  display: grid;
   gap: 8px;
+  min-height: 148px;
+  padding: 10px;
+  border: 1px solid rgba(117, 177, 198, 0.25);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(5, 20, 32, 0.78), rgba(2, 8, 14, 0.86));
+}
+
+.screw-diagram-control-column.zone-feed {
+  border-color: rgba(68, 215, 255, 0.62);
+  box-shadow: inset 4px 0 0 rgba(68, 215, 255, 0.34);
+}
+
+.screw-diagram-control-column.zone-transition {
+  border-color: rgba(54, 229, 170, 0.62);
+  box-shadow: inset 4px 0 0 rgba(54, 229, 170, 0.34);
+}
+
+.screw-diagram-control-column.zone-metering {
+  border-color: rgba(255, 211, 111, 0.68);
+  box-shadow: inset 4px 0 0 rgba(255, 211, 111, 0.36);
+}
+
+.screw-diagram-column-title {
+  display: block;
+  color: #f3fbff;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.zone-feed .screw-diagram-column-title {
+  color: #44d7ff;
+}
+
+.zone-transition .screw-diagram-column-title {
+  color: #36e5aa;
+}
+
+.zone-metering .screw-diagram-column-title {
+  color: #ffd36f;
 }
 
 .screw-diagram-pill {
-  min-height: 40px;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  font-size: 0.74rem;
+  display: grid;
+  min-height: 46px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.76rem;
   letter-spacing: 0;
 }
 
 .screw-diagram-target-icon {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   border-width: 2px;
 }
 
 .screw-diagram-target-icon::before {
-  top: -5px;
-  bottom: -5px;
+  top: -6px;
+  bottom: -6px;
 }
 
 .screw-diagram-target-icon::after {
-  left: -5px;
-  right: -5px;
+  left: -6px;
+  right: -6px;
 }
 
 .screw-diagram-button-copy {
-  display: block;
+  display: grid;
   color: #f3fbff;
-  font-size: 0.74rem;
+  font-size: 0.78rem;
   font-weight: 950;
-  line-height: 1.15;
+  line-height: 1.05;
   overflow-wrap: anywhere;
-  text-align: left;
+  text-align: center;
   text-transform: uppercase;
 }
 
@@ -99,7 +149,7 @@
 .screw-diagram-wrap {
   overflow: hidden;
   border-color: rgba(68, 215, 255, 0.22);
-  border-radius: 8px;
+  border-radius: 10px;
   background:
     linear-gradient(180deg, rgba(8, 25, 38, 0.88), rgba(3, 10, 18, 0.92)),
     repeating-linear-gradient(90deg, rgba(143, 205, 233, 0.04) 0 1px, transparent 1px 64px);
@@ -110,7 +160,7 @@
   display: block;
   width: min(100%, 1180px);
   height: auto;
-  max-height: clamp(275px, 26vw, 382px);
+  max-height: clamp(290px, 28vw, 390px);
   margin: 0 auto;
   aspect-ratio: 1120 / 312;
 }
@@ -161,6 +211,14 @@
 
 .screw-drive-neck {
   fill: rgba(142, 162, 170, 0.92);
+}
+
+.screw-drive-label {
+  fill: #f3fbff;
+  font-size: 12px;
+  font-weight: 950;
+  text-anchor: middle;
+  text-transform: uppercase;
 }
 
 .screw-spline-groove {
@@ -311,7 +369,11 @@
 
 @media (max-width: 1100px) {
   .screw-diagram-controls {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
+  }
+
+  .screw-diagram-control-column {
+    min-height: 0;
   }
 }
 
@@ -322,10 +384,6 @@
 
   .measurement-inspection-modal {
     width: calc(100vw - 20px);
-  }
-
-  .screw-diagram-controls {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .screw-diagram-svg {
