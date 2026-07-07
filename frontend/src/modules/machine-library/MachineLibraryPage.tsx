@@ -1,5 +1,6 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import ScrewMeasurementMap from './ScrewMeasurementMap';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAsset = {
@@ -1084,31 +1085,11 @@ function ScrewInspectionForm({record,onText,onMeasurement,onSelect,onRecord}:{re
     <FieldGrid>{screwIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid>
     <MeasurementSectionHeading title="Screw Measurements" />
     <MeasurementFieldGrid>{screwMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid>
-    <ScrewMeasurementDiagram onAddReading={addReading} />
+    <ScrewMeasurementMap onAddReading={addReading} />
     <ScrewSmallestSummary record={record} />
     <ScrewMeasurementAreas record={record} onAddReading={addReading} onUpdateReading={updateReading} onRemoveReading={removeReading} />
     <MeasurementSectionHeading title="Spline Check" />
     <FieldGrid><Select label="Spline Check" value={record.selectFields.splineCheck ?? ''} set={value=>onSelect('splineCheck',value)} options={['','Good','Worn','Damaged']} disabled={false}/><Area label="Spline Notes" value={record.textFields.splineNotes ?? ''} set={value=>onText('splineNotes',value)} disabled={false}/><Area label="Screw Comments" value={record.textFields.screwComments ?? ''} set={value=>onText('screwComments',value)} disabled={false}/></FieldGrid>
-  </section>;
-}
-function ScrewMeasurementDiagram({onAddReading}:{onAddReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey)=>void}) {
-  return <section className="screw-diagram-panel">
-    <div className="measurement-section-heading"><h4>Visual Screw Measurement Map</h4></div>
-    <div className="screw-diagram-controls" aria-label="Screw measurement controls">
-      {screwSections.map(section=><div className={`screw-diagram-control-column zone-${section.key}`} key={section.key}>
-        <strong>{section.shortLabel} Section</strong>
-        <button className="screw-diagram-pill flight" type="button" onClick={()=>onAddReading('flight',section.key)} aria-label={`Add ${section.shortLabel} Flight OD reading`}><span className="screw-diagram-target-icon" aria-hidden="true" /><span className="screw-diagram-button-copy"><b>{section.shortLabel}</b><span>Flight OD</span></span></button>
-        <button className="screw-diagram-pill root" type="button" onClick={()=>onAddReading('root',section.key)} aria-label={`Add ${section.shortLabel} Root Dia reading`}><span className="screw-diagram-target-icon" aria-hidden="true" /><span className="screw-diagram-button-copy"><b>{section.shortLabel}</b><span>Root Dia</span></span></button>
-      </div>)}
-    </div>
-    <div className="screw-diagram-wrap">
-      <img
-        className="screw-diagram-reference-img"
-        src="/screw-measurement-map-basic.svg"
-        alt="Screw measurement map showing flight OD and root diameter measurement locations"
-      />
-    </div>
-    <div className="screw-diagram-legend"><span className="flight">Flight OD = measure top/outer edge of flight</span><span className="root">Root Dia = measure valley between flights</span></div>
   </section>;
 }
 function ScrewSmallestSummary({record}:{record:MeasurementInspectionRecord}) {
