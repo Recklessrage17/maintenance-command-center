@@ -42,8 +42,8 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .mcc-brand::after { content: ""; position: absolute; left: 10px; right: 0; bottom: 4px; height: 1px; background: linear-gradient(90deg, rgba(68, 215, 255, 0.48), rgba(68, 215, 255, 0)); }
 .mcc-brand-mark { position: relative; display: grid; gap: 5px; padding: 2px 0; }
 .mcc-brand-mark strong { display: flex; align-items: baseline; gap: 9px; margin: 0; letter-spacing: .04em; line-height: 1; }
-.mcc-brand-jbt { color: #f3fbff; font-size: 1.62rem; font-weight: 950; text-shadow: 0 0 18px rgba(68, 215, 255, 0.24); }
-.mcc-brand-usa { color: #36e5aa; font-size: 1.12rem; font-weight: 950; text-shadow: 0 0 14px rgba(54, 229, 170, 0.2); }
+.mcc-brand-name { color: #f3fbff; font-size: 1.62rem; font-weight: 950; text-shadow: 0 0 18px rgba(68, 215, 255, 0.24); }
+.mcc-brand-accent { color: #36e5aa; font-size: 1.12rem; font-weight: 950; text-shadow: 0 0 14px rgba(54, 229, 170, 0.2); }
 .mcc-brand-mark > span { display: block; color: #a7e7fb; font-size: .68rem; font-weight: 900; letter-spacing: .07em; line-height: 1.2; text-transform: uppercase; }
 .mcc-brand-image { display: block; width: 42px; height: 42px; object-fit: contain; }
 .command-brand.image-brand { justify-content: center; padding-left: 13px; }
@@ -61,8 +61,8 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .command-brand::after { left: 9px; right: 2px; bottom: 3px; }
 .command-brand .mcc-brand-mark { gap: 2px; }
 .command-brand .mcc-brand-mark strong { display: grid; gap: 1px; letter-spacing: 0; line-height: .92; }
-.command-brand .mcc-brand-jbt { font-size: 1.05rem; }
-.command-brand .mcc-brand-usa { font-size: .78rem; }
+.command-brand .mcc-brand-name { font-size: 1.05rem; }
+.command-brand .mcc-brand-accent { font-size: .78rem; }
 .command-brand .mcc-brand-mark > span { display: none; }
 .command-launcher-button { display: grid; justify-items: center; gap: 5px; min-height: 62px; width: 62px; padding: 8px 6px; border: 1px solid rgba(68, 215, 255, 0.34); border-radius: 18px; color: #dff7ff; background: rgba(4, 18, 34, 0.84); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(68, 215, 255, 0.08) inset; cursor: pointer; font-size: .65rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .command-launcher-button:hover, .command-launcher.open .command-launcher-button { border-color: rgba(68, 215, 255, 0.72); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32), 0 0 24px rgba(68, 215, 255, 0.18); transform: translateY(-1px); }
@@ -145,8 +145,8 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
   .command-launcher.open::after { display: none; }
   .command-brand { width: auto; min-width: 150px; min-height: 58px; padding-left: 16px; }
   .command-brand .mcc-brand-mark strong { display: flex; align-items: baseline; gap: 8px; }
-  .command-brand .mcc-brand-jbt { font-size: 1.36rem; }
-  .command-brand .mcc-brand-usa { font-size: .96rem; }
+  .command-brand .mcc-brand-name { font-size: 1.36rem; }
+  .command-brand .mcc-brand-accent { font-size: .96rem; }
   .command-brand .mcc-brand-mark > span { display: block; font-size: .6rem; }
   .command-launcher-button { flex: 0 0 auto; margin-left: auto; }
   .command-menu { top: 70px; left: 0; right: 0; width: auto; max-height: calc(100vh - 92px); }
@@ -161,8 +161,8 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
   .mcc-main { padding: 140px 14px 14px; }
   .mcc-sidebar { width: 100%; padding: 16px; }
   .mcc-brand { min-height: auto; margin-bottom: 14px; padding-left: 16px; }
-  .mcc-brand-jbt { font-size: 1.42rem; }
-  .mcc-brand-usa { font-size: 1rem; }
+  .mcc-brand-name { font-size: 1.42rem; }
+  .mcc-brand-accent { font-size: 1rem; }
   .mcc-nav { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .mcc-header { align-items: flex-start; flex-direction: column; }
 }
@@ -573,16 +573,14 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .screw-reading-row {
     grid-template-columns: 1fr;
   }
-  .screw-diagram-buttons {
-    position: static;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding: 0 10px 10px;
+  .screw-diagram-controls {
+    grid-template-columns: 1fr;
   }
   .screw-diagram-wrap {
-    overflow: visible;
+    overflow: hidden;
   }
   .screw-diagram-svg {
-    height: 190px;
+    max-height: 220px;
   }
   .measurement-station-header {
     display: none;
@@ -653,16 +651,25 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .measurement-station-row { padding: 8px; border: 1px solid rgba(143,205,233,.12); border-radius: 8px; background: rgba(4,13,25,.34); }
 .measurement-station-row .form-field span, .measurement-station-row .measurement-input-field span { display: none; }
 .screw-inspection-form { border-color: rgba(68,215,255,.22); }
-.screw-diagram-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: rgba(4,18,34,.34); }
-.screw-diagram-wrap { position: relative; min-height: 240px; overflow: hidden; border: 1px solid rgba(68,215,255,.18); border-radius: 8px; background: linear-gradient(180deg, rgba(7,25,45,.84), rgba(3,10,18,.86)); }
-.screw-diagram-svg { display: block; width: 100%; height: 230px; }
-.screw-section-guides line { stroke: rgba(223,247,255,.28); stroke-width: 1; stroke-dasharray: 5 5; }
-.screw-section-guides text { fill: #dff7ff; font-size: 18px; font-weight: 900; letter-spacing: 0; }
-.screw-measure-arrow.flight-arrow { stroke: #44d7ff; fill: #44d7ff; }
-.screw-measure-arrow.root-arrow { stroke: #ffd36f; fill: #ffd36f; }
-.screw-measure-arrow line { stroke-width: 3; stroke-linecap: round; }
-.screw-diagram-buttons { position: absolute; inset: 12px 12px auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; pointer-events: none; }
-.screw-diagram-pill { pointer-events: auto; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 1px solid rgba(143,205,233,.24); border-radius: 999px; color: #e8fbff; background: rgba(4,18,34,.72); cursor: pointer; font: inherit; font-size: .72rem; font-weight: 950; line-height: 1.1; white-space: normal; text-align: center; }
+.screw-diagram-panel { min-width: 0; display: grid; gap: 12px; padding: 12px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: rgba(4,18,34,.34); overflow: hidden; }
+.screw-diagram-controls { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
+.screw-diagram-control-column { min-width: 0; display: grid; grid-template-rows: auto auto auto; gap: 7px; padding: 9px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: linear-gradient(145deg, rgba(13,32,45,.68), rgba(3,10,18,.42)); }
+.screw-diagram-control-column strong { min-height: 28px; display: grid; place-items: center; color: #f3fbff; font-size: .82rem; line-height: 1.15; text-align: center; }
+.screw-diagram-control-column.zone-feed { border-color: rgba(68,215,255,.22); }
+.screw-diagram-control-column.zone-transition { border-color: rgba(54,229,170,.2); }
+.screw-diagram-control-column.zone-metering { border-color: rgba(255,211,111,.22); }
+.screw-diagram-wrap { min-width: 0; overflow: hidden; border: 1px solid rgba(68,215,255,.18); border-radius: 8px; background: linear-gradient(180deg, rgba(7,25,45,.84), rgba(3,10,18,.86)); }
+.screw-diagram-svg { display: block; width: 100%; height: auto; max-height: 292px; aspect-ratio: 900 / 260; }
+.screw-zone-fill { opacity: .16; }
+.screw-zone-fill.feed { fill: #44d7ff; }
+.screw-zone-fill.transition { fill: #36e5aa; }
+.screw-zone-fill.metering { fill: #ffd36f; }
+.screw-zone-divider { stroke: rgba(223,247,255,.28); stroke-width: 1; stroke-dasharray: 5 6; }
+.screw-measure-label text { font-size: 18px; font-weight: 950; letter-spacing: 0; }
+.screw-measure-label line { stroke-width: 3; stroke-linecap: round; }
+.screw-measure-label.flight-label { fill: #bff3ff; stroke: #44d7ff; }
+.screw-measure-label.root-label { fill: #ffe1a3; stroke: #ffd36f; }
+.screw-diagram-pill { min-width: 0; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 9px; border: 1px solid rgba(143,205,233,.24); border-radius: 999px; color: #e8fbff; background: rgba(4,18,34,.72); cursor: pointer; font: inherit; font-size: .74rem; font-weight: 950; line-height: 1.1; white-space: normal; text-align: center; overflow-wrap: anywhere; }
 .screw-diagram-pill span { color: inherit; font-size: .64rem; text-transform: uppercase; }
 .screw-diagram-pill.flight { border-color: rgba(68,215,255,.58); background: linear-gradient(135deg, rgba(5,61,86,.82), rgba(4,18,34,.72)); }
 .screw-diagram-pill.root { border-color: rgba(255,211,111,.58); background: linear-gradient(135deg, rgba(91,70,19,.68), rgba(4,18,34,.76)); }

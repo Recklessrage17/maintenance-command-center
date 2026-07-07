@@ -87,9 +87,9 @@ const screwMeasurementFields = [
   ['leadGapMeasurement','Lead Gap Measurement'],
 ] as const;
 const screwSections: Array<{ key: ScrewSectionKey; label: string; shortLabel: string }> = [
-  { key: 'metering', label: 'Metering Section', shortLabel: 'Metering' },
-  { key: 'transition', label: 'Transition Section', shortLabel: 'Transition' },
   { key: 'feed', label: 'Feed Section', shortLabel: 'Feed' },
+  { key: 'transition', label: 'Transition Section', shortLabel: 'Transition' },
+  { key: 'metering', label: 'Metering Section', shortLabel: 'Metering' },
 ];
 const screwMeasurementKinds: Array<{ key: ScrewMeasurementKind; label: string; shortLabel: string; accent: string }> = [
   { key: 'flight', label: 'Flight Measurements', shortLabel: 'Flight OD', accent: 'flight' },
@@ -337,8 +337,8 @@ function measurementHelperText(value: MeasurementValue) {
 }
 function emptyScrewReadings(): ScrewMeasurementReadings {
   return {
-    flight: { metering: [], transition: [], feed: [] },
-    root: { metering: [], transition: [], feed: [] },
+    flight: { feed: [], transition: [], metering: [] },
+    root: { feed: [], transition: [], metering: [] },
   };
 }
 function screwReadingsForRecord(record: MeasurementInspectionRecord) {
@@ -1094,33 +1094,57 @@ function ScrewInspectionForm({record,onText,onMeasurement,onSelect,onRecord}:{re
 function ScrewMeasurementDiagram({onAddReading}:{onAddReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey)=>void}) {
   return <section className="screw-diagram-panel">
     <div className="measurement-section-heading"><h4>Visual Screw Measurement Map</h4></div>
+    <div className="screw-diagram-controls" aria-label="Screw measurement controls">
+      {screwSections.map(section=><div className={`screw-diagram-control-column zone-${section.key}`} key={section.key}>
+        <strong>{section.shortLabel}</strong>
+        <button className="screw-diagram-pill flight" type="button" onClick={()=>onAddReading('flight',section.key)} aria-label={`Add ${section.shortLabel} Flight OD reading`}><span>{section.shortLabel}</span>Flight OD</button>
+        <button className="screw-diagram-pill root" type="button" onClick={()=>onAddReading('root',section.key)} aria-label={`Add ${section.shortLabel} Root Dia reading`}><span>{section.shortLabel}</span>Root Dia</button>
+      </div>)}
+    </div>
     <div className="screw-diagram-wrap">
-      <svg className="screw-diagram-svg" viewBox="0 0 900 230" role="img" aria-label="Screw side view showing feed, transition, and metering measurement locations">
+      <svg className="screw-diagram-svg" viewBox="0 0 900 260" role="img" aria-label="Screw side view showing feed, transition, metering, and measurement locations">
         <defs>
-          <linearGradient id="screwBodyFill" x1="0" x2="1"><stop offset="0%" stopColor="#5c7484" /><stop offset="52%" stopColor="#9bb8c5" /><stop offset="100%" stopColor="#5f7888" /></linearGradient>
+          <linearGradient id="screwBodyFill" x1="0" x2="1"><stop offset="0%" stopColor="#405563" /><stop offset="40%" stopColor="#94aebb" /><stop offset="72%" stopColor="#b6ccd5" /><stop offset="100%" stopColor="#526a78" /></linearGradient>
+          <linearGradient id="screwFlightHighlight" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#f4fbff" stopOpacity=".7" /><stop offset="44%" stopColor="#cfe8f0" stopOpacity=".36" /><stop offset="100%" stopColor="#152635" stopOpacity=".18" /></linearGradient>
+          <marker id="screwFlightArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#44d7ff" /></marker>
+          <marker id="screwRootArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#ffd36f" /></marker>
         </defs>
-        <rect x="105" y="96" width="650" height="36" rx="18" fill="url(#screwBodyFill)" opacity=".92" />
-        <polygon points="755,94 838,114 755,134" fill="#8ea9b7" opacity=".9" />
-        <rect x="52" y="88" width="64" height="52" rx="7" fill="#718b99" />
-        <rect x="34" y="100" width="22" height="28" rx="5" fill="#4d6573" />
-        {Array.from({length:19}).map((_,index)=>{
-          const x = 124 + index * 32;
-          return <path key={x} d={`M ${x} 91 L ${x + 24} 72 L ${x + 34} 138 L ${x + 8} 157 Z`} fill={index < 7 ? '#77d7ff' : index < 13 ? '#80d7c7' : '#ffd36f'} opacity=".58" stroke="#dff7ff" strokeOpacity=".18" />;
+        <rect className="screw-zone-fill feed" x="120" y="64" width="225" height="130" rx="18" />
+        <rect className="screw-zone-fill transition" x="345" y="64" width="220" height="130" rx="18" />
+        <rect className="screw-zone-fill metering" x="565" y="64" width="205" height="130" rx="18" />
+        <line className="screw-zone-divider" x1="345" y1="58" x2="345" y2="201" />
+        <line className="screw-zone-divider" x1="565" y1="58" x2="565" y2="201" />
+        <rect x="88" y="114" width="700" height="38" rx="19" fill="url(#screwBodyFill)" opacity=".96" />
+        <rect x="124" y="124" width="628" height="10" rx="5" fill="#182c3a" opacity=".34" />
+        <line x1="118" y1="133" x2="760" y2="133" stroke="#dff7ff" strokeWidth="1.4" strokeLinecap="round" opacity=".24" />
+        <polygon points="786,109 850,133 786,157" fill="#89a5b4" opacity=".94" />
+        <polygon points="792,118 832,133 792,148" fill="#d5e8ef" opacity=".28" />
+        <rect x="52" y="103" width="42" height="60" rx="7" fill="#657f8d" />
+        <rect x="29" y="113" width="30" height="40" rx="5" fill="#455d6b" />
+        {[0,1,2,3].map(index=><rect key={index} x={62 + index * 8} y="96" width="5" height="16" rx="2" fill="#9db7c3" opacity=".78" />)}
+        {[0,1,2,3].map(index=><rect key={index} x={62 + index * 8} y="154" width="5" height="16" rx="2" fill="#9db7c3" opacity=".72" />)}
+        {Array.from({length:21}).map((_,index)=>{
+          const x = 118 + index * 31;
+          const feed = index < 8;
+          const transition = index >= 8 && index < 15;
+          const transitionStep = transition ? index - 8 : 0;
+          const top = feed ? 76 : transition ? 82 + transitionStep * 3 : 103;
+          const bottom = feed ? 190 : transition ? 184 - transitionStep * 5 : 163;
+          const fill = feed ? '#5fcfff' : transition ? '#62dac7' : '#ffd06a';
+          return <g key={x}>
+            <path d={`M ${x} 108 L ${x + 24} ${top} L ${x + 40} ${bottom} L ${x + 12} 158 Z`} fill={fill} opacity=".56" stroke="#eefbff" strokeOpacity=".26" />
+            <path d={`M ${x + 7} 111 L ${x + 25} ${top + 9} L ${x + 35} ${bottom - 12} L ${x + 16} 154 Z`} fill="url(#screwFlightHighlight)" opacity=".42" />
+          </g>;
         })}
-        <line x1="112" y1="114" x2="752" y2="114" stroke="#1a2d3a" strokeWidth="3" strokeLinecap="round" opacity=".7" />
-        <g className="screw-section-guides">
-          <line x1="318" y1="48" x2="318" y2="176" />
-          <line x1="540" y1="48" x2="540" y2="176" />
-          <text x="200" y="42">Feed</text>
-          <text x="410" y="42">Transition</text>
-          <text x="625" y="42">Metering</text>
+        <g className="screw-measure-label flight-label">
+          <text x="642" y="42">Flight OD</text>
+          <line x1="665" y1="50" x2="650" y2="96" markerEnd="url(#screwFlightArrowHead)" />
         </g>
-        <g className="screw-measure-arrow flight-arrow"><line x1="650" y1="70" x2="650" y2="88" /><circle cx="650" cy="70" r="5" /></g>
-        <g className="screw-measure-arrow root-arrow"><line x1="405" y1="164" x2="405" y2="125" /><circle cx="405" cy="164" r="5" /></g>
+        <g className="screw-measure-label root-label">
+          <text x="390" y="224">Root Dia</text>
+          <line x1="420" y1="206" x2="428" y2="145" markerEnd="url(#screwRootArrowHead)" />
+        </g>
       </svg>
-      <div className="screw-diagram-buttons">
-        {screwMeasurementKinds.map(kind=>screwSections.map(section=><button className={`screw-diagram-pill ${kind.accent}`} type="button" key={`${kind.key}-${section.key}`} onClick={()=>onAddReading(kind.key,section.key)}><span>{section.shortLabel}</span>{kind.shortLabel}</button>))}
-      </div>
     </div>
     <div className="screw-diagram-legend"><span className="flight">Flight OD = measure top/outer edge of flight</span><span className="root">Root Dia = measure valley between flights</span></div>
   </section>;

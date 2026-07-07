@@ -34,7 +34,7 @@ Company Branding in Settings controls the command launcher mark.
 
 Uploaded logos accept PNG, JPG, WEBP, and GIF files up to 1 MB. SVG is intentionally not accepted in this patch. Uploaded branding files are served from the branding uploads folder through a safe public URL and full filesystem paths are not returned to the UI.
 
-Default branding remains JBT USA with the Maintenance Command Center subtitle. If branding fails to load, the launcher falls back to that default.
+Default branding remains MCC with the Maintenance Command Center subtitle. If branding fails to load, the launcher falls back to that default.
 
 ## Files that should not be committed
 

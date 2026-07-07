@@ -405,9 +405,9 @@ type BrandingSettings = {
   iconAnimation: IconAnimation;
 };
 const defaultBrandingSettings: BrandingSettings = {
-  companyName: 'JBT',
+  companyName: 'MCC',
   companySubtitle: 'Maintenance Command Center',
-  companyAccentText: 'USA',
+  companyAccentText: '',
   logoMode: 'text',
   logoUrl: '',
   logoFileName: '',
@@ -3725,7 +3725,7 @@ function officialShiftUnder100TitleRight(sheet: XlsxSheet, type: RequisitionTemp
 async function officialWorkbookBuffer(input: { header: Record<string, unknown>; items: RequisitionPdfItem[]; notes: string; requestedBy: string; total: number; type: RequisitionTemplateKind; vendor: string }) {
   const map = officialTemplateMaps[input.type];
   if (!fs.existsSync(map.templatePath)) throw new Error(`Official requisition workbook template is missing: ${path.basename(map.templatePath)}`);
-  // Fill the official JBT XLSX template instead of redrawing price fields by PDF coordinates.
+  // Fill the workbook template instead of redrawing price fields by PDF coordinates.
   const workbook = await XlsxPopulate.fromFileAsync(map.templatePath);
   const sheet = workbook.sheet(0) as XlsxSheet;
   officialApplyWorkbookLayout(sheet, input.type);
@@ -4335,7 +4335,7 @@ function drawCurrencyInBox(
   options: { font: PDFFont; pageHeight: number; paddingX?: number; size?: number }
 ) {
   const amount = Number.isFinite(value) ? value : 0;
-  // The official JBT templates include placeholder prices ($0.00 / $ -).
+  // The workbook templates include placeholder prices ($0.00 / $ -).
   // Clear the cell interior first so MCC draws exactly one fitted price value.
   clearPdfBox(page, box, options.pageHeight);
   drawTextInBox(page, money(amount), box, {
@@ -4370,7 +4370,7 @@ function getVendorContactLines(header: Record<string, unknown>) {
 }
 
 function drawLineTableHeaders(_page: PDFPage, _positions: StampPositions, _boldFont: PDFFont, _pageHeight: number) {
-  // The JBT templates already include table headers. Keep normal output clean.
+  // The workbook templates already include table headers. Keep normal output clean.
 }
 function polishUnder100TemplateLabels(page: PDFPage, boldFont: PDFFont, regularFont: PDFFont, pageHeight: number) {
   const white = rgb(1, 1, 1);
@@ -5404,7 +5404,7 @@ function measurementPdfScrewReadingEntries(record: Record<string, unknown>) {
   const entries: Array<{ label: string; value: string }> = [];
   for (const kind of ['flight','root']) {
     const kindRecord = isRecord(readings[kind]) ? readings[kind] : {};
-    for (const section of ['metering','transition','feed']) {
+    for (const section of ['feed','transition','metering']) {
       const sectionReadings = Array.isArray(kindRecord[section]) ? kindRecord[section] as unknown[] : [];
       entries.push({ label: `${measurementPdfScrewKindLabels[kind]} ${measurementPdfScrewSectionLabels[section]} Smallest Dia`, value: measurementPdfSmallest(sectionReadings) || 'No readings' });
       sectionReadings.filter(isRecord).forEach((reading,index)=>{
@@ -5454,8 +5454,8 @@ function measurementPdfRecordEntries(record: Record<string, unknown>) {
 function measurementPdfBlankEntries(component: string) {
   const common = ['Inspector Name','Date Measured','Date Installed','OLD / NEW','Comments'];
   const componentFields: Record<string, string[]> = {
-    screw: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Flight Metering Readings','Flight Transition Readings','Flight Feed Readings','Root Metering Readings','Root Transition Readings','Root Feed Readings','Flight Smallest Dia Summary','Root Smallest Dia Summary','Spline Check','Spline Notes','Screw Comments'],
-    screw_2: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Flight Metering Readings','Flight Transition Readings','Flight Feed Readings','Root Metering Readings','Root Transition Readings','Root Feed Readings','Flight Smallest Dia Summary','Root Smallest Dia Summary','Spline Check','Spline Notes','Screw Comments'],
+    screw: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Flight Feed Readings','Flight Transition Readings','Flight Metering Readings','Root Feed Readings','Root Transition Readings','Root Metering Readings','Flight Smallest Dia Summary','Root Smallest Dia Summary','Spline Check','Spline Notes','Screw Comments'],
+    screw_2: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Flight Feed Readings','Flight Transition Readings','Flight Metering Readings','Root Feed Readings','Root Transition Readings','Root Metering Readings','Flight Smallest Dia Summary','Root Smallest Dia Summary','Spline Check','Spline Notes','Screw Comments'],
     barrel: ['Barrel Part #','OEM Barrel Bore','Barrel Length','Barrel Bore / Screw Diameter','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Station 5 Distance / ID','Station 6 Distance / ID','Barrel Notes','Barrel Comments'],
     barrel_2: ['Barrel Part #','OEM Barrel Bore','Barrel Length','Barrel Bore / Screw Diameter','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Station 5 Distance / ID','Station 6 Distance / ID','Barrel Notes','Barrel Comments'],
     tip: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Check','Tip Thread Notes','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
@@ -6566,7 +6566,7 @@ app.put('/api/settings/branding', requireAuth, requireOwnerAdmin, (req:AuthReque
       oldBranding: publicBrandingSettings(previous),
       newBranding: publicBrandingSettings(next),
     });
-    res.json({ok:true,branding:publicBrandingSettings(next),message:body.resetToDefault === true ? 'Branding reset to JBT USA.' : 'Company branding saved.'});
+    res.json({ok:true,branding:publicBrandingSettings(next),message:body.resetToDefault === true ? 'Branding reset to MCC.' : 'Company branding saved.'});
   } catch (error) {
     const message = safeErrorMessage(error, [], 'Branding update failed.');
     res.status(/required|characters|invalid/i.test(message) ? 400 : 500).json({ok:false,error:message});

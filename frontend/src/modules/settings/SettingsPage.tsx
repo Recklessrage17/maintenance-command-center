@@ -647,7 +647,7 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
           <div className="branding-preview">
             <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
               <div className="mcc-brand-mark">
-                {branding.logoMode==='image'&&branding.logoUrl ? <img className="mcc-brand-image" src={branding.logoUrl} alt="" /> : <strong><span className="mcc-brand-jbt">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-usa">{branding.companyAccentText}</span>}</strong>}
+                {branding.logoMode==='image'&&branding.logoUrl ? <img className="mcc-brand-image" src={branding.logoUrl} alt="" /> : <strong><span className="mcc-brand-name">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-accent">{branding.companyAccentText}</span>}</strong>}
                 <span>{branding.companySubtitle}</span>
               </div>
             </div>

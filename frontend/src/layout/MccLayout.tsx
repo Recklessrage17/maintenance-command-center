@@ -198,7 +198,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
            {branding.logoMode==='image'&&branding.logoUrl ? (
              <img className="mcc-brand-image" src={branding.logoUrl} alt={`${branding.companyName} logo`} onError={()=>setBranding(defaultBranding)} />
            ) : (
-             <strong><span className="mcc-brand-jbt">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-usa">{branding.companyAccentText}</span>}</strong>
+              <strong><span className="mcc-brand-name">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-accent">{branding.companyAccentText}</span>}</strong>
            )}
            <span>{branding.companySubtitle}</span>
          </div>

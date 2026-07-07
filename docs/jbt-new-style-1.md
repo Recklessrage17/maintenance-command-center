@@ -1,6 +1,6 @@
-# JBT New Style 1
+# MCC New Style 1
 
-JBT New Style 1 is the official visual style for the current Maintenance Command Center (MCC) website shell.
+MCC New Style 1 is the official visual style for the current Maintenance Command Center website shell.
 
 ## Purpose
 
@@ -51,7 +51,7 @@ Sidebar navigation should:
 
 ## Design Checklist
 
-When adding new MCC screens or components, confirm that they follow JBT New Style 1:
+When adding new MCC screens or components, confirm that they follow MCC New Style 1:
 
 - Dark navy command center background.
 - Cyan/blue maintenance highlights.
