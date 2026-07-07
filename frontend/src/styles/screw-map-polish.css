@@ -1,14 +1,14 @@
-/* Screw measurement map polish overrides
-   Keeps the React SVG interactive while making the inspection map use the screen better. */
+/* Basic screw measurement map overrides.
+   Goal: clean shop-floor readable diagram, not a heavy 3D render. */
 .measurement-modal-backdrop {
   align-items: flex-start;
   padding: var(--mcc-topbar-safe-offset) 18px var(--mcc-modal-bottom-safe);
 }
 
 .measurement-inspection-modal {
-  width: min(1740px, calc(100vw - 36px));
+  width: min(1600px, calc(100vw - 36px));
   max-width: none;
-  min-height: min(920px, var(--mcc-modal-available-height));
+  min-height: min(860px, var(--mcc-modal-available-height));
   max-height: var(--mcc-modal-available-height);
 }
 
@@ -19,137 +19,155 @@
 }
 
 .screw-diagram-panel {
-  padding: clamp(12px, 1.3vw, 20px);
-  border-color: rgba(68, 215, 255, 0.24);
-  background:
-    radial-gradient(circle at 34% 10%, rgba(68, 215, 255, 0.10), transparent 34%),
-    radial-gradient(circle at 78% 22%, rgba(255, 179, 57, 0.08), transparent 32%),
-    linear-gradient(145deg, rgba(5, 18, 28, 0.76), rgba(2, 8, 14, 0.92));
+  padding: 14px;
+  border-color: rgba(117, 177, 198, 0.22);
+  background: linear-gradient(145deg, rgba(6, 18, 28, 0.82), rgba(2, 8, 14, 0.94));
 }
 
 .screw-diagram-controls {
-  gap: 12px;
+  gap: 10px;
 }
 
 .screw-diagram-control-column {
-  min-height: 142px;
-  border-radius: 12px;
+  min-height: 132px;
+  border-radius: 10px;
+  background: rgba(4, 13, 22, 0.72);
 }
 
 .screw-diagram-wrap {
   overflow: hidden;
-  padding: clamp(10px, 1.1vw, 18px) clamp(18px, 2vw, 34px);
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at 52% 48%, rgba(68, 215, 255, 0.06), transparent 34%),
-    linear-gradient(180deg, rgba(5, 17, 30, 0.92), rgba(2, 8, 14, 0.96));
+  padding: 18px 22px;
+  border-radius: 10px;
+  background: #030d17;
 }
 
 .screw-diagram-svg {
   display: block;
-  width: min(100%, 1260px);
+  width: min(100%, 1180px);
   min-width: 0;
   height: auto;
-  max-height: 430px;
+  max-height: 380px;
   margin: 0 auto;
   aspect-ratio: 1100 / 360;
   overflow: visible;
 }
 
-/* Hide clipped side labels for now. The flat end and drive spline are visible enough and this prevents ugly cut-off text. */
+/* Basic view: remove the cut-off side words and let the shape speak. */
 .screw-side-label {
   display: none;
 }
 
+/* Subtle section blocks only, so the screw is easy to read. */
 .screw-zone-fill {
-  opacity: 0.11;
+  opacity: 0.07;
 }
 
 .screw-od-envelope {
+  stroke: rgba(68, 215, 255, 0.42);
+  stroke-width: 1;
+  opacity: 0.72;
+}
+
+.screw-zone-divider {
+  opacity: 0.28;
+}
+
+/* Make the core/root the main visual. */
+.screw-root-core {
+  fill: rgba(194, 212, 218, 0.84);
+  stroke: rgba(238, 251, 255, 0.28);
+  stroke-width: 1;
+  opacity: 0.98;
+  filter: none;
+}
+
+.screw-root-highlight {
+  stroke: rgba(255, 255, 255, 0.62);
+  stroke-width: 3.6;
+  opacity: 0.62;
+}
+
+.screw-root-shadow {
+  stroke: rgba(0, 0, 0, 0.42);
+  stroke-width: 2.1;
+  opacity: 0.44;
+}
+
+.screw-root-edge {
+  stroke: rgba(232, 247, 252, 0.46);
   stroke-width: 1;
   opacity: 0.62;
 }
 
-.screw-zone-divider {
-  opacity: 0.35;
-}
-
-.screw-root-core {
-  opacity: 0.98;
-  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.34));
-}
-
-/* Make the existing SVG flight shapes read as slim helical ribs instead of tall sheet-metal fins. */
+/* Basic flight look: thin rib outlines instead of ghosty 3D blades. */
 .screw-flight-ribs {
-  opacity: 0.72;
+  opacity: 0.78;
 }
 
 .screw-flight-band {
+  fill: rgba(176, 204, 211, 0.16);
+  stroke: rgba(214, 235, 240, 0.56);
+  stroke-width: 1.15;
+  opacity: 0.72;
   transform-box: fill-box;
   transform-origin: center;
-  transform: scaleX(0.25) skewX(-8deg);
-  opacity: 0.42;
-  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.42));
-  stroke-width: 0.35;
+  transform: scaleX(0.36) skewX(-6deg);
+  filter: none;
 }
 
 .screw-flight-shadow {
-  stroke-width: 0.8;
-  opacity: 0.14;
+  stroke: rgba(0, 0, 0, 0.38);
+  stroke-width: 1.1;
+  opacity: 0.2;
 }
 
-.screw-root-highlight {
-  stroke-width: 4.6;
-  opacity: 0.56;
-}
-
-.screw-root-shadow {
-  stroke-width: 2.2;
-  opacity: 0.38;
-}
-
-.screw-root-edge {
-  opacity: 0.52;
-}
-
+/* Basic drive and flat end. */
 .screw-drive-shank,
 .screw-shoulder-ring,
 .screw-drive-collar,
 .screw-flat-end {
-  opacity: 0.82;
+  fill: rgba(138, 158, 166, 0.82);
+  stroke: rgba(226, 244, 250, 0.34);
+  stroke-width: 1;
+  opacity: 0.9;
+  filter: none;
 }
 
 .screw-drive-shank,
 .screw-shoulder-ring,
 .screw-drive-collar {
-  transform: translateX(28px);
+  transform: translateX(34px);
 }
 
 .screw-spline-groove {
-  opacity: 0.48;
-  stroke-width: 3.2;
-  transform: translateX(28px);
+  stroke: rgba(210, 230, 236, 0.62);
+  stroke-width: 3;
+  opacity: 0.58;
+  transform: translateX(34px);
 }
 
 .screw-flat-end {
-  opacity: 0.88;
-  transform: translateX(-36px) scaleX(0.7);
+  transform: translateX(-42px) scaleX(0.62);
   transform-box: fill-box;
   transform-origin: center;
 }
 
 .screw-flat-face {
-  stroke-width: 1.6;
-  opacity: 0.52;
-  transform: translateX(-42px);
+  stroke: rgba(242, 247, 248, 0.58);
+  stroke-width: 1.4;
+  opacity: 0.6;
+  transform: translateX(-50px);
 }
 
+/* Keep measurement callouts clean and readable. */
 .screw-measure-label rect {
-  filter: drop-shadow(0 0 12px rgba(68, 215, 255, 0.18));
+  fill: rgba(4, 18, 34, 0.94);
+  filter: none;
 }
 
 .screw-measure-label.root-label rect {
-  filter: drop-shadow(0 0 12px rgba(255, 179, 57, 0.16));
+  fill: rgba(45, 32, 9, 0.94);
+  filter: none;
 }
 
 .screw-measure-label text {
@@ -160,11 +178,11 @@
 }
 
 .screw-measure-label line {
-  stroke-width: 2.15;
+  stroke-width: 2;
 }
 
 .screw-measure-label circle {
-  opacity: 0.88;
+  opacity: 0.84;
 }
 
 .screw-section-caption text:first-child {
@@ -185,12 +203,12 @@
 
 @media (min-width: 1500px) {
   .measurement-inspection-modal {
-    width: min(1820px, calc(100vw - 28px));
+    width: min(1700px, calc(100vw - 28px));
   }
 
   .screw-diagram-svg {
-    width: min(100%, 1340px);
-    max-height: 470px;
+    width: min(100%, 1260px);
+    max-height: 420px;
   }
 }
 
