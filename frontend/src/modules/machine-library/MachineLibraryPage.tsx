@@ -397,7 +397,8 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
 function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:()=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
   const [currentAsset,setCurrentAsset]=useState(asset);
   const [draft,setDraft]=useState<AssetForm>(()=>assetToForm(asset));
-  const [expanded,setExpanded]=useState<Set<MachineDetailSectionKey>>(()=>new Set(['basic']));
+  const [hoveredSection,setHoveredSection]=useState<MachineDetailSectionKey|null>(null);
+  const [pinnedSection,setPinnedSection]=useState<MachineDetailSectionKey|null>('basic');
   const [editingSection,setEditingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [savingSection,setSavingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [sectionErrors,setSectionErrors]=useState<Partial<Record<MachineDetailEditableSectionKey,string>>>({});
@@ -412,27 +413,43 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
   useEffect(()=>{
     setCurrentAsset(asset);
     setDraft(assetToForm(asset));
-    setExpanded(new Set(['basic']));
+    setHoveredSection(null);
+    setPinnedSection('basic');
     setEditingSection(null);
     setSectionErrors({});
   },[asset.id]);
+  useEffect(()=>{
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || editingSection) return;
+      setHoveredSection(null);
+      setPinnedSection(null);
+    }
+    document.addEventListener('keydown',onKeyDown);
+    return ()=>document.removeEventListener('keydown',onKeyDown);
+  },[editingSection]);
 
   function setDraftField<K extends keyof AssetForm>(key: K, value: AssetForm[K]) {
     setDraft(current=>({...current,[key]:value}));
   }
-  function openSection(key: MachineDetailSectionKey) {
-    setExpanded(current=>{ const next = new Set(current); next.add(key); return next; });
+  function previewSection(key: MachineDetailSectionKey) {
+    if (editingSection) return;
+    setHoveredSection(key);
   }
-  function toggleSection(key: MachineDetailSectionKey) {
-    if (editingSection === key) return;
-    setExpanded(current=>{ const next = new Set(current); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  function clearPreview() {
+    if (!editingSection) setHoveredSection(null);
+  }
+  function togglePinnedSection(key: MachineDetailSectionKey) {
+    if (editingSection) return;
+    setHoveredSection(null);
+    setPinnedSection(current=>current === key ? null : key);
   }
   function beginSectionEdit(key: MachineDetailEditableSectionKey) {
     if (!canEdit) return;
     setDraft(assetToForm(currentAsset));
+    setHoveredSection(null);
+    setPinnedSection(key);
     setEditingSection(key);
     setSectionErrors(current=>({...current,[key]:undefined}));
-    openSection(key);
   }
   function cancelSectionEdit() {
     setDraft(assetToForm(currentAsset));
@@ -447,6 +464,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
       const data = await api<{ok:boolean;asset:MachineAsset}>(`/api/machine-library/assets/${currentAsset.id}`,{method:'PUT',body:JSON.stringify(payload)});
       setCurrentAsset(data.asset);
       setDraft(assetToForm(data.asset));
+      setPinnedSection(key);
       setEditingSection(null);
       onAssetUpdated(data.asset);
     } catch (error) {
@@ -598,24 +616,24 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
       <DetailItem label="Year / Age" value={`${currentAsset.machineYear || '-'} / ${machineYearAge(currentAsset.machineYear)}`} />
       <DetailItem label="Location" value={detailValue(currentAsset.location)} />
     </div>
-    <div className="machine-detail-accordion-list">
+    <div className="machine-detail-accordion-list" onPointerLeave={clearPreview}>
       {sections.map(section=>{
         const editableKey = section.editableKey;
         const isEditing = Boolean(editableKey && editingSection === editableKey);
-        const isOpen = expanded.has(section.key) || isEditing;
+        const isOpen = isEditing || (editingSection ? false : hoveredSection ? hoveredSection === section.key : pinnedSection === section.key);
         const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
-        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onOpen={()=>openSection(section.key)} onToggle={()=>toggleSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onPreview={()=>previewSection(section.key)} onToggle={()=>togglePinnedSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
     </div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section></div>;
 }
-function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onOpen,onToggle,onSave,onCancel,saving,error,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onOpen:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;children:ReactNode}) {
+function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onPreview,onToggle,onSave,onCancel,saving,error,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onPreview:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;children:ReactNode}) {
   const panelId = `machine-detail-panel-${sectionKey}`;
-  return <article className={`machine-detail-accordion-card ${expanded ? 'is-open' : ''} ${editing ? 'is-editing' : ''}`} onPointerEnter={event=>{ if (event.pointerType !== 'touch') onOpen(); }}>
+  return <article className={`machine-detail-accordion-card ${expanded ? 'is-open' : ''} ${editing ? 'is-editing' : ''}`} onPointerEnter={event=>{ if (event.pointerType !== 'touch') onPreview(); }}>
     <div className="machine-detail-accordion-header">
-      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle} onFocus={onOpen}>
+      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle} onFocus={onPreview}>
         <span className="machine-detail-section-title">{title}</span>
         <span className="machine-detail-section-summary">{summary}</span>
         {status}
