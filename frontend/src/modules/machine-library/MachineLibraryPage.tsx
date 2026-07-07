@@ -1092,56 +1092,67 @@ function ScrewInspectionForm({record,onText,onMeasurement,onSelect,onRecord}:{re
   </section>;
 }
 function ScrewMeasurementDiagram({onAddReading}:{onAddReading:(kind:ScrewMeasurementKind,section:ScrewSectionKey)=>void}) {
+  const sectionNotes: Record<ScrewSectionKey, string> = { feed: 'Deep Channel - Smaller Core', transition: 'Core Gradually Increases', metering: 'Shallow Channel - Larger Core' };
   return <section className="screw-diagram-panel">
     <div className="measurement-section-heading"><h4>Visual Screw Measurement Map</h4></div>
     <div className="screw-diagram-controls" aria-label="Screw measurement controls">
       {screwSections.map(section=><div className={`screw-diagram-control-column zone-${section.key}`} key={section.key}>
-        <strong>{section.shortLabel}</strong>
-        <button className="screw-diagram-pill flight" type="button" onClick={()=>onAddReading('flight',section.key)} aria-label={`Add ${section.shortLabel} Flight OD reading`}><span>{section.shortLabel}</span>Flight OD</button>
-        <button className="screw-diagram-pill root" type="button" onClick={()=>onAddReading('root',section.key)} aria-label={`Add ${section.shortLabel} Root Dia reading`}><span>{section.shortLabel}</span>Root Dia</button>
+        <strong>{section.shortLabel} Section</strong>
+        <button className="screw-diagram-pill flight" type="button" onClick={()=>onAddReading('flight',section.key)} aria-label={`Add ${section.shortLabel} Flight OD reading`}><span className="screw-diagram-target-icon" aria-hidden="true" /><span className="screw-diagram-button-copy"><b>{section.shortLabel}</b><span>Flight OD</span></span></button>
+        <button className="screw-diagram-pill root" type="button" onClick={()=>onAddReading('root',section.key)} aria-label={`Add ${section.shortLabel} Root Dia reading`}><span className="screw-diagram-target-icon" aria-hidden="true" /><span className="screw-diagram-button-copy"><b>{section.shortLabel}</b><span>Root Dia</span></span></button>
       </div>)}
     </div>
     <div className="screw-diagram-wrap">
-      <svg className="screw-diagram-svg" viewBox="0 0 900 260" role="img" aria-label="Screw side view showing feed, transition, metering, and measurement locations">
+      <svg className="screw-diagram-svg" viewBox="0 0 1100 360" role="img" aria-label="Screw side view showing feed, transition, metering, and measurement locations">
         <defs>
-          <linearGradient id="screwBodyFill" x1="0" x2="1"><stop offset="0%" stopColor="#405563" /><stop offset="40%" stopColor="#94aebb" /><stop offset="72%" stopColor="#b6ccd5" /><stop offset="100%" stopColor="#526a78" /></linearGradient>
-          <linearGradient id="screwFlightHighlight" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#f4fbff" stopOpacity=".7" /><stop offset="44%" stopColor="#cfe8f0" stopOpacity=".36" /><stop offset="100%" stopColor="#152635" stopOpacity=".18" /></linearGradient>
+          <linearGradient id="screwBodyFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#d8e4e8" /><stop offset="18%" stopColor="#7e8b8f" /><stop offset="44%" stopColor="#22292d" /><stop offset="58%" stopColor="#f4f8f8" /><stop offset="82%" stopColor="#596469" /><stop offset="100%" stopColor="#151c20" /></linearGradient>
+          <linearGradient id="screwFlightFill" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stopColor="#eff7f8" /><stop offset="22%" stopColor="#808a8e" /><stop offset="48%" stopColor="#22282b" /><stop offset="72%" stopColor="#d4dcde" /><stop offset="100%" stopColor="#3a4145" /></linearGradient>
+          <linearGradient id="screwCapFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#c6d3d7" /><stop offset="42%" stopColor="#5e6a6f" /><stop offset="100%" stopColor="#232a2e" /></linearGradient>
           <marker id="screwFlightArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#44d7ff" /></marker>
           <marker id="screwRootArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#ffd36f" /></marker>
         </defs>
-        <rect className="screw-zone-fill feed" x="120" y="64" width="225" height="130" rx="18" />
-        <rect className="screw-zone-fill transition" x="345" y="64" width="220" height="130" rx="18" />
-        <rect className="screw-zone-fill metering" x="565" y="64" width="205" height="130" rx="18" />
-        <line className="screw-zone-divider" x1="345" y1="58" x2="345" y2="201" />
-        <line className="screw-zone-divider" x1="565" y1="58" x2="565" y2="201" />
-        <path className="screw-od-envelope" d="M 118 76 L 784 76 M 118 190 L 784 190" />
-        <path className="screw-drive-shank" d="M 36 118 H64 L74 112 H96 C108 112 117 121 117 133 C117 145 108 154 96 154 H74 L64 148 H36 Z" />
-        {[0,1,2,3].map(index=><rect className="screw-spline-groove" key={`upper-${index}`} x={43 + index * 7} y="113" width="3.6" height="11" rx="1.6" />)}
-        {[0,1,2,3].map(index=><rect className="screw-spline-groove" key={`lower-${index}`} x={43 + index * 7} y="142" width="3.6" height="11" rx="1.6" />)}
-        <path className="screw-root-core" d="M 94 124 C 190 124 270 124 345 124 C 430 123 510 115 565 108 L 784 108 C 803 108 814 119 814 133 C 814 147 803 158 784 158 L 565 158 C 510 151 430 143 345 142 C 270 142 190 142 94 142 Z" />
-        <path className="screw-root-highlight" d="M 104 128 C 212 128 300 128 358 128 C 438 126 502 121 568 114 L 752 114" />
-        <path className="screw-root-shadow" d="M 104 139 C 212 139 300 139 358 139 C 438 141 502 147 568 153 L 752 153" />
-        <path className="screw-nose-detail" d="M 784 118 C 797 119 804 125 805 133 C 804 141 797 147 784 148" />
-        {Array.from({length:21}).map((_,index)=>{
-          const x = 118 + index * 31;
-          const feed = index < 8;
-          const transition = index >= 8 && index < 15;
-          const fill = feed ? '#5fcfff' : transition ? '#62dac7' : '#ffd06a';
+        <rect className="screw-zone-fill feed" x="135" y="82" width="300" height="210" rx="4" />
+        <rect className="screw-zone-fill transition" x="435" y="82" width="330" height="210" rx="4" />
+        <rect className="screw-zone-fill metering" x="765" y="82" width="275" height="210" rx="4" />
+        <path className="screw-od-envelope" d="M 130 88 L 1050 88 M 130 234 L 1050 234" />
+        <line className="screw-zone-divider" x1="435" y1="82" x2="435" y2="320" />
+        <line className="screw-zone-divider" x1="765" y1="82" x2="765" y2="320" />
+        <g className="screw-side-label drive-label"><text x="38" y="154">DRIVE /</text><text x="38" y="174">SPLINE</text><text x="48" y="194">END</text></g>
+        <g className="screw-side-label tip-label"><text x="1062" y="160">TIP REMOVED</text><text x="1066" y="181">(FLAT END)</text></g>
+        <path className="screw-drive-shank" d="M 72 139 H132 L144 130 H176 C190 130 200 143 200 161 C200 179 190 192 176 192 H144 L132 183 H72 Z" />
+        {[0,1,2,3,4,5,6].map(index=><rect className="screw-spline-groove" key={`upper-${index}`} x={80 + index * 8} y="132" width="5" height="19" rx="2" />)}
+        {[0,1,2,3,4,5,6].map(index=><rect className="screw-spline-groove" key={`lower-${index}`} x={80 + index * 8} y="171" width="5" height="19" rx="2" />)}
+        <rect className="screw-shoulder-ring" x="142" y="125" width="26" height="72" rx="5" />
+        <path className="screw-root-core" d="M 162 148 C 255 148 347 148 435 148 C 552 145 675 134 765 124 L 1026 124 C 1038 124 1046 137 1046 161 C 1046 185 1038 198 1026 198 L 765 198 C 675 188 552 177 435 174 C 347 174 255 174 162 174 Z" />
+        <path className="screw-root-highlight" d="M 176 153 C 280 153 350 153 440 153 C 556 150 680 139 766 130 L 1010 130" />
+        <path className="screw-root-shadow" d="M 176 169 C 280 169 350 169 440 169 C 556 172 680 184 766 192 L 1010 192" />
+        <rect className="screw-flat-end" x="1023" y="127" width="20" height="68" rx="3" />
+        {Array.from({length:22}).map((_,index)=>{
+          const x = 175 + index * 38;
           return <g key={x}>
-            <path d={`M ${x} 108 L ${x + 24} 76 L ${x + 40} 190 L ${x + 12} 158 Z`} fill={fill} opacity=".52" stroke="#eefbff" strokeOpacity=".24" />
-            <path d={`M ${x + 7} 111 L ${x + 25} 85 L ${x + 35} 178 L ${x + 16} 154 Z`} fill="url(#screwFlightHighlight)" opacity=".38" />
+            <path d={`M ${x} 232 C ${x + 7} 207 ${x + 11} 184 ${x + 15} 160 C ${x + 19} 136 ${x + 28} 111 ${x + 41} 101 L ${x + 56} 101 C ${x + 42} 124 ${x + 35} 148 ${x + 32} 176 C ${x + 29} 199 ${x + 25} 220 ${x + 20} 235 Z`} fill="url(#screwFlightFill)" stroke="#eefbff" strokeOpacity=".22" />
+            <path className="screw-flight-rim" d={`M ${x + 18} 224 C ${x + 23} 201 ${x + 27} 181 ${x + 30} 158 C ${x + 34} 136 ${x + 40} 117 ${x + 51} 106`} />
           </g>;
         })}
-        <path className="screw-root-edge top" d="M 96 124 C 190 124 270 124 345 124 C 430 123 510 115 565 108 L 784 108" />
-        <path className="screw-root-edge bottom" d="M 96 142 C 190 142 270 142 345 142 C 430 143 510 151 565 158 L 784 158" />
+        <path className="screw-root-edge top" d="M 162 148 C 255 148 347 148 435 148 C 552 145 675 134 765 124 L 1026 124" />
+        <path className="screw-root-edge bottom" d="M 162 174 C 255 174 347 174 435 174 C 552 177 675 188 765 198 L 1026 198" />
         <g className="screw-measure-label flight-label">
-          <text x="642" y="42">Flight OD</text>
-          <line x1="665" y1="50" x2="650" y2="78" markerEnd="url(#screwFlightArrowHead)" />
+          <rect x="485" y="24" width="130" height="38" rx="8" />
+          <text x="512" y="49">Flight OD</text>
+          <line x1="500" y1="62" x2="452" y2="106" markerEnd="url(#screwFlightArrowHead)" />
+          <line x1="602" y1="62" x2="652" y2="106" markerEnd="url(#screwFlightArrowHead)" />
         </g>
         <g className="screw-measure-label root-label">
-          <text x="390" y="224">Root Dia</text>
-          <line x1="420" y1="206" x2="430" y2="124" markerEnd="url(#screwRootArrowHead)" />
+          <rect x="485" y="256" width="130" height="38" rx="8" />
+          <text x="515" y="281">Root Dia</text>
+          <line x1="492" y1="256" x2="328" y2="174" markerEnd="url(#screwRootArrowHead)" />
+          <line x1="550" y1="256" x2="548" y2="172" markerEnd="url(#screwRootArrowHead)" />
+          <line x1="608" y1="256" x2="700" y2="188" markerEnd="url(#screwRootArrowHead)" />
         </g>
+        {screwSections.map(section=>{
+          const center = section.key === 'feed' ? 285 : section.key === 'transition' ? 600 : 905;
+          return <g className={`screw-section-caption ${section.key}`} key={section.key}><text x={center} y="318">{section.shortLabel} Section</text><text x={center} y="341">{sectionNotes[section.key]}</text></g>;
+        })}
       </svg>
     </div>
     <div className="screw-diagram-legend"><span className="flight">Flight OD = measure top/outer edge of flight</span><span className="root">Root Dia = measure valley between flights</span></div>
