@@ -1,4 +1,5 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAsset = {
@@ -18,6 +19,7 @@ type BooleanFormKey = { [K in keyof AssetForm]: AssetForm[K] extends boolean ? K
 type ConditionFormKey = { [K in keyof AssetForm]: AssetForm[K] extends ConditionStatus ? K : never }[keyof AssetForm];
 type MachineDetailEditableSectionKey = 'basic' | 'electrical' | 'screw' | 'screwTip' | 'barrel' | 'barrelEndCap' | 'screw2' | 'screw2Tip' | 'barrel2' | 'barrel2EndCap' | 'plunger' | 'plungerBarrel' | 'plungerBarrelEndCap' | 'notes';
 type MachineDetailSectionKey = MachineDetailEditableSectionKey | 'inspection';
+type DatePopoverPosition = { top: number; left: number; width: number; placement: 'top' | 'bottom' };
 
 const blankAssetForm: AssetForm = {
   assetNumber: '', assetName: '', brand: '', model: '', serialNumber: '', machineYear: '', machineType: 'Injection Molding Machine', powerType: '', shotSizeOz: '', tonnage: 0, barrelDiameter: '', location: '', department: '', status: 'active', voltageValue: '', voltageType: '', fullLoadAmp: '', machineLength: '', machineWidth: '', machineHeight: '', fullDieHeightLength: '', screwType: '', screwTipType: '', screwTipInstalledDate: '', screwInstalledDate: '', barrelInstalledDate: '', barrelEndCapInstalledDate: '', barrelLength: '', screwLength: '', screwRebuildRepaired: false, barrelRebuildRepaired: false, screwConditionStatus: 'new', barrelConditionStatus: 'new', hasDoubleShotInjection: false, hasPlungerInjection: false, screw2Type: '', screw2TipType: '', screw2RebuildRepaired: false, screw2ConditionStatus: 'new', screw2InstalledDate: '', screw2TipInstalledDate: '', screw2Length: '', barrel2Diameter: '', barrel2RebuildRepaired: false, barrel2ConditionStatus: 'new', barrel2InstalledDate: '', barrel2EndCapInstalledDate: '', barrel2Length: '', plungerType: '', plungerRebuildRepaired: false, plungerConditionStatus: 'new', plungerInstalledDate: '', plungerLength: '', plungerDiameter: '', plungerBarrelType: '', plungerBarrelRebuildRepaired: false, plungerBarrelConditionStatus: 'new', plungerBarrelInstalledDate: '', plungerBarrelEndCapInstalledDate: '', plungerBarrelLength: '', plungerBarrelDiameter: '', notes: '', criticalNotes: '',
@@ -97,6 +99,22 @@ function isEngelBrand(value: string) {
 function machineStatusLabel(status: string) {
   const normalized = status || 'active';
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+function machineSummaryStatusClass(status: string) {
+  if (status === 'active') return 'status-active';
+  if (status === 'down') return 'status-down';
+  if (status === 'disabled') return 'status-disabled';
+  if (status === 'removed') return 'status-removed';
+  return 'status-unknown';
+}
+function machineSummarySetupClass(asset: Pick<MachineAsset, 'hasDoubleShotInjection' | 'hasPlungerInjection'>) {
+  if (asset.hasDoubleShotInjection && asset.hasPlungerInjection) return 'setup-combo';
+  if (asset.hasDoubleShotInjection) return 'setup-double';
+  if (asset.hasPlungerInjection) return 'setup-plunger';
+  return 'setup-standard';
+}
+function machineSummaryKnownClass(value: string, base: string) {
+  return value.trim() ? base : `${base} is-unknown`;
 }
 function downloadTemplate() {
   window.location.href = '/api/machine-library/export/template';
@@ -597,12 +615,12 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
   ];
 
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-modal machine-detail-modal">
-    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3>{currentAsset.assetNumber}</h3><p>{currentAsset.brand || 'Brand'} / {currentAsset.model || 'Model'} / S/N: {currentAsset.serialNumber || '-'}</p></div><div className="machine-detail-header-actions"><button className="secondary-button compact-button" type="button" onClick={onLogs}>Logs</button><button className="primary-button compact-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div></div>
-    <div className="machine-detail-summary">
-      <DetailItem label="Status" value={machineStatusLabel(currentAsset.status)} />
-      <DetailItem label="Setup" value={unitLabel} />
-      <DetailItem label="Year / Age" value={`${currentAsset.machineYear || '-'} / ${machineYearAge(currentAsset.machineYear)}`} />
-      <DetailItem label="Location" value={detailValue(currentAsset.location)} />
+    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3>{currentAsset.assetNumber}</h3><p className="machine-detail-identity-badge" style={{'--machine-detail-brand-color':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}><span className="machine-detail-brand-dot" aria-hidden="true" /><span>{currentAsset.brand || 'Brand unknown'}</span><span>Model {currentAsset.model || '-'}</span><span>S/N {currentAsset.serialNumber || '-'}</span></p></div><div className="machine-detail-header-actions"><button className="secondary-button compact-button" type="button" onClick={onLogs}>Logs</button><button className="primary-button compact-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div></div>
+    <div className="machine-detail-summary-grid">
+      <SummaryBadge label="Status" value={machineStatusLabel(currentAsset.status)} tone={machineSummaryStatusClass(currentAsset.status)} />
+      <SummaryBadge label="Setup" value={unitLabel} tone={machineSummarySetupClass(currentAsset)} />
+      <SummaryBadge label="Year / Age" value={`${currentAsset.machineYear || '-'} / ${machineYearAge(currentAsset.machineYear)}`} tone={machineSummaryKnownClass(currentAsset.machineYear,'year-age')} />
+      <SummaryBadge label="Location" value={detailValue(currentAsset.location)} tone={machineSummaryKnownClass(currentAsset.location,'location')} />
     </div>
     <div className="machine-detail-accordion-list">
       {sections.map(section=>{
@@ -639,6 +657,7 @@ function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded
   </article>;
 }
 function DetailStatusPill({status}:{status:ConditionStatus}) { return <span className={`machine-section-status-pill condition-${status}`}>{conditionLabels[status]}</span>; }
+function SummaryBadge({label,value,tone}:{label:string;value:ReactNode;tone:string}) { return <div className="machine-detail-summary-card"><span className="machine-detail-summary-label">{label}</span><strong className={`machine-detail-summary-pill ${tone}`}>{value}</strong></div>; }
 function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-pill ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span className="machine-detail-pill-label">{label}</span><strong className="machine-detail-pill-value">{value}</strong></div>; }
 function MeasurementInspectionModal({target,onClose}:{target:InspectionContext;onClose:()=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal measurement-inspection-modal"><div className="modal-heading"><div><p className="eyebrow">Alpha Placeholder / Coming Next</p><h3>Measurement Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p>Alpha placeholder. Inspection tracking will later compare screw, barrel, tip, end cap, and plunger measurements and update conditions from New to Used to Worn.</p><div className="measurement-component-list">{inspectionComponents(target).map(component=><span key={component}>{component}</span>)}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Close</button></div></section></div>;
@@ -723,6 +742,8 @@ function MccDateField({label,value,set,disabled,ageText}:{label:string;value:str
   const [open,setOpen]=useState(false);
   const [viewDate,setViewDate]=useState<Date>(selectedDate ?? today);
   const wrapRef=useRef<HTMLLabelElement>(null);
+  const popoverRef=useRef<HTMLDivElement>(null);
+  const [position,setPosition]=useState<DatePopoverPosition>({top:0,left:0,width:312,placement:'bottom'});
   const viewYear = viewDate.getFullYear();
   const viewMonth = viewDate.getMonth();
   const monthStart = new Date(viewYear, viewMonth, 1);
@@ -730,23 +751,47 @@ function MccDateField({label,value,set,disabled,ageText}:{label:string;value:str
   const days = Array.from({length:42},(_,index)=>new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
   const selectedIso = selectedDate ? localIsoDate(selectedDate) : '';
   const todayIso = localIsoDate(today);
+  function updatePopoverPosition() {
+    const anchor = wrapRef.current?.querySelector('.mcc-date-control') ?? wrapRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const margin = 10;
+    const preferredWidth = Math.min(312, Math.max(260, window.innerWidth - margin * 2));
+    const popoverHeight = popoverRef.current?.offsetHeight || 344;
+    const width = Math.min(preferredWidth, window.innerWidth - margin * 2);
+    const belowTop = rect.bottom + 8;
+    const aboveTop = rect.top - popoverHeight - 8;
+    const hasRoomBelow = belowTop + popoverHeight <= window.innerHeight - margin;
+    const top = hasRoomBelow ? belowTop : Math.max(margin, aboveTop);
+    const left = Math.min(Math.max(margin, rect.right - width), window.innerWidth - width - margin);
+    setPosition({top,left,width,placement:hasRoomBelow ? 'bottom' : 'top'});
+  }
   useEffect(()=>{
     if(!open) return;
     setViewDate(selectedDate ?? today);
+    updatePopoverPosition();
+    const frame = window.requestAnimationFrame(updatePopoverPosition);
+    return ()=>window.cancelAnimationFrame(frame);
   },[open,selectedIso,today]);
   useEffect(()=>{
     if(!open) return;
     function onPointerDown(event: PointerEvent) {
-      if(wrapRef.current&&!wrapRef.current.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if(wrapRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
       if(event.key==='Escape') setOpen(false);
     }
     document.addEventListener('pointerdown',onPointerDown);
     document.addEventListener('keydown',onKeyDown);
+    window.addEventListener('resize',updatePopoverPosition);
+    window.addEventListener('scroll',updatePopoverPosition,true);
     return ()=>{
       document.removeEventListener('pointerdown',onPointerDown);
       document.removeEventListener('keydown',onKeyDown);
+      window.removeEventListener('resize',updatePopoverPosition);
+      window.removeEventListener('scroll',updatePopoverPosition,true);
     };
   },[open]);
   function chooseDate(date: Date) {
@@ -756,7 +801,8 @@ function MccDateField({label,value,set,disabled,ageText}:{label:string;value:str
   function moveMonth(offset: number) {
     setViewDate(current=>new Date(current.getFullYear(), current.getMonth() + offset, 1));
   }
-  return <label className={open?'form-field machine-date-field mcc-date-open':'form-field machine-date-field'} ref={wrapRef}><span>{label}</span><div className="mcc-date-control"><input className="mcc-date-input" type="text" inputMode="numeric" value={value} disabled={disabled} onFocus={()=>setOpen(true)} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD" /><button className="mcc-date-trigger" type="button" aria-label={`Open ${label} calendar`} disabled={disabled} onClick={()=>setOpen(current=>!current)}><span className="mcc-date-icon" aria-hidden="true" /></button>{open&&<div className="mcc-date-popover" role="dialog" aria-label={`${label} calendar`}><div className="mcc-date-header"><button type="button" onClick={()=>moveMonth(-1)} aria-label="Previous month">&lt;</button><strong>{viewDate.toLocaleString(undefined,{month:'long',year:'numeric'})}</strong><button type="button" onClick={()=>moveMonth(1)} aria-label="Next month">&gt;</button></div><div className="mcc-date-weekdays" aria-hidden="true">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><span key={day}>{day}</span>)}</div><div className="mcc-date-grid">{days.map(day=>{ const iso=localIsoDate(day); const outside=day.getMonth()!==viewMonth; return <button className={`${outside?'outside ':''}${iso===todayIso?'today ':''}${iso===selectedIso?'selected ':''}`.trim()} type="button" key={iso} onClick={()=>chooseDate(day)} aria-label={day.toLocaleDateString(undefined,{dateStyle:'full'})} aria-pressed={iso===selectedIso}>{day.getDate()}</button>; })}</div><div className="mcc-date-footer"><button type="button" onClick={()=>{ set(''); setOpen(false); }}>Clear</button><button type="button" onClick={()=>chooseDate(today)}>Today</button></div></div>}</div><small className="machine-age-label">Year count: {ageText}</small></label>;
+  const calendar = open ? createPortal(<div className={`mcc-date-popover placement-${position.placement}`} ref={popoverRef} role="dialog" aria-label={`${label} calendar`} style={{top:position.top,left:position.left,width:position.width}}><div className="mcc-date-header"><button type="button" onClick={()=>moveMonth(-1)} aria-label="Previous month">&lt;</button><strong>{viewDate.toLocaleString(undefined,{month:'long',year:'numeric'})}</strong><button type="button" onClick={()=>moveMonth(1)} aria-label="Next month">&gt;</button></div><div className="mcc-date-weekdays" aria-hidden="true">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><span key={day}>{day}</span>)}</div><div className="mcc-date-grid">{days.map(day=>{ const iso=localIsoDate(day); const outside=day.getMonth()!==viewMonth; return <button className={`${outside?'outside ':''}${iso===todayIso?'today ':''}${iso===selectedIso?'selected ':''}`.trim()} type="button" key={iso} onClick={()=>chooseDate(day)} aria-label={day.toLocaleDateString(undefined,{dateStyle:'full'})} aria-pressed={iso===selectedIso}>{day.getDate()}</button>; })}</div><div className="mcc-date-footer"><button type="button" onClick={()=>{ set(''); setOpen(false); }}>Clear</button><button type="button" onClick={()=>chooseDate(today)}>Today</button></div></div>, document.body) : null;
+  return <label className={open?'form-field machine-date-field mcc-date-open':'form-field machine-date-field'} ref={wrapRef}><span>{label}</span><div className="mcc-date-control"><input className="mcc-date-input" type="text" inputMode="numeric" value={value} disabled={disabled} onFocus={()=>setOpen(true)} onChange={event=>set(event.target.value)} placeholder="YYYY-MM-DD" /><button className="mcc-date-trigger" type="button" aria-label={`Open ${label} calendar`} disabled={disabled} onClick={()=>setOpen(current=>!current)}><span className="mcc-date-icon" aria-hidden="true" /></button>{calendar}</div><small className="machine-age-label">Year count: {ageText}</small></label>;
 }
 function ConditionBadge({label,status}:{label:string;status:ConditionStatus}) {
   return <div className={`machine-condition-badge condition-${status}`}><span>{label}</span><strong>{conditionLabels[status]}</strong></div>;

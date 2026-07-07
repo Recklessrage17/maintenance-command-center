@@ -438,7 +438,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .mcc-date-icon::before, .mcc-date-icon::after { content: ""; position: absolute; top: -7px; width: 3px; height: 6px; border-radius: 999px; background: #dff7ff; }
 .mcc-date-icon::before { left: 3px; }
 .mcc-date-icon::after { right: 3px; }
-.mcc-date-popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 35; width: min(312px, calc(100vw - 40px)); display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(68,215,255,.46); border-radius: 14px; background: linear-gradient(180deg, rgba(5,22,40,.98), rgba(3,13,27,.98)); box-shadow: 0 24px 58px rgba(0,0,0,.42), 0 0 32px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.06); animation: mcc-date-pop .14s ease-out both; }
+.mcc-date-popover { position: fixed; z-index: 140; display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(68,215,255,.52); border-radius: 14px; background: linear-gradient(180deg, rgba(5,22,40,.98), rgba(3,13,27,.98)); box-shadow: 0 28px 68px rgba(0,0,0,.56), 0 0 34px rgba(68,215,255,.18), inset 0 1px 0 rgba(255,255,255,.08); animation: mcc-date-pop .14s ease-out both; }
 .mcc-date-header { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 8px; align-items: center; }
 .mcc-date-header strong { color: #f3fbff; font-size: .94rem; line-height: 1.2; text-align: center; }
 .mcc-date-header button, .mcc-date-footer button, .mcc-date-grid button { border: 1px solid rgba(68,215,255,.28); color: #dff7ff; background: rgba(5,61,86,.42); cursor: pointer; font: inherit; font-weight: 950; transition: border-color .14s ease, background .14s ease, color .14s ease, transform .14s ease, box-shadow .14s ease; }
@@ -453,7 +453,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .mcc-date-grid button:hover, .mcc-date-grid button:focus-visible { border-color: rgba(68,215,255,.78); background: rgba(0,153,219,.24); color: #effcff; outline: none; transform: translateY(-1px); }
 .mcc-date-footer { display: flex; justify-content: space-between; gap: 8px; padding-top: 2px; }
 .mcc-date-footer button { min-height: 32px; flex: 1 1 0; border-radius: 9px; font-size: .76rem; }
-@media (max-width: 520px) { .mcc-date-popover { left: 0; right: 0; width: auto; max-width: none; } }
 .machine-screw-barrel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .machine-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .machine-yes-no > div { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -497,10 +496,27 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-detail-modal { gap: 14px; }
 .machine-detail-heading { gap: 12px; }
 .machine-detail-header-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.machine-detail-identity-badge { --machine-detail-brand-color: #44d7ff; width: fit-content; max-width: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px !important; padding: 7px 11px; border: 1px solid color-mix(in srgb, var(--machine-detail-brand-color) 34%, rgba(143,205,233,.2)); border-left: 3px solid var(--machine-detail-brand-color); border-radius: 999px; color: #d5eaf2 !important; background: linear-gradient(135deg, color-mix(in srgb, var(--machine-detail-brand-color) 12%, rgba(4,18,34,.78)), rgba(3,10,18,.78)); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 18px color-mix(in srgb, var(--machine-detail-brand-color) 14%, transparent); font-size: .82rem !important; font-weight: 900; line-height: 1.25; overflow-wrap: anywhere; }
+.machine-detail-identity-badge span { display: inline-flex; margin: 0; color: #d7edf5; font-size: inherit; font-weight: 900; line-height: inherit; }
+.machine-detail-identity-badge span:not(.machine-detail-brand-dot) { min-width: 0; overflow-wrap: anywhere; }
+.machine-detail-brand-dot { flex: 0 0 auto; width: 10px; height: 10px; border: 1px solid rgba(255,255,255,.58); border-radius: 999px; background: var(--machine-detail-brand-color); box-shadow: 0 0 12px color-mix(in srgb, var(--machine-detail-brand-color) 45%, transparent); }
 .machine-detail-summary,
 .machine-detail-grid,
 .measurement-component-list { display: grid; gap: 10px; }
 .machine-detail-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.machine-detail-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.machine-detail-summary-card { min-width: 0; display: grid; gap: 7px; padding: 10px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: linear-gradient(145deg, rgba(10,24,34,.56), rgba(3,10,18,.6)); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.machine-detail-summary-label { margin: 0; color: #8fe8ff; font-size: .66rem; font-weight: 950; line-height: 1.05; text-transform: uppercase; letter-spacing: .04em; }
+.machine-detail-summary-pill { min-width: 0; display: block; margin: 0; padding: 8px 11px; border: 1px solid rgba(143,205,233,.18); border-radius: 999px; color: #f3fbff; background: linear-gradient(180deg, rgba(8,24,37,.76), rgba(3,10,18,.78)); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 14px rgba(68,215,255,.08); font-size: .88rem; line-height: 1.25; overflow-wrap: anywhere; white-space: normal; }
+.machine-detail-summary-pill.status-active { color: #a7ffd8; border-color: rgba(54,229,170,.35); background: linear-gradient(180deg, rgba(18,97,71,.34), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.status-down { color: #ffcf9a; border-color: rgba(255,159,67,.38); background: linear-gradient(180deg, rgba(111,64,24,.36), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.status-disabled, .machine-detail-summary-pill.location.is-unknown, .machine-detail-summary-pill.year-age.is-unknown { color: #b7c7d0; border-color: rgba(160,180,190,.22); background: linear-gradient(180deg, rgba(54,65,72,.28), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.status-removed { color: #ffb7c1; border-color: rgba(255,117,138,.34); background: linear-gradient(180deg, rgba(111,52,60,.34), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.setup-standard, .machine-detail-summary-pill.location { color: #dff7ff; border-color: rgba(68,215,255,.3); background: linear-gradient(180deg, rgba(5,61,86,.36), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.setup-double { color: #d8d0ff; border-color: rgba(140,124,255,.34); background: linear-gradient(180deg, rgba(52,46,112,.34), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.setup-plunger { color: #ffe1a3; border-color: rgba(255,180,95,.34); background: linear-gradient(180deg, rgba(91,70,19,.34), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.setup-combo { color: #ffe6b7; border-color: rgba(180,150,255,.34); background: linear-gradient(135deg, rgba(52,46,112,.36), rgba(91,70,19,.28), rgba(3,10,18,.78)); }
+.machine-detail-summary-pill.year-age { color: #ffe18a; border-color: rgba(255,211,111,.32); background: linear-gradient(180deg, rgba(91,70,19,.32), rgba(3,10,18,.78)); }
 .machine-detail-section { display: grid; gap: 10px; padding: 13px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: linear-gradient(145deg, rgba(10, 24, 34, .66), rgba(3, 10, 18, .62)); box-shadow: inset 0 1px 0 rgba(255,255,255,.055); }
 .machine-detail-section > span { color: #9eefff; font-size: .72rem; font-weight: 950; text-transform: uppercase; letter-spacing: .055em; }
 .machine-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1712,7 +1728,7 @@ tr:hover td {
   background:
     linear-gradient(145deg, rgba(18, 31, 45, .98), rgba(4, 13, 25, .98)),
     radial-gradient(circle at 12% 0%, rgba(68,215,255,.14), transparent 34%);
-  box-shadow: 0 24px 58px rgba(0,0,0,.48), 0 0 34px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.09);
+  box-shadow: 0 28px 68px rgba(0,0,0,.56), 0 0 34px rgba(68,215,255,.18), inset 0 1px 0 rgba(255,255,255,.09);
 }
 
 .machine-library-page {
@@ -2024,6 +2040,7 @@ tr:hover td {
   }
 
   .machine-detail-summary,
+  .machine-detail-summary-grid,
   .machine-detail-grid,
   .measurement-component-list {
     grid-template-columns: 1fr;
@@ -2109,6 +2126,7 @@ tr:hover td {
   .machine-detail-accordion-card,
   .machine-detail-accordion-panel,
   .machine-accordion-chevron,
+  .mcc-date-popover,
   .command-menu-item,
   .command-launcher-button,
   .launcher-gear,
@@ -2118,6 +2136,7 @@ tr:hover td {
   .requisition-preview-tabs button,
   .segmented-control button {
     transition: none !important;
+    animation: none !important;
   }
 }
 
