@@ -559,6 +559,27 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .machine-detail-section-actions .compact-button { flex: 1 1 120px; }
   .machine-detail-edit-grid { grid-template-columns: 1fr; }
   .machine-inspection-inline-panel .compact-button { width: 100%; }
+  .measurement-machine-badge-grid,
+  .measurement-general-grid,
+  .measurement-field-grid,
+  .measurement-input-grid,
+  .measurement-reason-grid,
+  .measurement-station-control-grid,
+  .measurement-station-header,
+  .measurement-station-row {
+    grid-template-columns: 1fr;
+  }
+  .measurement-station-header {
+    display: none;
+  }
+  .measurement-station-row .form-field span,
+  .measurement-station-row .measurement-input-field span {
+    display: block;
+  }
+  .measurement-modal-actions .primary-button,
+  .measurement-modal-actions .secondary-button {
+    width: 100%;
+  }
 }
 .machine-detail-pill { min-width: 0; display: grid; gap: 6px; align-content: start; padding: 8px; border: 1px solid rgba(143,205,233,.1); border-radius: 8px; background: rgba(4,13,25,.18); }
 .machine-detail-pill-label { margin: 0; color: #8fe8ff; font-size: .66rem; font-weight: 950; line-height: 1.05; text-transform: uppercase; letter-spacing: .04em; }
@@ -573,6 +594,52 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-inspection-card:hover,
 .machine-inspection-card:focus-visible { border-color: rgba(54,229,170,.72); box-shadow: 0 0 22px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.1); outline: none; transform: translateY(-1px); }
 .measurement-inspection-modal p { margin: 0; color: #d5eaf2; line-height: 1.45; }
+.machine-measurement-panel { display: grid; gap: 12px; padding: 13px; border: 1px solid rgba(68,215,255,.22); border-radius: 8px; background: linear-gradient(145deg, rgba(19,31,42,.72), rgba(4,13,25,.78)); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.machine-measurement-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.machine-measurement-panel-heading h4 { margin: 0; color: #f3fbff; font-size: 1rem; line-height: 1.2; }
+.machine-measurement-setup-pill { display: inline-flex; min-height: 28px; align-items: center; padding: 0 10px; border: 1px solid rgba(54,229,170,.32); border-radius: 999px; color: #d9fff2; background: rgba(18,97,71,.28); font-size: .72rem; font-weight: 950; text-transform: uppercase; }
+.machine-inspection-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
+.machine-inspection-card { min-height: 166px; cursor: default; }
+.machine-inspection-card em { margin: 2px 0 0; color: #ffd36f; font-size: .76rem; font-style: normal; font-weight: 950; }
+.machine-inspection-card .compact-button { align-self: end; justify-self: stretch; width: 100%; margin-top: 4px; }
+.measurement-modal-backdrop { z-index: 120; }
+.measurement-inspection-modal { width: min(1180px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 8px; }
+.measurement-modal-heading { align-items: start; }
+.measurement-machine-badge-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.measurement-component-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 8px; }
+.measurement-component-tab { appearance: none; min-height: 58px; display: grid; gap: 4px; justify-items: start; padding: 10px; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; color: #e8fbff; background: rgba(4,18,34,.48); cursor: pointer; font: inherit; text-align: left; }
+.measurement-component-tab span { margin: 0; color: #8fe8ff; font-size: .62rem; font-weight: 950; line-height: 1; text-transform: uppercase; }
+.measurement-component-tab strong { margin: 0; color: #f3fbff; font-size: .82rem; line-height: 1.15; overflow-wrap: anywhere; }
+.measurement-component-tab.active, .measurement-component-tab:hover, .measurement-component-tab:focus-visible { border-color: rgba(54,229,170,.54); background: linear-gradient(145deg, rgba(5,61,86,.62), rgba(18,97,71,.3)); outline: none; }
+.measurement-form-shell { display: grid; gap: 12px; }
+.measurement-form-section { min-width: 0; display: grid; gap: 12px; padding: 12px; border: 1px solid rgba(143,205,233,.14); border-radius: 8px; background: linear-gradient(145deg, rgba(14,26,37,.66), rgba(4,13,25,.72)); }
+.measurement-general-section { border-color: rgba(68,215,255,.24); }
+.measurement-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.measurement-section-heading h4 { margin: 0; color: #f3fbff; font-size: .94rem; line-height: 1.2; }
+.measurement-status-pill { display: inline-flex; min-height: 24px; align-items: center; padding: 0 9px; border: 1px solid rgba(143,205,233,.22); border-radius: 999px; font-size: .64rem; font-weight: 950; text-transform: uppercase; }
+.measurement-status-pill.status-completed { color: #a7ffd8; border-color: rgba(54,229,170,.42); background: rgba(18,97,71,.32); }
+.measurement-status-pill.status-draft { color: #ffd36f; border-color: rgba(255,211,111,.34); background: rgba(91,70,19,.3); }
+.measurement-general-grid, .measurement-field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.measurement-general-grid .machine-form-wide, .measurement-field-grid .machine-form-wide { grid-column: 1 / -1; }
+.measurement-input-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.measurement-input-field input { border-color: rgba(68,215,255,.38); }
+.measurement-helper { display: inline-flex; width: fit-content; max-width: 100%; min-height: 24px; align-items: center; margin-top: 6px; padding: 3px 8px; border: 1px solid rgba(54,229,170,.28); border-radius: 999px; color: #d9fff2; background: rgba(18,97,71,.3); font-size: .72rem; font-weight: 950; line-height: 1.2; overflow-wrap: anywhere; }
+.measurement-helper.error { color: #ffb7c1; border-color: rgba(255,117,138,.34); background: rgba(111,52,60,.28); }
+.measurement-pill-selector > div { display: flex; gap: 7px; flex-wrap: wrap; }
+.measurement-pill-selector button { min-height: 38px; padding: 0 10px; border: 1px solid rgba(68,215,255,.28); border-radius: 999px; color: #dff7ff; background: rgba(5,61,86,.32); cursor: pointer; font: inherit; font-size: .76rem; font-weight: 950; }
+.measurement-pill-selector button.active, .measurement-pill-selector button:hover, .measurement-pill-selector button:focus-visible { color: #001523; border-color: rgba(54,229,170,.82); background: linear-gradient(135deg, #44d7ff, #36e5aa); outline: none; }
+.measurement-reason-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.measurement-station-control-grid { display: grid; grid-template-columns: minmax(160px, .6fr) minmax(160px, .8fr) auto; gap: 10px; align-items: end; }
+.measurement-station-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-start; }
+.measurement-station-actions .compact-button { width: auto; }
+.measurement-station-table { display: grid; gap: 7px; min-width: 0; }
+.measurement-station-header, .measurement-station-row { display: grid; grid-template-columns: minmax(150px, .9fr) minmax(150px, .9fr) minmax(150px, 1fr) auto; gap: 8px; align-items: start; }
+.measurement-station-header { padding: 8px 10px; border: 1px solid rgba(143,205,233,.12); border-radius: 8px; color: #83cfea; background: rgba(4,18,34,.42); font-size: .64rem; font-weight: 950; text-transform: uppercase; }
+.measurement-station-row { padding: 8px; border: 1px solid rgba(143,205,233,.12); border-radius: 8px; background: rgba(4,13,25,.34); }
+.measurement-station-row .form-field span, .measurement-station-row .measurement-input-field span { display: none; }
+.measurement-confirm-backdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.46); }
+.measurement-confirm-modal { width: min(460px, 100%); display: grid; gap: 12px; border-radius: 8px; }
+.measurement-confirm-modal h4 { margin: 0; color: #f3fbff; font-size: 1.05rem; line-height: 1.25; }
 .measurement-component-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .measurement-component-list span { padding: 9px 10px; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; color: #f3fbff; background: rgba(4,13,25,.42); font-size: .84rem; font-weight: 900; }
 .machine-unit-field { min-width: 0; }

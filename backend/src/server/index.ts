@@ -5303,6 +5303,221 @@ async function buildHistoryPdf(input: { section: HistorySection; rows: HistoryLo
   });
   return Buffer.from(await pdf.save());
 }
+type MeasurementPdfMode = 'filled' | 'blank';
+type MeasurementPdfTarget = { assetNumber: string; brand: string; model: string; serialNumber: string; machineYear: string; setup: string };
+const measurementPdfComponentLabels: Record<string, string> = { screw: 'Screw', barrel: 'Barrel', tip: 'Tip', plunger: 'Plunger', screw_2: 'Unit 2 Screw', barrel_2: 'Unit 2 Barrel', tip_2: 'Unit 2 Tip' };
+const measurementPdfFieldLabels: Record<string, string> = {
+  oldNew: 'OLD / NEW',
+  dateMeasured: 'Date Measured',
+  dateInstalled: 'Date Installed',
+  inspectorName: 'Inspector Name',
+  comments: 'Comments',
+  reasonForPull: 'Reason for Pull',
+  screwSerialNumber: 'Screw Serial #',
+  screwPartNumber: 'Screw Part #',
+  ldRatio: 'L/D',
+  compressionRatio: 'Compression Ratio',
+  screwOverallLength: 'Screw Overall Length',
+  screwOverallLengthWithTip: 'Screw Overall Length With Tip',
+  screwLength: 'Screw Length',
+  flightSectionLength: 'Flight Section Length',
+  leadGapMeasurement: 'Lead Gap Measurement',
+  feedRootSmallestDia: 'Feed Root Smallest Dia',
+  transitionRootSmallestDia: 'Transition Root Smallest Dia',
+  meteringRootSmallestDia: 'Metering Root Smallest Dia',
+  feedFlightSmallestDia: 'Feed Flight Smallest Dia',
+  transitionFlightSmallestDia: 'Transition Flight Smallest Dia',
+  meteringFlightSmallestDia: 'Metering Flight Smallest Dia',
+  splineCheck: 'Spline Check',
+  splineNotes: 'Spline Notes',
+  screwComments: 'Screw Comments',
+  barrelPartNumber: 'Barrel Part #',
+  oemBarrelBore: 'OEM Barrel Bore',
+  barrelLength: 'Barrel Length',
+  barrelBoreScrewDiameter: 'Barrel Bore / Screw Diameter',
+  barrelNotes: 'Barrel Notes',
+  barrelComments: 'Barrel Comments',
+  tipMfg: 'Tip MFG',
+  tipPartNumber: 'Tip Part #',
+  tipType: 'Tip Type',
+  checkRingDia: 'Check Ring Dia',
+  seatCondition: 'Seat Condition',
+  tipThreadInspection: 'Tip Thread Inspection',
+  checkRingDiameter: 'Check Ring Diameter',
+  tipDiameter: 'Tip Diameter',
+  tipLength: 'Tip Length',
+  seatMeasurement: 'Seat Measurement',
+  tipComments: 'Tip Comments',
+  plungerType: 'Plunger Type',
+  plungerDiameter: 'Plunger Diameter',
+  plungerLength: 'Plunger Length',
+  plungerOverallLength: 'Plunger Overall Length',
+  plungerRebuildRepaired: 'Plunger Rebuild / Repaired',
+  plungerCondition: 'Plunger Condition',
+  plungerNotes: 'Plunger Notes',
+  plungerComments: 'Plunger Comments',
+  plungerBarrelType: 'Plunger Barrel Type',
+  cylinderBarrelBore: 'Cylinder Barrel Bore',
+  cylinderBarrelLength: 'Cylinder Barrel Length',
+  cylinderBarrelNotes: 'Cylinder Barrel Notes',
+};
+function measurementPdfMode(body: Record<string, unknown>): MeasurementPdfMode {
+  return String(body.mode ?? '').toLowerCase() === 'blank' ? 'blank' : 'filled';
+}
+function measurementPdfTarget(body: Record<string, unknown>): MeasurementPdfTarget {
+  const target = isRecord(body.target) ? body.target : {};
+  const hasDouble = Boolean(target.hasDoubleShotInjection);
+  const hasPlunger = Boolean(target.hasPlungerInjection);
+  const setup = hasDouble && hasPlunger ? 'Double Shot + Plunger' : hasDouble ? 'Double Shot' : hasPlunger ? 'Plunger' : 'Standard Injection';
+  return {
+    assetNumber: cleanPdfText(target.assetNumber) || 'Machine Asset',
+    brand: cleanPdfText(target.brand),
+    model: cleanPdfText(target.model),
+    serialNumber: cleanPdfText(target.serialNumber),
+    machineYear: cleanPdfText(target.machineYear),
+    setup,
+  };
+}
+function measurementPdfComponents(body: Record<string, unknown>) {
+  const raw = Array.isArray(body.components) ? body.components.map(value=>cleanPdfText(value)) : [];
+  const allowed = new Set(Object.keys(measurementPdfComponentLabels));
+  const components = raw.filter(component=>allowed.has(component));
+  return components.length ? [...new Set(components)] : ['screw','barrel','tip'];
+}
+function measurementPdfLabel(key: string) {
+  if (measurementPdfFieldLabels[key]) return measurementPdfFieldLabels[key];
+  return key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, letter=>letter.toUpperCase()).trim();
+}
+function measurementPdfValue(value: unknown) {
+  if (!isRecord(value)) return cleanPdfText(value);
+  const raw = cleanPdfText(value.rawInput);
+  const inches = typeof value.valueInches === 'number' && Number.isFinite(value.valueInches) ? `${value.valueInches.toFixed(3)} in` : '';
+  const mm = typeof value.valueMm === 'number' && Number.isFinite(value.valueMm) ? `${value.valueMm.toFixed(2)} mm` : '';
+  const converted = [inches,mm].filter(Boolean).join(' / ');
+  return [raw,converted].filter(Boolean).join(' | ');
+}
+function measurementPdfReasonText(record: Record<string, unknown>) {
+  const reasonRecord = isRecord(record.reasonForPull) ? record.reasonForPull : {};
+  const selected = Object.entries(reasonRecord).filter(([,value])=>Boolean(value)).map(([key])=>key);
+  const other = cleanPdfText(record.reasonForPullOther);
+  return selected.map(reason=>reason === 'Other' && other ? `Other: ${other}` : reason).join(', ');
+}
+function measurementPdfRecordEntries(record: Record<string, unknown>) {
+  const entries: Array<{ label: string; value: string }> = [
+    { label: measurementPdfLabel('oldNew'), value: cleanPdfText(record.oldNew).replace(/_/g, ' ') },
+    { label: measurementPdfLabel('dateMeasured'), value: cleanPdfText(record.dateMeasured) },
+    { label: measurementPdfLabel('dateInstalled'), value: cleanPdfText(record.dateInstalled) },
+    { label: measurementPdfLabel('inspectorName'), value: cleanPdfText(record.inspectorName) },
+  ];
+  const reasons = measurementPdfReasonText(record);
+  if (reasons) entries.push({ label: measurementPdfLabel('reasonForPull'), value: reasons });
+  for (const groupKey of ['textFields','selectFields','measurements']) {
+    const group = isRecord(record[groupKey]) ? record[groupKey] : {};
+    for (const [key,value] of Object.entries(group)) {
+      const text = groupKey === 'measurements' ? measurementPdfValue(value) : cleanPdfText(value);
+      entries.push({ label: measurementPdfLabel(key), value: text });
+    }
+  }
+  const stations = Array.isArray(record.stations) ? record.stations.filter(isRecord) : [];
+  stations.forEach((station,index)=>{
+    const distance = measurementPdfValue(station.distance);
+    const insideDiameter = measurementPdfValue(station.insideDiameter);
+    const notes = cleanPdfText(station.notes);
+    entries.push({ label: `Station ${index + 1}`, value: [distance && `Distance ${distance}`, insideDiameter && `ID ${insideDiameter}`, notes && `Notes ${notes}`].filter(Boolean).join(' | ') });
+  });
+  const comments = cleanPdfText(record.comments);
+  if (comments) entries.push({ label: measurementPdfLabel('comments'), value: comments });
+  return entries.filter(entry=>entry.value || entry.label);
+}
+function measurementPdfBlankEntries(component: string) {
+  const common = ['Inspector Name','Date Measured','Date Installed','OLD / NEW','Comments'];
+  const componentFields: Record<string, string[]> = {
+    screw: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Feed Root Smallest Dia','Transition Root Smallest Dia','Metering Root Smallest Dia','Feed Flight Smallest Dia','Transition Flight Smallest Dia','Metering Flight Smallest Dia','Spline Check','Spline Notes','Screw Comments'],
+    screw_2: ['Reason for Pull','Screw Serial #','Screw Part #','L/D','Compression Ratio','Screw Overall Length','Screw Overall Length With Tip','Screw Length','Flight Section Length','Lead Gap Measurement','Feed Root Smallest Dia','Transition Root Smallest Dia','Metering Root Smallest Dia','Feed Flight Smallest Dia','Transition Flight Smallest Dia','Metering Flight Smallest Dia','Spline Check','Spline Notes','Screw Comments'],
+    barrel: ['Barrel Part #','OEM Barrel Bore','Barrel Length','Barrel Bore / Screw Diameter','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Station 5 Distance / ID','Station 6 Distance / ID','Barrel Notes','Barrel Comments'],
+    barrel_2: ['Barrel Part #','OEM Barrel Bore','Barrel Length','Barrel Bore / Screw Diameter','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Station 5 Distance / ID','Station 6 Distance / ID','Barrel Notes','Barrel Comments'],
+    tip: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Inspection','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
+    tip_2: ['Tip MFG','Tip Part #','Tip Type','Check Ring Dia','Seat Condition','Lead Gap Measurement','Tip Thread Inspection','Check Ring Diameter','Tip Diameter','Tip Length','Seat Measurement','Tip Comments'],
+    plunger: ['Plunger Type','Plunger Diameter','Plunger Length','Plunger Overall Length','Plunger Rebuild / Repaired','Plunger Condition','Plunger Barrel Type','Cylinder Barrel Bore','Cylinder Barrel Length','Station 1 Distance / ID','Station 2 Distance / ID','Station 3 Distance / ID','Station 4 Distance / ID','Plunger Notes','Cylinder Barrel Notes'],
+  };
+  return [...common,...(componentFields[component] ?? [])].map(label=>({label,value:''}));
+}
+async function buildMeasurementInspectionPdf(body: Record<string, unknown>, actor: User) {
+  const mode = measurementPdfMode(body);
+  const target = measurementPdfTarget(body);
+  const components = measurementPdfComponents(body);
+  const records = Array.isArray(body.records) ? body.records.filter(isRecord) : [];
+  const recordsByComponent = new Map(records.map(record=>[cleanPdfText(record.componentType), record]));
+  const pdf = await PDFDocument.create();
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const width = 792;
+  const height = 612;
+  const margin = 30;
+  const accent = rgb(0.02, 0.45, 0.72);
+  const soft = rgb(0.92, 0.97, 1);
+  const dark = rgb(0.05, 0.08, 0.12);
+  const gray = rgb(0.35, 0.42, 0.48);
+  const border = rgb(0.72, 0.82, 0.88);
+  let page: PDFPage;
+  let y = 0;
+  let pageNumber = 0;
+  const title = mode === 'blank' ? 'MCC Screw / Barrel / Tip Measurement Sheet - Blank' : 'MCC Measurement Inspection';
+  const addPage = () => {
+    page = pdf.addPage([width,height]);
+    pageNumber += 1;
+    page.drawRectangle({ x: 0, y: height - 62, width, height: 62, color: soft });
+    page.drawRectangle({ x: 0, y: height - 62, width: 7, height: 62, color: accent });
+    page.drawText(title, { x: margin, y: height - 34, size: 17, font: bold, color: dark });
+    page.drawText(`Generated ${new Date().toLocaleString('en-US')} by ${actor.full_name}`, { x: margin, y: height - 51, size: 8, font: regular, color: gray });
+    y = height - 86;
+  };
+  const ensure = (space: number) => {
+    if (y - space < margin + 24) addPage();
+  };
+  const drawSectionHeader = (label: string) => {
+    ensure(30);
+    page.drawRectangle({ x: margin, y: y - 20, width: width - margin * 2, height: 22, color: accent });
+    page.drawText(label, { x: margin + 8, y: y - 14, size: 10, font: bold, color: pdfWhite });
+    y -= 30;
+  };
+  const drawEntry = (entry: { label: string; value: string }, x: number, boxWidth: number, rowY: number) => {
+    page.drawRectangle({ x, y: rowY - 34, width: boxWidth, height: 34, borderColor: border, borderWidth: 0.6, color: rgb(0.985,0.995,1) });
+    page.drawText(truncateToFit(entry.label, bold, 6.6, boxWidth - 10), { x: x + 5, y: rowY - 10, size: 6.6, font: bold, color: accent });
+    const lines = wrapPdfText(entry.value, regular, 7.2, boxWidth - 10, 2);
+    lines.forEach((line,index)=>page.drawText(line, { x: x + 5, y: rowY - 22 - index * 8, size: 7.2, font: regular, color: dark }));
+  };
+  const drawEntries = (entries: Array<{ label: string; value: string }>) => {
+    const gap = 8;
+    const boxWidth = (width - margin * 2 - gap) / 2;
+    for (let index = 0; index < entries.length; index += 2) {
+      ensure(42);
+      const rowY = y;
+      drawEntry(entries[index], margin, boxWidth, rowY);
+      if (entries[index + 1]) drawEntry(entries[index + 1], margin + boxWidth + gap, boxWidth, rowY);
+      y -= 42;
+    }
+  };
+  addPage();
+  drawSectionHeader('Machine');
+  drawEntries([
+    { label: 'Press #', value: target.assetNumber },
+    { label: 'Brand', value: target.brand },
+    { label: 'Model', value: target.model },
+    { label: 'Serial #', value: target.serialNumber },
+    { label: 'Machine Year / Age', value: target.machineYear },
+    { label: 'Injection Setup', value: target.setup },
+  ]);
+  for (const component of components) {
+    drawSectionHeader(measurementPdfComponentLabels[component] ?? component);
+    const record = recordsByComponent.get(component);
+    const entries = mode === 'blank' || !record ? measurementPdfBlankEntries(component) : measurementPdfRecordEntries(record);
+    drawEntries(entries);
+  }
+  const pages = pdf.getPages();
+  pages.forEach((pdfPage,index)=>pdfPage.drawText(`Page ${index + 1} of ${pages.length}`, { x: width - 88, y: 16, size: 8, font: regular, color: gray }));
+  return Buffer.from(await pdf.save());
+}
 function validateMit3PartInput(body: unknown) {
   const input = isRecord(body) ? body : {};
   const partNumber = textField(input, ['partNumber']);
@@ -6175,6 +6390,19 @@ app.get('/api/machine-library/assets/:id/history', requireAuth, requirePermissio
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
   const records = all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC, id DESC LIMIT 200", [String(asset.id),String(asset.id),asset.asset_number]).map(publicHistoryRecord);
   res.json({ok:true,asset:publicMachineAsset(asset),records});
+});
+app.post('/api/machine-library/measurement-inspection/pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
+  try {
+    const body = isRecord(req.body) ? req.body : {};
+    const mode = measurementPdfMode(body);
+    const target = measurementPdfTarget(body);
+    const buffer = await buildMeasurementInspectionPdf(body, req.user!);
+    const fileName = `MCC_Measurement_Inspection_${safeFileToken(target.assetNumber)}_${mode}_${downloadDateStamp()}.pdf`;
+    audit(req,'measurement inspection pdf generated','machine_asset',target.assetNumber,{mode,componentCount:measurementPdfComponents(body).length});
+    sendDownload(res,fileName,'application/pdf',buffer);
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
+  }
 });
 app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.write'), (_req,res)=>{
   sendDownload(res, `MCC_Machine_List_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', machineCsvFromRows(machineImportHeaders, []));

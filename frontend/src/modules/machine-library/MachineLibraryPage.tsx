@@ -11,7 +11,33 @@ type ImportMode = 'add_new_only' | 'upsert';
 type ImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
 type MachineImportSummary = { addedCount: number; updatedCount: number; skippedCount: number; rejectedDuplicateCount: number; errors?: string[]; rejectedDuplicates?: ImportRejectedDuplicate[]; changedAssetNumbers?: string[] };
 type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz'> & { shotSizeOz: string };
-type InspectionContext = { assetNumber: string; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean };
+type MeasurementComponentType = 'screw' | 'barrel' | 'tip' | 'plunger' | 'screw_2' | 'barrel_2' | 'tip_2';
+type MeasurementUnit = 'in' | 'mm';
+type MeasurementOldNew = 'old' | 'new' | 'rebuilt_repaired';
+type MeasurementStationInterval = '3' | '6' | 'custom';
+type MeasurementValue = { rawInput: string; valueInches: number | null; valueMm: number | null; unitDetected: MeasurementUnit | ''; validationMessage: string };
+type InspectionContext = { id?: number; assetNumber: string; brand: string; model: string; serialNumber: string; machineYear: string; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean; barrelLength: string; barrel2Length: string; plungerBarrelLength: string; barrelDiameter: string; barrel2Diameter: string; plungerDiameter: string };
+type MeasurementCardDefinition = { type: MeasurementComponentType; title: string; badge: string; description: string };
+type MeasurementStation = { id: string; distance: MeasurementValue; insideDiameter: MeasurementValue; notes: string };
+type MeasurementInspectionRecord = {
+  componentType: MeasurementComponentType;
+  status: 'draft' | 'completed';
+  oldNew: MeasurementOldNew;
+  dateMeasured: string;
+  dateInstalled: string;
+  inspectorName: string;
+  comments: string;
+  reasonForPull: Record<string, boolean>;
+  reasonForPullOther: string;
+  textFields: Record<string, string>;
+  measurements: Record<string, MeasurementValue>;
+  selectFields: Record<string, string>;
+  stationInterval: MeasurementStationInterval;
+  customStationInterval: MeasurementValue;
+  stations: MeasurementStation[];
+};
+type MeasurementInspectionRecordMap = Record<string, MeasurementInspectionRecord>;
+type MeasurementInspectionState = { target: InspectionContext; componentType: MeasurementComponentType };
 type ReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'barrelLength' | 'screwLength' | 'screw2Length' | 'barrel2Length' | 'plungerLength' | 'plungerDiameter' | 'plungerBarrelLength' | 'plungerBarrelDiameter';
 type StringFormKey = { [K in keyof AssetForm]: AssetForm[K] extends string ? K : never }[keyof AssetForm];
@@ -39,6 +65,63 @@ const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
   { key: 'fullDieHeightLength', label: 'Full Die Height Length / Range' },
 ];
 const conditionLabels: Record<ConditionStatus, string> = { new: 'New', used: 'Used', worn: 'Worn', rebuilt_repaired: 'Rebuilt / Repaired' };
+const measurementComponentLabels: Record<MeasurementComponentType, string> = { screw: 'Screw', barrel: 'Barrel', tip: 'Tip', plunger: 'Plunger', screw_2: 'Unit 2 Screw', barrel_2: 'Unit 2 Barrel', tip_2: 'Unit 2 Tip' };
+const measurementOldNewLabels: Record<MeasurementOldNew, string> = { old: 'Old', new: 'New', rebuilt_repaired: 'Rebuilt / Repaired' };
+const measurementReasons = ['Contamination','Splay','Cushion','Streaks','Metal','Recovery','History','Other'];
+const screwIdentityFields = [
+  ['screwSerialNumber','Screw Serial #'],
+  ['screwPartNumber','Screw Part #'],
+  ['ldRatio','L/D'],
+  ['compressionRatio','Compression Ratio'],
+] as const;
+const screwMeasurementFields = [
+  ['screwOverallLength','Screw Overall Length'],
+  ['screwOverallLengthWithTip','Screw Overall Length With Tip'],
+  ['screwLength','Screw Length'],
+  ['flightSectionLength','Flight Section Length'],
+  ['leadGapMeasurement','Lead Gap Measurement'],
+  ['feedRootSmallestDia','Feed Root Smallest Dia'],
+  ['transitionRootSmallestDia','Transition Root Smallest Dia'],
+  ['meteringRootSmallestDia','Metering Root Smallest Dia'],
+  ['feedFlightSmallestDia','Feed Flight Smallest Dia'],
+  ['transitionFlightSmallestDia','Transition Flight Smallest Dia'],
+  ['meteringFlightSmallestDia','Metering Flight Smallest Dia'],
+] as const;
+const barrelIdentityFields = [
+  ['barrelPartNumber','Barrel Part #'],
+] as const;
+const barrelMeasurementFields = [
+  ['oemBarrelBore','OEM Barrel Bore'],
+  ['barrelLength','Barrel Length'],
+  ['barrelBoreScrewDiameter','Barrel Bore / Screw Diameter'],
+] as const;
+const tipIdentityFields = [
+  ['tipMfg','Tip MFG'],
+  ['tipPartNumber','Tip Part #'],
+  ['tipType','Tip Type'],
+  ['seatCondition','Seat Condition'],
+] as const;
+const tipMeasurementFields = [
+  ['checkRingDia','Check Ring Dia'],
+  ['leadGapMeasurement','Lead Gap Measurement'],
+  ['checkRingDiameter','Check Ring Diameter'],
+  ['tipDiameter','Tip Diameter'],
+  ['tipLength','Tip Length'],
+  ['seatMeasurement','Seat Measurement'],
+] as const;
+const plungerTextFields = [
+  ['plungerType','Plunger Type'],
+  ['plungerRebuildRepaired','Plunger Rebuild / Repaired'],
+  ['plungerCondition','Plunger Condition'],
+  ['plungerBarrelType','Plunger Barrel Type'],
+] as const;
+const plungerMeasurementFields = [
+  ['plungerDiameter','Plunger Diameter'],
+  ['plungerLength','Plunger Length'],
+  ['plungerOverallLength','Plunger Overall Length'],
+  ['cylinderBarrelBore','Cylinder Barrel Bore'],
+  ['cylinderBarrelLength','Cylinder Barrel Length'],
+] as const;
 const machineDetailSectionFields: Record<MachineDetailEditableSectionKey, readonly (keyof AssetForm)[]> = {
   basic: ['assetName','brand','model','serialNumber','machineYear','machineType','powerType','tonnage','shotSizeOz','barrelDiameter','location','status'],
   electrical: ['voltageValue','voltageType','fullLoadAmp','machineLength','machineWidth','machineHeight','fullDieHeightLength'],
@@ -129,14 +212,40 @@ function injectionSetupLabel(asset: Pick<MachineAsset, 'hasDoubleShotInjection' 
   if (asset.hasPlungerInjection) return 'Plunger';
   return '';
 }
-function inspectionContext(asset: Pick<MachineAsset | AssetForm, 'assetNumber' | 'hasDoubleShotInjection' | 'hasPlungerInjection'>): InspectionContext {
-  return { assetNumber: asset.assetNumber || 'Machine Asset', hasDoubleShotInjection: asset.hasDoubleShotInjection, hasPlungerInjection: asset.hasPlungerInjection };
+function inspectionContext(asset: Partial<MachineAsset> | Partial<AssetForm>): InspectionContext {
+  return {
+    id: 'id' in asset && typeof asset.id === 'number' ? asset.id : undefined,
+    assetNumber: asset.assetNumber || 'Machine Asset',
+    brand: asset.brand || '',
+    model: asset.model || '',
+    serialNumber: asset.serialNumber || '',
+    machineYear: asset.machineYear || '',
+    hasDoubleShotInjection: Boolean(asset.hasDoubleShotInjection),
+    hasPlungerInjection: Boolean(asset.hasPlungerInjection),
+    barrelLength: asset.barrelLength || '',
+    barrel2Length: asset.barrel2Length || '',
+    plungerBarrelLength: asset.plungerBarrelLength || '',
+    barrelDiameter: asset.barrelDiameter || '',
+    barrel2Diameter: asset.barrel2Diameter || '',
+    plungerDiameter: asset.plungerDiameter || '',
+  };
 }
-function inspectionComponents(target: Pick<InspectionContext, 'hasDoubleShotInjection' | 'hasPlungerInjection'>) {
-  const components = ['Screw', 'Screw Tip', 'Barrel', 'Barrel End Cap'];
-  if (target.hasDoubleShotInjection) components.push('Unit 2 Screw', 'Unit 2 Screw Tip', 'Unit 2 Barrel', 'Unit 2 Barrel End Cap');
-  if (target.hasPlungerInjection) components.push('Plunger', 'Plunger Barrel');
-  return components;
+function measurementComponentCards(target: Pick<InspectionContext, 'hasDoubleShotInjection' | 'hasPlungerInjection'>): MeasurementCardDefinition[] {
+  const cards: MeasurementCardDefinition[] = [
+    { type: 'screw', title: 'Screw Inspection', badge: 'Root / Flight', description: 'Measure root, flight, length, spline.' },
+    { type: 'barrel', title: 'Barrel Inspection', badge: 'Bore Stations', description: 'Measure barrel bore / inside diameter stations.' },
+    { type: 'tip', title: 'Tip Inspection', badge: 'Ring / Seat', description: 'Measure check ring, tip thread, seat condition.' },
+  ];
+  if (target.hasPlungerInjection) cards.push({ type: 'plunger', title: 'Plunger Inspection', badge: 'Plunger', description: 'Measure plunger and plunger barrel / cylinder barrel.' });
+  if (target.hasDoubleShotInjection) cards.push(
+    { type: 'screw_2', title: 'Unit 2 Screw Inspection', badge: 'Unit 2', description: 'Measure secondary screw root, flight, length, spline.' },
+    { type: 'barrel_2', title: 'Unit 2 Barrel Inspection', badge: 'Unit 2', description: 'Measure secondary barrel bore / inside diameter stations.' },
+    { type: 'tip_2', title: 'Unit 2 Tip Inspection', badge: 'Unit 2', description: 'Measure secondary check ring, tip thread, seat condition.' },
+  );
+  return cards;
+}
+function defaultMeasurementComponent(target: Pick<InspectionContext, 'hasDoubleShotInjection' | 'hasPlungerInjection'>): MeasurementComponentType {
+  return measurementComponentCards(target)[0]?.type ?? 'screw';
 }
 function componentSummary(type: string, date: string) {
   return `${type || '-'} / ${ageYears(date)}`;
@@ -192,6 +301,106 @@ function parseDimensionValue(value: string) {
   const mm = unit.startsWith('mm') || unit.startsWith('millimeter') ? amount : unit === 'in' || unit === 'inch' || unit === 'inches' || unit === '"' ? amount * 25.4 : amount * 304.8;
   return { mm, inches: mm / 25.4, feet: mm / 304.8 };
 }
+function measurementValueFromRaw(rawInput: string): MeasurementValue {
+  const raw = rawInput;
+  const clean = raw.trim();
+  if (!clean) return { rawInput: raw, valueInches: null, valueMm: null, unitDetected: '', validationMessage: '' };
+  if (/^[+-]?$|^[+-]?\.$/.test(clean)) return { rawInput: raw, valueInches: null, valueMm: null, unitDetected: '', validationMessage: '' };
+  const match = clean.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*(mm|millimeter|millimeters|in|inch|inches|")?$/i);
+  if (!match) return { rawInput: raw, valueInches: null, valueMm: null, unitDetected: '', validationMessage: 'Enter a number with optional in or mm.' };
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return { rawInput: raw, valueInches: null, valueMm: null, unitDetected: '', validationMessage: 'Enter a numeric measurement.' };
+  if (amount < 0) return { rawInput: raw, valueInches: null, valueMm: null, unitDetected: '', validationMessage: 'Measurement cannot be negative.' };
+  const unitText = (match[2] || 'in').toLowerCase();
+  const unitDetected: MeasurementUnit = unitText.startsWith('mm') || unitText.startsWith('millimeter') ? 'mm' : 'in';
+  const valueMm = unitDetected === 'mm' ? amount : amount * 25.4;
+  const valueInches = valueMm / 25.4;
+  return { rawInput: raw, valueInches, valueMm, unitDetected, validationMessage: '' };
+}
+function measurementValueFromKnownDimension(value: string) {
+  const parsed = parseDimensionValue(value);
+  if (parsed) return measurementValueFromRaw(`${formatUnitNumber(parsed.inches, 3)}in`);
+  return measurementValueFromRaw(value);
+}
+function measurementHelperText(value: MeasurementValue) {
+  if (value.validationMessage) return value.validationMessage;
+  if (value.valueInches === null || value.valueMm === null || !value.unitDetected) return '';
+  return value.unitDetected === 'mm' ? `${formatUnitNumber(value.valueInches, 3)} in` : `${formatUnitNumber(value.valueMm, 2)} mm`;
+}
+function measurementRecordKey(target: InspectionContext, componentType: MeasurementComponentType) {
+  return `${target.id ?? (target.assetNumber || 'draft')}:${componentType}`;
+}
+function measurementTargetKey(target: InspectionContext) {
+  return String(target.id ?? (target.assetNumber || 'draft'));
+}
+function fieldMap(keys: readonly (readonly [string, string])[]) {
+  return Object.fromEntries(keys.map(([key])=>[key,'']));
+}
+function measurementMap(keys: readonly (readonly [string, string])[], defaults: Record<string, string> = {}) {
+  return Object.fromEntries(keys.map(([key])=>[key,measurementValueFromKnownDimension(defaults[key] ?? '')]));
+}
+function stationRowsFromLength(lengthValue: MeasurementValue, intervalValue: MeasurementValue) {
+  const length = lengthValue.valueInches;
+  const interval = intervalValue.valueInches;
+  if (!length || !interval || length <= 0 || interval <= 0) return [];
+  const rows: MeasurementStation[] = [];
+  for (let distance = 0; distance <= length + 0.001; distance += interval) {
+    rows.push({ id: `station-${rows.length}-${distance.toFixed(3)}`, distance: measurementValueFromRaw(`${formatUnitNumber(distance, 3)}in`), insideDiameter: measurementValueFromRaw(''), notes: '' });
+    if (rows.length > 80) break;
+  }
+  if (rows.length && rows[rows.length - 1].distance.valueInches !== null && Math.abs(rows[rows.length - 1].distance.valueInches! - length) > 0.05) rows.push({ id: `station-${rows.length}-${length.toFixed(3)}`, distance: measurementValueFromRaw(`${formatUnitNumber(length, 3)}in`), insideDiameter: measurementValueFromRaw(''), notes: '' });
+  return rows;
+}
+function defaultMeasurementRecord(target: InspectionContext, componentType: MeasurementComponentType, inspectorName = ''): MeasurementInspectionRecord {
+  const isUnit2 = componentType.endsWith('_2');
+  const isBarrel = componentType === 'barrel' || componentType === 'barrel_2';
+  const isTip = componentType === 'tip' || componentType === 'tip_2';
+  const isPlunger = componentType === 'plunger';
+  const barrelLength = isUnit2 ? target.barrel2Length : target.barrelLength;
+  const barrelDiameter = isUnit2 ? target.barrel2Diameter : target.barrelDiameter;
+  const plungerBarrelLength = target.plungerBarrelLength;
+  const base: MeasurementInspectionRecord = {
+    componentType,
+    status: 'draft',
+    oldNew: 'old',
+    dateMeasured: localIsoDate(new Date()),
+    dateInstalled: '',
+    inspectorName,
+    comments: '',
+    reasonForPull: Object.fromEntries(measurementReasons.map(reason=>[reason,false])),
+    reasonForPullOther: '',
+    textFields: {},
+    measurements: {},
+    selectFields: {},
+    stationInterval: '3',
+    customStationInterval: measurementValueFromRaw(''),
+    stations: [],
+  };
+  if (componentType === 'screw' || componentType === 'screw_2') {
+    return { ...base, textFields: { ...fieldMap(screwIdentityFields), splineNotes: '', screwComments: '' }, measurements: measurementMap(screwMeasurementFields), selectFields: { splineCheck: '' } };
+  }
+  if (isBarrel) {
+    const measurements = measurementMap(barrelMeasurementFields, { barrelLength, barrelBoreScrewDiameter: barrelDiameter, oemBarrelBore: barrelDiameter });
+    const interval = Number(measurements.barrelLength.valueInches ?? 0) > 40 ? measurementValueFromRaw('6in') : measurementValueFromRaw('3in');
+    return { ...base, stationInterval: interval.valueInches === 6 ? '6' : '3', textFields: { ...fieldMap(barrelIdentityFields), barrelNotes: '', barrelComments: '' }, measurements, stations: stationRowsFromLength(measurements.barrelLength, interval) };
+  }
+  if (isTip) {
+    return { ...base, textFields: { ...fieldMap(tipIdentityFields), tipComments: '' }, measurements: measurementMap(tipMeasurementFields), selectFields: { tipThreadInspection: '' } };
+  }
+  if (isPlunger) {
+    const measurements = measurementMap(plungerMeasurementFields, { plungerDiameter: target.plungerDiameter, cylinderBarrelLength: plungerBarrelLength });
+    return { ...base, textFields: { ...fieldMap(plungerTextFields), plungerNotes: '', plungerComments: '', cylinderBarrelNotes: '' }, measurements, stations: stationRowsFromLength(measurements.cylinderBarrelLength, measurementValueFromRaw('3in')) };
+  }
+  return base;
+}
+function ensureMeasurementRecord(records: MeasurementInspectionRecordMap, target: InspectionContext, componentType: MeasurementComponentType, inspectorName = '') {
+  const key = measurementRecordKey(target, componentType);
+  return records[key] ? records : { ...records, [key]: defaultMeasurementRecord(target, componentType, inspectorName) };
+}
+function targetMeasurementRecords(records: MeasurementInspectionRecordMap, target: InspectionContext) {
+  const targetKey = measurementTargetKey(target);
+  return Object.entries(records).filter(([key])=>key.startsWith(`${targetKey}:`)).map(([,record])=>record);
+}
 function importToast(summary: MachineImportSummary) {
   const added = summary.addedCount ?? 0;
   const updated = summary.updatedCount ?? 0;
@@ -201,7 +410,7 @@ function importToast(summary: MachineImportSummary) {
   return { kind: 'error' as const, text: `Machine import finished with no changes: ${rejected} rejected, ${skipped} skipped.` };
 }
 
-export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
+export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userRole?: string; userFullName?: string }) {
   const [assets,setAssets]=useState<MachineAsset[]>([]);
   const [brandSettings,setBrandSettings]=useState<BrandSetting[]>([]);
   const [permissions,setPermissions]=useState({canEdit:editableRoles.has(userRole),canDelete:deleteRoles.has(userRole)});
@@ -221,7 +430,8 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   const [showColors,setShowColors]=useState(false);
   const [colorDrafts,setColorDrafts]=useState<Record<string,string>>({});
   const [detailAsset,setDetailAsset]=useState<MachineAsset|null>(null);
-  const [inspection,setInspection]=useState<InspectionContext|null>(null);
+  const [inspection,setInspection]=useState<MeasurementInspectionState|null>(null);
+  const [measurementRecords,setMeasurementRecords]=useState<MeasurementInspectionRecordMap>({});
   const [logs,setLogs]=useState<{asset:MachineAsset;records:HistoryRecord[]}|null>(null);
   const [replacement,setReplacement]=useState<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>(null);
   const fileRef = useRef<HTMLInputElement|null>(null);
@@ -328,6 +538,10 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
     if (importSummary) setMessage(importToast(importSummary));
     setImportSummary(null);
   }
+  function openMeasurementInspection(target: InspectionContext, componentType = defaultMeasurementComponent(target)) {
+    setMeasurementRecords(current=>ensureMeasurementRecord(current,target,componentType,userFullName));
+    setInspection({target,componentType});
+  }
 
   return (
     <div className="page-stack machine-library-page">
@@ -401,9 +615,9 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}
       </div>
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
-      {detailAsset&&<MachineDetailModal asset={detailAsset} canEdit={canEdit} onClose={()=>setDetailAsset(null)} onEdit={()=>{ const asset = detailAsset; setDetailAsset(null); openEdit(asset); }} onLogs={()=>{ const asset = detailAsset; setDetailAsset(null); void loadLogs(asset); }} onInspection={()=>setInspection(inspectionContext(detailAsset))} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} />}
-      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspection={()=>setInspection(inspectionContext(editing ?? form))} />}
-      {inspection&&<MeasurementInspectionModal target={inspection} onClose={()=>setInspection(null)} />}
+      {detailAsset&&<MachineDetailModal asset={detailAsset} canEdit={canEdit} measurementRecords={measurementRecords} onClose={()=>setDetailAsset(null)} onEdit={()=>{ const asset = detailAsset; setDetailAsset(null); openEdit(asset); }} onLogs={()=>{ const asset = detailAsset; setDetailAsset(null); void loadLogs(asset); }} onInspection={componentType=>openMeasurementInspection(inspectionContext(detailAsset),componentType)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} />}
+      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onInspection={()=>{ const target = inspectionContext(editing ?? form); openMeasurementInspection(target, defaultMeasurementComponent(target)); }} />}
+      {inspection&&<MeasurementInspectionModal target={inspection.target} initialComponentType={inspection.componentType} records={measurementRecords} setRecords={setMeasurementRecords} userFullName={userFullName} onClose={()=>setInspection(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
       {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} onSubmit={updateReplacement} />}
@@ -412,7 +626,7 @@ export function MachineLibraryPage({ userRole = '' }: { userRole?: string }) {
   );
 }
 
-function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:()=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
+function MachineDetailModal({asset,canEdit,measurementRecords,onClose,onEdit,onLogs,onInspection,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;measurementRecords:MeasurementInspectionRecordMap;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onInspection:(componentType:MeasurementComponentType)=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
   const [currentAsset,setCurrentAsset]=useState(asset);
   const [draft,setDraft]=useState<AssetForm>(()=>assetToForm(asset));
   const [openSection,setOpenSection]=useState<MachineDetailSectionKey|null>(null);
@@ -604,14 +818,6 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
       view: <><DetailItem label="Notes" value={detailValue(currentAsset.notes)} tone="note" /><DetailItem label="Critical Notes" value={detailValue(currentAsset.criticalNotes)} tone="critical" /></>,
       edit: <><Area tone="note" label="Notes" value={draft.notes} set={v=>setDraftField('notes',v)} disabled={!canEdit}/><Area tone="critical" label="Critical Notes" value={draft.criticalNotes} set={v=>setDraftField('criticalNotes',v)} disabled={!canEdit}/></>,
     },
-    {
-      key: 'inspection',
-      title: 'Measurement Inspection',
-      summary: 'Alpha placeholder / component condition planning',
-      actionLabel: 'Open',
-      onAction: onInspection,
-      view: <div className="machine-inspection-inline-panel"><strong>Alpha placeholder</strong><p>Alpha placeholder. Inspection tracking will later compare screw, barrel, tip, end cap, and plunger measurements and update conditions from New to Used to Worn.</p><div className="measurement-component-list">{inspectionComponents(currentAsset).map(component=><span key={component}>{component}</span>)}</div><button className="secondary-button compact-button" type="button" onClick={onInspection}>Open</button></div>,
-    },
   ];
 
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-modal machine-detail-modal">
@@ -622,6 +828,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onInspection,on
       <SummaryBadge label="Year / Age" value={`${currentAsset.machineYear || '-'} / ${machineYearAge(currentAsset.machineYear)}`} tone={machineSummaryKnownClass(currentAsset.machineYear,'year-age')} />
       <SummaryBadge label="Location" value={detailValue(currentAsset.location)} tone={machineSummaryKnownClass(currentAsset.location,'location')} />
     </div>
+    <MeasurementInspectionLaunchPanel target={inspectionContext(currentAsset)} records={measurementRecords} onOpen={onInspection} />
     <div className="machine-detail-accordion-list">
       {sections.map(section=>{
         const editableKey = section.editableKey;
@@ -659,8 +866,164 @@ function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded
 function DetailStatusPill({status}:{status:ConditionStatus}) { return <span className={`machine-section-status-pill condition-${status}`}>{conditionLabels[status]}</span>; }
 function SummaryBadge({label,value,tone}:{label:string;value:ReactNode;tone:string}) { return <div className="machine-detail-summary-card"><span className="machine-detail-summary-label">{label}</span><strong className={`machine-detail-summary-pill ${tone}`}>{value}</strong></div>; }
 function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-pill ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span className="machine-detail-pill-label">{label}</span><strong className="machine-detail-pill-value">{value}</strong></div>; }
-function MeasurementInspectionModal({target,onClose}:{target:InspectionContext;onClose:()=>void}) {
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-small-modal measurement-inspection-modal"><div className="modal-heading"><div><p className="eyebrow">Alpha Placeholder / Coming Next</p><h3>Measurement Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p>Alpha placeholder. Inspection tracking will later compare screw, barrel, tip, end cap, and plunger measurements and update conditions from New to Used to Worn.</p><div className="measurement-component-list">{inspectionComponents(target).map(component=><span key={component}>{component}</span>)}</div><div className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Close</button></div></section></div>;
+function MeasurementInspectionLaunchPanel({target,records,onOpen}:{target:InspectionContext;records:MeasurementInspectionRecordMap;onOpen:(componentType:MeasurementComponentType)=>void}) {
+  return <section className="machine-measurement-panel">
+    <div className="machine-measurement-panel-heading"><div><p className="eyebrow">Measurement Inspection</p><h4>Measurement Inspection</h4></div><span className="machine-measurement-setup-pill">{injectionSetupLabel(target) || 'Standard Injection'}</span></div>
+    <div className="machine-inspection-card-grid">
+      {measurementComponentCards(target).map(card=>{
+        const record = records[measurementRecordKey(target,card.type)];
+        const status = record?.status === 'completed' ? `Completed ${record.dateMeasured || ''}` : record ? 'Draft in progress' : 'No inspection yet';
+        return <article className="machine-inspection-card" key={card.type}>
+          <span>{card.badge}</span>
+          <strong>{card.title}</strong>
+          <small>{card.description}</small>
+          <em>{status}</em>
+          <button className="secondary-button compact-button" type="button" onClick={()=>onOpen(card.type)}>{record ? 'Open Inspection' : 'Start Inspection'}</button>
+        </article>;
+      })}
+    </div>
+  </section>;
+}
+function MeasurementInspectionModal({target,initialComponentType,records,setRecords,userFullName,onClose}:{target:InspectionContext;initialComponentType:MeasurementComponentType;records:MeasurementInspectionRecordMap;setRecords:Dispatch<SetStateAction<MeasurementInspectionRecordMap>>;userFullName:string;onClose:()=>void}) {
+  const [activeComponent,setActiveComponent]=useState<MeasurementComponentType>(initialComponentType);
+  const [validationMessage,setValidationMessage]=useState('');
+  const [confirmingComplete,setConfirmingComplete]=useState(false);
+  const [isGeneratingPdf,setIsGeneratingPdf]=useState(false);
+  const [pdfMessage,setPdfMessage]=useState('');
+  const cards = measurementComponentCards(target);
+  const activeKey = measurementRecordKey(target,activeComponent);
+  const record = records[activeKey] ?? defaultMeasurementRecord(target,activeComponent,userFullName);
+  useEffect(()=>{ setRecords(current=>ensureMeasurementRecord(current,target,activeComponent,userFullName)); },[activeComponent,target.assetNumber,target.id,userFullName,setRecords]);
+  function updateRecord(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord) {
+    setRecords(current=>{
+      const base = current[activeKey] ?? record;
+      return { ...current, [activeKey]: updater(base) };
+    });
+  }
+  function updateTextField(key:string,value:string) { updateRecord(current=>({...current,textFields:{...current.textFields,[key]:value},status:current.status==='completed'?'draft':current.status})); }
+  function updateMeasurement(key:string,value:MeasurementValue) { updateRecord(current=>({...current,measurements:{...current.measurements,[key]:value},status:current.status==='completed'?'draft':current.status})); }
+  function updateSelectField(key:string,value:string) { updateRecord(current=>({...current,selectFields:{...current.selectFields,[key]:value},status:current.status==='completed'?'draft':current.status})); }
+  function updateStation(stationId:string,patch:Partial<MeasurementStation>) { updateRecord(current=>({...current,stations:current.stations.map(station=>station.id===stationId?{...station,...patch}:station),status:current.status==='completed'?'draft':current.status})); }
+  function addStation() { updateRecord(current=>({...current,stations:[...current.stations,{id:`manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,distance:measurementValueFromRaw(''),insideDiameter:measurementValueFromRaw(''),notes:''}]})); }
+  function removeStation(stationId:string) { updateRecord(current=>({...current,stations:current.stations.filter(station=>station.id!==stationId)})); }
+  function generateStations() {
+    const lengthKey = record.componentType === 'plunger' ? 'cylinderBarrelLength' : 'barrelLength';
+    const interval = record.stationInterval === 'custom' ? record.customStationInterval : measurementValueFromRaw(`${record.stationInterval}in`);
+    updateRecord(current=>({...current,stations:stationRowsFromLength(current.measurements[lengthKey] ?? measurementValueFromRaw(''),interval)}));
+  }
+  function requestComplete() {
+    if (!record.inspectorName.trim()) { setValidationMessage('Inspector Name is required to complete this inspection.'); return; }
+    if (!record.dateMeasured.trim()) { setValidationMessage('Date Measured is required to complete this inspection.'); return; }
+    setValidationMessage('');
+    setConfirmingComplete(true);
+  }
+  function completeRecord() {
+    updateRecord(current=>({...current,status:'completed'}));
+    setConfirmingComplete(false);
+  }
+  async function downloadMeasurementPdf(mode:'filled'|'blank') {
+    setPdfMessage('');
+    setIsGeneratingPdf(true);
+    try {
+      const snapshot = { ...records, [activeKey]: record };
+      const payload = { mode, target, components: cards.map(card=>card.type), records: mode === 'blank' ? [] : targetMeasurementRecords(snapshot,target) };
+      const res = await fetch('/api/machine-library/measurement-inspection/pdf',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if (!res.ok) {
+        const data = await res.json().catch(()=>({}));
+        throw new Error(data.error || 'Measurement PDF generation failed.');
+      }
+      const blob = await res.blob();
+      const fileName = downloadFileName(res.headers.get('Content-Disposition')) || `MCC_Measurement_Inspection_${target.assetNumber.replace(/\W+/g,'_')}_${mode}.pdf`;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setPdfMessage(mode === 'blank' ? 'Blank measurement PDF generated.' : 'Filled measurement PDF generated.');
+    } catch (error) {
+      setPdfMessage((error as Error).message);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  }
+  return createPortal(<div className="modal-backdrop measurement-modal-backdrop" role="dialog" aria-modal="true">
+    <section className="mcc-card measurement-inspection-modal">
+      <div className="modal-heading measurement-modal-heading"><div><p className="eyebrow">Measurement Inspection Alpha</p><h3>{measurementComponentLabels[activeComponent]} Inspection</h3><p>{target.assetNumber}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
+      <div className="measurement-machine-badge-grid">
+        <DetailItem label="Press #" value={detailValue(target.assetNumber)} />
+        <DetailItem label="Brand" value={detailValue(target.brand)} />
+        <DetailItem label="Model" value={detailValue(target.model)} />
+        <DetailItem label="Serial #" value={detailValue(target.serialNumber)} />
+        <DetailItem label="Machine Year / Age" value={`${target.machineYear || '-'} / ${machineYearAge(target.machineYear)}`} />
+        <DetailItem label="Injection Setup" value={injectionSetupLabel(target) || 'Standard Injection'} />
+      </div>
+      <div className="measurement-component-tabs">{cards.map(card=><button className={card.type===activeComponent?'measurement-component-tab active':'measurement-component-tab'} type="button" key={card.type} onClick={()=>{ setActiveComponent(card.type); setValidationMessage(''); setConfirmingComplete(false); }}><span>{card.badge}</span><strong>{card.title}</strong></button>)}</div>
+      <div className="measurement-form-shell">
+        <section className="measurement-form-section measurement-general-section">
+          <div className="measurement-section-heading"><h4>{measurementComponentLabels[activeComponent]}</h4><span className={`measurement-status-pill status-${record.status}`}>{record.status === 'completed' ? 'Completed' : 'Draft'}</span></div>
+          <div className="measurement-general-grid">
+            <PillSelector label="OLD / NEW" value={record.oldNew} options={measurementOldNewLabels} set={value=>updateRecord(current=>({...current,oldNew:value,status:current.status==='completed'?'draft':current.status}))} />
+            <MeasurementDateField label="Date Measured *" value={record.dateMeasured} set={value=>updateRecord(current=>({...current,dateMeasured:value,status:current.status==='completed'?'draft':current.status}))} />
+            <MeasurementDateField label="Date Installed" value={record.dateInstalled} set={value=>updateRecord(current=>({...current,dateInstalled:value,status:current.status==='completed'?'draft':current.status}))} />
+            <Text label="Inspector Name *" value={record.inspectorName} set={value=>updateRecord(current=>({...current,inspectorName:value,status:current.status==='completed'?'draft':current.status}))} disabled={false}/>
+            <Area label="Comments" value={record.comments} set={value=>updateRecord(current=>({...current,comments:value,status:current.status==='completed'?'draft':current.status}))} disabled={false}/>
+          </div>
+        </section>
+        <MeasurementComponentForm record={record} onText={updateTextField} onMeasurement={updateMeasurement} onSelect={updateSelectField} onRecord={updateRecord} onStation={updateStation} onAddStation={addStation} onRemoveStation={removeStation} onGenerateStations={generateStations} />
+      </div>
+      {(validationMessage||pdfMessage)&&<p className={validationMessage||/failed|required|error/i.test(pdfMessage)?'form-message error':'form-message'}>{validationMessage || pdfMessage}</p>}
+      <div className="modal-actions measurement-modal-actions">
+        <button className="secondary-button" type="button" onClick={()=>void downloadMeasurementPdf('blank')} disabled={isGeneratingPdf}>Generate Blank Measurement PDF</button>
+        <button className="secondary-button" type="button" onClick={()=>void downloadMeasurementPdf('filled')} disabled={isGeneratingPdf}>{isGeneratingPdf ? 'Generating PDF...' : 'Generate Filled Measurement PDF'}</button>
+        <button className="primary-button" type="button" onClick={requestComplete}>Complete Inspection</button>
+      </div>
+      {confirmingComplete&&<div className="measurement-confirm-backdrop" role="dialog" aria-modal="true"><section className="mcc-card measurement-confirm-modal"><h4>Complete measurement inspection for {target.assetNumber}?</h4><p>{measurementComponentLabels[activeComponent]} will be marked completed for this alpha session.</p><div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setConfirmingComplete(false)}>Cancel</button><button className="primary-button" type="button" onClick={completeRecord}>Complete Inspection</button></div></section></div>}
+    </section>
+  </div>, document.body);
+}
+function downloadFileName(disposition: string | null) {
+  const match = disposition?.match(/filename="([^"]+)"/i);
+  return match?.[1] ?? '';
+}
+function MeasurementComponentForm({record,onText,onMeasurement,onSelect,onRecord,onStation,onAddStation,onRemoveStation,onGenerateStations}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onSelect:(key:string,value:string)=>void;onRecord:(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord)=>void;onStation:(stationId:string,patch:Partial<MeasurementStation>)=>void;onAddStation:()=>void;onRemoveStation:(stationId:string)=>void;onGenerateStations:()=>void}) {
+  if (record.componentType === 'screw' || record.componentType === 'screw_2') return <ScrewInspectionForm record={record} onText={onText} onMeasurement={onMeasurement} onSelect={onSelect} onRecord={onRecord} />;
+  if (record.componentType === 'barrel' || record.componentType === 'barrel_2') return <BarrelInspectionForm record={record} onText={onText} onMeasurement={onMeasurement} onStation={onStation} onAddStation={onAddStation} onRemoveStation={onRemoveStation} onGenerateStations={onGenerateStations} onRecord={onRecord} />;
+  if (record.componentType === 'tip' || record.componentType === 'tip_2') return <TipInspectionForm record={record} onText={onText} onMeasurement={onMeasurement} onSelect={onSelect} />;
+  return <PlungerInspectionForm record={record} onText={onText} onMeasurement={onMeasurement} onStation={onStation} onAddStation={onAddStation} onRemoveStation={onRemoveStation} onGenerateStations={onGenerateStations} />;
+}
+function ScrewInspectionForm({record,onText,onMeasurement,onSelect,onRecord}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onSelect:(key:string,value:string)=>void;onRecord:(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord)=>void}) {
+  return <section className="measurement-form-section"><MeasurementSectionHeading title="Reason for Pull" /><div className="measurement-reason-grid">{measurementReasons.map(reason=><label className="machine-check-field" key={reason}><input type="checkbox" checked={Boolean(record.reasonForPull[reason])} onChange={event=>onRecord(current=>({...current,reasonForPull:{...current.reasonForPull,[reason]:event.target.checked}}))} /><span>{reason}</span></label>)}</div>{record.reasonForPull.Other&&<Text label="Other Reason" value={record.reasonForPullOther} set={value=>onRecord(current=>({...current,reasonForPullOther:value}))} disabled={false}/>}<MeasurementSectionHeading title="Screw Identity" /><FieldGrid>{screwIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Screw Measurements" /><MeasurementFieldGrid>{screwMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><MeasurementSectionHeading title="Spline Check" /><FieldGrid><Select label="Spline Check" value={record.selectFields.splineCheck ?? ''} set={value=>onSelect('splineCheck',value)} options={['','Good','Worn','Damaged']} disabled={false}/><Area label="Spline Notes" value={record.textFields.splineNotes ?? ''} set={value=>onText('splineNotes',value)} disabled={false}/><Area label="Screw Comments" value={record.textFields.screwComments ?? ''} set={value=>onText('screwComments',value)} disabled={false}/></FieldGrid></section>;
+}
+function BarrelInspectionForm({record,onText,onMeasurement,onStation,onAddStation,onRemoveStation,onGenerateStations,onRecord}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onStation:(stationId:string,patch:Partial<MeasurementStation>)=>void;onAddStation:()=>void;onRemoveStation:(stationId:string)=>void;onGenerateStations:()=>void;onRecord:(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord)=>void}) {
+  return <section className="measurement-form-section"><MeasurementSectionHeading title="Barrel Identity" /><FieldGrid>{barrelIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Barrel Measurements" /><MeasurementFieldGrid>{barrelMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><StationControls record={record} onRecord={onRecord} onGenerateStations={onGenerateStations} onAddStation={onAddStation} /><StationTable stations={record.stations} distanceLabel="Station distance from feed throat/front" measurementLabel="Inside Diameter measurement" onStation={onStation} onRemove={onRemoveStation} /><FieldGrid><Area label="Barrel Notes" value={record.textFields.barrelNotes ?? ''} set={value=>onText('barrelNotes',value)} disabled={false}/><Area label="Barrel Comments" value={record.textFields.barrelComments ?? ''} set={value=>onText('barrelComments',value)} disabled={false}/></FieldGrid></section>;
+}
+function TipInspectionForm({record,onText,onMeasurement,onSelect}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onSelect:(key:string,value:string)=>void}) {
+  return <section className="measurement-form-section"><MeasurementSectionHeading title="Tip Identity" /><FieldGrid>{tipIdentityFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Tip Thread Inspection" /><FieldGrid><Select label="Tip Thread Inspection" value={record.selectFields.tipThreadInspection ?? ''} set={value=>onSelect('tipThreadInspection',value)} options={['','Good','Worn','Damaged']} disabled={false}/></FieldGrid><MeasurementSectionHeading title="Tip Measurements" /><MeasurementFieldGrid>{tipMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><Area label="Tip Comments" value={record.textFields.tipComments ?? ''} set={value=>onText('tipComments',value)} disabled={false}/></section>;
+}
+function PlungerInspectionForm({record,onText,onMeasurement,onStation,onAddStation,onRemoveStation,onGenerateStations}:{record:MeasurementInspectionRecord;onText:(key:string,value:string)=>void;onMeasurement:(key:string,value:MeasurementValue)=>void;onStation:(stationId:string,patch:Partial<MeasurementStation>)=>void;onAddStation:()=>void;onRemoveStation:(stationId:string)=>void;onGenerateStations:()=>void}) {
+  return <section className="measurement-form-section"><MeasurementSectionHeading title="Plunger" /><FieldGrid>{plungerTextFields.map(([key,label])=><Text key={key} label={label} value={record.textFields[key] ?? ''} set={value=>onText(key,value)} disabled={false}/>)}</FieldGrid><MeasurementSectionHeading title="Plunger Measurements" /><MeasurementFieldGrid>{plungerMeasurementFields.map(([key,label])=><MeasurementInput key={key} label={label} value={record.measurements[key] ?? measurementValueFromRaw('')} set={value=>onMeasurement(key,value)} />)}</MeasurementFieldGrid><MeasurementSectionHeading title="Plunger Barrel / Cylinder Barrel Stations" /><div className="measurement-station-actions"><button className="secondary-button compact-button" type="button" onClick={onGenerateStations}>Generate Cylinder Stations</button><button className="secondary-button compact-button" type="button" onClick={onAddStation}>Add Station</button></div><StationTable stations={record.stations} distanceLabel="Station distance" measurementLabel="Inside Diameter measurement" onStation={onStation} onRemove={onRemoveStation} /><FieldGrid><Area label="Plunger Notes" value={record.textFields.plungerNotes ?? ''} set={value=>onText('plungerNotes',value)} disabled={false}/><Area label="Plunger Comments" value={record.textFields.plungerComments ?? ''} set={value=>onText('plungerComments',value)} disabled={false}/><Area label="Cylinder Barrel Notes" value={record.textFields.cylinderBarrelNotes ?? ''} set={value=>onText('cylinderBarrelNotes',value)} disabled={false}/></FieldGrid></section>;
+}
+function MeasurementSectionHeading({title}:{title:string}) { return <div className="measurement-section-heading"><h4>{title}</h4></div>; }
+function FieldGrid({children}:{children:ReactNode}) { return <div className="measurement-field-grid">{children}</div>; }
+function MeasurementFieldGrid({children}:{children:ReactNode}) { return <div className="measurement-field-grid measurement-input-grid">{children}</div>; }
+function PillSelector<T extends string>({label,value,options,set}:{label:string;value:T;options:Record<T,string>;set:(value:T)=>void}) {
+  return <div className="form-field measurement-pill-selector"><span>{label}</span><div>{(Object.keys(options) as T[]).map(option=><button className={value===option?'active':''} key={option} type="button" onClick={()=>set(option)}>{options[option]}</button>)}</div></div>;
+}
+function MeasurementDateField({label,value,set}:{label:string;value:string;set:(value:string)=>void}) {
+  return <label className="form-field"><span>{label}</span><input type="date" value={isoDateValue(value) ?? ''} onChange={event=>set(event.target.value)} /></label>;
+}
+function MeasurementInput({label,value,set}:{label:string;value:MeasurementValue;set:(value:MeasurementValue)=>void}) {
+  const helper = measurementHelperText(value);
+  return <label className="form-field measurement-input-field"><span>{label}</span><input value={value.rawInput} inputMode="decimal" placeholder="1.03, 100mm, 1.03in" onChange={event=>set(measurementValueFromRaw(event.target.value))} />{helper&&<small className={value.validationMessage?'measurement-helper error':'measurement-helper'}>{helper}</small>}</label>;
+}
+function StationControls({record,onRecord,onGenerateStations,onAddStation}:{record:MeasurementInspectionRecord;onRecord:(updater:(record:MeasurementInspectionRecord)=>MeasurementInspectionRecord)=>void;onGenerateStations:()=>void;onAddStation:()=>void}) {
+  return <div className="measurement-station-control-grid"><label className="form-field"><span>Station Interval</span><select value={record.stationInterval} onChange={event=>onRecord(current=>({...current,stationInterval:event.target.value as MeasurementStationInterval}))}><option value="3">3 in</option><option value="6">6 in</option><option value="custom">Custom</option></select></label>{record.stationInterval === 'custom'&&<MeasurementInput label="Custom Interval" value={record.customStationInterval} set={value=>onRecord(current=>({...current,customStationInterval:value}))} />}<div className="measurement-station-actions"><button className="secondary-button compact-button" type="button" onClick={onGenerateStations}>Generate Stations</button><button className="secondary-button compact-button" type="button" onClick={onAddStation}>Add Station</button></div></div>;
+}
+function StationTable({stations,distanceLabel,measurementLabel,onStation,onRemove}:{stations:MeasurementStation[];distanceLabel:string;measurementLabel:string;onStation:(stationId:string,patch:Partial<MeasurementStation>)=>void;onRemove:(stationId:string)=>void}) {
+  return <div className="measurement-station-table"><div className="measurement-station-header"><span>{distanceLabel}</span><span>{measurementLabel}</span><span>Notes</span><span></span></div>{stations.map(station=><div className="measurement-station-row" key={station.id}><MeasurementInput label={distanceLabel} value={station.distance} set={value=>onStation(station.id,{distance:value})} /><MeasurementInput label={measurementLabel} value={station.insideDiameter} set={value=>onStation(station.id,{insideDiameter:value})} /><label className="form-field"><span>Notes</span><input value={station.notes} onChange={event=>onStation(station.id,{notes:event.target.value})} /></label><button className="link-button compact-button" type="button" onClick={()=>onRemove(station.id)}>Remove</button></div>)}{!stations.length&&<p className="form-help">No station rows yet.</p>}</div>;
 }
 
 function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onReplacement,onInspection}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onInspection:()=>void}) {
@@ -711,7 +1074,7 @@ function PlungerBarrelBox({title,form,setField,disabled}:{title:string;form:Asse
   return <div className={machineComponentClass('plunger-barrel')}><h4>{title}</h4><Text label="Plunger Barrel Type" value={form.plungerBarrelType} set={v=>setField('plungerBarrelType',v)} disabled={disabled}/><Check label="Plunger Barrel Rebuild / Repaired" checked={form.plungerBarrelRebuildRepaired} set={checked=>setComponentRebuild(setField,'plungerBarrelRebuildRepaired','plungerBarrelConditionStatus',checked)} disabled={disabled}/><DateWithAge label="Plunger Barrel Installed Date" value={form.plungerBarrelInstalledDate} set={v=>setField('plungerBarrelInstalledDate',v)} disabled={disabled}/><DateWithAge label="Plunger Barrel End Cap Installed Date" value={form.plungerBarrelEndCapInstalledDate} set={v=>setField('plungerBarrelEndCapInstalledDate',v)} disabled={disabled}/><UnitDimensionField label="Plunger Barrel Length" value={form.plungerBarrelLength} set={v=>setField('plungerBarrelLength',v)} disabled={disabled}/><UnitDimensionField label="Plunger Barrel Diameter" value={form.plungerBarrelDiameter} set={v=>setField('plungerBarrelDiameter',v)} disabled={disabled}/><ConditionBadge label="Plunger Barrel condition" status={effectiveCondition(form.plungerBarrelRebuildRepaired, form.plungerBarrelConditionStatus)} /></div>;
 }
 function MeasurementRow({canEdit,label,onInspection}:{canEdit:boolean;label:string;onInspection:()=>void}) {
-  return <div className="measurement-inspection-row">{canEdit&&<button className="machine-action-badge measurement-inspection-button" type="button" onClick={onInspection}>{label}</button>}<small>Measurement Inspection later will update New to Used to Worn for screw, barrel, and plunger components.</small></div>;
+  return <div className="measurement-inspection-row">{canEdit&&<button className="machine-action-badge measurement-inspection-button" type="button" onClick={onInspection}>{label}</button>}<small>Open alpha measurement forms for screw, barrel, tip, and enabled injection components.</small></div>;
 }
 function ReplacementUpdatesPanel({asset,form,canEdit,onReplacement}:{asset:MachineAsset;form:AssetForm;canEdit:boolean;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void}) {
   const groups = replacementGroups.filter(group=>group.enabled(form));
