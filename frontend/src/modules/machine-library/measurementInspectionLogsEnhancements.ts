@@ -146,6 +146,27 @@ function addSavedPathRows(panel: HTMLElement) {
   });
 }
 
+function disableLogOnlySelections(panel: HTMLElement) {
+  panel.querySelectorAll<HTMLElement>('.measurement-log-row').forEach(row => {
+    const status = row.querySelector('.measurement-log-row-actions em')?.textContent?.trim().toLowerCase() ?? '';
+    const checkbox = row.querySelector<HTMLInputElement>('[data-measurement-log-check]');
+    if (status !== 'log only' || !checkbox) return;
+    checkbox.checked = false;
+    checkbox.disabled = true;
+    row.classList.add('measurement-log-row-disabled');
+    row.querySelector('.measurement-log-select')?.setAttribute('title', 'Upload this record again before printing.');
+    if (!row.querySelector('.measurement-log-upload-note')) {
+      const note = document.createElement('small');
+      note.className = 'measurement-log-upload-note';
+      note.textContent = 'Upload again to print.';
+      row.querySelector('.measurement-log-main')?.appendChild(note);
+    }
+  });
+  const counter = panel.querySelector<HTMLElement>('[data-measurement-selected-count]');
+  const selectedCount = panel.querySelectorAll<HTMLInputElement>('[data-measurement-log-check]:checked:not(:disabled)').length;
+  if (counter) counter.textContent = `${selectedCount} selected`;
+}
+
 async function deleteCurrentYearFolder(panel: HTMLElement) {
   const year = currentFolderYear(panel);
   if (!canDeleteYearFolder()) {
@@ -168,9 +189,14 @@ async function deleteCurrentYearFolder(panel: HTMLElement) {
   window.location.reload();
 }
 
+function refreshRowEnhancements(panel: HTMLElement) {
+  addSavedPathRows(panel);
+  disableLogOnlySelections(panel);
+}
+
 function enhancePanel(panel: HTMLElement) {
   if (panel.getAttribute(ENHANCED_ATTR) === 'true') {
-    addSavedPathRows(panel);
+    refreshRowEnhancements(panel);
     return;
   }
   panel.setAttribute(ENHANCED_ATTR, 'true');
@@ -207,14 +233,14 @@ function enhancePanel(panel: HTMLElement) {
     bulkActions.insertAdjacentHTML('beforeend', '<button class="secondary-button compact-button danger-button" type="button" data-delete-current-folder>Delete Year Folder</button><span class="measurement-tier-note">Tier 3+ only</span>');
     bulkActions.querySelector<HTMLButtonElement>('[data-delete-current-folder]')?.addEventListener('click', () => void deleteCurrentYearFolder(panel));
   }
-  addSavedPathRows(panel);
+  refreshRowEnhancements(panel);
 }
 
 function injectEnhancementStyles() {
   if (document.getElementById('measurement-log-enhancement-styles')) return;
   const style = document.createElement('style');
   style.id = 'measurement-log-enhancement-styles';
-  style.textContent = `.measurement-log-toggle-heading{cursor:pointer;border:1px solid rgba(68,215,255,.18);border-radius:10px;padding:10px 12px}.measurement-log-chevron{margin-left:auto;color:#8ff1ff;font-weight:950}.measurement-log-collapsed .measurement-log-shell{display:none!important}.measurement-log-collapsed .measurement-log-chevron{transform:rotate(-90deg);display:inline-block}.measurement-template-card{border-top:1px solid rgba(68,215,255,.18);margin-top:14px;padding-top:13px}.measurement-log-path{color:#86f1ff!important;display:block;font-size:.7rem;font-weight:900;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.measurement-tier-note{align-items:center;color:#ffd25e;display:inline-flex;font-size:.7rem;font-weight:950;letter-spacing:.03em;text-transform:uppercase}.danger-button{border-color:rgba(255,99,99,.45)!important;color:#ffb5b5!important}`;
+  style.textContent = `.measurement-log-toggle-heading{cursor:pointer;border:1px solid rgba(68,215,255,.18);border-radius:10px;padding:10px 12px}.measurement-log-chevron{margin-left:auto;color:#8ff1ff;font-weight:950}.measurement-log-collapsed .measurement-log-shell{display:none!important}.measurement-log-collapsed .measurement-log-chevron{transform:rotate(-90deg);display:inline-block}.measurement-template-card{border-top:1px solid rgba(68,215,255,.18);margin-top:14px;padding-top:13px}.measurement-log-path{color:#86f1ff!important;display:block;font-size:.7rem;font-weight:900;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.measurement-tier-note{align-items:center;color:#ffd25e;display:inline-flex;font-size:.7rem;font-weight:950;letter-spacing:.03em;text-transform:uppercase}.danger-button{border-color:rgba(255,99,99,.45)!important;color:#ffb5b5!important}.measurement-log-row-disabled{opacity:.55}.measurement-log-row-disabled .measurement-log-select{cursor:not-allowed}.measurement-log-row-disabled .measurement-log-select span{border-color:rgba(255,210,94,.32)}.measurement-log-upload-note{color:#ffd25e!important;display:block;font-size:.7rem;font-weight:950;margin-top:5px}`;
   document.head.appendChild(style);
 }
 
