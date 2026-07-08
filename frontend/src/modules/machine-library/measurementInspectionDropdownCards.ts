@@ -2,6 +2,14 @@ export {};
 
 const PANEL_SELECTOR = '.measurement-log-panel';
 const READY_ATTR = 'data-measurement-action-menu-ready';
+const RECORDS_ICON = `
+  <svg class="measurement-records-svg" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <rect x="10" y="11" width="24" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="2.6" />
+    <rect x="15" y="7" width="24" height="30" rx="4" fill="rgba(68, 215, 255, .12)" stroke="currentColor" stroke-width="2.6" />
+    <path d="M21 16H33M21 22H33M21 28H30" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" />
+    <path d="M15 13H10V41H31V37" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".55" />
+  </svg>
+`;
 
 function triggerClick(panel: HTMLElement, selector: string) {
   const button = panel.querySelector<HTMLButtonElement>(selector);
@@ -37,7 +45,7 @@ function buildActionMenu(panel: HTMLElement) {
   importCard.insertAdjacentHTML('beforeend', `
     <div class="measurement-action-launcher-wrap">
       <button class="measurement-action-launcher" type="button" aria-expanded="false" aria-label="Open measurement inspection record actions">
-        <span class="measurement-action-launcher-icon">▤</span>
+        <span class="measurement-action-launcher-icon">${RECORDS_ICON}</span>
         <span class="measurement-action-launcher-text">
           <strong>Records</strong>
           <small>Upload • Backup • Blank Form</small>
@@ -46,7 +54,7 @@ function buildActionMenu(panel: HTMLElement) {
       </button>
       <div class="measurement-action-popover" role="menu" aria-label="Measurement inspection actions">
         <div class="measurement-action-popover-heading">
-          <span>▤</span>
+          <span>${RECORDS_ICON}</span>
           <div>
             <strong>Measurement Records</strong>
             <small>Screw & Barrel files and blank form</small>
@@ -134,16 +142,20 @@ function injectStyles() {
     }
     .measurement-action-launcher-icon {
       align-items: center;
-      background: rgba(68, 215, 255, .14);
+      background: radial-gradient(circle at 30% 20%, rgba(134, 241, 255, .2), rgba(68, 215, 255, .1));
       border: 1px solid rgba(68, 215, 255, .44);
       border-radius: 16px;
       color: #86f1ff;
       display: inline-flex;
-      font-size: 1.55rem;
-      font-weight: 950;
-      height: 46px;
+      height: 48px;
       justify-content: center;
-      width: 46px;
+      width: 48px;
+    }
+    .measurement-records-svg {
+      display: block;
+      height: 31px;
+      width: 31px;
+      filter: drop-shadow(0 0 6px rgba(68, 215, 255, .22));
     }
     .measurement-action-launcher-text strong {
       color: #f3fbff;
@@ -197,10 +209,13 @@ function injectStyles() {
       border-radius: 13px;
       color: #86f1ff;
       display: inline-flex;
-      font-size: 1.15rem;
-      height: 38px;
+      height: 40px;
       justify-content: center;
-      width: 38px;
+      width: 40px;
+    }
+    .measurement-action-popover-heading .measurement-records-svg {
+      height: 26px;
+      width: 26px;
     }
     .measurement-action-popover-heading strong {
       color: #f3fbff;
