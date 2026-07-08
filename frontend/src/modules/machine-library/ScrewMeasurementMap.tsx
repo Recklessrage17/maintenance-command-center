@@ -50,13 +50,12 @@ export default function ScrewMeasurementMap({ onAddReading }: ScrewMeasurementMa
       </div>
 
       <div className="screw-diagram-wrap">
-        <div className="screw-map-reset-placeholder">
-          <div className="screw-map-reset-line">
-            <span className="feed">Feed</span>
-            <span className="transition">Transition</span>
-            <span className="metering">Metering</span>
-          </div>
-          <p>Screw visual map coming next.</p>
+        <div className="measurement-screw-map-final-shell">
+          <img
+            className="measurement-screw-map-final"
+            src="/measurement-screw-map-final.png"
+            alt="Screw measurement map showing feed, transition, and metering sections"
+          />
         </div>
       </div>
     </section>
