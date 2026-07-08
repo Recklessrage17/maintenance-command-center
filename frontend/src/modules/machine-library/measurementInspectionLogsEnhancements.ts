@@ -131,7 +131,8 @@ async function updateTemplateStatus(panel: HTMLElement) {
   const status = panel.querySelector<HTMLElement>('[data-template-status]');
   if (!status) return;
   const template = await readTemplateFile().catch(() => undefined);
-  status.textContent = template ? `Custom form active: ${template.name}` : `Default locked: ${DEFAULT_TEMPLATE_NAME}`;
+  const nextText = template ? `Custom form active: ${template.name}` : `Default locked: ${DEFAULT_TEMPLATE_NAME}`;
+  if (status.textContent !== nextText) status.textContent = nextText;
 }
 
 function addSavedPathRows(panel: HTMLElement) {
@@ -151,10 +152,11 @@ function disableLogOnlySelections(panel: HTMLElement) {
     const status = row.querySelector('.measurement-log-row-actions em')?.textContent?.trim().toLowerCase() ?? '';
     const checkbox = row.querySelector<HTMLInputElement>('[data-measurement-log-check]');
     if (status !== 'log only' || !checkbox) return;
-    checkbox.checked = false;
-    checkbox.disabled = true;
+    if (checkbox.checked) checkbox.checked = false;
+    if (!checkbox.disabled) checkbox.disabled = true;
     row.classList.add('measurement-log-row-disabled');
-    row.querySelector('.measurement-log-select')?.setAttribute('title', 'Upload this record again before printing.');
+    const select = row.querySelector('.measurement-log-select');
+    if (select?.getAttribute('title') !== 'Upload this record again before printing.') select?.setAttribute('title', 'Upload this record again before printing.');
     if (!row.querySelector('.measurement-log-upload-note')) {
       const note = document.createElement('small');
       note.className = 'measurement-log-upload-note';
@@ -164,7 +166,8 @@ function disableLogOnlySelections(panel: HTMLElement) {
   });
   const counter = panel.querySelector<HTMLElement>('[data-measurement-selected-count]');
   const selectedCount = panel.querySelectorAll<HTMLInputElement>('[data-measurement-log-check]:checked:not(:disabled)').length;
-  if (counter) counter.textContent = `${selectedCount} selected`;
+  const nextText = `${selectedCount} selected`;
+  if (counter && counter.textContent !== nextText) counter.textContent = nextText;
 }
 
 async function deleteCurrentYearFolder(panel: HTMLElement) {
@@ -200,12 +203,13 @@ function enhancePanel(panel: HTMLElement) {
     return;
   }
   panel.setAttribute(ENHANCED_ATTR, 'true');
+
   const heading = panel.querySelector<HTMLElement>('.machine-measurement-panel-heading');
   if (heading) {
     heading.classList.add('measurement-log-toggle-heading');
     heading.setAttribute('role', 'button');
     heading.setAttribute('tabindex', '0');
-    heading.insertAdjacentHTML('beforeend', '<span class="measurement-log-chevron">v</span>');
+    if (!heading.querySelector('.measurement-log-chevron')) heading.insertAdjacentHTML('beforeend', '<span class="measurement-log-chevron">v</span>');
     const toggle = () => panel.classList.toggle('measurement-log-collapsed');
     heading.addEventListener('click', event => { if (!(event.target as HTMLElement).closest('button,input,label')) toggle(); });
     heading.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } });
@@ -244,12 +248,19 @@ function injectEnhancementStyles() {
   document.head.appendChild(style);
 }
 
-function runEnhancements() {
-  document.querySelectorAll<HTMLElement>(LOG_PANEL_SELECTOR).forEach(enhancePanel);
+let scheduled = false;
+function scheduleEnhancements() {
+  if (scheduled) return;
+  scheduled = true;
+  window.requestAnimationFrame(() => {
+    scheduled = false;
+    document.querySelectorAll<HTMLElement>(LOG_PANEL_SELECTOR).forEach(enhancePanel);
+  });
 }
 
 if (typeof window !== 'undefined') {
   injectEnhancementStyles();
-  window.requestAnimationFrame(runEnhancements);
-  new MutationObserver(runEnhancements).observe(document.documentElement, { childList: true, subtree: true });
+  window.requestAnimationFrame(scheduleEnhancements);
+  const interval = window.setInterval(scheduleEnhancements, 750);
+  window.setTimeout(() => window.clearInterval(interval), 20000);
 }
