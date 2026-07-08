@@ -10,39 +10,66 @@ type ScrewMeasurementMapProps = {
   readings?: ScrewMeasurementReadings;
 };
 
-const screwSections: Array<{
+const sectionZones: Array<{
   key: ScrewSectionKey;
-  shortLabel: string;
+  label: string;
   x1: number;
   x2: number;
-  pillX: number;
-  targetX: number;
   color: string;
   fill: string;
 }> = [
-  { key: 'feed', shortLabel: 'Feed', x1: 260, x2: 520, pillX: 390, targetX: 390, color: '#44d7ff', fill: 'rgba(68,215,255,.105)' },
-  { key: 'transition', shortLabel: 'Transition', x1: 520, x2: 820, pillX: 670, targetX: 670, color: '#36e5aa', fill: 'rgba(54,229,170,.095)' },
-  { key: 'metering', shortLabel: 'Metering', x1: 820, x2: 1080, pillX: 950, targetX: 950, color: '#ffb339', fill: 'rgba(255,179,57,.105)' },
+  { key: 'metering', label: 'METER', x1: 190, x2: 455, color: '#ffb339', fill: 'rgba(255,179,57,.08)' },
+  { key: 'transition', label: 'TRANSITION', x1: 455, x2: 745, color: '#36e5aa', fill: 'rgba(54,229,170,.08)' },
+  { key: 'feed', label: 'FEED', x1: 745, x2: 1015, color: '#44d7ff', fill: 'rgba(68,215,255,.08)' },
 ];
 
-const flightLines = Array.from({ length: 17 }, (_, index) => 270 + index * 48);
+const measurementPoints: Array<{
+  id: string;
+  section: ScrewSectionKey;
+  rootX: number;
+  flightX: number;
+}> = [
+  { id: 'm1', section: 'metering', rootX: 226, flightX: 220 },
+  { id: 'm2', section: 'metering', rootX: 288, flightX: 282 },
+  { id: 'm3', section: 'metering', rootX: 350, flightX: 344 },
+  { id: 'm4', section: 'metering', rootX: 412, flightX: 406 },
+  { id: 't1', section: 'transition', rootX: 490, flightX: 484 },
+  { id: 't2', section: 'transition', rootX: 552, flightX: 546 },
+  { id: 't3', section: 'transition', rootX: 614, flightX: 608 },
+  { id: 't4', section: 'transition', rootX: 676, flightX: 670 },
+  { id: 'f1', section: 'feed', rootX: 775, flightX: 768 },
+  { id: 'f2', section: 'feed', rootX: 837, flightX: 830 },
+  { id: 'f3', section: 'feed', rootX: 899, flightX: 892 },
+  { id: 'f4', section: 'feed', rootX: 961, flightX: 954 },
+];
 
-function latestReading(readings: ScrewMeasurementReadings | undefined, section: ScrewSectionKey) {
-  const sectionReadings = readings?.flight?.[section] ?? [];
+function latestReading(readings: ScrewMeasurementReadings | undefined, kind: ScrewMeasurementKind, section: ScrewSectionKey) {
+  const sectionReadings = readings?.[kind]?.[section] ?? [];
   return [...sectionReadings].reverse().find(reading => {
     const value = reading.value;
     return Boolean(value.rawInput.trim()) || (value.valueInches !== null && value.valueMm !== null);
   }) ?? sectionReadings[sectionReadings.length - 1];
 }
 
-function compactMeasurementDisplay(reading: ScrewMeasurementReading | undefined) {
-  if (!reading) return 'Add Flight';
+function compactMeasurementDisplay(reading: ScrewMeasurementReading | undefined, emptyLabel: string) {
+  if (!reading) return emptyLabel;
   const value = reading.value;
-  if (value.validationMessage) return 'Check input';
+  if (value.validationMessage) return 'Check';
   const raw = value.rawInput.trim();
-  if (raw) return raw.length > 13 ? `${raw.slice(0, 13)}…` : raw;
-  if (value.valueInches !== null) return `${Number(value.valueInches.toFixed(3))} in`;
-  return 'Add Flight';
+  if (raw) return raw.length > 10 ? `${raw.slice(0, 10)}…` : raw;
+  if (value.valueInches !== null) return `${Number(value.valueInches.toFixed(3))}`;
+  return emptyLabel;
+}
+
+function pointY(x: number, kind: ScrewMeasurementKind) {
+  if (kind === 'root') {
+    if (x < 455) return 174;
+    if (x < 745) return 168;
+    return 160;
+  }
+  if (x < 455) return 214;
+  if (x < 745) return 224;
+  return 232;
 }
 
 export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMeasurementMapProps) {
@@ -53,7 +80,7 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
       </div>
 
       <div
-        aria-label="Flight OD quick-add controls"
+        aria-label="Screw measurement quick-add controls"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -79,15 +106,15 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
             fontWeight: 950,
           }}
         >
-          Flight OD quick-add
+          PDF-style measurement map
         </span>
-        {screwSections.map(section => (
+        {sectionZones.map(section => (
           <button
             className="compact-button"
             type="button"
-            key={section.key}
+            key={`flight-${section.key}`}
             onClick={() => onAddReading('flight', section.key)}
-            aria-label={`Add ${section.shortLabel} Flight OD reading`}
+            aria-label={`Add ${section.label} Flight OD reading`}
             style={{
               minHeight: 30,
               width: 'auto',
@@ -101,7 +128,7 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
               cursor: 'pointer',
             }}
           >
-            {section.shortLabel}: {compactMeasurementDisplay(latestReading(readings, section.key))}
+            {section.label}: Add Flight
           </button>
         ))}
       </div>
@@ -116,117 +143,118 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
         }}
       >
         <svg
-          viewBox="0 0 1200 340"
+          viewBox="0 0 1200 430"
           role="img"
-          aria-labelledby="clean-screw-title clean-screw-desc"
-          style={{ display: 'block', width: '100%', height: 'auto', minHeight: 232 }}
+          aria-labelledby="pdf-screw-title pdf-screw-desc"
+          style={{ display: 'block', width: '100%', height: 'auto', minHeight: 290 }}
         >
-          <title id="clean-screw-title">Clean technical screw flight measurement map</title>
-          <desc id="clean-screw-desc">
-            Clean inspection schematic showing a tapered screw core, flight OD envelope, feed transition and metering zones, and aligned Flight OD callout buttons.
+          <title id="pdf-screw-title">PDF style screw measurement map</title>
+          <desc id="pdf-screw-desc">
+            Schematic screw measurement map modeled after the JBT screw and barrel measurement sheet, with top root measurement lines and bottom flight measurement lines.
           </desc>
           <defs>
-            <linearGradient id="cleanPanel" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stopColor="#092336" />
-              <stop offset="0.58" stopColor="#061522" />
-              <stop offset="1" stopColor="#02070d" />
+            <linearGradient id="paperLine" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor="#f2fbff" stopOpacity=".98" />
+              <stop offset="1" stopColor="#83a1ac" stopOpacity=".92" />
             </linearGradient>
-            <linearGradient id="cleanCore" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0" stopColor="#f4fbff" stopOpacity=".95" />
-              <stop offset=".35" stopColor="#9fb3bd" stopOpacity=".98" />
-              <stop offset=".58" stopColor="#536a75" stopOpacity=".98" />
-              <stop offset=".84" stopColor="#d9ecf2" stopOpacity=".94" />
-              <stop offset="1" stopColor="#2c414c" stopOpacity=".98" />
-            </linearGradient>
-            <linearGradient id="cleanFlight" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stopColor="#f8fdff" stopOpacity=".9" />
-              <stop offset=".44" stopColor="#aac0ca" stopOpacity=".78" />
-              <stop offset="1" stopColor="#f5fbff" stopOpacity=".82" />
-            </linearGradient>
-            <linearGradient id="cleanDarkSteel" x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0" stopColor="#263942" />
-              <stop offset=".5" stopColor="#b8cbd3" />
-              <stop offset="1" stopColor="#4c646e" />
-            </linearGradient>
-            <filter id="cleanDrop" x="-10%" y="-45%" width="120%" height="190%">
-              <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#00070d" floodOpacity=".42" />
+            <filter id="sheetGlow" x="-8%" y="-30%" width="116%" height="160%">
+              <feDropShadow dx="0" dy="7" stdDeviation="7" floodColor="#00070d" floodOpacity=".38" />
             </filter>
-            <filter id="cleanPillGlow" x="-20%" y="-70%" width="140%" height="240%">
-              <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#44d7ff" floodOpacity=".18" />
-            </filter>
-            <clipPath id="flightEnvelopeClip">
-              <rect x="260" y="134" width="820" height="114" rx="8" />
-            </clipPath>
-            <marker id="cleanArrow" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto" viewBox="0 0 8 8">
-              <path d="M0 0 L8 4 L0 8 Z" fill="#8fe8ff" />
+            <marker id="smallArrow" markerWidth="7" markerHeight="7" refX="5.5" refY="3.5" orient="auto" viewBox="0 0 7 7">
+              <path d="M0 0 L7 3.5 L0 7 Z" fill="#dff8ff" />
             </marker>
           </defs>
 
-          <rect x="16" y="14" width="1168" height="312" rx="24" fill="#020b13" stroke="rgba(68,215,255,.24)" strokeWidth="2" />
-          <rect x="58" y="88" width="1084" height="154" rx="18" fill="url(#cleanPanel)" stroke="rgba(68,215,255,.22)" />
+          <rect x="18" y="18" width="1164" height="394" rx="24" fill="#020b13" stroke="rgba(68,215,255,.24)" strokeWidth="2" />
+          <rect x="74" y="122" width="1052" height="176" rx="18" fill="rgba(6,22,32,.72)" stroke="rgba(68,215,255,.2)" />
 
-          <path d="M260 134 H1080 M260 248 H1080" stroke="rgba(180,231,245,.26)" strokeWidth="1.5" strokeDasharray="9 9" />
-          {screwSections.map(section => (
+          {sectionZones.map(section => (
             <g key={section.key}>
-              <rect x={section.x1} y="104" width={section.x2 - section.x1} height="158" rx="10" fill={section.fill} />
-              <line x1={section.x1} y1="96" x2={section.x1} y2="268" stroke="rgba(223,247,255,.16)" strokeDasharray="7 9" />
-              <line x1={section.x2} y1="96" x2={section.x2} y2="268" stroke="rgba(223,247,255,.16)" strokeDasharray="7 9" />
-              <line x1={section.x1 + 20} y1="262" x2={section.x2 - 20} y2="262" stroke={section.color} strokeWidth="3" strokeLinecap="round" opacity=".7" />
-              <text x={(section.x1 + section.x2) / 2} y="302" textAnchor="middle" fill={section.color} fontSize="22" fontWeight="950">{section.shortLabel.toUpperCase()}</text>
+              <rect x={section.x1} y="122" width={section.x2 - section.x1} height="176" rx="10" fill={section.fill} />
+              <line x1={section.x1} y1="112" x2={section.x1} y2="306" stroke="rgba(223,247,255,.16)" strokeDasharray="7 9" />
+              <line x1={section.x2} y1="112" x2={section.x2} y2="306" stroke="rgba(223,247,255,.16)" strokeDasharray="7 9" />
+              <line x1={section.x1 + 18} y1="310" x2={section.x2 - 18} y2="310" stroke={section.color} strokeWidth="3" strokeLinecap="round" opacity=".72" />
+              <text x={(section.x1 + section.x2) / 2} y="358" textAnchor="middle" fill={section.color} fontSize="23" fontWeight="950">{section.label}</text>
+              <text x={(section.x1 + section.x2) / 2} y="382" textAnchor="middle" fill="#a9c6d3" fontSize="12" fontWeight="800">Smallest Dia.</text>
             </g>
           ))}
 
-          <g filter="url(#cleanDrop)">
-            <rect x="86" y="170" width="84" height="42" rx="9" fill="url(#cleanDarkSteel)" stroke="rgba(238,251,255,.56)" />
-            <path d="M104 181 H152 M104 191 H152 M104 201 H152" stroke="#eefbff" strokeWidth="4" strokeLinecap="round" opacity=".68" />
-            <rect x="170" y="156" width="44" height="70" rx="9" fill="url(#cleanDarkSteel)" stroke="rgba(238,251,255,.48)" />
-            <rect x="214" y="171" width="46" height="40" rx="8" fill="url(#cleanDarkSteel)" stroke="rgba(238,251,255,.36)" />
-            <text x="112" y="145" textAnchor="middle" fill="#eefbff" fontSize="15" fontWeight="950">DRIVE /</text>
-            <text x="112" y="164" textAnchor="middle" fill="#eefbff" fontSize="15" fontWeight="950">SPLINE END</text>
+          <g filter="url(#sheetGlow)">
+            <text x="106" y="184" textAnchor="middle" fill="#eefbff" fontSize="15" fontWeight="950">NOZZLE</text>
+            <text x="106" y="204" textAnchor="middle" fill="#eefbff" fontSize="15" fontWeight="950">END</text>
+            <path d="M126 205 H174 V181 H192 V214 H174 V230 H126 Z" fill="none" stroke="url(#paperLine)" strokeWidth="3" strokeLinejoin="round" />
 
-            <g clipPath="url(#flightEnvelopeClip)">
-              {flightLines.map(x => (
-                <g key={x}>
-                  <path d={`M${x} 136 L${x + 66} 246`} stroke="rgba(2,7,13,.58)" strokeWidth="18" strokeLinecap="round" />
-                  <path d={`M${x} 136 L${x + 66} 246`} stroke="url(#cleanFlight)" strokeWidth="14" strokeLinecap="round" opacity=".88" />
-                  <path d={`M${x - 5} 139 L${x + 60} 240`} stroke="rgba(255,255,255,.55)" strokeWidth="3" strokeLinecap="round" opacity=".82" />
+            <path d="M190 168 L1018 154 L1018 244 L190 232 Z" fill="rgba(220,247,255,.035)" stroke="url(#paperLine)" strokeWidth="3" strokeLinejoin="round" />
+            <path d="M190 184 L1018 168 M190 216 L1018 226" stroke="rgba(223,247,255,.5)" strokeWidth="1.7" strokeLinecap="round" />
+            <path d="M190 200 C365 198 520 194 670 188 C804 182 915 178 1018 176" stroke="rgba(223,247,255,.48)" strokeWidth="1.5" strokeDasharray="10 8" />
+
+            {measurementPoints.map(point => {
+              const yTop = pointY(point.rootX, 'root');
+              const yBottom = pointY(point.flightX, 'flight');
+              return (
+                <g key={`thread-${point.id}`}>
+                  <path d={`M${point.flightX - 10} ${yBottom + 18} L${point.flightX + 22} ${yTop - 18}`} stroke="#eefbff" strokeWidth="6" strokeLinecap="round" />
+                  <path d={`M${point.flightX - 10} ${yBottom + 18} L${point.flightX + 22} ${yTop - 18}`} stroke="#06131d" strokeWidth="2" strokeLinecap="round" opacity=".45" />
                 </g>
-              ))}
-            </g>
+              );
+            })}
 
-            <path d="M260 187 C382 187 462 187 520 184 C632 180 724 174 820 166 C910 160 996 158 1080 158 L1080 224 C996 224 910 222 820 216 C724 210 632 204 520 200 C462 197 382 197 260 197 Z" fill="url(#cleanCore)" stroke="rgba(238,251,255,.34)" strokeWidth="1.6" />
-            <path d="M260 187 C382 187 462 187 520 184 C632 180 724 174 820 166 C910 160 996 158 1080 158" stroke="rgba(255,255,255,.62)" strokeWidth="3" strokeLinecap="round" fill="none" />
-            <path d="M260 197 C382 197 462 197 520 200 C632 204 724 210 820 216 C910 222 996 224 1080 224" stroke="rgba(3,8,14,.54)" strokeWidth="3.5" strokeLinecap="round" fill="none" />
-            <path d="M278 192 C452 192 586 191 720 190 C850 189 962 189 1066 188" stroke="rgba(12,24,32,.54)" strokeWidth="3.5" strokeLinecap="round" fill="none" opacity=".62" />
-
-            <rect x="1080" y="138" width="24" height="130" rx="6" fill="url(#cleanDarkSteel)" stroke="rgba(238,251,255,.52)" />
-            <line x1="1104" y1="148" x2="1104" y2="258" stroke="rgba(255,255,255,.65)" strokeWidth="2" strokeLinecap="round" />
+            <path d="M1018 152 H1044 V144 H1066 V254 H1044 V246 H1018 Z" fill="none" stroke="url(#paperLine)" strokeWidth="3" strokeLinejoin="round" />
+            <rect x="1066" y="168" width="68" height="64" rx="8" fill="none" stroke="url(#paperLine)" strokeWidth="3" />
+            <path d="M1078 180 H1122 M1078 192 H1122 M1078 204 H1122 M1078 216 H1122" stroke="#eefbff" strokeWidth="3.5" strokeLinecap="round" opacity=".76" />
+            <text x="1102" y="258" textAnchor="middle" fill="#eefbff" fontSize="15" fontWeight="950">SPLINE</text>
+            <text x="1102" y="277" textAnchor="middle" fill="#eefbff" fontSize="15" fontWeight="950">CHECK</text>
           </g>
 
-          {screwSections.map(section => {
-            const display = compactMeasurementDisplay(latestReading(readings, section.key));
+          <text x="1060" y="116" fill="#f8fdff" fontSize="13" fontWeight="900">Root Measurements</text>
+          <text x="1060" y="332" fill="#f8fdff" fontSize="13" fontWeight="900">Flight Measurements</text>
+
+          {measurementPoints.map((point, index) => {
+            const rootY = pointY(point.rootX, 'root');
+            const flightY = pointY(point.flightX, 'flight');
+            const section = sectionZones.find(item => item.key === point.section)!;
+            const rootValue = compactMeasurementDisplay(latestReading(readings, 'root', point.section), 'Root');
+            const flightValue = compactMeasurementDisplay(latestReading(readings, 'flight', point.section), 'Flight');
+            const topX = point.rootX - 52;
+            const bottomX = point.flightX - 46;
+            const topY = 62 + (index % 2) * 14;
+            const bottomY = 356 - (index % 2) * 14;
             return (
-              <g
-                key={`flight-callout-${section.key}`}
-                role="button"
-                tabIndex={0}
-                aria-label={`Add ${section.shortLabel} Flight OD reading`}
-                onClick={() => onAddReading('flight', section.key)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onAddReading('flight', section.key);
-                  }
-                }}
-                style={{ cursor: 'pointer' }}
-              >
-                <path d={`M${section.pillX} 90 C${section.pillX} 110 ${section.targetX} 118 ${section.targetX} 134`} fill="none" stroke={section.color} strokeWidth="2.2" strokeLinecap="round" strokeDasharray="6 7" markerEnd="url(#cleanArrow)" opacity=".86" />
-                <circle cx={section.targetX} cy="134" r="7" fill={section.color} opacity=".94" />
-                <circle cx={section.targetX} cy="134" r="15" fill="none" stroke={section.color} strokeWidth="1.8" opacity=".42" />
-                <rect x={section.pillX - 82} y="38" width="164" height="50" rx="16" fill="rgba(2,14,28,.94)" stroke={section.color} strokeWidth="1.8" filter="url(#cleanPillGlow)" />
-                <rect x={section.pillX - 70} y="49" width="140" height="28" rx="11" fill="rgba(255,255,255,.055)" />
-                <text x={section.pillX} y="60" textAnchor="middle" fill="#f3fbff" fontSize="11.8" fontWeight="950" letterSpacing=".25">{section.shortLabel.toUpperCase()} FLIGHT OD</text>
-                <text x={section.pillX} y="78" textAnchor="middle" fill={section.color} fontSize="14" fontWeight="950">{display}</text>
+              <g key={`measure-${point.id}`}>
+                <g
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Add ${section.label} Root Dia reading`}
+                  onClick={() => onAddReading('root', point.section)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onAddReading('root', point.section);
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <path d={`M${topX} ${topY} L${point.rootX} ${rootY - 12}`} stroke={section.color} strokeWidth="1.6" strokeLinecap="round" markerEnd="url(#smallArrow)" opacity=".88" />
+                  <rect x={topX - 36} y={topY - 16} width="72" height="20" rx="7" fill="rgba(2,14,28,.92)" stroke={section.color} strokeWidth="1.2" />
+                  <text x={topX} y={topY - 2} textAnchor="middle" fill={section.color} fontSize="10.5" fontWeight="900">{rootValue}</text>
+                </g>
+                <g
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Add ${section.label} Flight OD reading`}
+                  onClick={() => onAddReading('flight', point.section)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onAddReading('flight', point.section);
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <path d={`M${bottomX} ${bottomY} L${point.flightX} ${flightY + 16}`} stroke={section.color} strokeWidth="1.6" strokeLinecap="round" markerEnd="url(#smallArrow)" opacity=".88" />
+                  <rect x={bottomX - 38} y={bottomY - 4} width="76" height="20" rx="7" fill="rgba(2,14,28,.92)" stroke={section.color} strokeWidth="1.2" />
+                  <text x={bottomX} y={bottomY + 10} textAnchor="middle" fill={section.color} fontSize="10.5" fontWeight="900">{flightValue}</text>
+                </g>
               </g>
             );
           })}
@@ -234,8 +262,8 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
       </div>
 
       <div className="screw-diagram-legend" aria-label="Screw visual legend">
-        <span className="flight">Flight OD = outside diameter over the flights</span>
-        <span className="root">Root Dia will be added after the Flight OD visual is approved</span>
+        <span className="root">Top lines = Root Dia measurement points</span>
+        <span className="flight">Bottom lines = Flight OD measurement points</span>
       </div>
     </section>
   );
