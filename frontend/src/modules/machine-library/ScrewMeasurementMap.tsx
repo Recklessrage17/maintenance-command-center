@@ -14,7 +14,6 @@ const screwSections: Array<{
   key: ScrewSectionKey;
   label: string;
   shortLabel: string;
-  zoneLabel: string;
   x1: number;
   x2: number;
   pillX: number;
@@ -22,9 +21,9 @@ const screwSections: Array<{
   color: string;
   dimColor: string;
 }> = [
-  { key: 'feed', label: 'Feed Section', shortLabel: 'Feed', zoneLabel: 'Rear / Feed', x1: 260, x2: 520, pillX: 365, targetX: 375, color: '#44d7ff', dimColor: 'rgba(68,215,255,.16)' },
-  { key: 'transition', label: 'Transition Section', shortLabel: 'Transition', zoneLabel: 'Compression / Taper', x1: 520, x2: 820, pillX: 640, targetX: 665, color: '#36e5aa', dimColor: 'rgba(54,229,170,.14)' },
-  { key: 'metering', label: 'Metering Section', shortLabel: 'Metering', zoneLabel: 'Front / Metering', x1: 820, x2: 1080, pillX: 925, targetX: 940, color: '#ffb339', dimColor: 'rgba(255,179,57,.15)' },
+  { key: 'feed', label: 'Feed Section', shortLabel: 'Feed', x1: 260, x2: 520, pillX: 390, targetX: 390, color: '#44d7ff', dimColor: 'rgba(68,215,255,.13)' },
+  { key: 'transition', label: 'Transition Section', shortLabel: 'Transition', x1: 520, x2: 820, pillX: 670, targetX: 670, color: '#36e5aa', dimColor: 'rgba(54,229,170,.12)' },
+  { key: 'metering', label: 'Metering Section', shortLabel: 'Metering', x1: 820, x2: 1080, pillX: 950, targetX: 950, color: '#ffb339', dimColor: 'rgba(255,179,57,.13)' },
 ];
 
 const flightBands = Array.from({ length: 16 }, (_, index) => 278 + index * 49);
@@ -118,14 +117,14 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
         }}
       >
         <svg
-          viewBox="0 0 1200 420"
+          viewBox="0 0 1200 390"
           role="img"
           aria-labelledby="code-built-screw-title code-built-screw-desc"
-          style={{ display: 'block', width: '100%', height: 'auto', minHeight: 260 }}
+          style={{ display: 'block', width: '100%', height: 'auto', minHeight: 250 }}
         >
           <title id="code-built-screw-title">Code-built screw flight measurement map</title>
           <desc id="code-built-screw-desc">
-            Interactive coded screw map showing drive spline end, feed, transition, and metering zones, with Flight OD callout pills and arrow leaders.
+            Interactive coded screw map showing drive spline end, feed, transition, and metering zones, with a tapered screw core and aligned Flight OD callout pills.
           </desc>
           <defs>
             <linearGradient id="codedPanel" x1="0" x2="1" y1="0" y2="1">
@@ -155,53 +154,53 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
               <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="#00070d" floodOpacity=".45" />
             </filter>
             <filter id="codedPillGlow" x="-20%" y="-70%" width="140%" height="240%">
-              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#44d7ff" floodOpacity=".22" />
+              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#44d7ff" floodOpacity=".2" />
             </filter>
             <clipPath id="codedFlightClip">
-              <path d="M260 146 H1080 V246 H260 Z" />
+              <path d="M260 142 H1080 V250 H260 Z" />
             </clipPath>
             <marker id="codedArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10">
               <path d="M0 0 L10 5 L0 10 Z" fill="#8fe8ff" />
             </marker>
           </defs>
 
-          <rect x="14" y="16" width="1172" height="388" rx="24" fill="#020b13" stroke="rgba(68,215,255,.24)" strokeWidth="2" />
-          <rect x="50" y="76" width="1100" height="246" rx="18" fill="url(#codedPanel)" stroke="rgba(68,215,255,.2)" />
+          <rect x="14" y="16" width="1172" height="356" rx="24" fill="#020b13" stroke="rgba(68,215,255,.24)" strokeWidth="2" />
+          <rect x="50" y="88" width="1100" height="200" rx="18" fill="url(#codedPanel)" stroke="rgba(68,215,255,.2)" />
 
           {screwSections.map(section => (
             <g key={section.key}>
-              <rect x={section.x1} y="108" width={section.x2 - section.x1} height="170" rx="10" fill={section.dimColor} />
-              <line x1={section.x1} y1="92" x2={section.x1} y2="292" stroke="rgba(223,247,255,.18)" strokeDasharray="7 8" />
-              <line x1={section.x2} y1="92" x2={section.x2} y2="292" stroke="rgba(223,247,255,.18)" strokeDasharray="7 8" />
-              <line x1={section.x1 + 20} y1="292" x2={section.x2 - 20} y2="292" stroke={section.color} strokeWidth="3" strokeLinecap="round" opacity=".6" />
-              <text x={(section.x1 + section.x2) / 2} y="336" textAnchor="middle" fill={section.color} fontSize="26" fontWeight="950">{section.shortLabel.toUpperCase()}</text>
-              <text x={(section.x1 + section.x2) / 2} y="360" textAnchor="middle" fill="#a8c7d5" fontSize="14" fontWeight="850">{section.zoneLabel}</text>
+              <rect x={section.x1} y="112" width={section.x2 - section.x1} height="146" rx="10" fill={section.dimColor} />
+              <line x1={section.x1} y1="96" x2={section.x1} y2="278" stroke="rgba(223,247,255,.16)" strokeDasharray="7 8" />
+              <line x1={section.x2} y1="96" x2={section.x2} y2="278" stroke="rgba(223,247,255,.16)" strokeDasharray="7 8" />
+              <line x1={section.x1 + 20} y1="278" x2={section.x2 - 20} y2="278" stroke={section.color} strokeWidth="3" strokeLinecap="round" opacity=".62" />
+              <text x={(section.x1 + section.x2) / 2} y="326" textAnchor="middle" fill={section.color} fontSize="25" fontWeight="950">{section.shortLabel.toUpperCase()}</text>
             </g>
           ))}
 
           <g filter="url(#codedScrewShadow)">
-            <text x="96" y="154" textAnchor="middle" fill="#eefbff" fontSize="16" fontWeight="950">DRIVE /</text>
-            <text x="96" y="174" textAnchor="middle" fill="#eefbff" fontSize="16" fontWeight="950">SPLINE END</text>
-            <rect x="72" y="184" width="84" height="48" rx="8" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.54)" />
-            <path d="M86 196 H142 M86 208 H142 M86 220 H142" fill="none" stroke="#eefbff" strokeWidth="5" strokeLinecap="round" opacity=".68" />
-            <rect x="156" y="168" width="46" height="80" rx="8" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.5)" />
-            <rect x="202" y="182" width="56" height="52" rx="8" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.42)" />
+            <text x="96" y="164" textAnchor="middle" fill="#eefbff" fontSize="16" fontWeight="950">DRIVE /</text>
+            <text x="96" y="184" textAnchor="middle" fill="#eefbff" fontSize="16" fontWeight="950">SPLINE END</text>
+            <rect x="72" y="194" width="84" height="48" rx="8" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.54)" />
+            <path d="M86 206 H142 M86 218 H142 M86 230 H142" fill="none" stroke="#eefbff" strokeWidth="5" strokeLinecap="round" opacity=".68" />
+            <rect x="156" y="178" width="46" height="80" rx="8" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.5)" />
+            <rect x="202" y="194" width="56" height="48" rx="8" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.42)" />
 
-            <path d="M258 184 C378 184 464 185 520 190 C640 202 724 184 820 160 H1080 V226 H820 C724 208 640 204 520 214 C464 220 378 220 258 220 Z" fill="url(#codedSteel)" stroke="rgba(238,251,255,.3)" strokeWidth="1.5" />
-            <path d="M258 184 C378 184 464 185 520 190 C640 202 724 184 820 160 H1080" fill="none" stroke="rgba(255,255,255,.52)" strokeWidth="3.4" strokeLinecap="round" />
-            <path d="M258 220 C378 220 464 220 520 214 C640 204 724 208 820 226 H1080" fill="none" stroke="rgba(2,7,13,.48)" strokeWidth="4" strokeLinecap="round" />
+            <path d="M258 198 C386 198 464 198 520 194 C632 188 720 178 820 164 C900 154 988 150 1080 148 V238 C988 236 900 232 820 224 C720 214 632 206 520 202 C464 200 386 200 258 200 Z" fill="url(#codedSteel)" stroke="rgba(238,251,255,.34)" strokeWidth="1.5" />
+            <path d="M258 198 C386 198 464 198 520 194 C632 188 720 178 820 164 C900 154 988 150 1080 148" fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="3.4" strokeLinecap="round" />
+            <path d="M258 200 C386 200 464 200 520 202 C632 206 720 214 820 224 C900 232 988 236 1080 238" fill="none" stroke="rgba(2,7,13,.52)" strokeWidth="4" strokeLinecap="round" />
+            <path d="M270 199 C432 199 548 198 666 195 C782 192 922 190 1068 190" fill="none" stroke="rgba(12,24,32,.58)" strokeWidth="4" strokeLinecap="round" opacity=".55" />
 
             <g clipPath="url(#codedFlightClip)">
               {flightBands.map(x => (
                 <g key={x}>
-                  <path d={`M${x + 25} 148 L${x + 82} 246`} stroke="rgba(2,7,13,.58)" strokeWidth="8" strokeLinecap="round" />
-                  <path d={`M${x} 146 H${x + 34} L${x + 96} 246 H${x + 62} Z`} fill="url(#codedFlight)" stroke="rgba(247,253,255,.72)" strokeWidth="1.3" />
-                  <path d={`M${x + 34} 151 L${x + 92} 240`} stroke="rgba(255,255,255,.5)" strokeWidth="2" strokeLinecap="round" />
+                  <path d={`M${x + 25} 144 L${x + 82} 248`} stroke="rgba(2,7,13,.58)" strokeWidth="8" strokeLinecap="round" />
+                  <path d={`M${x} 142 H${x + 34} L${x + 96} 250 H${x + 62} Z`} fill="url(#codedFlight)" stroke="rgba(247,253,255,.72)" strokeWidth="1.3" />
+                  <path d={`M${x + 34} 148 L${x + 92} 244`} stroke="rgba(255,255,255,.5)" strokeWidth="2" strokeLinecap="round" />
                 </g>
               ))}
             </g>
-            <rect x="1080" y="148" width="26" height="100" rx="5" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.52)" />
-            <line x1="1106" y1="156" x2="1106" y2="240" stroke="rgba(255,255,255,.7)" strokeWidth="2.5" strokeLinecap="round" />
+            <rect x="1080" y="142" width="26" height="108" rx="5" fill="url(#codedDarkSteel)" stroke="rgba(238,251,255,.52)" />
+            <line x1="1106" y1="152" x2="1106" y2="240" stroke="rgba(255,255,255,.7)" strokeWidth="2.5" strokeLinecap="round" />
           </g>
 
           {screwSections.map(section => {
@@ -221,13 +220,13 @@ export default function ScrewMeasurementMap({ onAddReading, readings }: ScrewMea
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                <path d={`M${section.pillX} 94 C${section.pillX} 122 ${section.targetX - 24} 132 ${section.targetX} 148`} fill="none" stroke={section.color} strokeWidth="3" strokeLinecap="round" strokeDasharray="8 7" markerEnd="url(#codedArrow)" opacity=".92" />
-                <circle cx={section.targetX} cy="148" r="9" fill={section.color} opacity=".95" />
-                <circle cx={section.targetX} cy="148" r="18" fill="none" stroke={section.color} strokeWidth="2" opacity=".46" />
-                <rect x={section.pillX - 92} y="30" width="184" height="62" rx="18" fill="rgba(2,14,28,.94)" stroke={section.color} strokeWidth="2" filter="url(#codedPillGlow)" />
-                <rect x={section.pillX - 80} y="41" width="160" height="40" rx="13" fill={section.dimColor} />
-                <text x={section.pillX} y="56" textAnchor="middle" fill="#f3fbff" fontSize="13" fontWeight="950" letterSpacing=".4">{section.shortLabel.toUpperCase()} FLIGHT OD</text>
-                <text x={section.pillX} y="76" textAnchor="middle" fill={section.color} fontSize="15" fontWeight="950">{display}</text>
+                <path d={`M${section.pillX} 92 C${section.pillX} 118 ${section.targetX} 124 ${section.targetX} 146`} fill="none" stroke={section.color} strokeWidth="2.7" strokeLinecap="round" strokeDasharray="8 7" markerEnd="url(#codedArrow)" opacity=".9" />
+                <circle cx={section.targetX} cy="146" r="8" fill={section.color} opacity=".95" />
+                <circle cx={section.targetX} cy="146" r="17" fill="none" stroke={section.color} strokeWidth="2" opacity=".44" />
+                <rect x={section.pillX - 86} y="36" width="172" height="54" rx="17" fill="rgba(2,14,28,.94)" stroke={section.color} strokeWidth="2" filter="url(#codedPillGlow)" />
+                <rect x={section.pillX - 74} y="47" width="148" height="32" rx="12" fill={section.dimColor} />
+                <text x={section.pillX} y="59" textAnchor="middle" fill="#f3fbff" fontSize="12.5" fontWeight="950" letterSpacing=".35">{section.shortLabel.toUpperCase()} FLIGHT OD</text>
+                <text x={section.pillX} y="78" textAnchor="middle" fill={section.color} fontSize="14.5" fontWeight="950">{display}</text>
               </g>
             );
           })}
