@@ -57,6 +57,36 @@ function assetSlug(asset: MachineRecordLogAsset | undefined) {
   return assetLabel(asset).replace(/\W+/g, '_') || 'All_Assets';
 }
 
+function cleanFileToken(value: string, fallback = 'Record') {
+  return value.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 90) || fallback;
+}
+
+function assetFileToken(value: string) {
+  return value.replace(/[^A-Za-z0-9]+/g, '') || 'Asset';
+}
+
+function recordDateStamp(logs: MeasurementLogEntry[]) {
+  const stamps = logs.map(log => {
+    if (isValidMccDateValue(log.recordDate, true)) return log.recordDate;
+    const uploadDate = log.uploadedAt.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    return uploadDate || '';
+  }).filter(Boolean).sort((a,b)=>b.localeCompare(a));
+  return stamps[0] || localIsoDate(new Date());
+}
+
+function combinedPdfFileName(logs: MeasurementLogEntry[], mode: 'selected' | 'folder', year: string, assetScope: boolean) {
+  const assets = Array.from(new Set(logs.map(log => assetLabel(log)).filter(Boolean)));
+  const date = recordDateStamp(logs);
+  if (mode === 'folder') {
+    if (!assetScope) return cleanFileToken(`Measurement_Inspection_Logs_${year || date}.pdf`);
+    if (assets.length === 1) return cleanFileToken(`${assetFileToken(assets[0])}_Screw_and_Barrel_Inspection_${year || date}.pdf`);
+    return cleanFileToken(`Measurement_Inspection_Logs_${year || date}.pdf`);
+  }
+  if (logs.length === 1 && assets.length === 1) return cleanFileToken(`${assetFileToken(assets[0])}_Screw_and_Barrel_Inspection_${date}.pdf`);
+  if (assets.length === 1) return cleanFileToken(`${assetFileToken(assets[0])}_Screw_and_Barrel_Inspection_Selected_${date}.pdf`);
+  return cleanFileToken(`Measurement_Inspection_Selected_${date}.pdf`);
+}
+
 function normalizeRecord(log: Partial<MeasurementLogEntry>, assetOverride?: MachineRecordLogAsset): MeasurementLogEntry {
   const uploadedAt = String(log.uploadedAt ?? new Date().toISOString());
   const fallbackDate = uploadedAt.slice(0, 10);
@@ -503,7 +533,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     if (!asset) setOpenYear(nextYear);
   }
 
-  async function generateCombinedPdf(records: MeasurementLogEntry[], label: string) {
+  async function generateCombinedPdf(records: MeasurementLogEntry[], label: 'selected' | 'folder') {
     const ready = records.filter(log=>log.hasStoredFile);
     if (!ready.length) {
       window.alert('Select one or more READY record logs to generate a combined PDF.');
@@ -512,18 +542,20 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     setBusy(label);
     const objectUrls: string[] = [];
     try {
+      const fileName = combinedPdfFileName(ready, label, activeYear, Boolean(asset));
       const payloadRecords = (await Promise.all(ready.map(async log => {
         const stored = await readStoredFile(log.id).catch(() => undefined);
         if (!stored) return null;
         return { ...log, dataUrl: await blobToDataUrl(stored.blob), type: stored.type || log.type, name: stored.name || log.name };
       }))).filter(Boolean);
-      const res = await fetch('/api/machine-library/measurement-records/combined-pdf',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({ title: asset ? `${assetLabel(asset)} Screw & Barrel Inspection Records` : 'Screw & Barrel Inspection Records', records: payloadRecords })});
+      const res = await fetch('/api/machine-library/measurement-records/combined-pdf',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({ title: asset ? `${assetLabel(asset)} Screw & Barrel Inspection Records` : 'Screw & Barrel Inspection Records', fileName, records: payloadRecords })});
       if (!res.ok) {
         const data = await res.json().catch(()=>({}));
         throw new Error(data.error || 'Combined PDF generation failed.');
       }
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+      const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(pdfFile);
       objectUrls.push(url);
       const opened = window.open(url, '_blank', 'noopener,noreferrer');
       if (!opened) window.alert('Popup blocked. Allow popups for MCC to open the combined PDF.');
@@ -649,20 +681,6 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
         </span>;
       })}
     </div>
-    {!isAssetPanel&&!isGlobalFolderView&&<div className="measurement-folder-landing" aria-label="Measurement inspection year folders">
-      {years.map(year=>{
-        const folderLogs = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year);
-        const readyCount = folderLogs.filter(log=>log.hasStoredFile).length;
-        const assetCount = new Set(folderLogs.map(log=>log.assetNumber)).size;
-        return <button className="measurement-year-folder-card" type="button" key={year} onClick={()=>openFolder(year)}>
-          <span className="measurement-folder-glyph" aria-hidden="true" />
-          <strong>{year}</strong>
-          <em>{folderLogs.length} records</em>
-          <span>{readyCount} ready / {assetCount} assets</span>
-        </button>;
-      })}
-      {!scopedLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records yet.</strong><span>Upload records from an asset's Inspection Records card.</span></div>}
-    </div>}
     {(isAssetPanel||isGlobalFolderView)&&<div className="measurement-folder-records">
       <div className="measurement-folder-actions">
         <span>{selectedLogs.length} selected</span>

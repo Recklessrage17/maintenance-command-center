@@ -6438,6 +6438,11 @@ function measurementRecordPdfInputs(value: unknown): MeasurementRecordPdfInput[]
     };
   });
 }
+function measurementRecordPdfFileName(value: unknown) {
+  const body = isRecord(value) ? value : {};
+  const requested = String(body.fileName ?? '').replace(/\.pdf$/i, '');
+  return `${safeFileToken(requested || `MCC_Screw_Barrel_Records_${downloadDateStamp()}`)}.pdf`;
+}
 function drawMeasurementRecordHeader(page: PDFPage, record: MeasurementRecordPdfInput, font: PDFFont, bold: PDFFont, index: number) {
   const { width, height } = page.getSize();
   page.drawRectangle({ x: 0, y: height - 50, width, height: 50, color: pdfWhite, borderColor: rgb(0.72,0.82,0.88), borderWidth: 0.6 });
@@ -6505,7 +6510,7 @@ app.post('/api/machine-library/measurement-records/combined-pdf', requireAuth, r
   try {
     const buffer = await buildCombinedMeasurementRecordPdf(req.body);
     audit(req,'measurement record combined pdf generated','machine_asset','local-records',{recordCount:Array.isArray((req.body as {records?: unknown[]}).records) ? (req.body as {records: unknown[]}).records.length : 0});
-    sendDownload(res, `MCC_Screw_Barrel_Records_${downloadDateStamp()}.pdf`, 'application/pdf', buffer);
+    sendDownload(res, measurementRecordPdfFileName(req.body), 'application/pdf', buffer);
   } catch (error) {
     console.error('Measurement record combined PDF failed', error);
     res.status(400).json({ok:false,error:safeErrorMessage(error) || 'Combined PDF generation failed.'});
