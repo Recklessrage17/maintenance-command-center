@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { MccDateInput, formatDateDisplay, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 
 type MachineImportMode = 'add_new_only' | 'upsert';
 type MachineToolCategory = 'measurement' | 'brand' | 'doc';
@@ -394,14 +394,17 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   const templateInputRef = useRef<HTMLInputElement|null>(null);
   const [logs,setLogs]=useState<MeasurementLogEntry[]>([]);
   const [selectedYear,setSelectedYear]=useState(String(new Date().getFullYear()));
+  const [openYear,setOpenYear]=useState<string|null>(asset ? String(new Date().getFullYear()) : null);
   const [selectedIds,setSelectedIds]=useState<Set<string>>(new Set());
   const [busy,setBusy]=useState('');
   const scopedLogs = useMemo(()=>scopeLogs(logs, asset),[logs,asset]);
   const years = useMemo(()=>availableYears(scopedLogs),[scopedLogs]);
-  const yearLogs = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === selectedYear);
+  const isAssetPanel = Boolean(asset);
+  const isGlobalFolderView = !isAssetPanel && Boolean(openYear);
+  const activeYear = isAssetPanel ? selectedYear : openYear ?? selectedYear;
+  const yearLogs = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === activeYear);
   const selectedLogs = yearLogs.filter(log => selectedIds.has(log.id) && log.hasStoredFile);
   const readyYearLogs = yearLogs.filter(log => log.hasStoredFile);
-  const isAssetPanel = Boolean(asset);
 
   useEffect(()=>{
     function refreshLogs() {
@@ -416,7 +419,9 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   },[asset]);
   useEffect(()=>{
     if (!years.includes(selectedYear)) setSelectedYear(years[0]);
-  },[selectedYear,years]);
+    if (asset && (!openYear || !years.includes(openYear))) setOpenYear(years[0]);
+    if (!asset && openYear && !years.includes(openYear)) setOpenYear(null);
+  },[asset,openYear,selectedYear,years]);
 
   function replaceLogs(nextLogs: MeasurementLogEntry[]) {
     writeLogs(nextLogs);
@@ -492,8 +497,10 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
 
   function updateRecordDate(id: string, recordDate: string) {
     if (!isValidMccDateValue(recordDate, true)) return;
+    const nextYear = recordYear(recordDate);
     replaceLogs(readLogs().map(log=>log.id === id ? { ...log, recordDate, year: recordYear(recordDate) } : log));
-    setSelectedYear(recordYear(recordDate));
+    setSelectedYear(nextYear);
+    if (!asset) setOpenYear(nextYear);
   }
 
   async function generateCombinedPdf(records: MeasurementLogEntry[], label: string) {
@@ -526,6 +533,31 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     } finally {
       setBusy('');
       window.setTimeout(() => objectUrls.forEach(url => window.URL.revokeObjectURL(url)), 60000);
+    }
+  }
+
+  async function openSelectedRecords() {
+    if (!selectedLogs.length) {
+      window.alert('Select one or more READY record logs to open.');
+      return;
+    }
+    setBusy('open');
+    const objectUrls: string[] = [];
+    try {
+      for (const log of selectedLogs) {
+        const stored = await readStoredFile(log.id).catch(() => undefined);
+        if (!stored) continue;
+        const url = window.URL.createObjectURL(stored.blob);
+        objectUrls.push(url);
+        const opened = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!opened) {
+          window.alert('Popup blocked. Allow popups for MCC to open selected records.');
+          break;
+        }
+      }
+    } finally {
+      setBusy('');
+      window.setTimeout(() => objectUrls.forEach(url => window.URL.revokeObjectURL(url)), 30000);
     }
   }
 
@@ -574,12 +606,26 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     }
   }
 
+  function openFolder(year: string) {
+    setSelectedYear(year);
+    setOpenYear(year);
+    setSelectedIds(new Set());
+  }
+
+  const folderSummary = isAssetPanel || isGlobalFolderView
+    ? `${activeYear} folder / ${yearLogs.length} record(s)`
+    : `${years.length} year folder(s) / ${scopedLogs.length} record(s)`;
+
   return <section className="measurement-tools-panel measurement-records-panel">
     <div className="measurement-tools-heading">
-      <div><strong>{isAssetPanel ? 'Screw & Barrel Inspection Records' : 'Global Screw & Barrel Inspection Records'}</strong><span>{selectedYear} folder / {yearLogs.length} record(s)</span></div>
+      <div><strong>{isAssetPanel ? 'Screw & Barrel Inspection Records' : isGlobalFolderView ? `${activeYear} Screw & Barrel Records` : 'Global Screw & Barrel Inspection Records'}</strong><span>{folderSummary}</span></div>
+      {isGlobalFolderView&&<button className="secondary-button compact-button measurement-folder-back-button" type="button" onClick={()=>{ setOpenYear(null); setSelectedIds(new Set()); }}>Back to Folders</button>}
       <RecordPanelToolsDropdown
         canUpload={Boolean(asset)}
         busy={Boolean(busy)}
+        canPrintSelected={selectedLogs.length > 0}
+        canPrintFolder={(isAssetPanel || isGlobalFolderView) && readyYearLogs.length > 0}
+        canDeleteSelected={selectedIds.size > 0}
         onUpload={()=>fileInputRef.current?.click()}
         onImport={()=>importInputRef.current?.click()}
         onPrintSelected={()=>void generateCombinedPdf(selectedLogs,'selected')}
@@ -596,17 +642,34 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     <div className="measurement-folder-row" aria-label="Screw and barrel record year folders">
       {years.map(year=>{
         const count = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year).length;
-        return <span className={year === selectedYear ? 'measurement-folder-pill-wrap active' : 'measurement-folder-pill-wrap'} key={year}>
-          <button className="measurement-year-folder" type="button" onClick={()=>{ setSelectedYear(year); setSelectedIds(new Set()); }} aria-pressed={year === selectedYear}><span className="measurement-folder-glyph" aria-hidden="true" />{year}<em>{count}</em></button>
-          {year === selectedYear&&<button className="measurement-folder-delete-x" type="button" aria-label={`Delete ${year} folder`} onClick={()=>void deleteYearFolder(year)}>x</button>}
+        const active = year === activeYear && (isAssetPanel || isGlobalFolderView);
+        return <span className={active ? 'measurement-folder-pill-wrap active' : 'measurement-folder-pill-wrap'} key={year}>
+          <button className="measurement-year-folder" type="button" onClick={()=>{ isAssetPanel ? (setSelectedYear(year), setSelectedIds(new Set())) : openFolder(year); }} aria-pressed={active}><span className="measurement-folder-glyph" aria-hidden="true" />{year}<em>{count}</em></button>
+          {active&&<button className="measurement-folder-delete-x" type="button" aria-label={`Delete ${year} folder`} onClick={()=>void deleteYearFolder(year)}>x</button>}
         </span>;
       })}
     </div>
-    <div className="measurement-folder-records">
+    {!isAssetPanel&&!isGlobalFolderView&&<div className="measurement-folder-landing" aria-label="Measurement inspection year folders">
+      {years.map(year=>{
+        const folderLogs = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year);
+        const readyCount = folderLogs.filter(log=>log.hasStoredFile).length;
+        const assetCount = new Set(folderLogs.map(log=>log.assetNumber)).size;
+        return <button className="measurement-year-folder-card" type="button" key={year} onClick={()=>openFolder(year)}>
+          <span className="measurement-folder-glyph" aria-hidden="true" />
+          <strong>{year}</strong>
+          <em>{folderLogs.length} records</em>
+          <span>{readyCount} ready / {assetCount} assets</span>
+        </button>;
+      })}
+      {!scopedLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records yet.</strong><span>Upload records from an asset's Inspection Records card.</span></div>}
+    </div>}
+    {(isAssetPanel||isGlobalFolderView)&&<div className="measurement-folder-records">
       <div className="measurement-folder-actions">
         <span>{selectedLogs.length} selected</span>
-        <button className="secondary-button compact-button" type="button" onClick={()=>void generateCombinedPdf(selectedLogs,'selected')} disabled={Boolean(busy)}>Print Selected</button>
-        <button className="secondary-button compact-button danger-button" type="button" onClick={()=>void deleteSelected()} disabled={Boolean(busy)}>Delete Selected</button>
+        <button className="secondary-button compact-button" type="button" onClick={()=>void openSelectedRecords()} disabled={Boolean(busy)||!selectedLogs.length}>Open Selected</button>
+        <button className="secondary-button compact-button" type="button" onClick={()=>void generateCombinedPdf(selectedLogs,'selected')} disabled={Boolean(busy)||!selectedLogs.length}>Print Selected</button>
+        <button className="secondary-button compact-button" type="button" onClick={()=>void generateCombinedPdf(readyYearLogs,'folder')} disabled={Boolean(busy)||!readyYearLogs.length}>Print Folder PDF</button>
+        <button className="secondary-button compact-button danger-button" type="button" onClick={()=>void deleteSelected()} disabled={Boolean(busy)||!selectedIds.size}>Delete Selected</button>
       </div>
       <div className="measurement-log-list">
         {yearLogs.map(log=>{
@@ -614,20 +677,23 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
           const checked = selectedIds.has(log.id) && ready;
           return <article className={ready ? 'measurement-log-row measurement-record-row' : 'measurement-log-row measurement-record-row log-only'} key={log.id}>
             <label className="measurement-log-select" title={ready ? 'Select record' : 'Upload this record again before printing.'}><input type="checkbox" checked={checked} disabled={!ready} onChange={event=>toggleSelected(log.id,event.target.checked)} /><span /></label>
-            <div className="measurement-log-main"><div className="measurement-record-title-line"><span className="measurement-asset-pill">{log.assetNumber}</span><strong>{log.name}</strong></div><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Screw & Barrel Inspection Records / {log.year || recordYear(log.recordDate)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
+            <div className="measurement-log-main"><div className="measurement-record-title-line"><span className="measurement-asset-pill">{log.assetNumber}</span><span className="measurement-record-date-pill">{formatDateDisplay(log.recordDate)}</span><strong>{log.name}</strong></div><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Screw & Barrel Inspection Records / {log.year || recordYear(log.recordDate)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
             <div className="measurement-record-date-cell"><MccDateInput label="Record Date" value={log.recordDate} onChange={recordDate=>updateRecordDate(log.id, recordDate)} /></div>
-            <div className="measurement-log-row-actions"><em>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log.id)}>Open</button></div>
+            <div className="measurement-log-row-actions"><em className={ready ? 'measurement-status-pill status-ready' : 'measurement-status-pill status-log-only'}>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log.id)}>Open</button></div>
           </article>;
         })}
         {!yearLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records in this folder yet.</strong><span>{asset ? `Upload completed records for ${assetLabel(asset)}.` : 'Open an asset Record Logs panel to upload completed records.'}</span></div>}
       </div>
-    </div>
+    </div>}
   </section>;
 }
 
 function RecordPanelToolsDropdown({
   canUpload,
   busy,
+  canPrintSelected,
+  canPrintFolder,
+  canDeleteSelected,
   onUpload,
   onImport,
   onPrintSelected,
@@ -639,6 +705,9 @@ function RecordPanelToolsDropdown({
 }: {
   canUpload: boolean;
   busy: boolean;
+  canPrintSelected: boolean;
+  canPrintFolder: boolean;
+  canDeleteSelected: boolean;
   onUpload: () => void;
   onImport: () => void;
   onPrintSelected: () => void;
@@ -674,9 +743,9 @@ function RecordPanelToolsDropdown({
     {open&&<div className="record-panel-tools-menu" role="menu" aria-label="Record log tools">
       <button type="button" role="menuitem" onClick={()=>run(onUpload)} disabled={!canUpload || busy}>Upload File</button>
       <button type="button" role="menuitem" onClick={()=>run(onImport)} disabled={busy}>Import File</button>
-      <button type="button" role="menuitem" onClick={()=>run(onPrintSelected)} disabled={busy}>Print Selected</button>
-      <button type="button" role="menuitem" onClick={()=>run(onPrintFolder)} disabled={busy}>Print Year Folder</button>
-      <button type="button" role="menuitem" onClick={()=>run(onDeleteSelected)} disabled={busy}>Delete Selected</button>
+      <button type="button" role="menuitem" onClick={()=>run(onPrintSelected)} disabled={busy || !canPrintSelected}>Print Selected</button>
+      <button type="button" role="menuitem" onClick={()=>run(onPrintFolder)} disabled={busy || !canPrintFolder}>Print Folder PDF</button>
+      <button type="button" role="menuitem" onClick={()=>run(onDeleteSelected)} disabled={busy || !canDeleteSelected}>Delete Selected</button>
       <button type="button" role="menuitem" onClick={()=>run(onBackup)} disabled={busy}>Backup Data</button>
       <button type="button" role="menuitem" onClick={()=>run(onPrintBlank)} disabled={busy}>Print Blank Form</button>
       <button type="button" role="menuitem" onClick={()=>run(onUpdateForm)} disabled={busy}>Update Form</button>
