@@ -1,5 +1,6 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { MachineLibraryToolsDropdown } from './MeasurementInspectionLogsTools';
 import ScrewMeasurementMap from './ScrewMeasurementMap';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
@@ -64,6 +65,7 @@ const replacementGroups: Array<{ title: string; enabled: (form: AssetForm) => bo
 ];
 const editableRoles = new Set(['Maintenance Tech 3','Manager','Admin']);
 const deleteRoles = new Set(['Manager','Admin']);
+const measurementFolderDeleteRoles = new Set(['Maintenance Tech 3','Tier 3','Manager','Admin','Administrator']);
 const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
   { key: 'machineLength', label: 'Machine Length' },
   { key: 'machineWidth', label: 'Machine Width' },
@@ -471,6 +473,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const brands = useMemo(()=>[...new Set(assets.map(asset=>asset.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[assets]);
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
+  const canManageMeasurementYearFolders = measurementFolderDeleteRoles.has(userRole);
 
   function loadAssets() {
     const params = new URLSearchParams();
@@ -585,10 +588,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         <label className="form-field"><span>Status</span><select value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="">All status</option><option value="active">Active</option><option value="down">Down</option><option value="disabled">Disabled</option><option value="removed">Removed</option></select></label>
         <div className="machine-toolbar-actions">
           <button className="primary-button compact-button" type="button" onClick={openAdd} disabled={!canEdit}>Add Machine Asset</button>
-          <label className="form-field machine-import-mode"><span>Import Mode</span><select value={importMode} onChange={event=>setImportMode(event.target.value as ImportMode)} disabled={!canEdit||isImporting}><option value="add_new_only">Add New Only</option><option value="upsert">Update Existing / Upsert</option></select></label>
-          <button className="secondary-button compact-button" type="button" onClick={()=>fileRef.current?.click()} disabled={!canEdit||isImporting}>{isImporting?'Importing...':'Import Machine List'}</button>
-          <button className="secondary-button compact-button" type="button" onClick={downloadTemplate} disabled={!canEdit}>Export Machine Template</button>
-          <button className="secondary-button compact-button" type="button" onClick={()=>setShowColors(true)}>Brand Color Settings</button>
+          <MachineLibraryToolsDropdown canEdit={canEdit} canManageYearFolders={canManageMeasurementYearFolders} importMode={importMode} setImportMode={setImportMode} isImporting={isImporting} onImportMachineList={()=>fileRef.current?.click()} onExportTemplate={downloadTemplate} onOpenBrandColors={()=>setShowColors(true)} />
           <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden-file-input" onChange={()=>void importMachineList()} />
         </div>
         <p className="form-help machine-toolbar-note">Add New Only rejects existing Asset Numbers. Upsert updates existing assets and creates new ones. Duplicate Asset Numbers inside one file are always rejected after the first valid row.</p>

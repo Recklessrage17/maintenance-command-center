@@ -1910,6 +1910,402 @@ tr:hover td {
     inset 0 1px 0 rgba(255,255,255,.12);
 }
 
+.machine-tools-wrap {
+  position: relative;
+}
+
+.machine-tools-toggle {
+  min-width: 92px;
+}
+
+.machine-tools-toggle.active {
+  border-color: rgba(54, 229, 170, .58);
+  color: #d9ffe9;
+  background: linear-gradient(180deg, rgba(18, 97, 71, .46), rgba(5, 34, 39, .82));
+}
+
+.machine-tools-icon {
+  margin: 0 !important;
+  color: inherit !important;
+  font-size: .82rem !important;
+  font-weight: 950 !important;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+.machine-tools-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 40;
+  width: min(760px, calc(100vw - 52px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(143, 205, 233, .32);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(18, 31, 45, .98), rgba(4, 13, 25, .98)),
+    radial-gradient(circle at 8% 0%, rgba(68, 215, 255, .13), transparent 30%);
+  box-shadow: 0 28px 68px rgba(0,0,0,.56), 0 0 28px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.09);
+  backdrop-filter: blur(18px) saturate(132%);
+}
+
+.machine-tools-primary-row,
+.machine-tools-grid {
+  display: grid;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.machine-tools-primary-row {
+  grid-template-columns: minmax(180px, .62fr) minmax(220px, 1fr);
+}
+
+.machine-tools-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.machine-tools-import-mode {
+  min-width: 0;
+}
+
+.machine-tools-import-mode select {
+  min-height: 38px;
+  font-size: .8rem;
+}
+
+.machine-tools-item {
+  appearance: none;
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid rgba(143, 205, 233, .22);
+  border-radius: 8px;
+  color: #e9fbff;
+  background: linear-gradient(180deg, rgba(14, 39, 58, .82), rgba(5, 16, 29, .78));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.machine-tools-item:hover,
+.machine-tools-item.active {
+  border-color: rgba(68, 215, 255, .68);
+  background: linear-gradient(180deg, rgba(16, 57, 75, .9), rgba(5, 22, 38, .86));
+  box-shadow: 0 0 18px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.machine-tools-item:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.machine-tools-item span {
+  margin: 0 !important;
+  overflow: hidden;
+  color: #f3fbff !important;
+  font-size: .8rem !important;
+  font-weight: 950 !important;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  text-transform: none !important;
+  white-space: nowrap;
+}
+
+.machine-tools-item small {
+  overflow: hidden;
+  color: #9fbdcc;
+  font-size: .68rem;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.measurement-tools-panel {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(68, 215, 255, .24);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(5, 28, 41, .88), rgba(3, 13, 24, .94)),
+    linear-gradient(90deg, rgba(68,215,255,.06), transparent 50%, rgba(255,180,95,.04));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.measurement-tools-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.measurement-tools-heading strong {
+  display: block;
+  overflow: hidden;
+  color: #f3fbff;
+  font-size: .96rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.measurement-tools-heading span,
+.measurement-folder-actions span {
+  display: block;
+  margin: 3px 0 0 !important;
+  color: #90c8dd !important;
+  font-size: .72rem !important;
+  font-weight: 900 !important;
+  text-transform: none !important;
+}
+
+.measurement-folder-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.measurement-folder-pill-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.measurement-year-folder {
+  appearance: none;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(68, 215, 255, .26);
+  border-radius: 8px;
+  color: #dff7ff;
+  background: rgba(4, 18, 34, .68);
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 950;
+}
+
+.measurement-folder-pill-wrap.active .measurement-year-folder,
+.measurement-year-folder:hover {
+  border-color: rgba(68, 215, 255, .72);
+  color: #ffffff;
+  background: rgba(7, 35, 50, .92);
+  box-shadow: 0 0 16px rgba(68,215,255,.14);
+}
+
+.measurement-folder-glyph {
+  position: relative;
+  width: 17px;
+  height: 12px;
+  margin: 2px 0 0 !important;
+  border: 1px solid rgba(255, 210, 94, .72);
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(255,210,94,.34), rgba(255,180,95,.12));
+}
+
+.measurement-folder-glyph::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: -5px;
+  width: 8px;
+  height: 5px;
+  border: 1px solid rgba(255, 210, 94, .72);
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+  background: rgba(255, 210, 94, .28);
+}
+
+.measurement-year-folder em {
+  min-width: 20px;
+  display: inline-flex;
+  justify-content: center;
+  padding: 2px 6px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
+  color: #ffd25e;
+  font-size: .68rem;
+  font-style: normal;
+}
+
+.measurement-folder-delete-x {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255, 117, 138, .58);
+  border-radius: 999px;
+  color: #ffd3d7;
+  background: rgba(126, 32, 48, .72);
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.measurement-folder-delete-x:hover {
+  border-color: rgba(255, 152, 167, .9);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(255,117,138,.18);
+}
+
+.measurement-folder-records {
+  display: grid;
+  gap: 8px;
+}
+
+.measurement-folder-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.measurement-folder-actions span {
+  margin-right: auto !important;
+}
+
+.measurement-log-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(42vh, 430px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.measurement-log-row,
+.measurement-log-empty {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(68, 215, 255, .16);
+  border-radius: 8px;
+  background: rgba(2, 10, 18, .62);
+}
+
+.measurement-log-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.measurement-log-row.log-only {
+  opacity: .66;
+}
+
+.measurement-log-select {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.measurement-log-select input {
+  position: absolute;
+  opacity: 0;
+}
+
+.measurement-log-select span {
+  width: 17px;
+  height: 17px;
+  margin: 0 !important;
+  border: 1px solid rgba(68, 215, 255, .42);
+  border-radius: 5px;
+  background: rgba(4, 18, 34, .74);
+}
+
+.measurement-log-select input:checked + span {
+  border-color: rgba(151, 241, 255, .82);
+  background: #44d7ff;
+  box-shadow: 0 0 12px rgba(68,215,255,.22);
+}
+
+.measurement-log-select input:disabled + span {
+  border-color: rgba(255, 210, 94, .28);
+  background: rgba(70, 55, 23, .36);
+}
+
+.measurement-log-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.measurement-log-main strong,
+.measurement-log-main span,
+.measurement-log-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.measurement-log-main strong {
+  color: #f3fbff;
+  font-size: .82rem;
+}
+
+.measurement-log-main span,
+.measurement-log-main small {
+  margin: 0 !important;
+  color: #9fbdcc !important;
+  font-size: .68rem !important;
+  font-weight: 850 !important;
+  text-transform: none !important;
+}
+
+.measurement-log-main .measurement-log-upload-note {
+  color: #ffd25e !important;
+}
+
+.measurement-log-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.measurement-log-row-actions em {
+  color: #ffd25e;
+  font-size: .66rem;
+  font-style: normal;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.measurement-log-empty {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+}
+
+.measurement-log-empty strong {
+  color: #f3fbff;
+}
+
+.measurement-log-empty span {
+  margin: 0 !important;
+  color: #9fbdcc !important;
+  font-size: .78rem !important;
+  font-weight: 850 !important;
+  text-transform: none !important;
+}
+
 .machine-toolbar-card::after {
   content: "";
   position: absolute;
