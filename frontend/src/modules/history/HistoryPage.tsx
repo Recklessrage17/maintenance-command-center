@@ -1,4 +1,5 @@
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
+import { MccDateInput } from '../../components/MccDateInput';
 
 export type HistorySection = 'inventory' | 'vendors' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
 
@@ -364,14 +365,8 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
           <span>Search</span>
           <input value={filters.q} onChange={event=>updateFilter('q',event.target.value)} placeholder="Search username, work order, part, requisition, machine, asset, reason..." />
         </label>
-        <label className="form-field">
-          <span>Start Date</span>
-          <input type="date" value={filters.startDate} onChange={event=>updateFilter('startDate',event.target.value)} />
-        </label>
-        <label className="form-field">
-          <span>End Date</span>
-          <input type="date" value={filters.endDate} onChange={event=>updateFilter('endDate',event.target.value)} />
-        </label>
+        <MccDateInput label="Start Date" value={filters.startDate} onChange={value=>updateFilter('startDate',value)} />
+        <MccDateInput label="End Date" value={filters.endDate} onChange={value=>updateFilter('endDate',value)} />
       </section>
 
       <section className="mcc-card history-table-card">

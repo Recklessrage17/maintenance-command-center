@@ -1,4 +1,5 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
@@ -807,7 +808,9 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     for (const item of reviewItems) {
       const qty = Number(item.quantityRequested);
       if (!Number.isFinite(qty) || qty <= 0) { setRequisitionError('Qty requested must be a positive number for every item.'); return; }
+      if (!isValidMccDateValue(item.dueDate)) { setRequisitionError('Due Date must be valid when entered.'); return; }
     }
+    if (!isValidMccDateValue(reviewForm.requestDate, true)) { setRequisitionError('Request Date must be a valid date.'); return; }
     if (group.requiresReview && !window.confirm('This group has Unknown Vendor. Continue only if you reviewed the parts.')) return;
     setRequisitionSaving(true);
     setRequisitionError('');
@@ -1445,7 +1448,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             {reviewGroups[reviewIndex].requiresReview&&<p className="form-message error">Unknown Vendor group requires review before PDF creation.</p>}
             <div className="inventory-form-grid">
               <label className="form-field"><span>Requisition Type</span><select value={reviewForm.requisitionType} onChange={event=>setReviewForm({...reviewForm,requisitionType:event.target.value as RequisitionType})}><option value="under-100">Under $100</option><option value="over-100">Over $100</option></select></label>
-              <label className="form-field"><span>Request Date</span><input type="date" value={reviewForm.requestDate} onChange={event=>setReviewForm({...reviewForm,requestDate:event.target.value})} /></label>
+              <MccDateInput label="Request Date" value={reviewForm.requestDate} onChange={requestDate=>setReviewForm({...reviewForm,requestDate})} required />
               <label className="form-field"><span>PO No</span><input value={reviewForm.poNo} onChange={event=>setReviewForm({...reviewForm,poNo:event.target.value})} /></label>
               <label className="form-field"><span>PO Initiator</span><input value={reviewForm.poInitiator} onChange={event=>setReviewForm({...reviewForm,poInitiator:event.target.value})} /></label>
               <label className="form-field"><span>Ship Via</span><input value={reviewForm.shipVia} onChange={event=>setReviewForm({...reviewForm,shipVia:event.target.value})} /></label>
@@ -1468,7 +1471,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                   <strong>{item.part.partNumber || '-'}</strong>
                   <span>{item.part.description || '-'} / {item.part.location || 'No location'}</span>
                   <label className="form-field"><span>Qty</span><input inputMode="decimal" value={item.quantityRequested} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,quantityRequested:event.target.value}:row))} /></label>
-                  <label className="form-field"><span>Due Date</span><input type="date" value={item.dueDate} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,dueDate:event.target.value}:row))} /></label>
+                  <MccDateInput label="Due Date" value={item.dueDate} onChange={dueDate=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,dueDate}:row))} />
                   <label className="form-field"><span>Line Notes</span><input value={item.notes} onChange={event=>setReviewItems(current=>current.map((row,rowIndex)=>rowIndex===index?{...row,notes:event.target.value}:row))} /></label>
                 </div>
               ))}

@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 
 type MachineImportMode = 'add_new_only' | 'upsert';
 type MachineToolCategory = 'measurement' | 'brand' | 'doc';
-type MeasurementLogEntry = { id: string; name: string; size: number; type: string; uploadedAt: string; year: string; hasStoredFile?: boolean };
-type StoredMeasurementFile = { id: string; name: string; type: string; uploadedAt: string; blob: Blob };
+export type MachineRecordLogAsset = { id?: number | string; assetNumber: string; brand?: string; model?: string; serialNumber?: string };
+type MeasurementLogEntry = { id: string; name: string; size: number; type: string; uploadedAt: string; recordDate: string; year: string; assetId: string; assetNumber: string; brand?: string; model?: string; serialNumber?: string; hasStoredFile?: boolean };
+type StoredMeasurementFile = { id: string; name: string; type: string; uploadedAt: string; recordDate?: string; blob: Blob };
 type TemplateFile = { id: string; name: string; type: string; updatedAt: string; blob: Blob };
 
-const LOG_STORAGE_KEY = 'mcc:measurement-inspection-logs:v2';
-const LEGACY_LOG_STORAGE_KEY = 'mcc:measurement-inspection-logs:v1';
+const LOG_STORAGE_KEY = 'mcc:screw-barrel-inspection-records:v3';
+const LEGACY_LOG_STORAGE_KEYS = ['mcc:measurement-inspection-logs:v2', 'mcc:measurement-inspection-logs:v1'];
 const LOG_DB_NAME = 'mcc-measurement-inspection-logs';
 const LOG_DB_VERSION = 1;
 const LOG_FILE_STORE = 'files';
@@ -16,6 +18,7 @@ const TEMPLATE_DB_VERSION = 1;
 const TEMPLATE_STORE = 'templates';
 const DEFAULT_TEMPLATE_ID = 'screw-barrel-default-template';
 const DEFAULT_TEMPLATE_NAME = 'JBT Screw & Barrel Measurement Sheet OLD/NEW Rev. 9';
+const unassignedAsset: MachineRecordLogAsset = { id: 'unassigned', assetNumber: 'Unassigned' };
 const toolCategoryLabels: Record<MachineToolCategory, string> = {
   measurement: 'Measurement',
   brand: 'Brand',
@@ -37,41 +40,71 @@ function formatBytes(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function logYear(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(new Date().getFullYear()) : String(date.getFullYear());
+function recordYear(value: string) {
+  return isValidMccDateValue(value, true) ? value.slice(0, 4) : String(new Date().getFullYear());
+}
+
+function normalizedAssetId(asset: MachineRecordLogAsset | MeasurementLogEntry | undefined) {
+  return String(asset?.id ?? asset?.assetNumber ?? unassignedAsset.id);
+}
+
+function assetLabel(asset: Pick<MachineRecordLogAsset, 'assetNumber'> | undefined) {
+  return asset?.assetNumber?.trim() || unassignedAsset.assetNumber;
+}
+
+function assetSlug(asset: MachineRecordLogAsset | undefined) {
+  return assetLabel(asset).replace(/\W+/g, '_') || 'All_Assets';
+}
+
+function normalizeRecord(log: Partial<MeasurementLogEntry>, assetOverride?: MachineRecordLogAsset): MeasurementLogEntry {
+  const uploadedAt = String(log.uploadedAt ?? new Date().toISOString());
+  const fallbackDate = uploadedAt.slice(0, 10);
+  const recordDate = isValidMccDateValue(String(log.recordDate ?? ''), true) ? String(log.recordDate) : fallbackDate;
+  const asset = assetOverride ?? {
+    id: log.assetId || log.assetNumber || unassignedAsset.id,
+    assetNumber: log.assetNumber || unassignedAsset.assetNumber,
+    brand: log.brand,
+    model: log.model,
+    serialNumber: log.serialNumber,
+  };
+  return {
+    id: String(log.id ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    name: String(log.name ?? 'Screw & barrel inspection record'),
+    size: Number(log.size ?? 0),
+    type: String(log.type ?? 'File'),
+    uploadedAt,
+    recordDate,
+    year: recordYear(recordDate),
+    assetId: normalizedAssetId(asset),
+    assetNumber: assetLabel(asset),
+    brand: asset.brand || '',
+    model: asset.model || '',
+    serialNumber: asset.serialNumber || '',
+    hasStoredFile: Boolean(log.hasStoredFile),
+  };
 }
 
 function readLogs(): MeasurementLogEntry[] {
   try {
-    const raw = window.localStorage.getItem(LOG_STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_LOG_STORAGE_KEY);
+    const raw = window.localStorage.getItem(LOG_STORAGE_KEY) ?? LEGACY_LOG_STORAGE_KEYS.map(key=>window.localStorage.getItem(key)).find(Boolean);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    const logs = parsed.map((log: Partial<MeasurementLogEntry>) => ({
-      id: String(log.id ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`),
-      name: String(log.name ?? 'Measurement inspection record'),
-      size: Number(log.size ?? 0),
-      type: String(log.type ?? 'File'),
-      uploadedAt: String(log.uploadedAt ?? new Date().toISOString()),
-      year: String(log.year ?? logYear(String(log.uploadedAt ?? new Date().toISOString()))),
-      hasStoredFile: Boolean(log.hasStoredFile),
-    }));
+    const logs = parsed.map((log: Partial<MeasurementLogEntry>) => normalizeRecord(log));
     if (!window.localStorage.getItem(LOG_STORAGE_KEY) && logs.length) writeLogs(logs);
-    return logs;
+    return logs.sort((a,b)=>(b.recordDate || b.uploadedAt).localeCompare(a.recordDate || a.uploadedAt));
   } catch {
     return [];
   }
 }
 
 function writeLogs(logs: MeasurementLogEntry[]) {
-  window.localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(logs.slice(0, 300)));
+  window.localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(logs.slice(0, 1000)));
 }
 
 function availableYears(logs: MeasurementLogEntry[]) {
   const currentYear = new Date().getFullYear();
-  const years = new Set(logs.map(log => log.year || logYear(log.uploadedAt)));
+  const years = new Set(logs.map(log => log.year || recordYear(log.recordDate)));
   years.add(String(currentYear));
-  years.add(String(currentYear + 1));
   return Array.from(years).sort((a, b) => Number(b) - Number(a));
 }
 
@@ -87,22 +120,26 @@ function openDb(name: string, store: string, version = 1): Promise<IDBDatabase> 
   });
 }
 
-async function saveStoredFile(file: File, id: string, uploadedAt: string) {
+async function saveStoredBlob(blob: Blob, id: string, name: string, type: string, uploadedAt: string, recordDate: string) {
   const db = await openDb(LOG_DB_NAME, LOG_FILE_STORE, LOG_DB_VERSION);
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(LOG_FILE_STORE, 'readwrite');
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('Unable to save measurement file.'));
-    tx.objectStore(LOG_FILE_STORE).put({ id, name: file.name, type: file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, blob: file } satisfies StoredMeasurementFile);
+    tx.onerror = () => reject(tx.error ?? new Error('Unable to save record file.'));
+    tx.objectStore(LOG_FILE_STORE).put({ id, name, type, uploadedAt, recordDate, blob } satisfies StoredMeasurementFile);
   });
   db.close();
+}
+
+async function saveStoredFile(file: File, id: string, uploadedAt: string, recordDate: string) {
+  await saveStoredBlob(file, id, file.name, file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, recordDate);
 }
 
 async function readStoredFile(id: string) {
   const db = await openDb(LOG_DB_NAME, LOG_FILE_STORE, LOG_DB_VERSION);
   const file = await new Promise<StoredMeasurementFile | undefined>((resolve, reject) => {
     const request = db.transaction(LOG_FILE_STORE, 'readonly').objectStore(LOG_FILE_STORE).get(id);
-    request.onerror = () => reject(request.error ?? new Error('Unable to read measurement file.'));
+    request.onerror = () => reject(request.error ?? new Error('Unable to read record file.'));
     request.onsuccess = () => resolve(request.result as StoredMeasurementFile | undefined);
   });
   db.close();
@@ -114,7 +151,7 @@ async function deleteStoredFile(id: string) {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(LOG_FILE_STORE, 'readwrite');
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('Unable to delete measurement file.'));
+    tx.onerror = () => reject(tx.error ?? new Error('Unable to delete record file.'));
     tx.objectStore(LOG_FILE_STORE).delete(id);
   });
   db.close();
@@ -152,6 +189,11 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+async function dataUrlToBlob(dataUrl: string) {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
 function downloadTextFile(filename: string, content: string) {
   const blob = new Blob([content], { type: 'application/json' });
   const url = window.URL.createObjectURL(blob);
@@ -180,12 +222,40 @@ function isPdf(file: StoredMeasurementFile) {
   return file.type.toLowerCase().includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
 }
 
-function isImage(file: StoredMeasurementFile) {
-  return file.type.toLowerCase().startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
+function scopeLogs(logs: MeasurementLogEntry[], asset?: MachineRecordLogAsset) {
+  if (!asset) return logs;
+  const key = normalizedAssetId(asset);
+  return logs.filter(log => log.assetId === key || log.assetNumber === asset.assetNumber);
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character] ?? character));
+async function backupLogs(logs: MeasurementLogEntry[], asset?: MachineRecordLogAsset) {
+  const files = await Promise.all(logs.map(async log => {
+    const stored = await readStoredFile(log.id).catch(() => undefined);
+    return stored ? { id: log.id, name: stored.name, type: stored.type, uploadedAt: stored.uploadedAt, recordDate: log.recordDate, dataUrl: await blobToDataUrl(stored.blob) } : null;
+  }));
+  const template = await readTemplateFile().catch(() => undefined);
+  const backup = {
+    backupType: 'MCC Screw & Barrel Inspection Records',
+    version: 3,
+    exportedAt: new Date().toISOString(),
+    scope: asset ? { assetId: normalizedAssetId(asset), assetNumber: assetLabel(asset) } : { assetNumber: 'All Assets' },
+    logs,
+    files: files.filter(Boolean),
+    template: template ? { id: template.id, name: template.name, type: template.type, updatedAt: template.updatedAt, dataUrl: await blobToDataUrl(template.blob) } : null,
+  };
+  downloadTextFile(`MCC_Screw_Barrel_Record_Backup_${assetSlug(asset)}_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(backup, null, 2));
+}
+
+async function printBlankForm() {
+  const template = await readTemplateFile().catch(() => undefined);
+  if (!template) {
+    printDefaultBlankForm();
+    return;
+  }
+  const url = window.URL.createObjectURL(template.blob);
+  const win = window.open(url, '_blank', 'width=1100,height=850');
+  if (!win) window.alert('Popup blocked. Allow popups for MCC to open the blank form.');
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 30000);
 }
 
 export function MachineLibraryToolsDropdown({
@@ -244,10 +314,10 @@ export function MachineLibraryToolsDropdown({
       <div className="machine-tools-grid">
         <button className={machineToolClass('doc')} type="button" role="menuitem" onClick={()=>runTool(onExportTemplate)} disabled={!canEdit}><MachineToolBadge category="doc" /><span>Export Machine Template</span><small>Download workbook template</small></button>
         <button className={machineToolClass('brand')} type="button" role="menuitem" onClick={()=>runTool(onOpenBrandColors)}><MachineToolBadge category="brand" /><span>Brand Color Settings</span><small>Machine card color rules</small></button>
-        <button className={machineToolClass('measurement', showLogs)} type="button" role="menuitem" onClick={()=>setShowLogs(current=>!current)}><MachineToolBadge category="measurement" /><span>Measurement Inspection Logs</span><small>Year folders and records</small></button>
+        <button className={machineToolClass('measurement', showLogs)} type="button" role="menuitem" onClick={()=>setShowLogs(current=>!current)}><MachineToolBadge category="measurement" /><span>Measurement Inspection Logs</span><small>All asset record folders</small></button>
         <MeasurementQuickActions />
       </div>
-      {showLogs&&<MeasurementInspectionLogsPanel canManageYearFolders={canManageYearFolders} />}
+      {showLogs&&<MeasurementRecordLogsPanel canManageYearFolders={canManageYearFolders} />}
     </div>}
   </div>;
 }
@@ -259,40 +329,13 @@ function MeasurementQuickActions() {
   async function exportMeasurementBackup() {
     setBusy('backup');
     try {
-      const logs = readLogs();
-      const files = await Promise.all(logs.map(async log => {
-        const stored = await readStoredFile(log.id).catch(() => undefined);
-        return stored ? { id: stored.id, name: stored.name, type: stored.type, uploadedAt: stored.uploadedAt, dataUrl: await blobToDataUrl(stored.blob) } : null;
-      }));
-      const template = await readTemplateFile().catch(() => undefined);
-      const backup = {
-        backupType: 'MCC Measurement Inspection Logs',
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        note: 'Backup of local browser measurement inspection logs, uploaded files, and custom blank form template.',
-        logs,
-        files: files.filter(Boolean),
-        template: template ? { id: template.id, name: template.name, type: template.type, updatedAt: template.updatedAt, dataUrl: await blobToDataUrl(template.blob) } : null,
-      };
-      downloadTextFile(`MCC_Measurement_Inspection_Backup_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(backup, null, 2));
+      await backupLogs(readLogs());
     } catch (error) {
-      console.error('Measurement backup export failed', error);
+      console.error('Record backup export failed', error);
       window.alert('Backup export failed. Check console for details.');
     } finally {
       setBusy('');
     }
-  }
-
-  async function printBlankForm() {
-    const template = await readTemplateFile().catch(() => undefined);
-    if (!template) {
-      printDefaultBlankForm();
-      return;
-    }
-    const url = window.URL.createObjectURL(template.blob);
-    const win = window.open(url, '_blank', 'width=1100,height=850');
-    if (!win) window.alert('Popup blocked. Allow popups for MCC to open the blank form.');
-    window.setTimeout(() => window.URL.revokeObjectURL(url), 30000);
   }
 
   async function updateTemplate(file: File) {
@@ -316,21 +359,36 @@ function MeasurementQuickActions() {
   </>;
 }
 
-function MeasurementInspectionLogsPanel({ canManageYearFolders }: { canManageYearFolders: boolean }) {
+export function AssetMeasurementRecordLogsModal({ asset, canManageYearFolders, onClose }: { asset: MachineRecordLogAsset; canManageYearFolders: boolean; onClose: () => void }) {
+  return <div className="modal-backdrop measurement-modal-backdrop" role="dialog" aria-modal="true">
+    <section className="mcc-card measurement-record-modal">
+      <div className="modal-heading measurement-modal-heading"><div><p className="eyebrow">Screw & Barrel Inspection Records</p><h3>{assetLabel(asset)} Record Logs</h3><p>{[asset.brand, asset.model, asset.serialNumber ? `S/N ${asset.serialNumber}` : ''].filter(Boolean).join(' / ')}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
+      <MeasurementRecordLogsPanel asset={asset} canManageYearFolders={canManageYearFolders} />
+    </section>
+  </div>;
+}
+
+function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: MachineRecordLogAsset; canManageYearFolders: boolean }) {
   const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const importInputRef = useRef<HTMLInputElement|null>(null);
+  const templateInputRef = useRef<HTMLInputElement|null>(null);
   const [logs,setLogs]=useState<MeasurementLogEntry[]>([]);
-  const years = useMemo(()=>availableYears(logs),[logs]);
   const [selectedYear,setSelectedYear]=useState(String(new Date().getFullYear()));
   const [selectedIds,setSelectedIds]=useState<Set<string>>(new Set());
-  const yearLogs = logs.filter(log => (log.year || logYear(log.uploadedAt)) === selectedYear);
-  const selectedReadyCount = yearLogs.filter(log => selectedIds.has(log.id) && log.hasStoredFile).length;
+  const [busy,setBusy]=useState('');
+  const scopedLogs = useMemo(()=>scopeLogs(logs, asset),[logs,asset]);
+  const years = useMemo(()=>availableYears(scopedLogs),[scopedLogs]);
+  const yearLogs = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === selectedYear);
+  const selectedLogs = yearLogs.filter(log => selectedIds.has(log.id) && log.hasStoredFile);
+  const readyYearLogs = yearLogs.filter(log => log.hasStoredFile);
+  const isAssetPanel = Boolean(asset);
 
   useEffect(()=>{
     const nextLogs = readLogs();
     setLogs(nextLogs);
-    const nextYears = availableYears(nextLogs);
+    const nextYears = availableYears(scopeLogs(nextLogs, asset));
     setSelectedYear(current=>nextYears.includes(current) ? current : nextYears[0]);
-  },[]);
+  },[asset]);
   useEffect(()=>{
     if (!years.includes(selectedYear)) setSelectedYear(years[0]);
   },[selectedYear,years]);
@@ -350,17 +408,56 @@ function MeasurementInspectionLogsPanel({ canManageYearFolders }: { canManageYea
   }
 
   async function uploadFiles(files: File[]) {
+    if (!asset) {
+      window.alert('Open an asset Record Logs panel before uploading records.');
+      return;
+    }
     if (!files.length) return;
     const uploadedAt = new Date().toISOString();
+    const recordDate = localIsoDate(new Date());
     const newLogs: MeasurementLogEntry[] = [];
     for (const file of files) {
       const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      await saveStoredFile(file, id, uploadedAt);
-      newLogs.push({ id, name: file.name, size: file.size, type: file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, year: logYear(uploadedAt), hasStoredFile: true });
+      await saveStoredFile(file, id, uploadedAt, recordDate);
+      newLogs.push(normalizeRecord({ id, name: file.name, size: file.size, type: file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, recordDate, hasStoredFile: true }, asset));
     }
-    replaceLogs([...newLogs, ...readLogs()]);
-    setSelectedYear(logYear(uploadedAt));
+    const nextLogs = [...newLogs, ...readLogs()];
+    replaceLogs(nextLogs);
+    setSelectedYear(recordYear(recordDate));
     setSelectedIds(new Set());
+  }
+
+  async function importBackup(file: File) {
+    setBusy('import');
+    try {
+      const parsed = JSON.parse(await file.text()) as { logs?: Partial<MeasurementLogEntry>[]; files?: Array<{ id?: string; name: string; type: string; uploadedAt?: string; recordDate?: string; dataUrl: string }>; template?: { name: string; type: string; updatedAt?: string; dataUrl: string } | null };
+      const fileMap = new Map((parsed.files ?? []).map(item=>[String(item.id ?? item.name), item]));
+      const imported: MeasurementLogEntry[] = [];
+      for (const rawLog of parsed.logs ?? []) {
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const importedLog = normalizeRecord({ ...rawLog, id }, asset);
+        const fileEntry = fileMap.get(String(rawLog.id ?? rawLog.name)) ?? fileMap.get(importedLog.name);
+        if (fileEntry?.dataUrl) {
+          const blob = await dataUrlToBlob(fileEntry.dataUrl);
+          await saveStoredBlob(blob, id, fileEntry.name || importedLog.name, fileEntry.type || importedLog.type, fileEntry.uploadedAt || importedLog.uploadedAt, importedLog.recordDate);
+          importedLog.hasStoredFile = true;
+        }
+        imported.push(importedLog);
+      }
+      if (parsed.template?.dataUrl) {
+        const blob = await dataUrlToBlob(parsed.template.dataUrl);
+        await saveTemplateFile(new File([blob], parsed.template.name || DEFAULT_TEMPLATE_NAME, { type: parsed.template.type || blob.type || 'application/pdf' }));
+      }
+      replaceLogs([...imported, ...readLogs()]);
+      setSelectedYear(imported[0]?.year ?? selectedYear);
+      setSelectedIds(new Set());
+      window.alert(`Imported ${imported.length} record log(s).`);
+    } catch (error) {
+      console.error('Record import failed', error);
+      window.alert('Import failed. Choose a valid MCC record backup JSON file.');
+    } finally {
+      setBusy('');
+    }
   }
 
   async function openLogFile(id: string) {
@@ -375,52 +472,52 @@ function MeasurementInspectionLogsPanel({ canManageYearFolders }: { canManageYea
     window.setTimeout(() => window.URL.revokeObjectURL(url), 30000);
   }
 
-  async function printSelected() {
-    const selectedLogs = yearLogs.filter(log => selectedIds.has(log.id) && log.hasStoredFile);
-    if (!selectedLogs.length) {
-      window.alert('Select one or more READY measurement logs to print. LOG ONLY records need to be uploaded again first.');
+  function updateRecordDate(id: string, recordDate: string) {
+    if (!isValidMccDateValue(recordDate, true)) return;
+    replaceLogs(readLogs().map(log=>log.id === id ? { ...log, recordDate, year: recordYear(recordDate) } : log));
+    setSelectedYear(recordYear(recordDate));
+  }
+
+  async function generateCombinedPdf(records: MeasurementLogEntry[], label: string) {
+    const ready = records.filter(log=>log.hasStoredFile);
+    if (!ready.length) {
+      window.alert('Select one or more READY record logs to generate a combined PDF.');
       return;
     }
-    const files = (await Promise.all(selectedLogs.map(log => readStoredFile(log.id).catch(() => undefined)))).filter((file): file is StoredMeasurementFile => Boolean(file));
-    const pdfs = files.filter(isPdf);
-    const otherFiles = files.filter(file => !isPdf(file));
+    setBusy(label);
     const objectUrls: string[] = [];
-    for (const file of pdfs) {
-      const url = window.URL.createObjectURL(file.blob);
+    try {
+      const payloadRecords = (await Promise.all(ready.map(async log => {
+        const stored = await readStoredFile(log.id).catch(() => undefined);
+        if (!stored) return null;
+        return { ...log, dataUrl: await blobToDataUrl(stored.blob), type: stored.type || log.type, name: stored.name || log.name };
+      }))).filter(Boolean);
+      const res = await fetch('/api/machine-library/measurement-records/combined-pdf',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({ title: asset ? `${assetLabel(asset)} Screw & Barrel Inspection Records` : 'Screw & Barrel Inspection Records', records: payloadRecords })});
+      if (!res.ok) {
+        const data = await res.json().catch(()=>({}));
+        throw new Error(data.error || 'Combined PDF generation failed.');
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
       objectUrls.push(url);
       const opened = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!opened) {
-        window.alert('Popup blocked. Allow popups for MCC so the PDF can open in the browser viewer for printing.');
-        break;
-      }
+      if (!opened) window.alert('Popup blocked. Allow popups for MCC to open the combined PDF.');
+    } catch (error) {
+      console.error('Combined record PDF failed', error);
+      window.alert('Combined PDF generation failed. Check console for details.');
+    } finally {
+      setBusy('');
+      window.setTimeout(() => objectUrls.forEach(url => window.URL.revokeObjectURL(url)), 60000);
     }
-    if (otherFiles.length) {
-      const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1100,height=850');
-      if (printWindow) {
-        const sections = await Promise.all(otherFiles.map(async file => {
-          const url = window.URL.createObjectURL(file.blob);
-          objectUrls.push(url);
-          const safeName = escapeHtml(file.name);
-          if (isImage(file)) return `<section class="print-page"><h2>${safeName}</h2><img src="${url}" alt="${safeName}" /></section>`;
-          if (file.type.toLowerCase().includes('text') || /\.(csv|txt)$/i.test(file.name)) return `<section class="print-page"><h2>${safeName}</h2><pre>${escapeHtml(await file.blob.text())}</pre></section>`;
-          return `<section class="print-page"><h2>${safeName}</h2><p>Open this file and print it from its native app.</p><a href="${url}" download="${safeName}">Open / Download file</a></section>`;
-        }));
-        printWindow.document.write(`<!doctype html><html><head><title>Measurement Inspection Logs</title><style>body{margin:0;font-family:Arial,sans-serif;color:#111}.print-cover{padding:24px;border-bottom:2px solid #111}.print-page{break-after:page;page-break-after:always;padding:18px}h2{font-size:16px;margin:0 0 12px}img{display:block;max-width:100%;max-height:92vh;margin:0 auto}pre{white-space:pre-wrap;font-size:11px;border:1px solid #ccc;padding:12px}</style></head><body><section class="print-cover"><h1>Measurement Inspection Logs</h1><p>${new Date().toLocaleString()} / ${sections.length} selected non-PDF record(s)</p></section>${sections.join('')}</body></html>`);
-        printWindow.document.close();
-        window.setTimeout(() => { printWindow.focus(); printWindow.print(); }, 900);
-      }
-    }
-    if (pdfs.length) window.setTimeout(()=>window.alert(`${pdfs.length} PDF record(s) opened in the browser PDF viewer. Use the PDF viewer print button or Ctrl+P to print.`),350);
-    window.setTimeout(() => objectUrls.forEach(url => window.URL.revokeObjectURL(url)), 60000);
   }
 
   async function deleteSelected() {
     const ids = Array.from(selectedIds);
     if (!ids.length) {
-      window.alert('Select one or more measurement logs to delete.');
+      window.alert('Select one or more record logs to delete.');
       return;
     }
-    if (!window.confirm(`Delete ${ids.length} selected measurement log(s)?`)) return;
+    if (!window.confirm(`Delete ${ids.length} selected record log(s)?`)) return;
     await Promise.all(ids.map(id=>deleteStoredFile(id).catch(()=>undefined)));
     replaceLogs(readLogs().filter(log => !ids.includes(log.id)));
     setSelectedIds(new Set());
@@ -431,12 +528,12 @@ function MeasurementInspectionLogsPanel({ canManageYearFolders }: { canManageYea
       window.alert('Folder delete is locked for this account.');
       return;
     }
-    const deleteIds = logs.filter(log => (log.year || logYear(log.uploadedAt)) === year).map(log => log.id);
+    const deleteIds = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year).map(log => log.id);
     if (!deleteIds.length) {
       window.alert(`The ${year} folder is already empty.`);
       return;
     }
-    if (!window.confirm(`WARNING: Delete the entire ${year} Measurement Inspection folder and all ${deleteIds.length} log(s)? This cannot be undone.`)) return;
+    if (!window.confirm(`WARNING: Delete the entire ${year} record folder and all ${deleteIds.length} log(s)? This cannot be undone.`)) return;
     if (window.prompt(`Type DELETE ${year} to confirm folder deletion.`) !== `DELETE ${year}`) {
       window.alert('Folder delete cancelled.');
       return;
@@ -446,15 +543,41 @@ function MeasurementInspectionLogsPanel({ canManageYearFolders }: { canManageYea
     setSelectedIds(new Set());
   }
 
-  return <section className="measurement-tools-panel">
+  async function updateTemplate(file: File) {
+    setBusy('template');
+    try {
+      await saveTemplateFile(file);
+      window.alert('Blank form template updated. Print Blank Form will use the updated file.');
+    } catch (error) {
+      console.error('Template update failed', error);
+      window.alert('Template update failed.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return <section className="measurement-tools-panel measurement-records-panel">
     <div className="measurement-tools-heading">
-      <div><strong>Measurement Inspection Logs</strong><span>{selectedYear} folder / {yearLogs.length} record(s)</span></div>
-      <button className="secondary-button compact-button" type="button" onClick={()=>fileInputRef.current?.click()}>Upload File</button>
-      <input ref={fileInputRef} type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.csv,.txt,.xlsx,.xls,.doc,.docx" onChange={event=>{ const files = Array.from(event.target.files ?? []); void uploadFiles(files).catch(error=>{ console.error('Measurement log upload failed', error); window.alert('Measurement log upload failed. Check console for details.'); }); event.currentTarget.value = ''; }} />
+      <div><strong>{isAssetPanel ? 'Screw & Barrel Inspection Records' : 'Global Screw & Barrel Inspection Records'}</strong><span>{selectedYear} folder / {yearLogs.length} record(s)</span></div>
+      <RecordPanelToolsDropdown
+        canUpload={Boolean(asset)}
+        busy={Boolean(busy)}
+        onUpload={()=>fileInputRef.current?.click()}
+        onImport={()=>importInputRef.current?.click()}
+        onPrintSelected={()=>void generateCombinedPdf(selectedLogs,'selected')}
+        onPrintFolder={()=>void generateCombinedPdf(readyYearLogs,'folder')}
+        onDeleteSelected={()=>void deleteSelected()}
+        onBackup={()=>void backupLogs(scopedLogs, asset)}
+        onPrintBlank={()=>void printBlankForm()}
+        onUpdateForm={()=>templateInputRef.current?.click()}
+      />
+      <input ref={fileInputRef} type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.csv,.txt,.xlsx,.xls,.doc,.docx" onChange={event=>{ const files = Array.from(event.target.files ?? []); void uploadFiles(files).catch(error=>{ console.error('Record upload failed', error); window.alert('Record upload failed. Check console for details.'); }); event.currentTarget.value = ''; }} />
+      <input ref={importInputRef} type="file" hidden accept=".json" onChange={event=>{ const file = event.target.files?.[0]; if (file) void importBackup(file); event.currentTarget.value = ''; }} />
+      <input ref={templateInputRef} type="file" hidden accept=".pdf,.png,.jpg,.jpeg" onChange={event=>{ const file = event.target.files?.[0]; if (file) void updateTemplate(file); event.currentTarget.value = ''; }} />
     </div>
-    <div className="measurement-folder-row" aria-label="Measurement inspection log year folders">
+    <div className="measurement-folder-row" aria-label="Screw and barrel record year folders">
       {years.map(year=>{
-        const count = logs.filter(log => (log.year || logYear(log.uploadedAt)) === year).length;
+        const count = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year).length;
         return <span className={year === selectedYear ? 'measurement-folder-pill-wrap active' : 'measurement-folder-pill-wrap'} key={year}>
           <button className="measurement-year-folder" type="button" onClick={()=>{ setSelectedYear(year); setSelectedIds(new Set()); }} aria-pressed={year === selectedYear}><span className="measurement-folder-glyph" aria-hidden="true" />{year}<em>{count}</em></button>
           {year === selectedYear&&<button className="measurement-folder-delete-x" type="button" aria-label={`Delete ${year} folder`} onClick={()=>void deleteYearFolder(year)}>x</button>}
@@ -463,22 +586,82 @@ function MeasurementInspectionLogsPanel({ canManageYearFolders }: { canManageYea
     </div>
     <div className="measurement-folder-records">
       <div className="measurement-folder-actions">
-        <span>{selectedReadyCount} selected</span>
-        <button className="secondary-button compact-button" type="button" onClick={()=>void printSelected()}>Print Selected</button>
-        <button className="secondary-button compact-button danger-button" type="button" onClick={()=>void deleteSelected()}>Delete Selected</button>
+        <span>{selectedLogs.length} selected</span>
+        <button className="secondary-button compact-button" type="button" onClick={()=>void generateCombinedPdf(selectedLogs,'selected')} disabled={Boolean(busy)}>Print Selected</button>
+        <button className="secondary-button compact-button danger-button" type="button" onClick={()=>void deleteSelected()} disabled={Boolean(busy)}>Delete Selected</button>
       </div>
       <div className="measurement-log-list">
         {yearLogs.map(log=>{
           const ready = Boolean(log.hasStoredFile);
           const checked = selectedIds.has(log.id) && ready;
-          return <article className={ready ? 'measurement-log-row' : 'measurement-log-row log-only'} key={log.id}>
+          return <article className={ready ? 'measurement-log-row measurement-record-row' : 'measurement-log-row measurement-record-row log-only'} key={log.id}>
             <label className="measurement-log-select" title={ready ? 'Select record' : 'Upload this record again before printing.'}><input type="checkbox" checked={checked} disabled={!ready} onChange={event=>toggleSelected(log.id,event.target.checked)} /><span /></label>
-            <div className="measurement-log-main"><strong>{log.name}</strong><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Measurement Inspection Logs / {log.year || logYear(log.uploadedAt)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
+            <div className="measurement-log-main"><div className="measurement-record-title-line"><span className="measurement-asset-pill">{log.assetNumber}</span><strong>{log.name}</strong></div><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Screw & Barrel Inspection Records / {log.year || recordYear(log.recordDate)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
+            <div className="measurement-record-date-cell"><MccDateInput label="Record Date" value={log.recordDate} onChange={recordDate=>updateRecordDate(log.id, recordDate)} /></div>
             <div className="measurement-log-row-actions"><em>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log.id)}>Open</button></div>
           </article>;
         })}
-        {!yearLogs.length&&<div className="measurement-log-empty"><strong>No measurement inspection logs in this folder yet.</strong><span>Upload completed records and MCC will file them by year.</span></div>}
+        {!yearLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records in this folder yet.</strong><span>{asset ? `Upload completed records for ${assetLabel(asset)}.` : 'Open an asset Record Logs panel to upload completed records.'}</span></div>}
       </div>
     </div>
   </section>;
+}
+
+function RecordPanelToolsDropdown({
+  canUpload,
+  busy,
+  onUpload,
+  onImport,
+  onPrintSelected,
+  onPrintFolder,
+  onDeleteSelected,
+  onBackup,
+  onPrintBlank,
+  onUpdateForm,
+}: {
+  canUpload: boolean;
+  busy: boolean;
+  onUpload: () => void;
+  onImport: () => void;
+  onPrintSelected: () => void;
+  onPrintFolder: () => void;
+  onDeleteSelected: () => void;
+  onBackup: () => void;
+  onPrintBlank: () => void;
+  onUpdateForm: () => void;
+}) {
+  const [open,setOpen]=useState(false);
+  const wrapRef = useRef<HTMLDivElement|null>(null);
+  useEffect(()=>{
+    if (!open) return undefined;
+    function onPointerDown(event: PointerEvent) {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown',onPointerDown);
+    document.addEventListener('keydown',onKeyDown);
+    return ()=>{
+      document.removeEventListener('pointerdown',onPointerDown);
+      document.removeEventListener('keydown',onKeyDown);
+    };
+  },[open]);
+  function run(action: () => void) {
+    action();
+    setOpen(false);
+  }
+  return <div className="record-panel-tools-wrap" ref={wrapRef}>
+    <button className={open ? 'secondary-button compact-button machine-tools-toggle active' : 'secondary-button compact-button machine-tools-toggle'} type="button" aria-haspopup="menu" aria-expanded={open} onClick={()=>setOpen(current=>!current)}>Tools</button>
+    {open&&<div className="record-panel-tools-menu" role="menu" aria-label="Record log tools">
+      <button type="button" role="menuitem" onClick={()=>run(onUpload)} disabled={!canUpload || busy}>Upload File</button>
+      <button type="button" role="menuitem" onClick={()=>run(onImport)} disabled={busy}>Import File</button>
+      <button type="button" role="menuitem" onClick={()=>run(onPrintSelected)} disabled={busy}>Print Selected</button>
+      <button type="button" role="menuitem" onClick={()=>run(onPrintFolder)} disabled={busy}>Print Year Folder</button>
+      <button type="button" role="menuitem" onClick={()=>run(onDeleteSelected)} disabled={busy}>Delete Selected</button>
+      <button type="button" role="menuitem" onClick={()=>run(onBackup)} disabled={busy}>Backup Data</button>
+      <button type="button" role="menuitem" onClick={()=>run(onPrintBlank)} disabled={busy}>Print Blank Form</button>
+      <button type="button" role="menuitem" onClick={()=>run(onUpdateForm)} disabled={busy}>Update Form</button>
+    </div>}
+  </div>;
 }

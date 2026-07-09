@@ -43,7 +43,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(brandingUploadsDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
   setHeaders(res) {
@@ -6412,6 +6412,104 @@ app.get('/api/machine-library/assets/:id/history', requireAuth, requirePermissio
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
   const records = all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC, id DESC LIMIT 200", [String(asset.id),String(asset.id),asset.asset_number]).map(publicHistoryRecord);
   res.json({ok:true,asset:publicMachineAsset(asset),records});
+});
+type MeasurementRecordPdfInput = { name: string; type: string; assetNumber: string; recordDate: string; uploadedAt: string; size: number; dataUrl: string };
+function bufferFromDataUrl(dataUrl: string) {
+  const match = dataUrl.match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+  if (!match) throw new Error('Invalid file data.');
+  return Buffer.from(match[3], match[2] ? 'base64' : 'utf8');
+}
+function measurementRecordPdfInputs(value: unknown): MeasurementRecordPdfInput[] {
+  const body = isRecord(value) ? value : {};
+  const rows = Array.isArray(body.records) ? body.records : [];
+  return rows.slice(0, 75).map(row => {
+    const item = isRecord(row) ? row : {};
+    const name = cleanPdfText(String(item.name ?? 'Inspection record'));
+    const dataUrl = String(item.dataUrl ?? '');
+    if (!dataUrl.startsWith('data:')) throw new Error('Record file data is missing.');
+    return {
+      name,
+      type: cleanPdfText(String(item.type ?? 'application/octet-stream')).toLowerCase(),
+      assetNumber: cleanPdfText(String(item.assetNumber ?? 'Unassigned')),
+      recordDate: cleanPdfText(String(item.recordDate ?? '')),
+      uploadedAt: cleanPdfText(String(item.uploadedAt ?? '')),
+      size: Number(item.size ?? 0) || 0,
+      dataUrl,
+    };
+  });
+}
+function drawMeasurementRecordHeader(page: PDFPage, record: MeasurementRecordPdfInput, font: PDFFont, bold: PDFFont, index: number) {
+  const { width, height } = page.getSize();
+  page.drawRectangle({ x: 0, y: height - 50, width, height: 50, color: pdfWhite, borderColor: rgb(0.72,0.82,0.88), borderWidth: 0.6 });
+  page.drawText(`Asset: ${truncateToFit(record.assetNumber || 'Unassigned', bold, 12, width - 72)}`, { x: 30, y: height - 20, size: 12, font: bold, color: pdfBlack });
+  page.drawText(`Record Date: ${record.recordDate || '-'}  |  File: ${truncateToFit(record.name, font, 8, width - 190)}  |  Page ${index}`, { x: 30, y: height - 36, size: 8, font, color: rgb(0.28,0.34,0.4) });
+}
+function addMeasurementRecordInfoPage(pdf: PDFDocument, record: MeasurementRecordPdfInput, font: PDFFont, bold: PDFFont, message: string) {
+  const page = pdf.addPage([612, 792]);
+  drawMeasurementRecordHeader(page, record, font, bold, pdf.getPageCount());
+  page.drawText('Screw & Barrel Inspection Record', { x: 36, y: 700, size: 18, font: bold, color: pdfBlack });
+  page.drawText(message, { x: 36, y: 674, size: 10, font, color: rgb(0.18,0.24,0.3) });
+  page.drawText(`Original file type: ${record.type || '-'}`, { x: 36, y: 650, size: 9, font, color: rgb(0.18,0.24,0.3) });
+  page.drawText(`Uploaded: ${record.uploadedAt || '-'}`, { x: 36, y: 634, size: 9, font, color: rgb(0.18,0.24,0.3) });
+}
+async function buildCombinedMeasurementRecordPdf(input: unknown) {
+  const records = measurementRecordPdfInputs(input);
+  if (!records.length) throw new Error('Select at least one record.');
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  for (const record of records) {
+    const bytes = bufferFromDataUrl(record.dataUrl);
+    if (record.type.includes('pdf') || record.name.toLowerCase().endsWith('.pdf')) {
+      const source = await PDFDocument.load(bytes);
+      const pages = await pdf.copyPages(source, source.getPageIndices());
+      pages.forEach(page => {
+        pdf.addPage(page);
+        drawMeasurementRecordHeader(page, record, font, bold, pdf.getPageCount());
+      });
+      continue;
+    }
+    if (record.type.includes('png') || /\.png$/i.test(record.name) || record.type.includes('jpeg') || record.type.includes('jpg') || /\.jpe?g$/i.test(record.name)) {
+      const page = pdf.addPage([612, 792]);
+      drawMeasurementRecordHeader(page, record, font, bold, pdf.getPageCount());
+      const image = record.type.includes('png') || /\.png$/i.test(record.name) ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+      const maxWidth = 540;
+      const maxHeight = 690;
+      const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+      const drawWidth = image.width * scale;
+      const drawHeight = image.height * scale;
+      page.drawImage(image, { x: (612 - drawWidth) / 2, y: 34, width: drawWidth, height: drawHeight });
+      continue;
+    }
+    if (record.type.includes('text') || /\.(csv|txt|json)$/i.test(record.name)) {
+      const text = bytes.toString('utf8').replace(/\r/g, '').slice(0, 10000);
+      const page = pdf.addPage([612, 792]);
+      drawMeasurementRecordHeader(page, record, font, bold, pdf.getPageCount());
+      const lines = text.split('\n').flatMap(line => {
+        const chunks: string[] = [];
+        let rest = line || ' ';
+        while (rest.length > 0) {
+          chunks.push(rest.slice(0, 110));
+          rest = rest.slice(110);
+        }
+        return chunks;
+      }).slice(0, 72);
+      lines.forEach((line,index)=>page.drawText(cleanPdfText(line), { x: 34, y: 704 - index * 9, size: 7.2, font, color: pdfBlack }));
+      continue;
+    }
+    addMeasurementRecordInfoPage(pdf, record, font, bold, 'This file type is included in the record set but cannot be rendered into the combined PDF.');
+  }
+  return Buffer.from(await pdf.save());
+}
+app.post('/api/machine-library/measurement-records/combined-pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
+  try {
+    const buffer = await buildCombinedMeasurementRecordPdf(req.body);
+    audit(req,'measurement record combined pdf generated','machine_asset','local-records',{recordCount:Array.isArray((req.body as {records?: unknown[]}).records) ? (req.body as {records: unknown[]}).records.length : 0});
+    sendDownload(res, `MCC_Screw_Barrel_Records_${downloadDateStamp()}.pdf`, 'application/pdf', buffer);
+  } catch (error) {
+    console.error('Measurement record combined PDF failed', error);
+    res.status(400).json({ok:false,error:safeErrorMessage(error) || 'Combined PDF generation failed.'});
+  }
 });
 app.post('/api/machine-library/measurement-inspection/pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
   try {

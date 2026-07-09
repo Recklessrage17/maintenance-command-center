@@ -431,6 +431,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .mcc-date-input { padding-right: 48px; border-color: rgba(68,215,255,.42); background: linear-gradient(180deg, rgba(8,34,58,.96), rgba(4,18,34,.96)); transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
 .mcc-date-control:hover .mcc-date-input, .mcc-date-open .mcc-date-input { border-color: rgba(68,215,255,.78); box-shadow: 0 0 0 1px rgba(68,215,255,.12) inset, 0 0 20px rgba(68,215,255,.12); }
 .mcc-date-input:focus { outline: none; border-color: rgba(54,229,170,.86); box-shadow: 0 0 0 1px rgba(54,229,170,.18) inset, 0 0 24px rgba(68,215,255,.2); }
+.mcc-date-input[aria-invalid="true"] { border-color: rgba(255,117,138,.72); box-shadow: 0 0 0 1px rgba(255,117,138,.16) inset, 0 0 18px rgba(255,117,138,.12); }
+.machine-date-error { color: #ffb7c1; font-size: .72rem; font-weight: 900; }
 .mcc-date-trigger { position: absolute; top: 6px; right: 7px; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 1px solid rgba(68,215,255,.44); border-radius: 10px; color: #dff7ff; background: rgba(5,61,86,.56); cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease; }
 .mcc-date-control:hover .mcc-date-trigger, .mcc-date-trigger:focus-visible, .mcc-date-open .mcc-date-trigger { border-color: rgba(54,229,170,.72); background: rgba(6,85,112,.72); box-shadow: 0 0 18px rgba(68,215,255,.22); transform: translateY(-1px); outline: none; }
 .mcc-date-control:hover .mcc-date-icon, .mcc-date-open .mcc-date-icon { transform: scale(1.08); }
@@ -611,12 +613,17 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-measurement-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .machine-measurement-panel-heading h4 { margin: 0; color: #f3fbff; font-size: 1rem; line-height: 1.2; }
 .machine-measurement-setup-pill { display: inline-flex; min-height: 28px; align-items: center; padding: 0 10px; border: 1px solid rgba(54,229,170,.32); border-radius: 999px; color: #d9fff2; background: rgba(18,97,71,.28); font-size: .72rem; font-weight: 950; text-transform: uppercase; }
+.machine-record-launch-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid rgba(54,229,170,.24); border-radius: 8px; background: linear-gradient(145deg, rgba(18,58,50,.36), rgba(4,13,25,.7)); }
+.machine-record-launch-card > div { min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.machine-record-launch-card strong { color: #f3fbff; font-size: .96rem; }
+.machine-record-launch-card small { color: #9fbdcc; font-size: .8rem; font-weight: 850; line-height: 1.35; }
+.machine-record-logs-section { border-color: rgba(54,229,170,.2); }
 .machine-inspection-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
 .machine-inspection-card { min-height: 166px; cursor: default; }
 .machine-inspection-card em { margin: 2px 0 0; color: #ffd36f; font-size: .76rem; font-style: normal; font-weight: 950; }
 .machine-inspection-card .compact-button { align-self: end; justify-self: stretch; width: 100%; margin-top: 4px; }
 .measurement-modal-backdrop { z-index: 120; }
-.measurement-inspection-modal { width: min(1180px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 8px; }
+.measurement-inspection-modal, .measurement-record-modal { width: min(1180px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 8px; }
 .measurement-modal-heading { align-items: start; }
 .measurement-machine-badge-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .measurement-component-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 8px; }
@@ -2127,6 +2134,64 @@ tr:hover td {
   align-items: center;
 }
 
+.measurement-panel-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.measurement-panel-tools .compact-button {
+  width: auto;
+}
+
+.record-panel-tools-wrap {
+  position: relative;
+  justify-self: end;
+}
+
+.record-panel-tools-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 60;
+  width: min(260px, calc(100vw - 40px));
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(68,215,255,.34);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(18,31,45,.98), rgba(4,13,25,.98));
+  box-shadow: 0 22px 46px rgba(0,0,0,.46), 0 0 20px rgba(68,215,255,.12), inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.record-panel-tools-menu button {
+  appearance: none;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(143,205,233,.18);
+  border-radius: 7px;
+  color: #e9fbff;
+  background: rgba(7,25,45,.66);
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 900;
+  text-align: left;
+}
+
+.record-panel-tools-menu button:hover:not(:disabled),
+.record-panel-tools-menu button:focus-visible {
+  border-color: rgba(54,229,170,.5);
+  background: rgba(18,97,71,.28);
+  outline: none;
+}
+
+.record-panel-tools-menu button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .measurement-tools-heading strong {
   display: block;
   overflow: hidden;
@@ -2283,6 +2348,10 @@ tr:hover td {
   align-items: center;
 }
 
+.measurement-record-row {
+  grid-template-columns: auto minmax(0, 1fr) minmax(150px, .32fr) auto;
+}
+
 .measurement-log-row.log-only {
   opacity: .66;
 }
@@ -2326,6 +2395,63 @@ tr:hover td {
   min-width: 0;
   display: grid;
   gap: 3px;
+}
+
+.measurement-record-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.measurement-record-title-line strong {
+  min-width: 0;
+}
+
+.measurement-asset-pill {
+  flex: 0 0 auto;
+  display: inline-flex !important;
+  width: fit-content;
+  max-width: 120px;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid rgba(54,229,170,.46);
+  border-radius: 999px;
+  color: #d9fff2 !important;
+  background: rgba(18,97,71,.3);
+  box-shadow: 0 0 14px rgba(54,229,170,.1), inset 0 1px 0 rgba(255,255,255,.08);
+  font-size: .68rem !important;
+  font-weight: 950 !important;
+  line-height: 1;
+  text-transform: none !important;
+  white-space: nowrap;
+}
+
+.measurement-record-date-cell {
+  min-width: 0;
+}
+
+.measurement-record-date-cell .form-field {
+  gap: 4px;
+}
+
+.measurement-record-date-cell .form-field > span {
+  font-size: .62rem;
+}
+
+.measurement-record-date-cell .mcc-date-input {
+  min-height: 34px;
+  padding-right: 40px;
+  font-size: .76rem;
+}
+
+.measurement-record-date-cell .mcc-date-trigger {
+  top: 4px;
+  right: 5px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
 }
 
 .measurement-log-main strong,
@@ -2384,6 +2510,30 @@ tr:hover td {
   font-size: .78rem !important;
   font-weight: 850 !important;
   text-transform: none !important;
+}
+
+@media (max-width: 900px) {
+  .measurement-tools-heading,
+  .machine-record-launch-card {
+    grid-template-columns: 1fr;
+  }
+  .measurement-panel-tools {
+    justify-content: flex-start;
+  }
+  .record-panel-tools-wrap {
+    justify-self: start;
+  }
+  .measurement-record-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+  .measurement-record-date-cell,
+  .measurement-record-row .measurement-log-row-actions {
+    grid-column: 2;
+  }
+  .measurement-record-row .measurement-log-row-actions {
+    justify-content: flex-start;
+  }
 }
 
 .machine-toolbar-card::after {
