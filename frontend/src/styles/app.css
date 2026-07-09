@@ -1976,28 +1976,80 @@ tr:hover td {
 }
 
 .machine-tools-item {
+  --tool-border: rgba(143, 205, 233, .22);
+  --tool-hover-border: rgba(68, 215, 255, .56);
+  --tool-glow: rgba(68, 215, 255, .12);
+  --tool-pill-border: rgba(143, 205, 233, .32);
+  --tool-pill-color: #dff7ff;
+  --tool-pill-bg: rgba(10, 32, 55, .74);
+  --tool-card-bg: linear-gradient(180deg, rgba(14, 39, 58, .82), rgba(5, 16, 29, .78));
   appearance: none;
+  position: relative;
+  overflow: hidden;
   min-width: 0;
-  min-height: 58px;
+  min-height: 74px;
   display: grid;
-  align-content: center;
-  gap: 4px;
-  padding: 9px 10px;
-  border: 1px solid rgba(143, 205, 233, .22);
+  align-content: start;
+  gap: 6px;
+  padding: 10px 11px;
+  border: 1px solid var(--tool-border);
   border-radius: 8px;
   color: #e9fbff;
-  background: linear-gradient(180deg, rgba(14, 39, 58, .82), rgba(5, 16, 29, .78));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  background: var(--tool-card-bg);
+  box-shadow: 0 10px 24px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.08);
   cursor: pointer;
   font: inherit;
   text-align: left;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease;
 }
 
-.machine-tools-item:hover,
+.machine-tools-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,255,255,.07), transparent 34%);
+  opacity: .54;
+}
+
+.machine-tools-measurement {
+  --tool-border: rgba(255, 211, 111, .28);
+  --tool-hover-border: rgba(255, 211, 111, .62);
+  --tool-glow: rgba(255, 211, 111, .14);
+  --tool-pill-border: rgba(255, 211, 111, .58);
+  --tool-pill-color: #fff2c2;
+  --tool-pill-bg: rgba(91, 70, 19, .38);
+  --tool-card-bg: linear-gradient(180deg, rgba(47, 42, 27, .9), rgba(5, 16, 29, .82));
+}
+
+.machine-tools-brand {
+  --tool-border: rgba(196, 211, 220, .28);
+  --tool-hover-border: rgba(213, 226, 234, .58);
+  --tool-glow: rgba(213, 226, 234, .12);
+  --tool-pill-border: rgba(213, 226, 234, .5);
+  --tool-pill-color: #e8f0f4;
+  --tool-pill-bg: rgba(93, 107, 116, .3);
+  --tool-card-bg: linear-gradient(180deg, rgba(42, 52, 60, .84), rgba(5, 16, 29, .82));
+}
+
+.machine-tools-doc {
+  --tool-border: rgba(54, 229, 170, .26);
+  --tool-hover-border: rgba(54, 229, 170, .56);
+  --tool-glow: rgba(54, 229, 170, .13);
+  --tool-pill-border: rgba(54, 229, 170, .5);
+  --tool-pill-color: #d9fff2;
+  --tool-pill-bg: rgba(18, 97, 71, .3);
+  --tool-card-bg: linear-gradient(180deg, rgba(18, 58, 50, .78), rgba(5, 16, 29, .82));
+}
+
+.machine-tools-item:hover:not(:disabled),
+.machine-tools-item:focus-visible,
 .machine-tools-item.active {
-  border-color: rgba(68, 215, 255, .68);
-  background: linear-gradient(180deg, rgba(16, 57, 75, .9), rgba(5, 22, 38, .86));
-  box-shadow: 0 0 18px rgba(68,215,255,.14), inset 0 1px 0 rgba(255,255,255,.12);
+  border-color: var(--tool-hover-border);
+  background: var(--tool-card-bg);
+  box-shadow: 0 0 20px var(--tool-glow), 0 14px 28px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.12);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .machine-tools-item:disabled {
@@ -2005,7 +2057,33 @@ tr:hover td {
   opacity: .55;
 }
 
+.machine-tools-pill {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid var(--tool-pill-border);
+  border-radius: 999px;
+  color: var(--tool-pill-color);
+  background: var(--tool-pill-bg);
+  box-shadow: 0 0 14px var(--tool-glow), inset 0 1px 0 rgba(255,255,255,.08);
+  font-size: .6rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: .04em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .machine-tools-item span {
+  position: relative;
+  z-index: 1;
   margin: 0 !important;
   overflow: hidden;
   color: #f3fbff !important;
@@ -2018,6 +2096,8 @@ tr:hover td {
 }
 
 .machine-tools-item small {
+  position: relative;
+  z-index: 1;
   overflow: hidden;
   color: #9fbdcc;
   font-size: .68rem;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 type MachineImportMode = 'add_new_only' | 'upsert';
+type MachineToolCategory = 'measurement' | 'brand' | 'doc';
 type MeasurementLogEntry = { id: string; name: string; size: number; type: string; uploadedAt: string; year: string; hasStoredFile?: boolean };
 type StoredMeasurementFile = { id: string; name: string; type: string; uploadedAt: string; blob: Blob };
 type TemplateFile = { id: string; name: string; type: string; updatedAt: string; blob: Blob };
@@ -15,6 +16,19 @@ const TEMPLATE_DB_VERSION = 1;
 const TEMPLATE_STORE = 'templates';
 const DEFAULT_TEMPLATE_ID = 'screw-barrel-default-template';
 const DEFAULT_TEMPLATE_NAME = 'JBT Screw & Barrel Measurement Sheet OLD/NEW Rev. 9';
+const toolCategoryLabels: Record<MachineToolCategory, string> = {
+  measurement: 'Measurement',
+  brand: 'Brand',
+  doc: 'Doc / Log',
+};
+
+function machineToolClass(category: MachineToolCategory, active = false) {
+  return `machine-tools-item machine-tools-${category}${active ? ' active' : ''}`;
+}
+
+function MachineToolBadge({ category }: { category: MachineToolCategory }) {
+  return <em className="machine-tools-pill">{toolCategoryLabels[category]}</em>;
+}
 
 function formatBytes(size: number) {
   if (!Number.isFinite(size) || size <= 0) return '-';
@@ -225,12 +239,12 @@ export function MachineLibraryToolsDropdown({
     {open&&<div className="machine-tools-menu" role="menu" aria-label="Machine Library tools">
       <div className="machine-tools-primary-row">
         <label className="form-field machine-tools-import-mode"><span>Import Mode</span><select value={importMode} onChange={event=>setImportMode(event.target.value as MachineImportMode)} disabled={!canEdit||isImporting}><option value="add_new_only">Add New Only</option><option value="upsert">Update Existing / Upsert</option></select></label>
-        <button className="machine-tools-item" type="button" role="menuitem" onClick={()=>runTool(onImportMachineList)} disabled={!canEdit||isImporting}><span>Import Machine List</span><small>{isImporting ? 'Importing...' : 'CSV or Excel press list'}</small></button>
+        <button className={machineToolClass('doc')} type="button" role="menuitem" onClick={()=>runTool(onImportMachineList)} disabled={!canEdit||isImporting}><MachineToolBadge category="doc" /><span>Import Machine List</span><small>{isImporting ? 'Importing...' : 'CSV or Excel press list'}</small></button>
       </div>
       <div className="machine-tools-grid">
-        <button className="machine-tools-item" type="button" role="menuitem" onClick={()=>runTool(onExportTemplate)} disabled={!canEdit}><span>Export Machine Template</span><small>Download workbook template</small></button>
-        <button className="machine-tools-item" type="button" role="menuitem" onClick={()=>runTool(onOpenBrandColors)}><span>Brand Color Settings</span><small>Machine card color rules</small></button>
-        <button className={showLogs ? 'machine-tools-item active' : 'machine-tools-item'} type="button" role="menuitem" onClick={()=>setShowLogs(current=>!current)}><span>Measurement Inspection Logs</span><small>Year folders and records</small></button>
+        <button className={machineToolClass('doc')} type="button" role="menuitem" onClick={()=>runTool(onExportTemplate)} disabled={!canEdit}><MachineToolBadge category="doc" /><span>Export Machine Template</span><small>Download workbook template</small></button>
+        <button className={machineToolClass('brand')} type="button" role="menuitem" onClick={()=>runTool(onOpenBrandColors)}><MachineToolBadge category="brand" /><span>Brand Color Settings</span><small>Machine card color rules</small></button>
+        <button className={machineToolClass('measurement', showLogs)} type="button" role="menuitem" onClick={()=>setShowLogs(current=>!current)}><MachineToolBadge category="measurement" /><span>Measurement Inspection Logs</span><small>Year folders and records</small></button>
         <MeasurementQuickActions />
       </div>
       {showLogs&&<MeasurementInspectionLogsPanel canManageYearFolders={canManageYearFolders} />}
@@ -295,9 +309,9 @@ function MeasurementQuickActions() {
   }
 
   return <>
-    <button className="machine-tools-item" type="button" role="menuitem" onClick={()=>void exportMeasurementBackup()} disabled={busy==='backup'}><span>Backup Measurement Logs</span><small>JSON with files and template</small></button>
-    <button className="machine-tools-item" type="button" role="menuitem" onClick={()=>void printBlankForm()}><span>Print Blank Screw & Barrel Form</span><small>Custom or default blank form</small></button>
-    <button className="machine-tools-item" type="button" role="menuitem" onClick={()=>templateInputRef.current?.click()} disabled={busy==='template'}><span>Update Blank Form</span><small>Store a custom template</small></button>
+    <button className={machineToolClass('measurement')} type="button" role="menuitem" onClick={()=>void exportMeasurementBackup()} disabled={busy==='backup'}><MachineToolBadge category="measurement" /><span>Backup Measurement Logs</span><small>JSON with files and template</small></button>
+    <button className={machineToolClass('doc')} type="button" role="menuitem" onClick={()=>void printBlankForm()}><MachineToolBadge category="doc" /><span>Print Blank Screw & Barrel Form</span><small>Custom or default blank form</small></button>
+    <button className={machineToolClass('doc')} type="button" role="menuitem" onClick={()=>templateInputRef.current?.click()} disabled={busy==='template'}><MachineToolBadge category="doc" /><span>Update Blank Form</span><small>Store a custom template</small></button>
     <input ref={templateInputRef} type="file" hidden accept=".pdf,.png,.jpg,.jpeg" onChange={event=>{ const file = event.target.files?.[0]; if (file) void updateTemplate(file); event.currentTarget.value = ''; }} />
   </>;
 }
