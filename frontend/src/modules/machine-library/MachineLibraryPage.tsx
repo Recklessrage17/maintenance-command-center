@@ -1,7 +1,7 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
-import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown } from './MeasurementInspectionLogsTools';
+import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, uploadMeasurementRecordFiles } from './MeasurementInspectionLogsTools';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAsset = {
@@ -33,6 +33,7 @@ const replacementGroups: Array<{ title: string; enabled: (form: AssetForm) => bo
 const editableRoles = new Set(['Maintenance Tech 3','Manager','Admin']);
 const deleteRoles = new Set(['Manager','Admin']);
 const measurementFolderDeleteRoles = new Set(['Maintenance Tech 3','Tier 3','Manager','Admin','Administrator']);
+const recordLogFileAccept = '.pdf,.png,.jpg,.jpeg,.csv,.txt,.xlsx,.xls,.doc,.docx';
 const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
   { key: 'machineLength', label: 'Machine Length' },
   { key: 'machineWidth', label: 'Machine Width' },
@@ -655,12 +656,42 @@ function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded
 function DetailStatusPill({status}:{status:ConditionStatus}) { return <span className={`machine-section-status-pill condition-${status}`}>{conditionLabels[status]}</span>; }
 function SummaryBadge({label,value,tone}:{label:string;value:ReactNode;tone:string}) { return <div className="machine-detail-summary-card"><span className="machine-detail-summary-label">{label}</span><strong className={`machine-detail-summary-pill ${tone}`}>{value}</strong></div>; }
 function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-pill ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span className="machine-detail-pill-label">{label}</span><strong className="machine-detail-pill-value">{value}</strong></div>; }
+function MachineRecordLogActions({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
+  const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const [uploading,setUploading]=useState(false);
+  const [message,setMessage]=useState('');
+
+  async function uploadFiles(files: File[]) {
+    if (!files.length) return;
+    setUploading(true);
+    setMessage('');
+    try {
+      const result = await uploadMeasurementRecordFiles(asset, files);
+      if (result.count) setMessage(`${result.count} file${result.count === 1 ? '' : 's'} uploaded to ${asset.assetNumber}.`);
+    } catch (error) {
+      console.error('Record upload failed', error);
+      setMessage('Upload failed.');
+      window.alert('Record upload failed. Check console for details.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return <div className="machine-record-launch-action-stack">
+    <div className="machine-record-launch-actions">
+      <button className="primary-button compact-button" type="button" onClick={()=>fileInputRef.current?.click()} disabled={uploading}>{uploading ? 'Uploading...' : 'Upload File'}</button>
+      <button className="secondary-button compact-button" type="button" onClick={onOpen}>Open Record Logs</button>
+    </div>
+    {message&&<small className={message === 'Upload failed.' ? 'machine-record-upload-message error' : 'machine-record-upload-message'}>{message}</small>}
+    <input ref={fileInputRef} type="file" multiple hidden accept={recordLogFileAccept} onChange={event=>{ const files = Array.from(event.target.files ?? []); void uploadFiles(files); event.currentTarget.value = ''; }} />
+  </div>;
+}
 function MachineRecordLogsLaunchPanel({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
   return <section className="machine-measurement-panel">
     <div className="machine-measurement-panel-heading"><div><p className="eyebrow">Inspection Records</p><h4>Screw & Barrel Inspection Records</h4></div><span className="machine-measurement-setup-pill">{asset.assetNumber}</span></div>
     <div className="machine-record-launch-card">
-      <div><span className="measurement-asset-pill">{asset.assetNumber}</span><strong>Asset-specific record logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
-      <button className="primary-button compact-button" type="button" onClick={onOpen}>Open Record Logs</button>
+      <div className="machine-record-launch-copy"><span className="measurement-asset-pill">{asset.assetNumber}</span><strong>Asset-specific record logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
+      <MachineRecordLogActions asset={asset} onOpen={onOpen} />
     </div>
   </section>;
 }
@@ -713,7 +744,7 @@ function PlungerBarrelBox({title,form,setField,disabled}:{title:string;form:Asse
   return <div className={machineComponentClass('plunger-barrel')}><h4>{title}</h4><Text label="Plunger Barrel Type" value={form.plungerBarrelType} set={v=>setField('plungerBarrelType',v)} disabled={disabled}/><Check label="Plunger Barrel Rebuild / Repaired" checked={form.plungerBarrelRebuildRepaired} set={checked=>setComponentRebuild(setField,'plungerBarrelRebuildRepaired','plungerBarrelConditionStatus',checked)} disabled={disabled}/><DateWithAge label="Plunger Barrel Installed Date" value={form.plungerBarrelInstalledDate} set={v=>setField('plungerBarrelInstalledDate',v)} disabled={disabled}/><DateWithAge label="Plunger Barrel End Cap Installed Date" value={form.plungerBarrelEndCapInstalledDate} set={v=>setField('plungerBarrelEndCapInstalledDate',v)} disabled={disabled}/><UnitDimensionField label="Plunger Barrel Length" value={form.plungerBarrelLength} set={v=>setField('plungerBarrelLength',v)} disabled={disabled}/><UnitDimensionField label="Plunger Barrel Diameter" value={form.plungerBarrelDiameter} set={v=>setField('plungerBarrelDiameter',v)} disabled={disabled}/><ConditionBadge label="Plunger Barrel condition" status={effectiveCondition(form.plungerBarrelRebuildRepaired, form.plungerBarrelConditionStatus)} /></div>;
 }
 function RecordLogsRow({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
-  return <section className="machine-form-section machine-record-logs-section"><span>Screw & Barrel Inspection Records</span><div className="measurement-inspection-row"><button className="machine-action-badge measurement-inspection-button" type="button" onClick={onOpen}>Open Record Logs</button><small>Asset-specific uploaded record files for {asset.assetNumber}.</small></div></section>;
+  return <section className="machine-form-section machine-record-logs-section"><span>Screw & Barrel Inspection Records</span><div className="measurement-inspection-row"><MachineRecordLogActions asset={asset} onOpen={onOpen} /><small>Asset-specific uploaded record files for {asset.assetNumber}.</small></div></section>;
 }
 function ReplacementUpdatesPanel({asset,form,canEdit,onReplacement}:{asset:MachineAsset;form:AssetForm;canEdit:boolean;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void}) {
   const groups = replacementGroups.filter(group=>group.enabled(form));

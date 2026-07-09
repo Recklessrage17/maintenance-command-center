@@ -614,9 +614,14 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-measurement-panel-heading h4 { margin: 0; color: #f3fbff; font-size: 1rem; line-height: 1.2; }
 .machine-measurement-setup-pill { display: inline-flex; min-height: 28px; align-items: center; padding: 0 10px; border: 1px solid rgba(54,229,170,.32); border-radius: 999px; color: #d9fff2; background: rgba(18,97,71,.28); font-size: .72rem; font-weight: 950; text-transform: uppercase; }
 .machine-record-launch-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid rgba(54,229,170,.24); border-radius: 8px; background: linear-gradient(145deg, rgba(18,58,50,.36), rgba(4,13,25,.7)); }
-.machine-record-launch-card > div { min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.machine-record-launch-copy { min-width: 0; display: grid; gap: 6px; justify-items: start; }
 .machine-record-launch-card strong { color: #f3fbff; font-size: .96rem; }
 .machine-record-launch-card small { color: #9fbdcc; font-size: .8rem; font-weight: 850; line-height: 1.35; }
+.machine-record-launch-action-stack { min-width: 0; display: grid; gap: 6px; justify-items: end; }
+.machine-record-launch-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.machine-record-launch-actions .compact-button { width: auto; white-space: nowrap; }
+.machine-record-upload-message { color: #9fbdcc; font-size: .74rem; font-weight: 850; text-align: right; }
+.machine-record-upload-message.error { color: #ffb4aa; }
 .machine-record-logs-section { border-color: rgba(54,229,170,.2); }
 .machine-inspection-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
 .machine-inspection-card { min-height: 166px; cursor: default; }
@@ -2516,6 +2521,12 @@ tr:hover td {
   .measurement-tools-heading,
   .machine-record-launch-card {
     grid-template-columns: 1fr;
+  }
+  .machine-record-launch-action-stack {
+    justify-items: start;
+  }
+  .machine-record-launch-actions {
+    justify-content: flex-start;
   }
   .measurement-panel-tools {
     justify-content: flex-start;

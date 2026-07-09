@@ -18,6 +18,7 @@ const TEMPLATE_DB_VERSION = 1;
 const TEMPLATE_STORE = 'templates';
 const DEFAULT_TEMPLATE_ID = 'screw-barrel-default-template';
 const DEFAULT_TEMPLATE_NAME = 'JBT Screw & Barrel Measurement Sheet OLD/NEW Rev. 9';
+const RECORD_LOGS_UPDATED_EVENT = 'mcc:measurement-record-logs-updated';
 const unassignedAsset: MachineRecordLogAsset = { id: 'unassigned', assetNumber: 'Unassigned' };
 const toolCategoryLabels: Record<MachineToolCategory, string> = {
   measurement: 'Measurement',
@@ -101,6 +102,10 @@ function writeLogs(logs: MeasurementLogEntry[]) {
   window.localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(logs.slice(0, 1000)));
 }
 
+function notifyRecordLogsUpdated() {
+  window.dispatchEvent(new Event(RECORD_LOGS_UPDATED_EVENT));
+}
+
 function availableYears(logs: MeasurementLogEntry[]) {
   const currentYear = new Date().getFullYear();
   const years = new Set(logs.map(log => log.year || recordYear(log.recordDate)));
@@ -133,6 +138,21 @@ async function saveStoredBlob(blob: Blob, id: string, name: string, type: string
 
 async function saveStoredFile(file: File, id: string, uploadedAt: string, recordDate: string) {
   await saveStoredBlob(file, id, file.name, file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, recordDate);
+}
+
+export async function uploadMeasurementRecordFiles(asset: MachineRecordLogAsset, files: File[]) {
+  const recordDate = localIsoDate(new Date());
+  if (!files.length) return { count: 0, recordDate };
+  const uploadedAt = new Date().toISOString();
+  const newLogs: MeasurementLogEntry[] = [];
+  for (const file of files) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await saveStoredFile(file, id, uploadedAt, recordDate);
+    newLogs.push(normalizeRecord({ id, name: file.name, size: file.size, type: file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, recordDate, hasStoredFile: true }, asset));
+  }
+  writeLogs([...newLogs, ...readLogs()]);
+  notifyRecordLogsUpdated();
+  return { count: newLogs.length, recordDate };
 }
 
 async function readStoredFile(id: string) {
@@ -384,10 +404,15 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   const isAssetPanel = Boolean(asset);
 
   useEffect(()=>{
-    const nextLogs = readLogs();
-    setLogs(nextLogs);
-    const nextYears = availableYears(scopeLogs(nextLogs, asset));
-    setSelectedYear(current=>nextYears.includes(current) ? current : nextYears[0]);
+    function refreshLogs() {
+      const nextLogs = readLogs();
+      setLogs(nextLogs);
+      const nextYears = availableYears(scopeLogs(nextLogs, asset));
+      setSelectedYear(current=>nextYears.includes(current) ? current : nextYears[0]);
+    }
+    refreshLogs();
+    window.addEventListener(RECORD_LOGS_UPDATED_EVENT, refreshLogs);
+    return ()=>window.removeEventListener(RECORD_LOGS_UPDATED_EVENT, refreshLogs);
   },[asset]);
   useEffect(()=>{
     if (!years.includes(selectedYear)) setSelectedYear(years[0]);
@@ -396,6 +421,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   function replaceLogs(nextLogs: MeasurementLogEntry[]) {
     writeLogs(nextLogs);
     setLogs(nextLogs);
+    notifyRecordLogsUpdated();
   }
 
   function toggleSelected(id: string, checked: boolean) {
@@ -413,17 +439,9 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
       return;
     }
     if (!files.length) return;
-    const uploadedAt = new Date().toISOString();
-    const recordDate = localIsoDate(new Date());
-    const newLogs: MeasurementLogEntry[] = [];
-    for (const file of files) {
-      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      await saveStoredFile(file, id, uploadedAt, recordDate);
-      newLogs.push(normalizeRecord({ id, name: file.name, size: file.size, type: file.type || file.name.split('.').pop()?.toUpperCase() || 'File', uploadedAt, recordDate, hasStoredFile: true }, asset));
-    }
-    const nextLogs = [...newLogs, ...readLogs()];
-    replaceLogs(nextLogs);
-    setSelectedYear(recordYear(recordDate));
+    const result = await uploadMeasurementRecordFiles(asset, files);
+    setLogs(readLogs());
+    setSelectedYear(recordYear(result.recordDate));
     setSelectedIds(new Set());
   }
 
