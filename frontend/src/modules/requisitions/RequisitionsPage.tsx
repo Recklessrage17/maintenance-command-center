@@ -220,6 +220,12 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [batchEditing,setBatchEditing]=useState(false);
   const [batchForm,setBatchForm]=useState<RequisitionBatchForm>({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
   const [batchFormError,setBatchFormError]=useState('');
+  const [draggedStagingItemId,setDraggedStagingItemId]=useState<number|null>(null);
+  const [dragOverBatchId,setDragOverBatchId]=useState<number|null>(null);
+  const [movingStagingItems,setMovingStagingItems]=useState(false);
+  const [moveDestinationBatchId,setMoveDestinationBatchId]=useState<number|null>(null);
+  const [moveSaving,setMoveSaving]=useState(false);
+  const [moveError,setMoveError]=useState('');
   const [stagingSearch,setStagingSearch]=useState('');
   const [stagingSelectedIds,setStagingSelectedIds]=useState<Set<number>>(()=>new Set());
   const [stagingEditing,setStagingEditing]=useState<StagingItem|'new'|null>(null);
@@ -645,6 +651,43 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     }
   }
 
+  async function moveItemsToBatch(itemIds: number[], destinationBatch: RequisitionBatch, mergeDuplicates = false) {
+    if (!itemIds.length || destinationBatch.id===activeBatchId || !['Open','Ready'].includes(destinationBatch.status)) return;
+    setMoveSaving(true);
+    setMoveError('');
+    try {
+      const response = await fetch('/api/requisition-staging/move',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({itemIds,destinationBatchId:destinationBatch.id,mergeDuplicates})});
+      const result = await response.json().catch(()=>({}));
+      if (!response.ok) {
+        if (response.status===409&&!mergeDuplicates&&window.confirm(`${result.error}\n\nMerge quantities and complete the move?`)) {
+          setMoveSaving(false);
+          await moveItemsToBatch(itemIds,destinationBatch,true);
+          return;
+        }
+        throw new Error(result.error||'Unable to move staged items.');
+      }
+      setMovingStagingItems(false);
+      setMoveDestinationBatchId(null);
+      setStagingSelectedIds(new Set());
+      await Promise.all([loadStaging('active',activeBatchId),loadInventoryOptions()]);
+      setNotice({kind:'success',text:`${result.movedCount} item${result.movedCount===1?'':'s'} moved to ${destinationBatch.name}.${result.mergedCount?` ${result.mergedCount} duplicate${result.mergedCount===1?' was':'s were'} merged.`:''}`});
+    } catch (err) {
+      setMoveError((err as Error).message);
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setMoveSaving(false);
+      setDraggedStagingItemId(null);
+      setDragOverBatchId(null);
+    }
+  }
+
+  function openMoveSelectedItems() {
+    if (!selectedStagingItems.length) return;
+    setMoveDestinationBatchId(null);
+    setMoveError('');
+    setMovingStagingItems(true);
+  }
+
   function openCreatedRequisition(requisitionNumber: string) {
     setReviewingStaging(false);
     setFilter('All');
@@ -836,12 +879,16 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
             <button className={batchView==='completed'?'active':''} type="button" onClick={()=>{setBatchView('completed');void loadStaging('completed',null);}}>Converted / Closed</button>
           </div>
           <div className="requisition-batch-grid">
-            {requisitionBatches.map(batch=><button className={batch.id===activeBatchId?'requisition-batch-card active':'requisition-batch-card'} key={batch.id} type="button" onClick={()=>void selectRequisitionBatch(batch)}>
-              <span className={`requisition-batch-status status-${batch.status.toLowerCase()}`}>{batch.status}</span>
-              <strong>{batch.name}</strong>
-              <span>{batchView==='active'?batch.openItemCount:batch.convertedItemCount} item{(batchView==='active'?batch.openItemCount:batch.convertedItemCount)===1?'':'s'}</span>
-              {(batch.assetMachine||batch.workOrderNumber)&&<small>{batch.assetMachine||'No asset'}{batch.workOrderNumber?` / WO# ${batch.workOrderNumber}`:''}</small>}
-            </button>)}
+            {requisitionBatches.map(batch=>{
+              const canDrop=batchView==='active'&&batch.id!==activeBatchId&&['Open','Ready'].includes(batch.status);
+              const className=['requisition-batch-card',batch.id===activeBatchId?'active':'',dragOverBatchId===batch.id?'drop-target':'',draggedStagingItemId&&canDrop?'drop-available':''].filter(Boolean).join(' ');
+              return <button className={className} key={batch.id} type="button" onClick={()=>void selectRequisitionBatch(batch)} onDragOver={event=>{if(!draggedStagingItemId||!canDrop)return;event.preventDefault();event.dataTransfer.dropEffect='move';setDragOverBatchId(batch.id);}} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setDragOverBatchId(current=>current===batch.id?null:current);}} onDrop={event=>{event.preventDefault();event.stopPropagation();const itemId=Number(event.dataTransfer.getData('text/plain'))||draggedStagingItemId;if(itemId&&canDrop)void moveItemsToBatch([itemId],batch);}}>
+                <span className={`requisition-batch-status status-${batch.status.toLowerCase()}`}>{batch.status}</span>
+                <strong>{batch.name}</strong>
+                <span>{batchView==='active'?batch.openItemCount:batch.convertedItemCount} item{(batchView==='active'?batch.openItemCount:batch.convertedItemCount)===1?'':'s'}</span>
+                {(batch.assetMachine||batch.workOrderNumber)&&<small>{batch.assetMachine||'No asset'}{batch.workOrderNumber?` / WO# ${batch.workOrderNumber}`:''}</small>}
+              </button>;
+            })}
             {!loading&&!requisitionBatches.length&&<p className="empty-batch-message">No {batchView==='active'?'open':'converted or closed'} Requisition Batches.</p>}
           </div>
           {activeRequisitionBatch&&<div className="active-requisition-batch-heading"><div><span>Requisition Batch</span><strong>{activeRequisitionBatch.name}</strong><small>{activeRequisitionBatch.description||'No batch notes.'}</small></div>{batchView==='active'&&canWrite&&<button className="secondary-button compact-button" type="button" onClick={()=>openNewStaging()}>Manually Add Item</button>}<div className="batch-requisition-links">{activeRequisitionBatch.requisitions.map(requisition=><button className="secondary-button compact-button" key={requisition.id} type="button" onClick={()=>openCreatedRequisition(requisition.requisitionNumber)}>Open {requisition.requisitionNumber}</button>)}</div></div>}
@@ -856,17 +903,18 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
               <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!visibleSelectableStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
               <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Unselect All</button>
               {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>void clearSelectedStagingItems()} disabled={!selectedStagingItems.length||stagingSaving}>Clear Selected Items</button>}
+              {canWrite&&<button className="secondary-button compact-button" type="button" onClick={openMoveSelectedItems} disabled={!selectedStagingItems.length||moveSaving}>Move to Batch</button>}
               {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Preview Requisition</button>}
             </div>
           </>}
           <div className="table-card requisitions-table-wrap staging-table-wrap">
             <table className="requisition-staging-table">
-              <thead><tr><th>Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Move / Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
               <tbody>
                 {filteredStagingItems.map(item=>{
                   const selectable=['Need to Order','Ready for Requisition'].includes(item.status);
                   return <tr key={item.id}>
-                    <td>{batchView==='active'?<input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} />:'-'}</td>
+                    <td>{batchView==='active'?<div className="staging-select-cell"><span className="staging-drag-handle" draggable={selectable} role="img" aria-label={`Drag ${item.partNumber} to another Requisition Batch`} title="Drag to another Requisition Batch" onClick={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()} onDragStart={event=>{event.stopPropagation();event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id));setDraggedStagingItemId(item.id);setDragOverBatchId(null);}} onDragEnd={()=>{setDraggedStagingItemId(null);setDragOverBatchId(null);}}>&#8942;&#8942;</span><input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} /></div>:'-'}</td>
                     <td><span className={`staging-priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span></td>
                     <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>
                     <td><strong className="staging-part-number">{item.partNumber}</strong>{item.supplierPartNumber&&<small className="staging-supplier-number">Supplier: {item.supplierPartNumber}</small>}</td>
@@ -956,6 +1004,19 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
           </table>
         </div>
       </section>}
+
+      {movingStagingItems&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!moveSaving)setMovingStagingItems(false);}}>
+          <div className="mcc-card requisition-modal staging-move-modal" role="dialog" aria-modal="true" aria-labelledby="move-staged-items-title">
+            <div className="modal-heading"><div><p className="eyebrow">Requisition Staging List</p><h3 id="move-staged-items-title">Move to Batch</h3></div><button className="link-button compact-button" type="button" onClick={()=>setMovingStagingItems(false)} disabled={moveSaving}>Close</button></div>
+            <p>Choose an open destination for {selectedStagingItems.length} selected item{selectedStagingItems.length===1?'':'s'}.</p>
+            <div className="staging-batch-choice-grid">{requisitionBatches.filter(batch=>batch.id!==activeBatchId&&['Open','Ready'].includes(batch.status)).map(batch=><button className={batch.id===moveDestinationBatchId?'staging-batch-choice active':'staging-batch-choice'} type="button" key={batch.id} onClick={()=>setMoveDestinationBatchId(batch.id)}><strong>{batch.name}</strong><span>{batch.openItemCount} item{batch.openItemCount===1?'':'s'}</span>{(batch.assetMachine||batch.workOrderNumber)&&<small>{batch.assetMachine||'No asset'}{batch.workOrderNumber?` / WO# ${batch.workOrderNumber}`:''}</small>}</button>)}</div>
+            {!requisitionBatches.some(batch=>batch.id!==activeBatchId&&['Open','Ready'].includes(batch.status))&&<p className="form-message error">Create another open Requisition Batch before moving these items.</p>}
+            {moveError&&<p className="form-message error">{moveError}</p>}
+            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setMovingStagingItems(false)} disabled={moveSaving}>Cancel</button><button className="primary-button" type="button" disabled={!moveDestinationBatchId||moveSaving} onClick={()=>{const destination=requisitionBatches.find(batch=>batch.id===moveDestinationBatchId);if(destination)void moveItemsToBatch(selectedStagingItems.map(item=>item.id),destination);}}>{moveSaving?'Moving...':'Move Selected Items'}</button></div>
+          </div>
+        </div>
+      )}
 
       {batchEditing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setBatchEditing(false);}}>

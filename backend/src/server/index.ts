@@ -7279,6 +7279,60 @@ app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('invent
     res.status(/required|select|not found|must|positive|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
+app.post('/api/requisition-staging/move', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const destination = validateOpenRequisitionBatch(input.destinationBatchId ?? input.batchId);
+    const itemIds = Array.isArray(input.itemIds) ? uniquePositiveIds(input.itemIds.map(value=>Number(value))) : [];
+    if (!itemIds.length) throw new Error('Select at least one staged item to move.');
+    const placeholders = itemIds.map(()=>'?').join(',');
+    const items = all<RequisitionStagingRow>(`SELECT * FROM requisition_staging_items WHERE id IN (${placeholders}) ORDER BY id`, itemIds);
+    if (items.length !== itemIds.length) throw new Error('One or more staged items were not found.');
+    for (const item of items) {
+      if (!isOpenRequisitionStagingStatus(item.status)) throw new Error('Only active staged items can be moved.');
+      if (item.batch_id === destination.id) throw new Error('Choose a different destination Requisition Batch.');
+    }
+    const findDuplicate = (item: RequisitionStagingRow) => item.inventory_part_id
+      ? one<RequisitionStagingRow>("SELECT * FROM requisition_staging_items WHERE batch_id=? AND inventory_part_id=? AND status IN ('Need to Order','Ready for Requisition') ORDER BY id LIMIT 1", [destination.id,item.inventory_part_id])
+      : one<RequisitionStagingRow>("SELECT * FROM requisition_staging_items WHERE batch_id=? AND lower(trim(part_number))=lower(trim(?)) AND status IN ('Need to Order','Ready for Requisition') ORDER BY id LIMIT 1", [destination.id,item.part_number]);
+    const duplicates = items.map(item=>({item,existing:findDuplicate(item)})).filter(entry=>Boolean(entry.existing));
+    const mergeDuplicates = input.mergeDuplicates === true;
+    if (duplicates.length && !mergeDuplicates) {
+      return res.status(409).json({
+        ok:false,
+        error:`${duplicates.length} selected part${duplicates.length===1?' already exists':'s already exist'} in ${destination.name}. Merge the requested quantities?`,
+        duplicates:duplicates.map(entry=>({itemId:entry.item.id,partNumber:entry.item.part_number,existingItemId:entry.existing!.id,sourceQuantity:Number(entry.item.quantity_requested),destinationQuantity:Number(entry.existing!.quantity_requested)})),
+      });
+    }
+    const timestamp = now();
+    const sourceBatchIds = uniquePositiveIds(items.map(item=>Number(item.batch_id)));
+    let mergedCount = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const item of items) {
+        const duplicate = findDuplicate(item);
+        if (duplicate) {
+          run('UPDATE requisition_staging_items SET quantity_requested=?,updated_by_user_id=?,updated_at=? WHERE id=?', [Number(duplicate.quantity_requested)+Number(item.quantity_requested),actor.id,timestamp,duplicate.id]);
+          run('DELETE FROM requisition_staging_items WHERE id=?', [item.id]);
+          mergedCount += 1;
+        } else {
+          run('UPDATE requisition_staging_items SET batch_id=?,updated_by_user_id=?,updated_at=? WHERE id=?', [destination.id,actor.id,timestamp,item.id]);
+        }
+      }
+      for (const sourceBatchId of sourceBatchIds) run('UPDATE requisition_batches SET updated_by_user_id=?,updated_at=? WHERE id=?', [actor.id,timestamp,sourceBatchId]);
+      run('UPDATE requisition_batches SET updated_by_user_id=?,updated_at=? WHERE id=?', [actor.id,timestamp,destination.id]);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,destinationBatch:publicRequisitionBatch(requisitionBatchById(destination.id)!),movedCount:items.length,mergedCount});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /select|only|different|open|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
 app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const itemId = Number(req.params.id);
