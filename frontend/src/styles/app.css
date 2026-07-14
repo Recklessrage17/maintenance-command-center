@@ -1201,13 +1201,19 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .requisition-batch-status { position: absolute; top: 11px; right: 11px; display: inline-flex; align-items: center; justify-content: center; min-width: 66px; min-height: 25px; padding: 0 9px; border: 1px solid rgba(68,215,255,.38); border-radius: 999px; color: #dff7ff; background: rgba(5,61,86,.42); font-size: .65rem; font-weight: 900; }
 .requisition-batch-status.status-ready,.requisition-batch-status.status-converted { color: #d9ffe9; border-color: rgba(54,229,170,.45); background: rgba(18,97,71,.34); }
 .requisition-batch-status.status-closed { color: #d4dce0; border-color: rgba(184,199,207,.3); background: rgba(69,80,87,.34); }
-.active-requisition-batch-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 11px 13px; border: 1px solid rgba(68,215,255,.2); border-radius: 18px; background: rgba(5,61,86,.22); }
-.active-requisition-batch-heading > div:first-child { display: grid; gap: 2px; min-width: 220px; }
-.active-requisition-batch-heading > div:first-child > span { color: #44d7ff; font-size: .68rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.active-requisition-batch-heading > div:first-child > strong { margin: 0; font-size: .96rem; }
-.active-requisition-batch-heading small { color: #9fc5d5; }
-.batch-requisition-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.active-requisition-batch-heading { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 7px 12px; padding: 9px 11px; border: 1px solid rgba(68,215,255,.2); border-radius: 16px; background: rgba(5,61,86,.22); }
+.active-batch-summary { display: grid; gap: 3px; min-width: 0; }
+.active-batch-title-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.active-batch-title-line > strong { overflow: hidden; margin: 0; font-size: .94rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.active-batch-title-line .requisition-batch-status { position: static; flex: 0 0 auto; min-height: 23px; }
+.active-requisition-batch-heading small { overflow: hidden; color: #9fc5d5; font-size: .73rem; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.active-batch-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.batch-requisition-links { display: flex; grid-column: 1 / -1; gap: 6px; flex-wrap: wrap; }
 .empty-batch-message { margin: 0; color: #9fc5d5; }
+.opened-batch-loading { margin: 0; padding: 10px 12px; color: #9fc5d5; }
+.opened-batch-empty-state { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid rgba(143,205,233,.18); border-radius: 16px; background: rgba(4,18,34,.42); }
+.opened-batch-empty-state p { margin: 0; color: #c8e8f5; font-size: .82rem; font-weight: 800; }
+.opened-batch-empty-state > div { display: flex; gap: 7px; flex-wrap: wrap; }
 .staging-toolbar { display: grid; grid-template-columns: repeat(2,minmax(220px,1fr)); gap: 10px; align-items: end; }
 .staging-inventory-results { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 8px; padding: 10px; border: 1px solid rgba(68,215,255,.18); border-radius: 18px; background: rgba(4,18,34,.46); }
 .staging-inventory-results button { display: grid; gap: 3px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(143,205,233,.24); border-radius: 16px; color: #eafaff; background: rgba(10,32,55,.7); cursor: pointer; font: inherit; text-align: left; }
@@ -1289,6 +1295,10 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 900px) {
   .staging-toolbar { grid-template-columns: 1fr; }
   .staging-list-heading,.staging-review-summary { align-items: stretch; flex-direction: column; }
+  .active-requisition-batch-heading { grid-template-columns: 1fr; }
+  .active-batch-actions { justify-content: flex-start; }
+  .batch-requisition-links { grid-column: auto; }
+  .opened-batch-empty-state { align-items: flex-start; flex-direction: column; }
   .staging-editor-grid,.inventory-numeric-grid { grid-template-columns: 1fr; }
   .staging-editor-wide { grid-column: auto; }
   .staging-review-items > div { grid-template-columns: 1fr 1fr; }

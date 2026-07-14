@@ -3329,6 +3329,9 @@ function validateRequisitionBatchInput(body: unknown, existing?: RequisitionBatc
     status,
   };
 }
+function isGeneralRequisitionBatchName(value: string) {
+  return value.trim().replace(/\s+/g,' ').toLowerCase() === 'general / unassigned';
+}
 function requisitionBatchList(view = 'active') {
   const completed = view.toLowerCase() === 'completed';
   const statuses = completed ? "('Converted','Closed')" : "('Open','Ready')";
@@ -5223,6 +5226,9 @@ async function writeMit3AppData(data: Record<string, unknown>) {
 function canInventoryWrite(actor: User) {
   return roleRank(actor.role) >= roleRank('Maintenance Tech 2');
 }
+function canManageRequisitionBatches(actor: User) {
+  return actor.role === 'Admin' || actor.role === 'Manager' || actor.role === 'Maintenance Tech 3';
+}
 function canInventoryImport(actor: User) {
   return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
 }
@@ -6389,7 +6395,7 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='requisition-batch.manage'&&canManageRequisitionBatches(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -7165,6 +7171,7 @@ app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.w
   const actor = req.user!;
   try {
     const input = validateRequisitionBatchInput(req.body);
+    if (isGeneralRequisitionBatchName(input.name)) throw new Error('General / Unassigned is a reserved batch name.');
     if (!['Open','Ready'].includes(input.status)) throw new Error('A new Requisition Batch must be Open or Ready.');
     const timestamp = now();
     const result = run(`INSERT INTO requisition_batches (name,description,asset_machine,work_order_number,needed_by_date,status,is_general,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?,?,?)`, [
@@ -7173,25 +7180,76 @@ app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.w
     res.status(201).json({ok:true,batch:publicRequisitionBatch(requisitionBatchById(Number(result.lastInsertRowid))!)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/required|invalid|must/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/required|invalid|must|reserved/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requisition-batch.manage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const batchId = Number(req.params.id);
   try {
     const existing = requisitionBatchById(batchId);
     if (!existing) throw new Error('Requisition Batch not found.');
-    if (existing.status === 'Converted') throw new Error('Converted Requisition Batches cannot be edited.');
+    if (existing.is_general) throw new Error('General / Unassigned cannot be edited.');
     const input = validateRequisitionBatchInput(req.body,existing);
+    if (isGeneralRequisitionBatchName(input.name)) throw new Error('General / Unassigned is a reserved batch name.');
+    if (existing.status === 'Converted' && input.status !== 'Converted') throw new Error('A converted Requisition Batch must remain Converted.');
+    if (existing.status !== 'Converted' && input.status === 'Converted') throw new Error('A Requisition Batch is marked Converted only when its official requisitions are created.');
     const timestamp = now();
     run(`UPDATE requisition_batches SET name=?,description=?,asset_machine=?,work_order_number=?,needed_by_date=?,status=?,updated_by_user_id=?,closed_at=?,updated_at=? WHERE id=?`, [
-      input.name,input.description,input.assetMachine,input.workOrderNumber,input.neededByDate || null,input.status,actor.id,input.status==='Closed'?timestamp:null,timestamp,batchId,
+      input.name,input.description,input.assetMachine,input.workOrderNumber,input.neededByDate || null,input.status,actor.id,input.status==='Closed'?(existing.closed_at ?? timestamp):null,timestamp,batchId,
     ]);
     res.json({ok:true,batch:publicRequisitionBatch(requisitionBatchById(batchId)!)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /required|invalid|cannot/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /required|invalid|cannot|must|reserved/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requisition-batch.manage'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const batchId = Number(req.params.id);
+  try {
+    const existing = requisitionBatchById(batchId);
+    if (!existing) return res.status(404).json({ok:false,error:'Requisition Batch not found.'});
+    if (existing.is_general) return res.status(400).json({ok:false,error:'General / Unassigned cannot be deleted.'});
+    const requisitionLinks = Number(one<{ count: number }>('SELECT COUNT(*) AS count FROM requisition_batch_requisitions WHERE batch_id=?',[batchId])?.count ?? 0);
+    if (requisitionLinks > 0) return res.status(409).json({ok:false,error:'This batch is linked to an official requisition and cannot be deleted.'});
+    const nonActiveItems = Number(one<{ count: number }>("SELECT COUNT(*) AS count FROM requisition_staging_items WHERE batch_id=? AND status NOT IN ('Need to Order','Ready for Requisition')",[batchId])?.count ?? 0);
+    if (nonActiveItems > 0) return res.status(409).json({ok:false,error:'This batch contains completed staging records and cannot be deleted.'});
+    const activeItems = all<RequisitionStagingRow>("SELECT * FROM requisition_staging_items WHERE batch_id=? AND status IN ('Need to Order','Ready for Requisition') ORDER BY id",[batchId]);
+    const moveItemsToGeneral = req.body?.moveItemsToGeneral === true;
+    if (activeItems.length > 0 && !moveItemsToGeneral) {
+      return res.status(409).json({ok:false,error:`This batch contains ${activeItems.length} active item${activeItems.length===1?'':'s'}.`,requiresMove:true,activeItemCount:activeItems.length});
+    }
+    let movedCount = 0;
+    let mergedCount = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (activeItems.length > 0) {
+        const general = ensureGeneralRequisitionBatch(actor.id);
+        const timestamp = now();
+        for (const item of activeItems) {
+          const duplicate = item.inventory_part_id
+            ? one<RequisitionStagingRow>("SELECT * FROM requisition_staging_items WHERE batch_id=? AND inventory_part_id=? AND status IN ('Need to Order','Ready for Requisition') ORDER BY id LIMIT 1",[general.id,item.inventory_part_id])
+            : one<RequisitionStagingRow>("SELECT * FROM requisition_staging_items WHERE batch_id=? AND lower(trim(part_number))=lower(trim(?)) AND status IN ('Need to Order','Ready for Requisition') ORDER BY id LIMIT 1",[general.id,item.part_number]);
+          if (duplicate) {
+            run('UPDATE requisition_staging_items SET quantity_requested=?,updated_by_user_id=?,updated_at=? WHERE id=?',[Number(duplicate.quantity_requested)+Number(item.quantity_requested),actor.id,timestamp,duplicate.id]);
+            run('DELETE FROM requisition_staging_items WHERE id=?',[item.id]);
+            mergedCount += 1;
+          } else {
+            run('UPDATE requisition_staging_items SET batch_id=?,updated_by_user_id=?,updated_at=? WHERE id=?',[general.id,actor.id,timestamp,item.id]);
+          }
+          movedCount += 1;
+        }
+      }
+      run('DELETE FROM requisition_batches WHERE id=?',[batchId]);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,deletedBatchId:batchId,movedCount,mergedCount});
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error)});
   }
 });
 app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
