@@ -1245,7 +1245,6 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     const label = part.partNumber || part.itemId || '-';
     const partInfoUrl = safeHttpUrl(part.partInfoUrl || '');
     if (partInfoUrl) return <a className="vendor-website-link compact inventory-part-info-link" href={partInfoUrl} target="_blank" rel="noopener noreferrer" title="Open part information" aria-label={`Open part information for ${label}`} onClick={event=>event.stopPropagation()}>
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>
         <span>{label}</span>
       </a>;
     return <span className="plain-part-number" title={label}>{label}</span>;

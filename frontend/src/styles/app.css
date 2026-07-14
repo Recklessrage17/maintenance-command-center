@@ -967,8 +967,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-lead-time { color: #ffb45f !important; font-weight: 900 !important; }
 .plain-part-number { display: inline !important; margin: 0 !important; color: #f3fbff !important; font-weight: 800 !important; }
 .part-number-stack { display: grid; justify-items: start; gap: 5px; min-width: 0; }
-.inventory-part-info-link.vendor-website-link.compact { max-width: 100%; gap: 6px; padding: 4px 8px; }
-.inventory-part-info-link svg { flex: 0 0 14px; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.inventory-part-info-link.vendor-website-link.compact { max-width: 100%; padding: 4px 8px; }
 .part-number-link, .link-badge { display: inline-flex; align-items: center; gap: 7px; width: fit-content; border: 1px solid rgba(68, 215, 255, 0.42); border-radius: 999px; color: #bff3ff; background: linear-gradient(135deg, rgba(5, 61, 86, 0.72), rgba(18, 97, 71, 0.46)); font-size: .82rem; font-weight: 900; text-decoration: none; white-space: nowrap; box-shadow: 0 0 16px rgba(68, 215, 255, 0.16), inset 0 1px 0 rgba(255,255,255,0.14); }
 .part-number-link { position: relative; max-width: 132px; overflow: hidden; padding: 4px 8px; text-overflow: ellipsis; }
 .part-number-link:hover { border-color: rgba(54, 229, 170, 0.72); color: #dcfff0; box-shadow: 0 0 20px rgba(54, 229, 170, 0.2), inset 0 1px 0 rgba(255,255,255,0.18); }
