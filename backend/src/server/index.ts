@@ -3160,6 +3160,9 @@ function requisitionStagingById(id: number) {
 function activeStagingForPart(partId: number) {
   return one<{ id: number; status: RequisitionStagingStatus }>("SELECT id,status FROM requisition_staging_items WHERE inventory_part_id=? AND status IN ('Need to Order','Ready for Requisition') ORDER BY updated_at DESC,id DESC LIMIT 1", [partId]);
 }
+function isOpenRequisitionStagingStatus(status: RequisitionStagingStatus) {
+  return status === 'Need to Order' || status === 'Ready for Requisition';
+}
 function requisitionStagingList(search = '', includeRemoved = false) {
   const where = includeRemoved ? ['1=1'] : ["status<>'Removed / Canceled'"];
   const params: SqlParam[] = [];
@@ -3239,6 +3242,25 @@ function recordRequisitionStagingHistory(input: { action: string; actor: User; r
     reasonNote: input.reasonNote,
     actor: input.actor,
   });
+}
+function syncLinkedStagingForRequisitionStatus(input: { requisitionId: number; nextStatus: RequisitionStatus; actor: User; timestamp: string; reasonNote?: string }) {
+  const linkedRows = all<RequisitionStagingRow>('SELECT * FROM requisition_staging_items WHERE created_requisition_id=?', [input.requisitionId]);
+  if (!linkedRows.length) return;
+  if (input.nextStatus === 'Ordered') {
+    run("UPDATE requisition_staging_items SET status='Ordered',updated_by_user_id=?,updated_at=? WHERE created_requisition_id=?", [input.actor.id,input.timestamp,input.requisitionId]);
+  } else if (input.nextStatus === 'Canceled') {
+    run("UPDATE requisition_staging_items SET status='Removed / Canceled',removed_by_user_id=?,removed_at=?,updated_by_user_id=?,updated_at=? WHERE created_requisition_id=?", [input.actor.id,input.timestamp,input.actor.id,input.timestamp,input.requisitionId]);
+  }
+  for (const linked of linkedRows) {
+    const updated = requisitionStagingById(linked.id);
+    if (!updated) continue;
+    const action = input.nextStatus === 'Ordered'
+      ? 'staged_requisition_marked_ordered'
+      : input.nextStatus === 'Received'
+        ? 'staged_requisition_marked_received'
+        : 'staged_requisition_canceled';
+    recordRequisitionStagingHistory({action,actor:input.actor,row:updated,oldValue:publicRequisitionStagingItem(linked),reasonNote:input.reasonNote});
+  }
 }
 function activeRequisitionForPart(partId: number) {
   return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT r.requisition_number,r.status
@@ -5001,7 +5023,7 @@ function sendRequisitionError(req: Request, res: Response, operation: string, ta
   const message = safeErrorMessage(error);
   inventoryAudit(req,'failed requisition action','requisition',targetId,{operation,error:message});
   audit(req,'failed requisition action','requisition',targetId,{operation,error:message});
-  const status = /not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /must|requires|required|unsupported|only/i.test(message) ? 400 : 500;
+  const status = /not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /must|requires|required|unsupported|only|cannot/i.test(message) ? 400 : 500;
   res.status(status).json({ok:false,error:message,activeRequisitionExists:/already exists/i.test(message)});
 }
 function canDeleteRequisitions(actor: User) {
@@ -5172,6 +5194,7 @@ function resetStatusCounts() {
       inventoryLocations: rowCount('inventory_locations'),
       requisitions: rowCount('inventory_requisitions'),
       requisitionLines: rowCount('inventory_requisition_lines'),
+      requisitionStagingItems: rowCount('requisition_staging_items'),
       historyCounts,
       futureTableCounts,
     },
@@ -5199,9 +5222,11 @@ function resetTableGroup(section: keyof typeof resetTableAllowlists, deletedCoun
   return existingTableCount;
 }
 function resetRequisitionsData(deletedCounts: Record<string, number>) {
+  deletedCounts.requisitionStagingItems = deleteRows('requisition_staging_items');
   deletedCounts.inventoryRequisitionLines = deleteRows('inventory_requisition_lines');
   deletedCounts.inventoryRequisitions = deleteRows('inventory_requisitions');
   if (tableExists('inventory_parts')) run("UPDATE inventory_parts SET requisition='', updated_at=? WHERE requisition<>''", [now()]);
+  resetSqliteSequence('requisition_staging_items');
   resetSqliteSequence('inventory_requisition_lines');
   resetSqliteSequence('inventory_requisitions');
 }
@@ -6993,6 +7018,7 @@ app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('invent
   try {
     const existing = requisitionStagingById(itemId);
     if (!existing) throw new Error('Staged item not found.');
+    if (!isOpenRequisitionStagingStatus(existing.status)) throw new Error('Only open staged items can be edited.');
     const input = validateRequisitionStagingInput(req.body, existing);
     if (input.inventoryPartId) {
       const duplicate = activeStagingForPart(input.inventoryPartId);
@@ -7026,6 +7052,7 @@ app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inven
     const existing = requisitionStagingById(itemId);
     if (!existing) throw new Error('Staged item not found.');
     if (existing.status === 'Removed / Canceled') return res.json({ok:true,item:publicRequisitionStagingItem(existing)});
+    if (!isOpenRequisitionStagingStatus(existing.status)) throw new Error('Only open staged items can be removed.');
     const timestamp = now();
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -7042,7 +7069,7 @@ app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inven
     res.json({ok:true,item:publicRequisitionStagingItem(requisitionStagingById(itemId)!)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
@@ -7281,6 +7308,11 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
       const existing = requisitionById(requisitionId);
       if (!existing) throw new Error('Requisition not found.');
       if (existing.status === 'Draft') throw new Error('Draft requisitions must be passed before status changes.');
+      const allowedTransitions: Partial<Record<RequisitionStatus, RequisitionStatus[]>> = {
+        Requested: ['Ordered','Received','Canceled'],
+        Ordered: ['Received','Canceled'],
+      };
+      if (!allowedTransitions[existing.status]?.includes(nextStatus)) throw new Error(`A ${existing.status} requisition cannot be changed to ${nextStatus}.`);
       previousStatus = existing.status;
       const partIds = requisitionPartIds(existing);
       if (nextStatus === 'Ordered') {
@@ -7290,18 +7322,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
       } else {
         run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,cancelReason,timestamp,requisitionId]);
       }
-      const linkedStagingRows = all<RequisitionStagingRow>('SELECT * FROM requisition_staging_items WHERE created_requisition_id=?', [requisitionId]);
-      if (nextStatus === 'Ordered') {
-        run("UPDATE requisition_staging_items SET status='Ordered',updated_by_user_id=?,updated_at=? WHERE created_requisition_id=?", [actor.id,timestamp,requisitionId]);
-      } else if (nextStatus === 'Canceled') {
-        run("UPDATE requisition_staging_items SET status='Removed / Canceled',removed_by_user_id=?,removed_at=?,updated_by_user_id=?,updated_at=? WHERE created_requisition_id=?", [actor.id,timestamp,actor.id,timestamp,requisitionId]);
-      }
-      for (const linked of linkedStagingRows) {
-        const updatedStaging = requisitionStagingById(linked.id);
-        if (!updatedStaging) continue;
-        const stagingAction = nextStatus === 'Ordered' ? 'staged_requisition_marked_ordered' : nextStatus === 'Received' ? 'staged_requisition_marked_received' : 'staged_requisition_canceled';
-        recordRequisitionStagingHistory({action:stagingAction,actor,row:updatedStaging,oldValue:publicRequisitionStagingItem(linked),reasonNote:nextStatus === 'Canceled' ? cancelReason : ''});
-      }
+      syncLinkedStagingForRequisitionStatus({requisitionId,nextStatus,actor,timestamp,reasonNote:nextStatus === 'Canceled' ? cancelReason : ''});
       syncRequisitionPartFlags(partIds,timestamp);
       inventoryAudit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
       audit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
@@ -7438,6 +7459,7 @@ app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('invent
         if (existing.status !== 'Requested' && existing.status !== 'Ordered') throw new Error('Only Requested or Ordered requisitions can be canceled.');
         const partIds = requisitionPartIds(existing);
         run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', ['Canceled',actor.id,timestamp,reasonNote,timestamp,requisitionId]);
+        syncLinkedStagingForRequisitionStatus({requisitionId,nextStatus:'Canceled',actor,timestamp,reasonNote});
         syncRequisitionPartFlags(partIds,timestamp);
         inventoryAudit(req,'bulk requisition canceled','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
         audit(req,'bulk requisition canceled','requisition',requisitionId,{requisitionNumber:existing.requisition_number});

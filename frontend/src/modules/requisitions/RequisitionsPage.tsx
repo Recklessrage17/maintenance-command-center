@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
 type StatusFilter = 'Requisition Staging' | 'All' | RequisitionStatus;
@@ -340,7 +341,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     if (!needle) return [];
     return inventoryOptions.filter(part=>[part.partNumber,part.description,part.vendor,part.supplierPartNumber,part.location].some(value=>String(value ?? '').toLowerCase().includes(needle))).slice(0,12);
   },[inventoryOptions,inventorySearch]);
-  const allVisibleStagingSelected = filteredStagingItems.length > 0 && filteredStagingItems.filter(item=>['Need to Order','Ready for Requisition'].includes(item.status)).every(item=>stagingSelectedIds.has(item.id));
+  const visibleSelectableStagingItems = filteredStagingItems.filter(item=>['Need to Order','Ready for Requisition'].includes(item.status));
+  const allVisibleStagingSelected = visibleSelectableStagingItems.length > 0 && visibleSelectableStagingItems.every(item=>stagingSelectedIds.has(item.id));
   const selectedRequisitions = useMemo(()=>requisitions.filter(requisition=>selectedIds.has(requisition.id)&&!requisition.deleted),[requisitions,selectedIds]);
   const selectedCancelable = selectedRequisitions.filter(requisition=>requisition.status==='Requested'||requisition.status==='Ordered');
   const allVisibleSelected = filteredRequisitions.length > 0 && filteredRequisitions.every(requisition=>selectedIds.has(requisition.id));
@@ -431,6 +433,10 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       setStagingFormError('Unit Cost must be zero or a positive number.');
       return;
     }
+    if (!isValidMccDateValue(stagingForm.neededByDate)) {
+      setStagingFormError('Needed-by Date must be valid when entered.');
+      return;
+    }
     setStagingSaving(true);
     setStagingFormError('');
     try {
@@ -438,8 +444,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       await api(isEdit ? `/api/requisition-staging/${stagingEditing.id}` : '/api/requisition-staging', {method:isEdit?'PATCH':'POST',body:JSON.stringify({...stagingForm,quantityRequested:quantity,unitCost})});
       closeStagingEditor(true);
       setInventorySearch('');
-      setNotice({kind:'success',text:isEdit?'Staged item updated.':'Item added to Requisition Staging List.'});
       await Promise.all([loadStaging(),loadInventoryOptions()]);
+      setNotice({kind:'success',text:isEdit?'Staged item updated.':'Item added to Requisition Staging List.'});
     } catch (err) {
       setStagingFormError((err as Error).message);
     } finally {
@@ -453,8 +459,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     try {
       await api(`/api/requisition-staging/${item.id}`, {method:'DELETE'});
       setStagingSelectedIds(current=>{const next=new Set(current);next.delete(item.id);return next;});
-      setNotice({kind:'success',text:`${item.partNumber} removed from the active staging list.`});
       await Promise.all([loadStaging(),loadInventoryOptions()]);
+      setNotice({kind:'success',text:`${item.partNumber} removed from the active staging list.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -496,8 +502,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       const result = await api<{requisitions:StagingCreateResult[]}>('/api/requisition-staging/create-requisitions',{method:'POST',body:JSON.stringify({...stagingReviewForm,stagingItemIds:selectedStagingItems.map(item=>item.id)})});
       setCreatedFromStaging(result.requisitions ?? []);
       setStagingSelectedIds(new Set());
-      setNotice({kind:'success',text:`Created ${result.requisitions?.length ?? 0} vendor requisition draft${result.requisitions?.length === 1 ? '' : 's'} from staged items.`});
       await loadStaging();
+      setNotice({kind:'success',text:`Created ${result.requisitions?.length ?? 0} official vendor requisition${result.requisitions?.length === 1 ? '' : 's'} from staged items.`});
     } catch (err) {
       setStagingFormError((err as Error).message);
     } finally {
@@ -507,9 +513,9 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
   function openCreatedRequisition(requisitionNumber: string) {
     setReviewingStaging(false);
-    setFilter('Requested');
+    setFilter('All');
     setSearch(requisitionNumber);
-    void loadRequisitions('Requested',false);
+    void loadRequisitions('All',false);
   }
 
   function openReasonAction(kind: ReasonAction['kind'], requisitionsForAction: Requisition[]) {
@@ -607,8 +613,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
         method: 'PATCH',
         body: JSON.stringify({status}),
       });
-      setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
       await loadRequisitions(filter, showDeleted);
+      setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -703,7 +709,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
           )}
           <div className="requisition-selection-toolbar">
             <span>Selected: {selectedStagingItems.length}</span>
-            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!filteredStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
+            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!visibleSelectableStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
             <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Clear Selection</button>
             {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Create Requisition Draft</button>}
           </div>
@@ -719,7 +725,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                     <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>
                     <td><strong>{item.partNumber}</strong>{item.supplierPartNumber&&<small className="staging-supplier-number">Supplier: {item.supplierPartNumber}</small>}</td>
                     <td className="inventory-description-cell">{item.description}</td><td>{formatQuantity(item.quantityRequested)}</td><td>{item.vendor}</td><td>{item.location||'-'}</td><td>{item.assetMachine||'-'}</td><td>{item.workOrderNumber||'-'}</td><td>{item.neededByDate||'-'}</td><td>{item.requestedBy||'-'}</td>
-                    <td><div className="requisition-row-actions">{item.createdRequisitionNumber&&<button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(item.createdRequisitionNumber)}>Open {item.createdRequisitionNumber}</button>}{canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{canWrite&&item.status!=='Removed / Canceled'&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}</div></td>
+                    <td><div className="requisition-row-actions">{item.createdRequisitionNumber&&<button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(item.createdRequisitionNumber)}>Open {item.createdRequisitionNumber}</button>}{canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{canWrite&&selectable&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}</div></td>
                   </tr>;
                 })}
                 {!loading&&!filteredStagingItems.length&&<tr><td colSpan={13} className="empty-table-cell">No staged items match this view.</td></tr>}
@@ -821,7 +827,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
               <label className="form-field"><span>Work Order Number</span><input value={stagingForm.workOrderNumber} onChange={event=>setStagingForm({...stagingForm,workOrderNumber:event.target.value})} /></label>
               <label className="form-field"><span>Priority</span><select value={stagingForm.priority} onChange={event=>setStagingForm({...stagingForm,priority:event.target.value as StagingPriority})}><option>Critical</option><option>High</option><option>Normal</option><option>Low</option></select></label>
               <label className="form-field"><span>Requested By</span><input value={stagingForm.requestedBy} onChange={event=>setStagingForm({...stagingForm,requestedBy:event.target.value})} /></label>
-              <label className="form-field"><span>Needed-by Date</span><input type="date" value={stagingForm.neededByDate} onChange={event=>setStagingForm({...stagingForm,neededByDate:event.target.value})} /></label>
+              <MccDateInput label="Needed-by Date" value={stagingForm.neededByDate} onChange={value=>setStagingForm({...stagingForm,neededByDate:value})} />
               <label className="form-field"><span>Status</span><select value={stagingForm.status} onChange={event=>setStagingForm({...stagingForm,status:event.target.value as StagingStatus})}><option>Need to Order</option><option>Ready for Requisition</option></select></label>
               <label className="form-field staging-editor-wide"><span>Notes</span><textarea value={stagingForm.notes} onChange={event=>setStagingForm({...stagingForm,notes:event.target.value})} /></label>
             </div>
