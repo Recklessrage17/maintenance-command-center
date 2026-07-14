@@ -3163,15 +3163,15 @@ function activeStagingForPart(partId: number) {
 function isOpenRequisitionStagingStatus(status: RequisitionStagingStatus) {
   return status === 'Need to Order' || status === 'Ready for Requisition';
 }
-function requisitionStagingList(search = '', includeRemoved = false) {
-  const where = includeRemoved ? ['1=1'] : ["status<>'Removed / Canceled'"];
+function requisitionStagingList(search = '') {
+  const where = ["status IN ('Need to Order','Ready for Requisition')"];
   const params: SqlParam[] = [];
   if (search.trim()) {
     const like = `%${escapeLike(search.trim())}%`;
     where.push("(part_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR description LIKE ? ESCAPE '\\' COLLATE NOCASE OR vendor_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR supplier_part_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR location_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR asset_machine LIKE ? ESCAPE '\\' COLLATE NOCASE OR work_order_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR requested_by LIKE ? ESCAPE '\\' COLLATE NOCASE OR notes LIKE ? ESCAPE '\\' COLLATE NOCASE OR created_requisition_number LIKE ? ESCAPE '\\' COLLATE NOCASE)");
     params.push(like,like,like,like,like,like,like,like,like,like);
   }
-  return all<RequisitionStagingRow>(`SELECT * FROM requisition_staging_items WHERE ${where.join(' AND ')} ORDER BY CASE status WHEN 'Ready for Requisition' THEN 1 WHEN 'Need to Order' THEN 2 WHEN 'Requisition Created' THEN 3 WHEN 'Ordered' THEN 4 ELSE 5 END, CASE priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END, date_added DESC,id DESC`, params).map(publicRequisitionStagingItem);
+  return all<RequisitionStagingRow>(`SELECT * FROM requisition_staging_items WHERE ${where.join(' AND ')} ORDER BY CASE status WHEN 'Ready for Requisition' THEN 1 ELSE 2 END, CASE priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END, date_added DESC,id DESC`, params).map(publicRequisitionStagingItem);
 }
 function dateOnlyInput(value: unknown, label: string) {
   const clean = cleanPdfText(value);
@@ -3204,8 +3204,7 @@ function validateRequisitionStagingInput(body: unknown, existing?: RequisitionSt
   const priority = field(['priority'], existing?.priority ?? 'Normal') as RequisitionStagingPriority;
   if (!requisitionStagingPriorities.includes(priority)) throw new Error('Priority is invalid.');
   const status = field(['status'], existing?.status ?? 'Need to Order') as RequisitionStagingStatus;
-  if (!requisitionStagingStatuses.includes(status)) throw new Error('Staging status is invalid.');
-  if (existing?.created_requisition_id && ['Need to Order','Ready for Requisition'].includes(status)) throw new Error('A linked staged item cannot be moved back to an open status.');
+  if (!requisitionStagingStatuses.includes(status) || !isOpenRequisitionStagingStatus(status)) throw new Error('Staging status is invalid.');
   return {
     inventoryPartId,
     partNumber,
@@ -3223,44 +3222,6 @@ function validateRequisitionStagingInput(body: unknown, existing?: RequisitionSt
     neededByDate: dateOnlyInput(input.neededByDate ?? input.needed_by_date ?? existing?.needed_by_date ?? '', 'Needed-by date'),
     status,
   };
-}
-function recordRequisitionStagingHistory(input: { action: string; actor: User; row: RequisitionStagingRow; oldValue?: Record<string, unknown> | null; reasonNote?: string }) {
-  recordHistoryLog({
-    section: 'requisitions',
-    action: input.action,
-    entityType: 'requisition_staging_item',
-    entityId: input.row.id,
-    entityLabel: input.row.part_number,
-    workOrderNumber: input.row.work_order_number,
-    partNumber: input.row.part_number,
-    requisitionNumber: input.row.created_requisition_number,
-    locationName: input.row.location_name,
-    vendorName: input.row.vendor_name,
-    oldValue: input.oldValue,
-    newValue: publicRequisitionStagingItem(input.row),
-    quantityAfter: input.row.quantity_requested,
-    reasonNote: input.reasonNote,
-    actor: input.actor,
-  });
-}
-function syncLinkedStagingForRequisitionStatus(input: { requisitionId: number; nextStatus: RequisitionStatus; actor: User; timestamp: string; reasonNote?: string }) {
-  const linkedRows = all<RequisitionStagingRow>('SELECT * FROM requisition_staging_items WHERE created_requisition_id=?', [input.requisitionId]);
-  if (!linkedRows.length) return;
-  if (input.nextStatus === 'Ordered') {
-    run("UPDATE requisition_staging_items SET status='Ordered',updated_by_user_id=?,updated_at=? WHERE created_requisition_id=?", [input.actor.id,input.timestamp,input.requisitionId]);
-  } else if (input.nextStatus === 'Canceled') {
-    run("UPDATE requisition_staging_items SET status='Removed / Canceled',removed_by_user_id=?,removed_at=?,updated_by_user_id=?,updated_at=? WHERE created_requisition_id=?", [input.actor.id,input.timestamp,input.actor.id,input.timestamp,input.requisitionId]);
-  }
-  for (const linked of linkedRows) {
-    const updated = requisitionStagingById(linked.id);
-    if (!updated) continue;
-    const action = input.nextStatus === 'Ordered'
-      ? 'staged_requisition_marked_ordered'
-      : input.nextStatus === 'Received'
-        ? 'staged_requisition_marked_received'
-        : 'staged_requisition_canceled';
-    recordRequisitionStagingHistory({action,actor:input.actor,row:updated,oldValue:publicRequisitionStagingItem(linked),reasonNote:input.reasonNote});
-  }
 }
 function activeRequisitionForPart(partId: number) {
   return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT r.requisition_number,r.status
@@ -4978,10 +4939,7 @@ function createRequisitionsFromStaging(req: AuthRequest, actor: User, input: Rec
       run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
         requisitionId,row.inventory_part_id ?? 0,row.part_number,row.description,row.vendor_name,row.location_name,row.quantity_requested,row.unit_cost,'EA',row.supplier_part_number || row.part_number,row.notes,timestamp,timestamp,
       ]);
-      const oldValue = publicRequisitionStagingItem(row);
-      run("UPDATE requisition_staging_items SET status='Requisition Created',created_requisition_id=?,created_requisition_number=?,updated_by_user_id=?,updated_at=? WHERE id=?", [requisitionId,requisitionNumber,actor.id,timestamp,row.id]);
-      const updatedStaging = requisitionStagingById(row.id)!;
-      recordRequisitionStagingHistory({action:'requisition_created_from_staging',actor,row:updatedStaging,oldValue});
+      run('DELETE FROM requisition_staging_items WHERE id=?', [row.id]);
     }
     const historyRow = requisitionById(requisitionId, { includeDeleted: true });
     if (historyRow) recordRequisitionHistory({action:'requested_from_staging',actor,row:historyRow,newValue:requisitionHistoryValue(historyRow),createdAt:timestamp});
@@ -6974,9 +6932,8 @@ app.get('/api/settings/network-links', requireAuth, requirePermission('settings.
 });
 app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
   try {
-    const includeRemoved = String(req.query.includeRemoved ?? '').toLowerCase() === 'true';
-    const items = requisitionStagingList(queryText(req.query.search ?? req.query.q), includeRemoved);
-    res.json({ok:true,items,openCount:items.filter(item=>['Need to Order','Ready for Requisition'].includes(item.status)).length});
+    const items = requisitionStagingList(queryText(req.query.search ?? req.query.q));
+    res.json({ok:true,items,openCount:items.length});
   } catch (error) {
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
@@ -6997,10 +6954,6 @@ app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.w
         input.inventoryPartId,input.partNumber,input.description,input.vendor,input.supplierPartNumber,input.quantityRequested,input.unitCost,input.location,input.assetMachine,input.workOrderNumber,input.priority,input.notes,input.requestedBy || actor.full_name,timestamp,input.neededByDate || null,input.status,actor.id,actor.id,timestamp,timestamp,
       ]);
       itemId = Number(result.lastInsertRowid);
-      const row = requisitionStagingById(itemId)!;
-      recordRequisitionStagingHistory({action:'staged_item_added',actor,row});
-      inventoryAudit(req,'staged item added','requisition_staging_item',itemId,{inventoryPartId:input.inventoryPartId,partNumber:input.partNumber,quantityRequested:input.quantityRequested});
-      audit(req,'requisition staged item added','requisition_staging_item',itemId,{inventoryPartId:input.inventoryPartId,partNumber:input.partNumber,quantityRequested:input.quantityRequested});
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -7030,10 +6983,6 @@ app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('invent
       run(`UPDATE requisition_staging_items SET inventory_part_id=?,part_number=?,description=?,vendor_name=?,supplier_part_number=?,quantity_requested=?,unit_cost=?,location_name=?,asset_machine=?,work_order_number=?,priority=?,notes=?,requested_by=?,needed_by_date=?,status=?,updated_by_user_id=?,updated_at=? WHERE id=?`, [
         input.inventoryPartId,input.partNumber,input.description,input.vendor,input.supplierPartNumber,input.quantityRequested,input.unitCost,input.location,input.assetMachine,input.workOrderNumber,input.priority,input.notes,input.requestedBy || actor.full_name,input.neededByDate || null,input.status,actor.id,timestamp,itemId,
       ]);
-      const updated = requisitionStagingById(itemId)!;
-      recordRequisitionStagingHistory({action:'staged_item_edited',actor,row:updated,oldValue:publicRequisitionStagingItem(existing)});
-      inventoryAudit(req,'staged item edited','requisition_staging_item',itemId,{partNumber:updated.part_number,status:updated.status});
-      audit(req,'requisition staged item edited','requisition_staging_item',itemId,{partNumber:updated.part_number,status:updated.status});
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -7045,28 +6994,43 @@ app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /already staged/i.test(message) ? 409 : /required|must|invalid/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
-  const actor = req.user!;
-  const itemId = Number(req.params.id);
+app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   try {
-    const existing = requisitionStagingById(itemId);
-    if (!existing) throw new Error('Staged item not found.');
-    if (existing.status === 'Removed / Canceled') return res.json({ok:true,item:publicRequisitionStagingItem(existing)});
-    if (!isOpenRequisitionStagingStatus(existing.status)) throw new Error('Only open staged items can be removed.');
-    const timestamp = now();
+    const input = isRecord(req.body) ? req.body : {};
+    const ids = Array.isArray(input.ids) ? uniquePositiveIds(input.ids.map(value=>Number(value))) : [];
+    if (!ids.length) throw new Error('Select at least one staged item.');
+    const placeholders = ids.map(()=>'?').join(',');
+    let removedCount = 0;
     db.exec('BEGIN IMMEDIATE');
     try {
-      run("UPDATE requisition_staging_items SET status='Removed / Canceled',removed_by_user_id=?,removed_at=?,updated_by_user_id=?,updated_at=? WHERE id=?", [actor.id,timestamp,actor.id,timestamp,itemId]);
-      const updated = requisitionStagingById(itemId)!;
-      recordRequisitionStagingHistory({action:'staged_item_removed',actor,row:updated,oldValue:publicRequisitionStagingItem(existing),reasonNote:textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason'])});
-      inventoryAudit(req,'staged item removed','requisition_staging_item',itemId,{partNumber:existing.part_number});
-      audit(req,'requisition staged item removed','requisition_staging_item',itemId,{partNumber:existing.part_number});
+      const result = run(`DELETE FROM requisition_staging_items WHERE id IN (${placeholders}) AND status IN ('Need to Order','Ready for Requisition')`, ids);
+      removedCount = Number(result.changes);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
     }
-    res.json({ok:true,item:publicRequisitionStagingItem(requisitionStagingById(itemId)!)});
+    res.json({ok:true,removedCount});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/select/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const itemId = Number(req.params.id);
+  try {
+    const existing = requisitionStagingById(itemId);
+    if (!existing) throw new Error('Staged item not found.');
+    if (!isOpenRequisitionStagingStatus(existing.status)) throw new Error('Only open staged items can be removed.');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      run('DELETE FROM requisition_staging_items WHERE id=?', [itemId]);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.json({ok:true,removedId:itemId});
   } catch (error) {
     const message = safeErrorMessage(error);
     res.status(/not found/i.test(message) ? 404 : /only/i.test(message) ? 400 : 500).json({ok:false,error:message});
@@ -7322,7 +7286,6 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
       } else {
         run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', [nextStatus,actor.id,timestamp,cancelReason,timestamp,requisitionId]);
       }
-      syncLinkedStagingForRequisitionStatus({requisitionId,nextStatus,actor,timestamp,reasonNote:nextStatus === 'Canceled' ? cancelReason : ''});
       syncRequisitionPartFlags(partIds,timestamp);
       inventoryAudit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
       audit(req,'requisition status changed','requisition',requisitionId,{previousStatus,nextStatus});
@@ -7459,7 +7422,6 @@ app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('invent
         if (existing.status !== 'Requested' && existing.status !== 'Ordered') throw new Error('Only Requested or Ordered requisitions can be canceled.');
         const partIds = requisitionPartIds(existing);
         run('UPDATE inventory_requisitions SET status=?, canceled_by_user_id=?, canceled_at=?, cancel_reason=?, updated_at=? WHERE id=?', ['Canceled',actor.id,timestamp,reasonNote,timestamp,requisitionId]);
-        syncLinkedStagingForRequisitionStatus({requisitionId,nextStatus:'Canceled',actor,timestamp,reasonNote});
         syncRequisitionPartFlags(partIds,timestamp);
         inventoryAudit(req,'bulk requisition canceled','requisition',requisitionId,{requisitionNumber:existing.requisition_number});
         audit(req,'bulk requisition canceled','requisition',requisitionId,{requisitionNumber:existing.requisition_number});

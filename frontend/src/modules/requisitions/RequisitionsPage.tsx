@@ -73,13 +73,12 @@ type ReasonAction = {
   requisitions: Requisition[];
 };
 
-type StagingStatus = 'Need to Order' | 'Ready for Requisition' | 'Requisition Created' | 'Ordered' | 'Removed / Canceled';
+type StagingStatus = 'Need to Order' | 'Ready for Requisition';
 type StagingPriority = 'Critical' | 'High' | 'Normal' | 'Low';
 type StagingItem = {
   id: number; inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string;
   quantityRequested: number; unitCost: number; location: string; assetMachine: string; workOrderNumber: string; priority: StagingPriority;
   notes: string; requestedBy: string; dateAdded: string; neededByDate: string; status: StagingStatus;
-  createdRequisitionId: number | null; createdRequisitionNumber: string;
 };
 type InventoryOption = { id: string; partNumber: string; description: string; vendor: string; supplierPartNumber: string; unitCost: number | null; location: string; isInRequisitionStaging?: boolean };
 type StagingForm = {
@@ -212,7 +211,6 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [reasonSaving,setReasonSaving]=useState(false);
   const [stagingItems,setStagingItems]=useState<StagingItem[]>([]);
   const [stagingSearch,setStagingSearch]=useState('');
-  const [showRemovedStaging,setShowRemovedStaging]=useState(false);
   const [stagingSelectedIds,setStagingSelectedIds]=useState<Set<number>>(()=>new Set());
   const [stagingEditing,setStagingEditing]=useState<StagingItem|'new'|null>(null);
   const [stagingForm,setStagingForm]=useState<StagingForm>(()=>blankStagingForm(userFullName));
@@ -227,14 +225,12 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const canWrite = writeRoles.has(userRole);
   const canDelete = deleteRoles.has(userRole);
 
-  async function loadStaging(nextShowRemoved = showRemovedStaging) {
+  async function loadStaging() {
     setLoading(true);
     setNotice(null);
     try {
-      const params = new URLSearchParams();
-      if (nextShowRemoved) params.set('includeRemoved','true');
       const [result,summaryResult] = await Promise.all([
-        api<{items:StagingItem[]}>(`/api/requisition-staging?${params.toString()}`),
+        api<{items:StagingItem[]}>('/api/requisition-staging'),
         api<Summary & {ok:boolean}>('/api/requisitions/summary'),
       ]);
       setStagingItems(result.items ?? []);
@@ -333,7 +329,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const filteredStagingItems = useMemo(()=>{
     const needle = stagingSearch.trim().toLowerCase();
     if (!needle) return stagingItems;
-    return stagingItems.filter(item=>[item.partNumber,item.description,item.vendor,item.supplierPartNumber,item.location,item.assetMachine,item.workOrderNumber,item.priority,item.status,item.notes,item.requestedBy,item.createdRequisitionNumber].some(value=>String(value ?? '').toLowerCase().includes(needle)));
+    return stagingItems.filter(item=>[item.partNumber,item.description,item.vendor,item.supplierPartNumber,item.location,item.assetMachine,item.workOrderNumber,item.priority,item.status,item.notes,item.requestedBy].some(value=>String(value ?? '').toLowerCase().includes(needle)));
   },[stagingItems,stagingSearch]);
   const selectedStagingItems = useMemo(()=>stagingItems.filter(item=>stagingSelectedIds.has(item.id)&&['Need to Order','Ready for Requisition'].includes(item.status)),[stagingItems,stagingSelectedIds]);
   const inventoryMatches = useMemo(()=>{
@@ -454,17 +450,34 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   async function removeStagingItem(item: StagingItem) {
-    if (!canWrite || !window.confirm(`Remove ${item.partNumber} from the active staging list? Its audit trail will be preserved.`)) return;
+    if (!canWrite || !window.confirm('Remove this item from the staging list?')) return;
     setBusyId(item.id);
     try {
       await api(`/api/requisition-staging/${item.id}`, {method:'DELETE'});
       setStagingSelectedIds(current=>{const next=new Set(current);next.delete(item.id);return next;});
       await Promise.all([loadStaging(),loadInventoryOptions()]);
-      setNotice({kind:'success',text:`${item.partNumber} removed from the active staging list.`});
+      setNotice({kind:'success',text:`${item.partNumber} removed from the staging list.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function clearSelectedStagingItems() {
+    const ids = selectedStagingItems.map(item=>item.id);
+    if (!canWrite || !ids.length || !window.confirm(`Remove ${ids.length} selected item${ids.length===1?'':'s'} from the staging list?`)) return;
+    setStagingSaving(true);
+    setNotice(null);
+    try {
+      const result = await api<{removedCount:number}>('/api/requisition-staging/clear-selected',{method:'POST',body:JSON.stringify({ids})});
+      setStagingSelectedIds(new Set());
+      await Promise.all([loadStaging(),loadInventoryOptions()]);
+      setNotice({kind:'success',text:`Removed ${result.removedCount} item${result.removedCount===1?'':'s'} from the staging list.`});
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setStagingSaving(false);
     }
   }
 
@@ -502,7 +515,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       const result = await api<{requisitions:StagingCreateResult[]}>('/api/requisition-staging/create-requisitions',{method:'POST',body:JSON.stringify({...stagingReviewForm,stagingItemIds:selectedStagingItems.map(item=>item.id)})});
       setCreatedFromStaging(result.requisitions ?? []);
       setStagingSelectedIds(new Set());
-      await loadStaging();
+      await Promise.all([loadStaging(),loadInventoryOptions()]);
       setNotice({kind:'success',text:`Created ${result.requisitions?.length ?? 0} official vendor requisition${result.requisitions?.length === 1 ? '' : 's'} from staged items.`});
     } catch (err) {
       setStagingFormError((err as Error).message);
@@ -694,13 +707,12 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       {filter==='Requisition Staging'&&(
         <section className="mcc-card requisitions-table-card staging-list-card">
           <div className="staging-list-heading">
-            <div><p className="eyebrow">Purchase preparation</p><h3>Requisition Staging List</h3><p>Parts identified for purchase but not yet converted into an official requisition.</p></div>
+            <div><p className="eyebrow">Purchase preparation</p><h3>Requisition Staging List</h3><p>A working list of items to order later. Select items when you are ready to build a requisition.</p></div>
             {canWrite&&<button className="primary-button" type="button" onClick={()=>openNewStaging()}>Manually Add Item</button>}
           </div>
           <div className="staging-toolbar">
             <label className="form-field"><span>Search staged items</span><input value={stagingSearch} onChange={event=>setStagingSearch(event.target.value)} placeholder="Part, vendor, machine, WO#, status..." /></label>
             {canWrite&&<label className="form-field"><span>Search Inventory to add</span><input value={inventorySearch} onChange={event=>setInventorySearch(event.target.value)} placeholder="Part number, description, vendor..." /></label>}
-            <label className="show-deleted-toggle"><input type="checkbox" checked={showRemovedStaging} onChange={event=>{setShowRemovedStaging(event.target.checked);void loadStaging(event.target.checked);}} /><span>Show Removed / Canceled</span></label>
           </div>
           {canWrite&&inventoryMatches.length>0&&(
             <div className="staging-inventory-results">
@@ -710,7 +722,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
           <div className="requisition-selection-toolbar">
             <span>Selected: {selectedStagingItems.length}</span>
             <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!visibleSelectableStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
-            <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Clear Selection</button>
+            <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Unselect All</button>
+            {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>void clearSelectedStagingItems()} disabled={!selectedStagingItems.length||stagingSaving}>Clear Selected Items</button>}
             {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Create Requisition Draft</button>}
           </div>
           <div className="table-card requisitions-table-wrap staging-table-wrap">
@@ -725,7 +738,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                     <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>
                     <td><strong className="staging-part-number">{item.partNumber}</strong>{item.supplierPartNumber&&<small className="staging-supplier-number">Supplier: {item.supplierPartNumber}</small>}</td>
                     <td className="inventory-description-cell">{item.description}</td><td>{formatQuantity(item.quantityRequested)}</td><td>{item.vendor}</td><td>{item.location||'-'}</td><td>{item.assetMachine||'-'}</td><td>{item.workOrderNumber||'-'}</td><td>{item.neededByDate||'-'}</td><td>{item.requestedBy||'-'}</td>
-                    <td><div className="requisition-row-actions">{item.createdRequisitionNumber&&<button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(item.createdRequisitionNumber)}>Open {item.createdRequisitionNumber}</button>}{canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{canWrite&&selectable&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}</div></td>
+                    <td><div className="requisition-row-actions">{canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{canWrite&&selectable&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}</div></td>
                   </tr>;
                 })}
                 {!loading&&!filteredStagingItems.length&&<tr><td colSpan={13} className="empty-table-cell">No staged items match this view.</td></tr>}

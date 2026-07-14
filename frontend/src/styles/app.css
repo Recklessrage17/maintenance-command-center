@@ -1186,7 +1186,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .staging-list-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .staging-list-heading h3,.staging-list-heading p { margin: 0; }
 .staging-list-heading > div { display: grid; gap: 5px; }
-.staging-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) minmax(220px,1fr) auto; gap: 10px; align-items: end; }
+.staging-toolbar { display: grid; grid-template-columns: repeat(2,minmax(220px,1fr)); gap: 10px; align-items: end; }
 .staging-inventory-results { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 8px; padding: 10px; border: 1px solid rgba(68,215,255,.18); border-radius: 18px; background: rgba(4,18,34,.46); }
 .staging-inventory-results button { display: grid; gap: 3px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(143,205,233,.24); border-radius: 16px; color: #eafaff; background: rgba(10,32,55,.7); cursor: pointer; font: inherit; text-align: left; }
 .staging-inventory-results button:hover { border-color: rgba(54,229,170,.62); }
