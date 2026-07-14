@@ -3,7 +3,6 @@ import { RoleBadge } from '../components/RoleBadge';
 import { mccPageMetadata, type MccSection } from './pageMetadata';
 
 export type { MccSection };
-type LauncherMode = 'hover' | 'pinned' | null;
 type BrandingSettings = {
   companyName: string;
   companySubtitle: string;
@@ -66,17 +65,8 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  const [pageEntering,setPageEntering]=useState(false);
  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
  const launcherRef=useRef<HTMLDivElement>(null);
- const closeTimerRef=useRef<number>();
  const warpTimerRef=useRef<number>();
- const launcherModeRef=useRef<LauncherMode>(null);
  const inventoryFocus=activeSection==='inventory';
-
- function clearLauncherClose() {
-   if(closeTimerRef.current){
-     window.clearTimeout(closeTimerRef.current);
-     closeTimerRef.current=undefined;
-   }
- }
 
  function clearWarpTimer() {
    if(warpTimerRef.current){
@@ -86,40 +76,11 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  }
 
  function closeLauncher() {
-   clearLauncherClose();
-   launcherModeRef.current=null;
    setLauncherOpen(false);
  }
 
- function supportsHoverLauncher() {
-   return window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
- }
-
- function openLauncherByHover() {
-   if(!supportsHoverLauncher()) return;
-   clearLauncherClose();
-   if(launcherModeRef.current!=='pinned') {
-     launcherModeRef.current='hover';
-   }
-   setLauncherOpen(true);
- }
-
  function toggleLauncher() {
-   clearLauncherClose();
-   setLauncherOpen(current=>{
-     if(current&&launcherModeRef.current==='pinned') {
-       launcherModeRef.current=null;
-       return false;
-     }
-     launcherModeRef.current='pinned';
-     return true;
-   });
- }
-
- function scheduleLauncherClose() {
-   if(launcherModeRef.current==='pinned') return;
-   clearLauncherClose();
-   closeTimerRef.current=window.setTimeout(()=>closeLauncher(),420);
+   setLauncherOpen(current=>!current);
  }
 
  useEffect(()=>{
@@ -142,7 +103,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
    };
  },[launcherOpen]);
 
- useEffect(()=>()=>{ clearLauncherClose(); clearWarpTimer(); },[]);
+ useEffect(()=>()=>{ clearWarpTimer(); },[]);
 
  useEffect(()=>{
    setPageEntering(true);
@@ -180,7 +141,6 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
 
  function selectSection(section:MccSection) {
    if(warpingSection) return;
-   clearLauncherClose();
    clearWarpTimer();
    setWarpingSection(section);
    warpTimerRef.current=window.setTimeout(()=>{
@@ -192,7 +152,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
 
  return (
    <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell':'mcc-shell command-shell'}>
-     <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef} onMouseEnter={openLauncherByHover} onMouseLeave={scheduleLauncherClose}>
+     <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef}>
        <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
          <div className="mcc-brand-mark">
            {branding.logoMode==='image'&&branding.logoUrl ? (
@@ -203,11 +163,11 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
            <span>{branding.companySubtitle}</span>
          </div>
        </div>
-       <button className="command-launcher-button" type="button" aria-label={launcherOpen?'Close command menu':'Open command menu'} aria-haspopup="menu" aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onMouseEnter={openLauncherByHover} onClick={toggleLauncher}>
+       <button className="command-launcher-button" type="button" aria-label={launcherOpen?'Close command menu':'Open command menu'} aria-haspopup="menu" aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onClick={toggleLauncher}>
          <span className="launcher-gear" aria-hidden="true">⚙</span>
          <span>Menu</span>
        </button>
-       <nav className="command-menu" id="command-launcher-menu" aria-label="MCC navigation" onMouseEnter={openLauncherByHover} onMouseLeave={scheduleLauncherClose}>
+       <nav className="command-menu" id="command-launcher-menu" aria-label="MCC navigation">
          <div className="command-menu-heading">
            <div className="command-menu-title">
              <span>Command modules</span>

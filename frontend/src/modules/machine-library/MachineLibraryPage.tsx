@@ -2,6 +2,7 @@ import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type
 import { createPortal } from 'react-dom';
 import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, uploadMeasurementRecordFiles } from './MeasurementInspectionLogsTools';
+import { MachineComponentImageCard } from './MachineComponentImageCard';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAsset = {
@@ -484,7 +485,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,on
     }
   }
 
-  const sections: Array<{key:MachineDetailSectionKey;editableKey?:MachineDetailEditableSectionKey;title:string;summary:string;status?:ReactNode;actionLabel?:string;onAction?:()=>void;view:ReactNode;edit?:ReactNode}> = [
+  const sections: Array<{key:MachineDetailSectionKey;editableKey?:MachineDetailEditableSectionKey;title:string;summary:string;status?:ReactNode;actionLabel?:string;onAction?:()=>void;view:ReactNode;edit?:ReactNode;image?:ReactNode}> = [
     {
       key: 'basic',
       editableKey: 'basic',
@@ -509,6 +510,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,on
       status: <DetailStatusPill status={screwCondition} />,
       view: <><DetailItem label="Screw Type" value={detailValue(currentAsset.screwType)} /><DetailItem label="Screw Installed Date" value={detailValue(currentAsset.screwInstalledDate)} /><DetailItem label="Screw Length" value={detailValue(currentAsset.screwLength)} /><DetailItem label="Screw Rebuild / Repaired" value={detailValue(currentAsset.screwRebuildRepaired)} /><ConditionBadge label="Screw condition" status={screwCondition} /></>,
       edit: <><Text label="Screw Type" value={draft.screwType} set={v=>setDraftField('screwType',v)} disabled={!canEdit}/><DateWithAge label="Screw Installed Date" value={draft.screwInstalledDate} set={v=>setDraftField('screwInstalledDate',v)} disabled={!canEdit}/><UnitDimensionField label="Screw Length" value={draft.screwLength} set={v=>setDraftField('screwLength',v)} disabled={!canEdit}/><ComponentConditionEditor rebuildLabel="Screw Rebuild / Repaired" conditionLabel="Screw Condition" rebuild={draft.screwRebuildRepaired} condition={draft.screwConditionStatus} setRebuild={v=>setDraftField('screwRebuildRepaired',v)} setCondition={v=>setDraftField('screwConditionStatus',v)} disabled={!canEdit}/></>,
+      image: <MachineComponentImageCard assetId={currentAsset.id} assetNumber={currentAsset.assetNumber} assetName={currentAsset.assetName} componentType="screw" componentName="Screw" canEdit={canEdit} />,
     },
     {
       key: 'screwTip',
@@ -517,6 +519,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,on
       summary: detailSummary(currentAsset.screwTipType || 'Type unknown', currentAsset.screwTipInstalledDate || 'Installed date unknown'),
       view: <><DetailItem label="Screw Tip Type" value={detailValue(currentAsset.screwTipType)} /><DetailItem label="Screw Tip Installed Date" value={detailValue(currentAsset.screwTipInstalledDate)} /></>,
       edit: <><Text label="Screw Tip Type" value={draft.screwTipType} set={v=>setDraftField('screwTipType',v)} disabled={!canEdit}/><DateWithAge label="Screw Tip Installed Date" value={draft.screwTipInstalledDate} set={v=>setDraftField('screwTipInstalledDate',v)} disabled={!canEdit}/></>,
+      image: <MachineComponentImageCard assetId={currentAsset.id} assetNumber={currentAsset.assetNumber} assetName={currentAsset.assetName} componentType="screw-tip" componentName="Screw Tip" canEdit={canEdit} />,
     },
     {
       key: 'barrel',
@@ -626,13 +629,13 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,on
         const isOpen = isEditing || openSection === section.key;
         const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
-        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
     </div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section></div>;
 }
-function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,error,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;children:ReactNode}) {
+function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,error,aside,children}:{sectionKey:MachineDetailSectionKey;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;aside?:ReactNode;children:ReactNode}) {
   const panelId = `machine-detail-panel-${sectionKey}`;
   return <article className={`machine-detail-accordion-card ${expanded ? 'is-open' : ''} ${editing ? 'is-editing' : ''}`}>
     <div className="machine-detail-accordion-header">
@@ -648,7 +651,7 @@ function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded
       </div>
     </div>
     <div className="machine-detail-accordion-panel" id={panelId} aria-hidden={!expanded}>
-      <div className={editing ? 'machine-detail-grid machine-detail-edit-grid' : 'machine-detail-grid'}>{children}</div>
+      <div className={aside?'machine-detail-section-layout has-component-image':'machine-detail-section-layout'}><div className={editing ? 'machine-detail-grid machine-detail-edit-grid' : 'machine-detail-grid'}>{children}</div>{aside&&<aside className="machine-detail-component-image-area">{aside}</aside>}</div>
       {error&&<p className="form-message error machine-section-error">{error}</p>}
     </div>
   </article>;
