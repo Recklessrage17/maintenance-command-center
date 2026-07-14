@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
@@ -226,6 +226,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [moveDestinationBatchId,setMoveDestinationBatchId]=useState<number|null>(null);
   const [moveSaving,setMoveSaving]=useState(false);
   const [moveError,setMoveError]=useState('');
+  const dragFromInteractiveControl=useRef(false);
   const [stagingSearch,setStagingSearch]=useState('');
   const [stagingSelectedIds,setStagingSelectedIds]=useState<Set<number>>(()=>new Set());
   const [stagingEditing,setStagingEditing]=useState<StagingItem|'new'|null>(null);
@@ -909,12 +910,13 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
           </>}
           <div className="table-card requisitions-table-wrap staging-table-wrap">
             <table className="requisition-staging-table">
-              <thead><tr><th>Move / Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
               <tbody>
                 {filteredStagingItems.map(item=>{
                   const selectable=['Need to Order','Ready for Requisition'].includes(item.status);
-                  return <tr key={item.id}>
-                    <td>{batchView==='active'?<div className="staging-select-cell"><span className="staging-drag-handle" draggable={selectable} role="img" aria-label={`Drag ${item.partNumber} to another Requisition Batch`} title="Drag to another Requisition Batch" onClick={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()} onDragStart={event=>{event.stopPropagation();event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id));setDraggedStagingItemId(item.id);setDragOverBatchId(null);}} onDragEnd={()=>{setDraggedStagingItemId(null);setDragOverBatchId(null);}}>&#8942;&#8942;</span><input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} /></div>:'-'}</td>
+                  const draggable=batchView==='active'&&selectable;
+                  return <tr className={draggable?`staging-draggable-row${draggedStagingItemId===item.id?' dragging':''}`:''} key={item.id} draggable={draggable} onPointerDownCapture={event=>{dragFromInteractiveControl.current=Boolean((event.target as Element).closest('button,input,select,textarea,a,label,[contenteditable="true"]'));}} onDragStart={event=>{if(dragFromInteractiveControl.current){event.preventDefault();dragFromInteractiveControl.current=false;return;}event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id));setDraggedStagingItemId(item.id);setDragOverBatchId(null);}} onDragEnd={()=>{dragFromInteractiveControl.current=false;setDraggedStagingItemId(null);setDragOverBatchId(null);}}>
+                    <td>{batchView==='active'?<input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} />:'-'}</td>
                     <td><span className={`staging-priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span></td>
                     <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>
                     <td><strong className="staging-part-number">{item.partNumber}</strong>{item.supplierPartNumber&&<small className="staging-supplier-number">Supplier: {item.supplierPartNumber}</small>}</td>
