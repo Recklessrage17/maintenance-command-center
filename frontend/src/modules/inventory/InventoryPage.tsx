@@ -19,6 +19,9 @@ type InventoryPart = {
   orderPlaced: boolean;
   hasActiveRequisitionRecord: boolean;
   activeRequisitionNumber?: string;
+  isInRequisitionStaging: boolean;
+  requisitionStagingItemId?: number | null;
+  requisitionStagingStatus?: string;
   partInfoUrl: string;
   manufacturerBrand: string;
   unitCost: number | null;
@@ -146,8 +149,8 @@ const blankForm: PartForm = {
   description: '',
   location: '',
   vendor: '',
-  quantity: '0',
-  minQuantity: '0',
+  quantity: '',
+  minQuantity: '',
   partInfoUrl: '',
   manufacturerBrand: '',
   unitCost: '',
@@ -332,8 +335,11 @@ function validateForm(form: PartForm) {
   if (!form.unitCost.trim()) return 'Unit Cost is required.';
   if (!Number.isFinite(Number(form.unitCost))) return 'Unit Cost must be numeric.';
   if (Number(form.unitCost) < 0) return 'Unit Cost cannot be negative.';
+  if (!form.quantity.trim()) return 'Quantity is required.';
   if (!Number.isFinite(Number(form.quantity))) return 'Quantity must be numeric.';
-  if (!Number.isFinite(Number(form.minQuantity))) return 'Minimum Quantity must be numeric.';
+  if (Number(form.quantity) < 0) return 'Quantity cannot be negative.';
+  if (form.minQuantity.trim() && !Number.isFinite(Number(form.minQuantity))) return 'Minimum Quantity must be numeric.';
+  if (form.minQuantity.trim() && Number(form.minQuantity) < 0) return 'Minimum Quantity cannot be negative.';
   if (form.partInfoUrl.trim() && !validUrl(form.partInfoUrl.trim())) return 'Part Info URL must be blank or a valid http/https URL.';
   if (form.leadTime.length > 120) return 'Lead Time must be 120 characters or less.';
   if (form.importantNote.length > 500) return 'Important Note must be 500 characters or less.';
@@ -409,7 +415,7 @@ function payloadFromForm(form: PartForm) {
     location: form.location.trim(),
     vendor: form.vendor.trim(),
     quantity: Number(form.quantity),
-    minQuantity: Number(form.minQuantity),
+    minQuantity: form.minQuantity.trim() ? Number(form.minQuantity) : 0,
     partInfoUrl: form.partInfoUrl.trim(),
     manufacturerBrand: form.manufacturerBrand.trim(),
     unitCost: form.unitCost.trim() ? Number(form.unitCost) : 0,
@@ -441,6 +447,10 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [form,setForm]=useState<PartForm>(blankForm);
   const [formError,setFormError]=useState('');
   const [saving,setSaving]=useState(false);
+  const [stagingPart,setStagingPart]=useState<InventoryPart|null>(null);
+  const [stagingQuantity,setStagingQuantity]=useState('');
+  const [stagingError,setStagingError]=useState('');
+  const [stagingSaving,setStagingSaving]=useState(false);
   const [toolsBusy,setToolsBusy]=useState('');
   const [toolsOpen,setToolsOpen]=useState(false);
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
@@ -917,6 +927,47 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     setFormError('');
   }
 
+  function openStaging(part: InventoryPart) {
+    if (!writeEnabled) return;
+    setStagingPart(part);
+    setStagingQuantity('');
+    setStagingError('');
+    setNotice(null);
+  }
+
+  function closeStaging(force = false) {
+    if (stagingSaving && !force) return;
+    setStagingPart(null);
+    setStagingQuantity('');
+    setStagingError('');
+  }
+
+  async function submitStaging(event: FormEvent) {
+    event.preventDefault();
+    if (!stagingPart) return;
+    const quantity = Number(stagingQuantity);
+    if (!stagingQuantity.trim() || !Number.isFinite(quantity) || quantity <= 0) {
+      setStagingError('Quantity Needed must be a positive number.');
+      return;
+    }
+    setStagingSaving(true);
+    setStagingError('');
+    try {
+      const updating = Boolean(stagingPart.isInRequisitionStaging && stagingPart.requisitionStagingItemId);
+      await api(updating ? `/api/requisition-staging/${stagingPart.requisitionStagingItemId}` : '/api/requisition-staging', {
+        method: updating ? 'PATCH' : 'POST',
+        body: JSON.stringify({inventoryPartId:Number(stagingPart.id),quantityRequested:quantity,status:'Need to Order'}),
+      });
+      closeStaging(true);
+      showNotice('success', updating ? `Updated staged quantity for ${stagingPart.partNumber}.` : `${stagingPart.partNumber} added to Requisition Staging List.`);
+      await refresh();
+    } catch (err) {
+      setStagingError((err as Error).message);
+    } finally {
+      setStagingSaving(false);
+    }
+  }
+
   async function submitForm(event: FormEvent){
     event.preventDefault();
     const validation = validateForm(form);
@@ -1318,6 +1369,11 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                         <div className="inventory-row-actions">
                           <button className={selectedPartIds.has(part.id) ? 'secondary-button compact-button selected' : 'secondary-button compact-button'} type="button" onClick={()=>togglePartSelection(part.id)} disabled={!writeEnabled}>{selectedPartIds.has(part.id) ? 'Selected' : 'Select'}</button>
                           <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
+                          <button className="secondary-button compact-button inventory-stage-button" type="button" onClick={()=>openStaging(part)} disabled={!writeEnabled}>
+                            <span className="inventory-stage-label-full">Add to Requisition Staging</span>
+                            <span className="inventory-stage-label-short">Stage for Requisition</span>
+                          </button>
+                          {part.isInRequisitionStaging&&<span className="inventory-staged-pill" title={part.requisitionStagingStatus || 'In Requisition Staging List'}>Staged</span>}
                           {part.hasActiveRequisitionRecord&&<span className="row-requisition-note" title={part.activeRequisitionNumber || undefined}>Active req</span>}
                         </div>
                       </td>
@@ -1343,55 +1399,42 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
               <button className="link-button compact-button" type="button" onClick={()=>closeModal()}>Close</button>
             </div>
 
-            <div className="inventory-form-grid">
-              <label className="form-field">
-                <span>Part Number <b className="required-marker" aria-label="required">*</b></span>
-                <input value={form.partNumber} onChange={event=>setForm({...form,partNumber:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Description <b className="required-marker" aria-label="required">*</b></span>
-                <input value={form.description} onChange={event=>setForm({...form,description:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Location</span>
-                <input list="native-location-options" value={form.location} onChange={event=>setForm({...form,location:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Vendor <b className="required-marker" aria-label="required">*</b></span>
-                <input list="native-vendor-options" value={form.vendor} onChange={event=>setForm({...form,vendor:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Manufacturer / Brand</span>
-                <input value={form.manufacturerBrand} onChange={event=>setForm({...form,manufacturerBrand:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Supplier Part #</span>
-                <input value={form.supplierPartNumber} onChange={event=>setForm({...form,supplierPartNumber:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Unit Cost <b className="required-marker" aria-label="required">*</b></span>
-                <input inputMode="decimal" value={form.unitCost} onChange={event=>setForm({...form,unitCost:event.target.value})} placeholder="0.00" />
-              </label>
-              <label className="form-field">
-                <span>Quantity</span>
-                <input inputMode="decimal" value={form.quantity} onChange={event=>setForm({...form,quantity:event.target.value})} />
-              </label>
-              <label className="form-field">
-                <span>Minimum Quantity</span>
-                <input inputMode="decimal" value={form.minQuantity} onChange={event=>setForm({...form,minQuantity:event.target.value})} />
-              </label>
-              <label className="form-field inventory-form-wide">
-                <span>Part Info URL</span>
-                <input value={form.partInfoUrl} onChange={event=>setForm({...form,partInfoUrl:event.target.value})} placeholder="https://..." />
-              </label>
-              <label className="form-field">
-                <span>Lead Time</span>
-                <input value={form.leadTime} onChange={event=>setForm({...form,leadTime:event.target.value})} placeholder="2 - 3 weeks" />
-              </label>
-              <label className="form-field inventory-form-wide">
-                <span>Important Note</span>
-                <textarea value={form.importantNote} onChange={event=>setForm({...form,importantNote:event.target.value})} placeholder="Important note shown in red under description" />
-              </label>
+            <div className="inventory-form-sections">
+              <fieldset className="inventory-form-section">
+                <legend>Part Identity</legend>
+                <div className="inventory-form-grid">
+                  <label className="form-field"><span>Part Number <b className="required-marker" aria-label="required">*</b></span><input value={form.partNumber} onChange={event=>setForm({...form,partNumber:event.target.value})} /></label>
+                  <label className="form-field"><span>Description <b className="required-marker" aria-label="required">*</b></span><input value={form.description} onChange={event=>setForm({...form,description:event.target.value})} /></label>
+                  <label className="form-field"><span>Manufacturer / Brand</span><input value={form.manufacturerBrand} onChange={event=>setForm({...form,manufacturerBrand:event.target.value})} /></label>
+                  <label className="form-field"><span>Part Info URL</span><input value={form.partInfoUrl} onChange={event=>setForm({...form,partInfoUrl:event.target.value})} placeholder="https://..." /></label>
+                </div>
+              </fieldset>
+              <fieldset className="inventory-form-section">
+                <legend>Vendor / Supplier</legend>
+                <div className="inventory-form-grid">
+                  <label className="form-field"><span>Vendor <b className="required-marker" aria-label="required">*</b></span><input list="native-vendor-options" value={form.vendor} onChange={event=>setForm({...form,vendor:event.target.value})} /></label>
+                  <label className="form-field"><span>Supplier Part #</span><input value={form.supplierPartNumber} onChange={event=>setForm({...form,supplierPartNumber:event.target.value})} /></label>
+                </div>
+              </fieldset>
+              <fieldset className="inventory-form-section">
+                <legend>Stock / Cost</legend>
+                <div className="inventory-form-grid inventory-numeric-grid">
+                  <label className="form-field"><span>Quantity <b className="required-marker" aria-label="required">*</b></span><input inputMode="decimal" value={form.quantity} onFocus={event=>event.currentTarget.select()} onChange={event=>setForm({...form,quantity:event.target.value})} placeholder="Enter quantity" /></label>
+                  <label className="form-field"><span>Minimum Quantity</span><input inputMode="decimal" value={form.minQuantity} onFocus={event=>event.currentTarget.select()} onChange={event=>setForm({...form,minQuantity:event.target.value})} placeholder="0" /></label>
+                  <label className="form-field"><span>Unit Cost <b className="required-marker" aria-label="required">*</b></span><input inputMode="decimal" value={form.unitCost} onFocus={event=>event.currentTarget.select()} onChange={event=>setForm({...form,unitCost:event.target.value})} placeholder="0.00" /></label>
+                </div>
+              </fieldset>
+              <fieldset className="inventory-form-section">
+                <legend>Purchasing Details</legend>
+                <div className="inventory-form-grid">
+                  <label className="form-field"><span>Location</span><input list="native-location-options" value={form.location} onChange={event=>setForm({...form,location:event.target.value})} /></label>
+                  <label className="form-field"><span>Lead Time</span><input value={form.leadTime} onChange={event=>setForm({...form,leadTime:event.target.value})} placeholder="2 - 3 weeks" /></label>
+                </div>
+              </fieldset>
+              <fieldset className="inventory-form-section">
+                <legend>Notes</legend>
+                <label className="form-field"><span>Important Note</span><textarea value={form.importantNote} onChange={event=>setForm({...form,importantNote:event.target.value})} placeholder="Important note shown in red under description" /></label>
+              </fieldset>
             </div>
 
             <datalist id="native-location-options">
@@ -1405,6 +1448,31 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeModal()}>Cancel</button>
               <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':modal==='edit'?'Save Changes':'Add Part'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {stagingPart&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeStaging(); }}>
+          <form className="mcc-card staging-quantity-modal" onSubmit={submitStaging}>
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Requisition Staging List</p>
+                <h3>{stagingPart.partNumber}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>closeStaging()}>Close</button>
+            </div>
+            <p>{stagingPart.description}</p>
+            {stagingPart.isInRequisitionStaging&&<p className="staging-duplicate-warning" role="status">This part is already staged. Enter a new quantity to update the existing staged item.</p>}
+            <label className="form-field">
+              <span>Quantity Needed <b className="required-marker" aria-label="required">*</b></span>
+              <input inputMode="decimal" value={stagingQuantity} onChange={event=>setStagingQuantity(event.target.value)} placeholder="Enter quantity needed" autoFocus />
+            </label>
+            {stagingError&&<p className="form-message error">{stagingError}</p>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={()=>closeStaging()}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Saving...':stagingPart.isInRequisitionStaging?'Update Staged Quantity':'Add to Staging List'}</button>
             </div>
           </form>
         </div>

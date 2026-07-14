@@ -1162,6 +1162,69 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 620px) { .share-card-heading, .share-url-row { grid-template-columns: 1fr; } .share-card-heading { display: grid; } .share-url-row .compact-button, .share-card-heading .compact-button { justify-self: start; } }
 @media (max-width: 480px) { .command-launcher { left: 8px; right: 8px; top: 8px; gap: 8px; } .command-brand { flex: 1 1 auto; min-width: 0; min-height: 54px; padding-left: 14px; } .command-brand .mcc-brand-mark > span { font-size: .56rem; } .command-launcher-button { width: 58px; min-height: 58px; border-radius: 16px; } .launcher-gear { width: 31px; height: 31px; font-size: 1.16rem; } .command-menu { top: 66px; max-height: calc(100vh - 82px); padding: 12px; border-radius: 18px; } .command-menu-heading { padding-bottom: 11px; } .command-menu-user { align-items: stretch; flex-wrap: wrap; } .command-menu-user-main { flex: 1 1 180px; } .command-menu-item { min-height: 58px; border-radius: 14px; } .mcc-page-topbar { top: 72px; left: 8px; right: 8px; } .mcc-page-tooltip { top: 124px; left: 8px; right: 8px; } .mcc-main, .inventory-focus-shell .mcc-main { padding: 132px 8px 10px; } .page-stack { gap: 12px; } .page-heading { min-height: auto; padding: 14px 14px 14px 16px; border-radius: 0 14px 14px 0; } .auth-shell { padding: 12px; } .auth-card { padding: 18px; border-radius: 20px; } .inventory-table-card, .requisitions-table-card { padding: 10px; } .modal-backdrop { padding: var(--mcc-topbar-safe-offset) 10px var(--mcc-modal-bottom-safe); } .inventory-modal, .requisition-modal { max-height: var(--mcc-modal-available-height); } }
 @media (max-width: 420px) { .machine-spec-grid { grid-template-columns: 1fr; } }
+
+/* Inventory part editor and Requisition Staging List */
+.inventory-modal { width: min(980px, 100%); }
+.inventory-form-sections { display: grid; gap: 12px; min-height: 0; overflow-y: auto; padding: 2px 4px 4px; }
+.inventory-form-section { min-width: 0; margin: 0; padding: 14px; border: 1px solid rgba(68,215,255,.22); border-radius: 22px; background: linear-gradient(145deg, rgba(7,35,55,.72), rgba(4,16,29,.82)); box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 10px 24px rgba(0,0,0,.12); }
+.inventory-form-section legend { padding: 6px 13px; border: 1px solid rgba(54,229,170,.35); border-radius: 999px; color: #d9fff2; background: rgba(18,97,71,.34); font-size: .78rem; font-weight: 950; letter-spacing: .04em; text-transform: uppercase; }
+.inventory-form-section .inventory-form-grid { margin-top: 4px; }
+.inventory-numeric-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.staging-quantity-modal { width: min(520px,100%); }
+.staging-duplicate-warning { padding: 10px 13px; border: 1px solid rgba(255,211,111,.45); border-radius: 999px; color: #fff2c2 !important; background: rgba(91,70,19,.28); }
+.inventory-stage-label-short { display: none; }
+.inventory-staged-pill { display: inline-flex; align-items: center; min-height: 25px; padding: 0 9px; border: 1px solid rgba(54,229,170,.45); border-radius: 999px; color: #d9ffe9 !important; background: rgba(18,97,71,.32); font-size: .68rem; font-weight: 950; }
+
+.requisition-view-pills { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px; border: 1px solid rgba(143,205,233,.2); border-radius: 999px; background: rgba(4,18,34,.62); }
+.requisition-view-pills button { min-height: 38px; padding: 0 15px; border: 1px solid rgba(143,205,233,.28); border-radius: 999px; color: #dff7ff; background: rgba(10,32,55,.72); cursor: pointer; font: inherit; font-size: .78rem; font-weight: 950; }
+.requisition-view-pills button.active { color: #02111d; border-color: rgba(151,241,255,.72); background: linear-gradient(135deg,#49dcff,#36e5aa 55%,#1e6bff); box-shadow: 0 8px 22px rgba(68,215,255,.18); }
+.staging-list-card { display: grid; gap: 12px; }
+.staging-list-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.staging-list-heading h3,.staging-list-heading p { margin: 0; }
+.staging-list-heading > div { display: grid; gap: 5px; }
+.staging-toolbar { display: grid; grid-template-columns: minmax(220px,1fr) minmax(220px,1fr) auto; gap: 10px; align-items: end; }
+.staging-inventory-results { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 8px; padding: 10px; border: 1px solid rgba(68,215,255,.18); border-radius: 18px; background: rgba(4,18,34,.46); }
+.staging-inventory-results button { display: grid; gap: 3px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(143,205,233,.24); border-radius: 16px; color: #eafaff; background: rgba(10,32,55,.7); cursor: pointer; font: inherit; text-align: left; }
+.staging-inventory-results button:hover { border-color: rgba(54,229,170,.62); }
+.staging-inventory-results span,.staging-inventory-results small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staging-table-wrap { max-height: calc(100vh - 385px); }
+.staging-table-wrap table { min-width: 1520px; }
+.staging-supplier-number { display: block; margin-top: 4px; color: #91bfd0; white-space: nowrap; }
+.staging-priority-pill,.staging-status-pill { display: inline-flex; align-items: center; min-height: 27px; padding: 0 9px; border: 1px solid rgba(143,205,233,.3); border-radius: 999px; font-size: .68rem; font-weight: 950; white-space: nowrap; }
+.staging-priority-pill.priority-critical { color: #ffe3e7; border-color: rgba(255,117,138,.58); background: rgba(126,32,48,.48); }
+.staging-priority-pill.priority-high { color: #ffe3bd; border-color: rgba(255,160,90,.5); background: rgba(112,61,18,.42); }
+.staging-priority-pill.priority-normal { color: #dff7ff; border-color: rgba(68,215,255,.42); background: rgba(5,61,86,.4); }
+.staging-priority-pill.priority-low { color: #d9ffe9; border-color: rgba(54,229,170,.36); background: rgba(18,97,71,.28); }
+.staging-status-pill.status-ready-for-requisition,.staging-status-pill.status-requisition-created { color: #d9ffe9; border-color: rgba(54,229,170,.42); background: rgba(18,97,71,.3); }
+.staging-status-pill.status-need-to-order { color: #fff2c2; border-color: rgba(255,211,111,.48); background: rgba(91,70,19,.3); }
+.staging-status-pill.status-ordered { color: #dff7ff; border-color: rgba(68,215,255,.48); background: rgba(5,61,86,.42); }
+.staging-status-pill.status-removed-canceled { color: #ffe3e7; border-color: rgba(255,117,138,.52); background: rgba(126,32,48,.4); }
+.staging-editor-modal,.staging-review-modal { width: min(960px,100%); }
+.staging-editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; min-height: 0; }
+.staging-editor-wide { grid-column: 1/-1; }
+.staging-review-summary { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid rgba(68,215,255,.25); border-radius: 999px; background: rgba(5,61,86,.28); }
+.staging-review-items { display: grid; gap: 7px; max-height: 220px; overflow-y: auto; }
+.staging-review-items > div { display: grid; grid-template-columns: 120px 150px 90px minmax(180px,1fr); gap: 9px; align-items: center; padding: 9px 11px; border: 1px solid rgba(143,205,233,.16); border-radius: 16px; background: rgba(4,18,34,.48); }
+.staging-created-list { display: grid; gap: 9px; }
+.staging-created-list > div { display: grid; grid-template-columns: 160px minmax(200px,1fr) auto; gap: 10px; align-items: center; padding: 11px 13px; border: 1px solid rgba(54,229,170,.3); border-radius: 18px; background: rgba(18,97,71,.2); }
+.staging-created-list > div > div { display: flex; gap: 7px; }
+
+@media (max-width: 900px) {
+  .staging-toolbar { grid-template-columns: 1fr; }
+  .staging-list-heading,.staging-review-summary { align-items: stretch; flex-direction: column; }
+  .staging-editor-grid,.inventory-numeric-grid { grid-template-columns: 1fr; }
+  .staging-editor-wide { grid-column: auto; }
+  .staging-review-items > div { grid-template-columns: 1fr 1fr; }
+  .staging-created-list > div { grid-template-columns: 1fr; }
+  .staging-created-list > div > div { flex-wrap: wrap; }
+}
+@media (max-width: 620px) {
+  .requisition-view-pills { border-radius: 20px; }
+  .requisition-view-pills button { flex: 1 1 140px; }
+  .inventory-stage-label-full { display: none; }
+  .inventory-stage-label-short { display: inline; }
+  .staging-review-items > div { grid-template-columns: 1fr; }
+}
 .requisition-review-list { display: grid; gap: 8px; }
 .requisition-review-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 110px; gap: 10px; align-items: center; padding: 9px 10px; border: 1px solid rgba(85, 191, 236, 0.16); border-radius: 10px; background: rgba(4, 18, 34, 0.42); }
 .requisition-review-row strong { margin: 0; color: #f3fbff; font-size: .86rem; }

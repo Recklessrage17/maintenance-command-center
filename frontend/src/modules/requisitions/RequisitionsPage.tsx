@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
-type StatusFilter = 'All' | RequisitionStatus;
+type StatusFilter = 'Requisition Staging' | 'All' | RequisitionStatus;
 type Notice = { kind: 'success' | 'error'; text: string };
 
 type RequisitionLine = {
@@ -72,9 +72,26 @@ type ReasonAction = {
   requisitions: Requisition[];
 };
 
+type StagingStatus = 'Need to Order' | 'Ready for Requisition' | 'Requisition Created' | 'Ordered' | 'Removed / Canceled';
+type StagingPriority = 'Critical' | 'High' | 'Normal' | 'Low';
+type StagingItem = {
+  id: number; inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string;
+  quantityRequested: number; unitCost: number; location: string; assetMachine: string; workOrderNumber: string; priority: StagingPriority;
+  notes: string; requestedBy: string; dateAdded: string; neededByDate: string; status: StagingStatus;
+  createdRequisitionId: number | null; createdRequisitionNumber: string;
+};
+type InventoryOption = { id: string; partNumber: string; description: string; vendor: string; supplierPartNumber: string; unitCost: number | null; location: string; isInRequisitionStaging?: boolean };
+type StagingForm = {
+  inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string; quantityRequested: string;
+  unitCost: string; location: string; assetMachine: string; workOrderNumber: string; priority: StagingPriority; notes: string; requestedBy: string;
+  neededByDate: string; status: StagingStatus;
+};
+type StagingCreateResult = { id: number; requisitionNumber: string; vendorName: string; lineCount: number; pdfUrl: string };
+type StagingReviewForm = { poInitiator: string; requisitionedByName: string; taxExempt: ''|'No'|'Yes'; workOrderNumber: string; confirmedWith: string; materialCert: 'No'|'Yes'; shipVia: string; fob: 'Origin'|'Destination'; notes: string };
+
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const deleteRoles = new Set(['Admin','Manager']);
-const filters: StatusFilter[] = ['All','Requested','Ordered','Received','Canceled'];
+const filters: StatusFilter[] = ['Requisition Staging','Requested','Ordered','Received','Canceled','All'];
 const emptySummary: Summary = { requestedCount: 0, orderedCount: 0, receivedCount: 0, canceledCount: 0, activeCount: 0 };
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
@@ -158,10 +175,22 @@ function editFormFromRequisition(requisition: Requisition): EditForm {
   };
 }
 
-export function RequisitionsPage({ userRole }: { userRole: string }) {
+function blankStagingForm(requestedBy = ''): StagingForm {
+  return {inventoryPartId:null,partNumber:'',description:'',vendor:'',supplierPartNumber:'',quantityRequested:'',unitCost:'',location:'',assetMachine:'',workOrderNumber:'',priority:'Normal',notes:'',requestedBy,neededByDate:'',status:'Need to Order'};
+}
+
+function stagingFormFromItem(item: StagingItem): StagingForm {
+  return {inventoryPartId:item.inventoryPartId,partNumber:item.partNumber,description:item.description,vendor:item.vendor,supplierPartNumber:item.supplierPartNumber,quantityRequested:String(item.quantityRequested),unitCost:String(item.unitCost),location:item.location,assetMachine:item.assetMachine,workOrderNumber:item.workOrderNumber,priority:item.priority,notes:item.notes,requestedBy:item.requestedBy,neededByDate:item.neededByDate,status:item.status};
+}
+
+function blankStagingReviewForm(userFullName = ''): StagingReviewForm {
+  return {poInitiator:'',requisitionedByName:userFullName,taxExempt:'',workOrderNumber:'',confirmedWith:'',materialCert:'No',shipVia:'',fob:'Destination',notes:''};
+}
+
+export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: string; userFullName?: string }) {
   const [requisitions,setRequisitions]=useState<Requisition[]>([]);
   const [summary,setSummary]=useState<Summary>(emptySummary);
-  const [filter,setFilter]=useState<StatusFilter>('All');
+  const [filter,setFilter]=useState<StatusFilter>('Requisition Staging');
   const [search,setSearch]=useState('');
   const [loading,setLoading]=useState(true);
   const [notice,setNotice]=useState<Notice|null>(null);
@@ -180,11 +209,57 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
   const [reasonNote,setReasonNote]=useState('');
   const [reasonError,setReasonError]=useState('');
   const [reasonSaving,setReasonSaving]=useState(false);
+  const [stagingItems,setStagingItems]=useState<StagingItem[]>([]);
+  const [stagingSearch,setStagingSearch]=useState('');
+  const [showRemovedStaging,setShowRemovedStaging]=useState(false);
+  const [stagingSelectedIds,setStagingSelectedIds]=useState<Set<number>>(()=>new Set());
+  const [stagingEditing,setStagingEditing]=useState<StagingItem|'new'|null>(null);
+  const [stagingForm,setStagingForm]=useState<StagingForm>(()=>blankStagingForm(userFullName));
+  const [stagingFormError,setStagingFormError]=useState('');
+  const [stagingSaving,setStagingSaving]=useState(false);
+  const [inventoryOptions,setInventoryOptions]=useState<InventoryOption[]>([]);
+  const [inventorySearch,setInventorySearch]=useState('');
+  const [reviewingStaging,setReviewingStaging]=useState(false);
+  const [stagingReviewForm,setStagingReviewForm]=useState<StagingReviewForm>(()=>blankStagingReviewForm(userFullName));
+  const [createdFromStaging,setCreatedFromStaging]=useState<StagingCreateResult[]>([]);
 
   const canWrite = writeRoles.has(userRole);
   const canDelete = deleteRoles.has(userRole);
 
+  async function loadStaging(nextShowRemoved = showRemovedStaging) {
+    setLoading(true);
+    setNotice(null);
+    try {
+      const params = new URLSearchParams();
+      if (nextShowRemoved) params.set('includeRemoved','true');
+      const [result,summaryResult] = await Promise.all([
+        api<{items:StagingItem[]}>(`/api/requisition-staging?${params.toString()}`),
+        api<Summary & {ok:boolean}>('/api/requisitions/summary'),
+      ]);
+      setStagingItems(result.items ?? []);
+      setSummary(summaryResult ?? emptySummary);
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+      setStagingItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadInventoryOptions() {
+    try {
+      const result = await api<{parts:InventoryOption[]}>('/api/inventory/native/parts');
+      setInventoryOptions(result.parts ?? []);
+    } catch {
+      setInventoryOptions([]);
+    }
+  }
+
   async function loadRequisitions(nextFilter = filter, nextShowDeleted = showDeleted) {
+    if (nextFilter === 'Requisition Staging') {
+      await loadStaging();
+      return;
+    }
     setLoading(true);
     setNotice(null);
     try {
@@ -203,7 +278,7 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
     }
   }
 
-  useEffect(()=>{ void loadRequisitions(); },[]);
+  useEffect(()=>{ void loadRequisitions(); void loadInventoryOptions(); },[]);
   useEffect(()=>{
     if (!previewing) {
       setPreviewUrl('');
@@ -254,6 +329,18 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
       ...(requisition.lines ?? []).flatMap(line=>[line.partNumber,line.description,line.vendorName,line.locationName,line.itemNumber,line.notes]),
     ].some(value=>value.toLowerCase().includes(needle)));
   },[requisitions,search]);
+  const filteredStagingItems = useMemo(()=>{
+    const needle = stagingSearch.trim().toLowerCase();
+    if (!needle) return stagingItems;
+    return stagingItems.filter(item=>[item.partNumber,item.description,item.vendor,item.supplierPartNumber,item.location,item.assetMachine,item.workOrderNumber,item.priority,item.status,item.notes,item.requestedBy,item.createdRequisitionNumber].some(value=>String(value ?? '').toLowerCase().includes(needle)));
+  },[stagingItems,stagingSearch]);
+  const selectedStagingItems = useMemo(()=>stagingItems.filter(item=>stagingSelectedIds.has(item.id)&&['Need to Order','Ready for Requisition'].includes(item.status)),[stagingItems,stagingSelectedIds]);
+  const inventoryMatches = useMemo(()=>{
+    const needle = inventorySearch.trim().toLowerCase();
+    if (!needle) return [];
+    return inventoryOptions.filter(part=>[part.partNumber,part.description,part.vendor,part.supplierPartNumber,part.location].some(value=>String(value ?? '').toLowerCase().includes(needle))).slice(0,12);
+  },[inventoryOptions,inventorySearch]);
+  const allVisibleStagingSelected = filteredStagingItems.length > 0 && filteredStagingItems.filter(item=>['Need to Order','Ready for Requisition'].includes(item.status)).every(item=>stagingSelectedIds.has(item.id));
   const selectedRequisitions = useMemo(()=>requisitions.filter(requisition=>selectedIds.has(requisition.id)&&!requisition.deleted),[requisitions,selectedIds]);
   const selectedCancelable = selectedRequisitions.filter(requisition=>requisition.status==='Requested'||requisition.status==='Ordered');
   const allVisibleSelected = filteredRequisitions.length > 0 && filteredRequisitions.every(requisition=>selectedIds.has(requisition.id));
@@ -292,6 +379,137 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
 
   function clearSelection() {
     setSelectedIds(new Set());
+  }
+
+  function openNewStaging(inventory?: InventoryOption) {
+    if (!canWrite) return;
+    setStagingEditing('new');
+    setStagingForm(inventory ? {
+      ...blankStagingForm(userFullName),inventoryPartId:Number(inventory.id),partNumber:inventory.partNumber,description:inventory.description,vendor:inventory.vendor,supplierPartNumber:inventory.supplierPartNumber,unitCost:inventory.unitCost === null ? '' : String(inventory.unitCost),location:inventory.location,
+    } : blankStagingForm(userFullName));
+    setStagingFormError('');
+    setCreatedFromStaging([]);
+  }
+
+  function openEditStaging(item: StagingItem) {
+    if (!canWrite) return;
+    setStagingEditing(item);
+    setStagingForm(stagingFormFromItem(item));
+    setStagingFormError('');
+  }
+
+  function stageInventoryOption(part: InventoryOption) {
+    const existing = stagingItems.find(item=>item.inventoryPartId === Number(part.id) && ['Need to Order','Ready for Requisition'].includes(item.status));
+    if (existing) {
+      setNotice({kind:'error',text:`${part.partNumber} is already staged. Update its existing quantity instead.`});
+      openEditStaging(existing);
+      return;
+    }
+    openNewStaging(part);
+  }
+
+  function closeStagingEditor(force = false) {
+    if (stagingSaving && !force) return;
+    setStagingEditing(null);
+    setStagingFormError('');
+  }
+
+  async function saveStagingItem(event: FormEvent) {
+    event.preventDefault();
+    if (!stagingEditing) return;
+    const quantity = Number(stagingForm.quantityRequested);
+    const unitCost = stagingForm.unitCost.trim() ? Number(stagingForm.unitCost) : 0;
+    if (!stagingForm.partNumber.trim() || !stagingForm.description.trim() || !stagingForm.vendor.trim()) {
+      setStagingFormError('Part Number, Description, and Vendor are required.');
+      return;
+    }
+    if (!stagingForm.quantityRequested.trim() || !Number.isFinite(quantity) || quantity <= 0) {
+      setStagingFormError('Quantity Requested must be a positive number.');
+      return;
+    }
+    if (!Number.isFinite(unitCost) || unitCost < 0) {
+      setStagingFormError('Unit Cost must be zero or a positive number.');
+      return;
+    }
+    setStagingSaving(true);
+    setStagingFormError('');
+    try {
+      const isEdit = stagingEditing !== 'new';
+      await api(isEdit ? `/api/requisition-staging/${stagingEditing.id}` : '/api/requisition-staging', {method:isEdit?'PATCH':'POST',body:JSON.stringify({...stagingForm,quantityRequested:quantity,unitCost})});
+      closeStagingEditor(true);
+      setInventorySearch('');
+      setNotice({kind:'success',text:isEdit?'Staged item updated.':'Item added to Requisition Staging List.'});
+      await Promise.all([loadStaging(),loadInventoryOptions()]);
+    } catch (err) {
+      setStagingFormError((err as Error).message);
+    } finally {
+      setStagingSaving(false);
+    }
+  }
+
+  async function removeStagingItem(item: StagingItem) {
+    if (!canWrite || !window.confirm(`Remove ${item.partNumber} from the active staging list? Its audit trail will be preserved.`)) return;
+    setBusyId(item.id);
+    try {
+      await api(`/api/requisition-staging/${item.id}`, {method:'DELETE'});
+      setStagingSelectedIds(current=>{const next=new Set(current);next.delete(item.id);return next;});
+      setNotice({kind:'success',text:`${item.partNumber} removed from the active staging list.`});
+      await Promise.all([loadStaging(),loadInventoryOptions()]);
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function toggleStagingSelection(id: number) {
+    setStagingSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;});
+  }
+
+  function toggleVisibleStagingSelection() {
+    setStagingSelectedIds(current=>{
+      const next=new Set(current);
+      const selectable=filteredStagingItems.filter(item=>['Need to Order','Ready for Requisition'].includes(item.status));
+      if (allVisibleStagingSelected) selectable.forEach(item=>next.delete(item.id)); else selectable.forEach(item=>next.add(item.id));
+      return next;
+    });
+  }
+
+  function openStagingReview() {
+    if (!selectedStagingItems.length) return;
+    setStagingReviewForm(blankStagingReviewForm(userFullName));
+    setReviewingStaging(true);
+    setStagingFormError('');
+    setCreatedFromStaging([]);
+  }
+
+  async function createFromStaging(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedStagingItems.length) return;
+    if (!stagingReviewForm.poInitiator.trim() || !stagingReviewForm.requisitionedByName.trim() || !stagingReviewForm.taxExempt) {
+      setStagingFormError('P.O. Initiator, Requisitioned By, and Tax Exempt are required.');
+      return;
+    }
+    setStagingSaving(true);
+    setStagingFormError('');
+    try {
+      const result = await api<{requisitions:StagingCreateResult[]}>('/api/requisition-staging/create-requisitions',{method:'POST',body:JSON.stringify({...stagingReviewForm,stagingItemIds:selectedStagingItems.map(item=>item.id)})});
+      setCreatedFromStaging(result.requisitions ?? []);
+      setStagingSelectedIds(new Set());
+      setNotice({kind:'success',text:`Created ${result.requisitions?.length ?? 0} vendor requisition draft${result.requisitions?.length === 1 ? '' : 's'} from staged items.`});
+      await loadStaging();
+    } catch (err) {
+      setStagingFormError((err as Error).message);
+    } finally {
+      setStagingSaving(false);
+    }
+  }
+
+  function openCreatedRequisition(requisitionNumber: string) {
+    setReviewingStaging(false);
+    setFilter('Requested');
+    setSearch(requisitionNumber);
+    void loadRequisitions('Requested',false);
   }
 
   function openReasonAction(kind: ReasonAction['kind'], requisitionsForAction: Requisition[]) {
@@ -461,17 +679,63 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
         <article className="mcc-card"><span>Active</span><strong>{summary.activeCount}</strong><p>Requested plus ordered.</p></article>
       </div>
 
+      <nav className="requisition-view-pills" aria-label="Requisition status views">
+        {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" onClick={()=>setNextFilter(option)}>{option}</button>)}
+      </nav>
+
       {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
 
-      <section className="mcc-card requisitions-table-card">
+      {filter==='Requisition Staging'&&(
+        <section className="mcc-card requisitions-table-card staging-list-card">
+          <div className="staging-list-heading">
+            <div><p className="eyebrow">Purchase preparation</p><h3>Requisition Staging List</h3><p>Parts identified for purchase but not yet converted into an official requisition.</p></div>
+            {canWrite&&<button className="primary-button" type="button" onClick={()=>openNewStaging()}>Manually Add Item</button>}
+          </div>
+          <div className="staging-toolbar">
+            <label className="form-field"><span>Search staged items</span><input value={stagingSearch} onChange={event=>setStagingSearch(event.target.value)} placeholder="Part, vendor, machine, WO#, status..." /></label>
+            {canWrite&&<label className="form-field"><span>Search Inventory to add</span><input value={inventorySearch} onChange={event=>setInventorySearch(event.target.value)} placeholder="Part number, description, vendor..." /></label>}
+            <label className="show-deleted-toggle"><input type="checkbox" checked={showRemovedStaging} onChange={event=>{setShowRemovedStaging(event.target.checked);void loadStaging(event.target.checked);}} /><span>Show Removed / Canceled</span></label>
+          </div>
+          {canWrite&&inventoryMatches.length>0&&(
+            <div className="staging-inventory-results">
+              {inventoryMatches.map(part=><button key={part.id} type="button" onClick={()=>stageInventoryOption(part)}><strong>{part.partNumber}</strong><span>{part.description}</span><small>{part.vendor || 'No vendor'}{part.isInRequisitionStaging?' / Already staged':''}</small></button>)}
+            </div>
+          )}
+          <div className="requisition-selection-toolbar">
+            <span>Selected: {selectedStagingItems.length}</span>
+            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!filteredStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
+            <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Clear Selection</button>
+            {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Create Requisition Draft</button>}
+          </div>
+          <div className="table-card requisitions-table-wrap staging-table-wrap">
+            <table>
+              <thead><tr><th>Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
+              <tbody>
+                {filteredStagingItems.map(item=>{
+                  const selectable=['Need to Order','Ready for Requisition'].includes(item.status);
+                  return <tr key={item.id}>
+                    <td><input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} /></td>
+                    <td><span className={`staging-priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span></td>
+                    <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>
+                    <td><strong>{item.partNumber}</strong>{item.supplierPartNumber&&<small className="staging-supplier-number">Supplier: {item.supplierPartNumber}</small>}</td>
+                    <td className="inventory-description-cell">{item.description}</td><td>{formatQuantity(item.quantityRequested)}</td><td>{item.vendor}</td><td>{item.location||'-'}</td><td>{item.assetMachine||'-'}</td><td>{item.workOrderNumber||'-'}</td><td>{item.neededByDate||'-'}</td><td>{item.requestedBy||'-'}</td>
+                    <td><div className="requisition-row-actions">{item.createdRequisitionNumber&&<button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(item.createdRequisitionNumber)}>Open {item.createdRequisitionNumber}</button>}{canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{canWrite&&item.status!=='Removed / Canceled'&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}</div></td>
+                  </tr>;
+                })}
+                {!loading&&!filteredStagingItems.length&&<tr><td colSpan={13} className="empty-table-cell">No staged items match this view.</td></tr>}
+                {loading&&<tr><td colSpan={13} className="empty-table-cell">Loading Requisition Staging List...</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {filter!=='Requisition Staging'&&<section className="mcc-card requisitions-table-card">
         <div className="requisition-toolbar">
           <label className="form-field requisition-search">
             <span>Search requisitions</span>
             <input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Req #, part number, description, vendor, location, WO#..." />
           </label>
-          <div className="segmented-control" aria-label="Requisition filters">
-            {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" onClick={()=>setNextFilter(option)}>{option}</button>)}
-          </div>
           {canDelete&&(
             <label className="show-deleted-toggle">
               <input type="checkbox" checked={showDeleted} onChange={toggleShowDeleted} />
@@ -539,7 +803,59 @@ export function RequisitionsPage({ userRole }: { userRole: string }) {
             </tbody>
           </table>
         </div>
-      </section>
+      </section>}
+
+      {stagingEditing&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)closeStagingEditor();}}>
+          <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveStagingItem}>
+            <div className="modal-heading"><div><p className="eyebrow">Requisition Staging List</p><h3>{stagingEditing==='new'?'Add staged item':`Edit ${stagingEditing.partNumber}`}</h3></div><button className="link-button compact-button" type="button" onClick={()=>closeStagingEditor()}>Close</button></div>
+            <div className="staging-editor-grid">
+              <label className="form-field"><span>Part Number <b className="required-marker">*</b></span><input value={stagingForm.partNumber} onChange={event=>setStagingForm({...stagingForm,partNumber:event.target.value})} /></label>
+              <label className="form-field"><span>Description <b className="required-marker">*</b></span><input value={stagingForm.description} onChange={event=>setStagingForm({...stagingForm,description:event.target.value})} /></label>
+              <label className="form-field"><span>Vendor <b className="required-marker">*</b></span><input value={stagingForm.vendor} onChange={event=>setStagingForm({...stagingForm,vendor:event.target.value})} /></label>
+              <label className="form-field"><span>Supplier Part Number</span><input value={stagingForm.supplierPartNumber} onChange={event=>setStagingForm({...stagingForm,supplierPartNumber:event.target.value})} /></label>
+              <label className="form-field"><span>Quantity Requested <b className="required-marker">*</b></span><input inputMode="decimal" value={stagingForm.quantityRequested} onFocus={event=>event.currentTarget.select()} onChange={event=>setStagingForm({...stagingForm,quantityRequested:event.target.value})} placeholder="Enter quantity" /></label>
+              <label className="form-field"><span>Unit Cost</span><input inputMode="decimal" value={stagingForm.unitCost} onFocus={event=>event.currentTarget.select()} onChange={event=>setStagingForm({...stagingForm,unitCost:event.target.value})} placeholder="0.00" /></label>
+              <label className="form-field"><span>Location</span><input value={stagingForm.location} onChange={event=>setStagingForm({...stagingForm,location:event.target.value})} /></label>
+              <label className="form-field"><span>Asset / Machine</span><input value={stagingForm.assetMachine} onChange={event=>setStagingForm({...stagingForm,assetMachine:event.target.value})} /></label>
+              <label className="form-field"><span>Work Order Number</span><input value={stagingForm.workOrderNumber} onChange={event=>setStagingForm({...stagingForm,workOrderNumber:event.target.value})} /></label>
+              <label className="form-field"><span>Priority</span><select value={stagingForm.priority} onChange={event=>setStagingForm({...stagingForm,priority:event.target.value as StagingPriority})}><option>Critical</option><option>High</option><option>Normal</option><option>Low</option></select></label>
+              <label className="form-field"><span>Requested By</span><input value={stagingForm.requestedBy} onChange={event=>setStagingForm({...stagingForm,requestedBy:event.target.value})} /></label>
+              <label className="form-field"><span>Needed-by Date</span><input type="date" value={stagingForm.neededByDate} onChange={event=>setStagingForm({...stagingForm,neededByDate:event.target.value})} /></label>
+              <label className="form-field"><span>Status</span><select value={stagingForm.status} onChange={event=>setStagingForm({...stagingForm,status:event.target.value as StagingStatus})}><option>Need to Order</option><option>Ready for Requisition</option></select></label>
+              <label className="form-field staging-editor-wide"><span>Notes</span><textarea value={stagingForm.notes} onChange={event=>setStagingForm({...stagingForm,notes:event.target.value})} /></label>
+            </div>
+            {stagingFormError&&<p className="form-message error">{stagingFormError}</p>}
+            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>closeStagingEditor()}>Cancel</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Saving...':'Save Staged Item'}</button></div>
+          </form>
+        </div>
+      )}
+
+      {reviewingStaging&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setReviewingStaging(false);}}>
+          <form className="mcc-card requisition-modal staging-review-modal" onSubmit={createFromStaging}>
+            <div className="modal-heading"><div><p className="eyebrow">Review before creation</p><h3>Create Requisition Draft</h3></div><button className="link-button compact-button" type="button" onClick={()=>setReviewingStaging(false)} disabled={stagingSaving}>Close</button></div>
+            {!createdFromStaging.length&&<>
+              <div className="staging-review-summary"><strong>{selectedStagingItems.length} staged item{selectedStagingItems.length===1?'':'s'}</strong><span>{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size} vendor requisition{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size===1?'':'s'} will be created using the existing vendor grouping.</span></div>
+              <div className="staging-review-items">{selectedStagingItems.map(item=><div key={item.id}><strong>{item.partNumber}</strong><span>{item.vendor}</span><span>Qty {formatQuantity(item.quantityRequested)}</span><small>{item.description}</small></div>)}</div>
+              <div className="staging-editor-grid">
+                <label className="form-field"><span>P.O. Initiator <b className="required-marker">*</b></span><input value={stagingReviewForm.poInitiator} onChange={event=>setStagingReviewForm({...stagingReviewForm,poInitiator:event.target.value})} /></label>
+                <label className="form-field"><span>Requisitioned By <b className="required-marker">*</b></span><input value={stagingReviewForm.requisitionedByName} onChange={event=>setStagingReviewForm({...stagingReviewForm,requisitionedByName:event.target.value})} /></label>
+                <label className="form-field"><span>Tax Exempt <b className="required-marker">*</b></span><select value={stagingReviewForm.taxExempt} onChange={event=>setStagingReviewForm({...stagingReviewForm,taxExempt:event.target.value as ''|'No'|'Yes'})}><option value="">Select...</option><option>No</option><option>Yes</option></select></label>
+                <label className="form-field"><span>Work Order Number</span><input value={stagingReviewForm.workOrderNumber} onChange={event=>setStagingReviewForm({...stagingReviewForm,workOrderNumber:event.target.value})} /></label>
+                <label className="form-field"><span>Confirmed With</span><input value={stagingReviewForm.confirmedWith} onChange={event=>setStagingReviewForm({...stagingReviewForm,confirmedWith:event.target.value})} /></label>
+                <label className="form-field"><span>Material Cert</span><select value={stagingReviewForm.materialCert} onChange={event=>setStagingReviewForm({...stagingReviewForm,materialCert:event.target.value as 'No'|'Yes'})}><option>No</option><option>Yes</option></select></label>
+                <label className="form-field"><span>Ship Via</span><input value={stagingReviewForm.shipVia} onChange={event=>setStagingReviewForm({...stagingReviewForm,shipVia:event.target.value})} /></label>
+                <label className="form-field"><span>FOB</span><select value={stagingReviewForm.fob} onChange={event=>setStagingReviewForm({...stagingReviewForm,fob:event.target.value as 'Origin'|'Destination'})}><option>Destination</option><option>Origin</option></select></label>
+                <label className="form-field staging-editor-wide"><span>Requisition Notes</span><textarea value={stagingReviewForm.notes} onChange={event=>setStagingReviewForm({...stagingReviewForm,notes:event.target.value})} /></label>
+              </div>
+            </>}
+            {createdFromStaging.length>0&&<div className="staging-created-list"><h4>Requisition drafts created</h4>{createdFromStaging.map(created=><div key={created.id}><strong>{created.requisitionNumber}</strong><span>{created.vendorName} / {created.lineCount} line{created.lineCount===1?'':'s'}</span><div><button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(created.requisitionNumber)}>Open Requisition</button><button className="secondary-button compact-button" type="button" onClick={()=>void downloadFile(`/api/requisitions/${created.id}/pdf`,`MCC_Requisition_${created.requisitionNumber}.pdf`)}>PDF</button></div></div>)}</div>}
+            {stagingFormError&&<p className="form-message error">{stagingFormError}</p>}
+            <div className="modal-actions">{!createdFromStaging.length?<><button className="secondary-button" type="button" onClick={()=>setReviewingStaging(false)}>Back</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Creating...':'Confirm and Create Drafts'}</button></>:<button className="primary-button" type="button" onClick={()=>setReviewingStaging(false)}>Done</button>}</div>
+          </form>
+        </div>
+      )}
 
       {reasonAction&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReasonAction(); }}>
