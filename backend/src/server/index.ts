@@ -664,8 +664,10 @@ function booleanField(record: Record<string, unknown>, keys: string[]) {
 function validWebUrl(value: string) {
   const raw = value.trim();
   if (!raw) return '';
+  const hasScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(raw) && !/^[^/?#\s]+:\d+(?:[/?#]|$)/.test(raw);
+  const normalized = hasScheme ? raw : raw.startsWith('//') ? `https:${raw}` : `https://${raw}`;
   try {
-    const url = new URL(raw);
+    const url = new URL(normalized);
     const host = url.hostname.toLowerCase();
     const localHost = host === 'localhost' || host === '[::1]' || host === '::1' || host === '0.0.0.0' || host.startsWith('127.') || host.endsWith('.local');
     return (url.protocol === 'http:' || url.protocol === 'https:') && !localHost ? url.toString() : '';

@@ -255,8 +255,12 @@ function isLowStock(part: InventoryPart) {
 }
 
 function safeHttpUrl(value: string) {
+  const raw = value.trim();
+  if (!raw) return '';
+  const hasScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(raw) && !/^[^/?#\s]+:\d+(?:[/?#]|$)/.test(raw);
+  const normalized = hasScheme ? raw : raw.startsWith('//') ? `https:${raw}` : `https://${raw}`;
   try {
-    const url = new URL(value.trim());
+    const url = new URL(normalized);
     const host = url.hostname.toLowerCase();
     const localHost = host === 'localhost' || host === '[::1]' || host === '::1' || host === '0.0.0.0' || host.startsWith('127.') || host.endsWith('.local');
     return (url.protocol === 'http:' || url.protocol === 'https:') && !localHost ? url.href : '';
@@ -1239,13 +1243,13 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
   function renderPartNumber(part: InventoryPart) {
     const label = part.partNumber || part.itemId || '-';
-    if (!part.partInfoUrl) return <span className="plain-part-number">{label}</span>;
-    return (
-      <a className="part-number-link" href={part.partInfoUrl} target="_blank" rel="noopener noreferrer" title={part.partInfoUrl} onClick={event=>event.stopPropagation()}>
-        <span>{label}</span>
-        <small>Link</small>
-      </a>
-    );
+    const partInfoUrl = safeHttpUrl(part.partInfoUrl || '');
+    return <span className="inventory-part-number-with-info">
+      <span className="plain-part-number" title={label}>{label}</span>
+      {partInfoUrl&&<a className="vendor-website-link compact inventory-part-info-link" href={partInfoUrl} target="_blank" rel="noopener noreferrer" title="Open part information" aria-label={`Open part information for ${label}`} onClick={event=>event.stopPropagation()}>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>
+      </a>}
+    </span>;
   }
 
   return (
