@@ -79,7 +79,9 @@ CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_requisitions (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_number TEXT NOT NULL UNIQUE, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'Requested', requested_by_user_id INTEGER, requested_by_name TEXT NOT NULL DEFAULT '', po_initiator TEXT NOT NULL DEFAULT '', requisitioned_by_name TEXT NOT NULL DEFAULT '', tax_exempt TEXT NOT NULL DEFAULT 'No', confirmed_with TEXT NOT NULL DEFAULT '', material_cert TEXT NOT NULL DEFAULT 'No', ship_via TEXT NOT NULL DEFAULT '', fob TEXT NOT NULL DEFAULT 'Destination', requested_at TEXT NOT NULL, ordered_by_user_id INTEGER, ordered_at TEXT, received_by_user_id INTEGER, received_at TEXT, canceled_by_user_id INTEGER, canceled_at TEXT, cancel_reason TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
-CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS requisition_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Open', is_general INTEGER NOT NULL DEFAULT 0, created_by_user_id INTEGER, updated_by_user_id INTEGER, converted_at TEXT, closed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS requisition_batch_requisitions (batch_id INTEGER NOT NULL, requisition_id INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (batch_id,requisition_id));
+CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
@@ -97,6 +99,8 @@ CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_req
 CREATE INDEX IF NOT EXISTS idx_requisition_staging_status ON requisition_staging_items (status,updated_at);
 CREATE INDEX IF NOT EXISTS idx_requisition_staging_part ON requisition_staging_items (inventory_part_id,status);
 CREATE INDEX IF NOT EXISTS idx_requisition_staging_requisition ON requisition_staging_items (created_requisition_id);
+CREATE INDEX IF NOT EXISTS idx_requisition_batches_status ON requisition_batches (status,updated_at);
+CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition_batch_requisitions (requisition_id);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
@@ -195,10 +199,24 @@ AND NOT EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=v.id)`, [vendo
   db.exec(`CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
-  db.exec(`CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  db.exec(`CREATE TABLE IF NOT EXISTS requisition_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Open', is_general INTEGER NOT NULL DEFAULT 0, created_by_user_id INTEGER, updated_by_user_id INTEGER, converted_at TEXT, closed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS requisition_batch_requisitions (batch_id INTEGER NOT NULL, requisition_id INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (batch_id,requisition_id));
+CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_requisition_staging_status ON requisition_staging_items (status,updated_at);
 CREATE INDEX IF NOT EXISTS idx_requisition_staging_part ON requisition_staging_items (inventory_part_id,status);
-CREATE INDEX IF NOT EXISTS idx_requisition_staging_requisition ON requisition_staging_items (created_requisition_id);`);
+CREATE INDEX IF NOT EXISTS idx_requisition_staging_requisition ON requisition_staging_items (created_requisition_id);
+CREATE INDEX IF NOT EXISTS idx_requisition_batches_status ON requisition_batches (status,updated_at);
+CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition_batch_requisitions (requisition_id);`);
+  const stagingColumns = new Set(all<{ name: string }>('PRAGMA table_info(requisition_staging_items)').map(column => column.name));
+  if (!stagingColumns.has('batch_id')) run('ALTER TABLE requisition_staging_items ADD COLUMN batch_id INTEGER');
+  run('CREATE INDEX IF NOT EXISTS idx_requisition_staging_batch ON requisition_staging_items (batch_id,status,updated_at)');
+  let generalBatch = one<{ id: number }>("SELECT id FROM requisition_batches WHERE is_general=1 AND status IN ('Open','Ready') ORDER BY id LIMIT 1");
+  if (!generalBatch) {
+    const timestamp = now();
+    const result = run("INSERT INTO requisition_batches (name,description,asset_machine,work_order_number,needed_by_date,status,is_general,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES ('General / Unassigned','Items not assigned to a named requisition batch.','','',NULL,'Open',1,NULL,NULL,?,?)", [timestamp,timestamp]);
+    generalBatch = { id: Number(result.lastInsertRowid) };
+  }
+  run('UPDATE requisition_staging_items SET batch_id=? WHERE batch_id IS NULL', [generalBatch.id]);
 
   db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
@@ -1747,7 +1765,7 @@ const masterBackupFolderCandidates = ['uploads','documents','files'];
 const backupDataAreaDefinitions = [
   { key: 'inventoryParts', label: 'Inventory', tables: ['inventory_parts'] },
   { key: 'vendors', label: 'Vendors', tables: ['inventory_vendors'] },
-  { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_staging_items'] },
+  { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_batches','requisition_batch_requisitions','requisition_staging_items'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
   { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machines','machine_library','machine_pms'] },
@@ -1828,6 +1846,7 @@ function masterBackupRecordCounts() {
     inventoryParts: tableCount('inventory_parts'),
     requisitions: tableCount('inventory_requisitions'),
     requisitionLines: tableCount('inventory_requisition_lines'),
+    requisitionBatches: tableCount('requisition_batches'),
     requisitionStagingItems: tableCount('requisition_staging_items'),
     historyLogs: tableCount('history_logs'),
     machineRecords: tableGroupCount(['machine_assets','machines','machine_library','machine_pms']),
@@ -3100,10 +3119,29 @@ function recordRequisitionHistory(input: { action: string; actor: User; row: Req
 }
 type RequisitionStagingStatus = 'Need to Order' | 'Ready for Requisition' | 'Requisition Created' | 'Ordered' | 'Removed / Canceled';
 type RequisitionStagingPriority = 'Critical' | 'High' | 'Normal' | 'Low';
+type RequisitionBatchStatus = 'Open' | 'Ready' | 'Converted' | 'Closed';
 const requisitionStagingStatuses: RequisitionStagingStatus[] = ['Need to Order','Ready for Requisition','Requisition Created','Ordered','Removed / Canceled'];
 const requisitionStagingPriorities: RequisitionStagingPriority[] = ['Critical','High','Normal','Low'];
+const requisitionBatchStatuses: RequisitionBatchStatus[] = ['Open','Ready','Converted','Closed'];
+interface RequisitionBatchRow {
+  id: number;
+  name: string;
+  description: string;
+  asset_machine: string;
+  work_order_number: string;
+  needed_by_date: string | null;
+  status: RequisitionBatchStatus;
+  is_general: number;
+  created_by_user_id: number | null;
+  updated_by_user_id: number | null;
+  converted_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 interface RequisitionStagingRow {
   id: number;
+  batch_id: number | null;
   inventory_part_id: number | null;
   part_number: string;
   description: string;
@@ -3132,6 +3170,7 @@ interface RequisitionStagingRow {
 function publicRequisitionStagingItem(row: RequisitionStagingRow) {
   return {
     id: row.id,
+    batchId: row.batch_id,
     inventoryPartId: row.inventory_part_id,
     partNumber: row.part_number,
     description: row.description,
@@ -3157,15 +3196,65 @@ function publicRequisitionStagingItem(row: RequisitionStagingRow) {
 function requisitionStagingById(id: number) {
   return one<RequisitionStagingRow>('SELECT * FROM requisition_staging_items WHERE id=?', [id]);
 }
-function activeStagingForPart(partId: number) {
-  return one<{ id: number; status: RequisitionStagingStatus }>("SELECT id,status FROM requisition_staging_items WHERE inventory_part_id=? AND status IN ('Need to Order','Ready for Requisition') ORDER BY updated_at DESC,id DESC LIMIT 1", [partId]);
+function requisitionBatchById(id: number) {
+  return one<RequisitionBatchRow>('SELECT * FROM requisition_batches WHERE id=?', [id]);
+}
+function publicRequisitionBatch(row: RequisitionBatchRow) {
+  const counts = one<{ item_count: number; open_item_count: number; converted_item_count: number }>(`SELECT COUNT(*) AS item_count,
+SUM(CASE WHEN status IN ('Need to Order','Ready for Requisition') THEN 1 ELSE 0 END) AS open_item_count,
+SUM(CASE WHEN status='Requisition Created' THEN 1 ELSE 0 END) AS converted_item_count
+FROM requisition_staging_items WHERE batch_id=?`, [row.id]);
+  const requisitions = all<{ id: number; requisition_number: string }>(`SELECT r.id,r.requisition_number FROM requisition_batch_requisitions link JOIN inventory_requisitions r ON r.id=link.requisition_id WHERE link.batch_id=? ORDER BY link.created_at,r.id`, [row.id]);
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    assetMachine: row.asset_machine,
+    workOrderNumber: row.work_order_number,
+    neededByDate: row.needed_by_date ?? '',
+    status: row.status,
+    isGeneral: Boolean(row.is_general),
+    itemCount: Number(counts?.item_count ?? 0),
+    openItemCount: Number(counts?.open_item_count ?? 0),
+    convertedItemCount: Number(counts?.converted_item_count ?? 0),
+    requisitions: requisitions.map(requisition=>({id:requisition.id,requisitionNumber:requisition.requisition_number})),
+    createdBy: userNameById(row.created_by_user_id),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    convertedAt: row.converted_at ?? '',
+  };
+}
+function ensureGeneralRequisitionBatch(actorId: number | null = null) {
+  const existing = one<RequisitionBatchRow>("SELECT * FROM requisition_batches WHERE is_general=1 AND status IN ('Open','Ready') ORDER BY id LIMIT 1");
+  if (existing) return existing;
+  const timestamp = now();
+  const result = run("INSERT INTO requisition_batches (name,description,asset_machine,work_order_number,needed_by_date,status,is_general,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES ('General / Unassigned','Items not assigned to a named requisition batch.','','',NULL,'Open',1,?,?,?,?)", [actorId,actorId,timestamp,timestamp]);
+  return requisitionBatchById(Number(result.lastInsertRowid))!;
+}
+function validateOpenRequisitionBatch(value: unknown, fallback?: number | null) {
+  const batchId = Number(value ?? fallback ?? ensureGeneralRequisitionBatch().id);
+  if (!Number.isInteger(batchId) || batchId <= 0) throw new Error('Requisition Batch is required.');
+  const batch = requisitionBatchById(batchId);
+  if (!batch) throw new Error('Requisition Batch not found.');
+  if (!['Open','Ready'].includes(batch.status)) throw new Error('Only an open Requisition Batch can receive items.');
+  return batch;
+}
+function activeStagingForPart(partId: number, batchId?: number | null) {
+  const params: SqlParam[] = [partId];
+  const batchClause = batchId ? ' AND batch_id=?' : '';
+  if (batchId) params.push(batchId);
+  return one<{ id: number; batch_id: number; status: RequisitionStagingStatus }>(`SELECT id,batch_id,status FROM requisition_staging_items WHERE inventory_part_id=?${batchClause} AND status IN ('Need to Order','Ready for Requisition') ORDER BY updated_at DESC,id DESC LIMIT 1`, params);
 }
 function isOpenRequisitionStagingStatus(status: RequisitionStagingStatus) {
   return status === 'Need to Order' || status === 'Ready for Requisition';
 }
-function requisitionStagingList(search = '') {
-  const where = ["status IN ('Need to Order','Ready for Requisition')"];
+function requisitionStagingList(search = '', batchId?: number, includeCompleted = false) {
+  const where = [includeCompleted ? "status IN ('Need to Order','Ready for Requisition','Requisition Created')" : "status IN ('Need to Order','Ready for Requisition')"];
   const params: SqlParam[] = [];
+  if (batchId) {
+    where.push('batch_id=?');
+    params.push(batchId);
+  }
   if (search.trim()) {
     const like = `%${escapeLike(search.trim())}%`;
     where.push("(part_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR description LIKE ? ESCAPE '\\' COLLATE NOCASE OR vendor_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR supplier_part_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR location_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR asset_machine LIKE ? ESCAPE '\\' COLLATE NOCASE OR work_order_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR requested_by LIKE ? ESCAPE '\\' COLLATE NOCASE OR notes LIKE ? ESCAPE '\\' COLLATE NOCASE OR created_requisition_number LIKE ? ESCAPE '\\' COLLATE NOCASE)");
@@ -3181,6 +3270,7 @@ function dateOnlyInput(value: unknown, label: string) {
 }
 function validateRequisitionStagingInput(body: unknown, existing?: RequisitionStagingRow) {
   const input = isRecord(body) ? body : {};
+  const batch = validateOpenRequisitionBatch(input.batchId ?? input.batch_id, existing?.batch_id);
   const inventoryPartIdRaw = input.inventoryPartId ?? input.inventory_part_id ?? existing?.inventory_part_id ?? null;
   const inventoryPartId = inventoryPartIdRaw === null || inventoryPartIdRaw === '' ? null : Number(inventoryPartIdRaw);
   if (inventoryPartId !== null && (!Number.isInteger(inventoryPartId) || inventoryPartId <= 0)) throw new Error('Inventory part not found.');
@@ -3206,6 +3296,7 @@ function validateRequisitionStagingInput(body: unknown, existing?: RequisitionSt
   const status = field(['status'], existing?.status ?? 'Need to Order') as RequisitionStagingStatus;
   if (!requisitionStagingStatuses.includes(status) || !isOpenRequisitionStagingStatus(status)) throw new Error('Staging status is invalid.');
   return {
+    batchId: batch.id,
     inventoryPartId,
     partNumber,
     description,
@@ -3222,6 +3313,26 @@ function validateRequisitionStagingInput(body: unknown, existing?: RequisitionSt
     neededByDate: dateOnlyInput(input.neededByDate ?? input.needed_by_date ?? existing?.needed_by_date ?? '', 'Needed-by date'),
     status,
   };
+}
+function validateRequisitionBatchInput(body: unknown, existing?: RequisitionBatchRow) {
+  const input = isRecord(body) ? body : {};
+  const name = textField(input, ['name','batchName'], existing?.name ?? '').slice(0, 160);
+  if (!name) throw new Error('Batch name is required.');
+  const status = textField(input, ['status'], existing?.status ?? 'Open') as RequisitionBatchStatus;
+  if (!requisitionBatchStatuses.includes(status)) throw new Error('Batch status is invalid.');
+  return {
+    name,
+    description: textField(input, ['description','notes'], existing?.description ?? '').slice(0, 1200),
+    assetMachine: textField(input, ['assetMachine','asset','machine'], existing?.asset_machine ?? '').slice(0, 200),
+    workOrderNumber: textField(input, ['workOrderNumber','workOrder'], existing?.work_order_number ?? '').slice(0, 160),
+    neededByDate: dateOnlyInput(input.neededByDate ?? existing?.needed_by_date ?? '', 'Needed-by date'),
+    status,
+  };
+}
+function requisitionBatchList(view = 'active') {
+  const completed = view.toLowerCase() === 'completed';
+  const statuses = completed ? "('Converted','Closed')" : "('Open','Ready')";
+  return all<RequisitionBatchRow>(`SELECT * FROM requisition_batches WHERE status IN ${statuses} ORDER BY is_general DESC, CASE status WHEN 'Ready' THEN 1 ELSE 2 END, updated_at DESC,id DESC`).map(publicRequisitionBatch);
 }
 function activeRequisitionForPart(partId: number) {
   return one<{ requisition_number: string; status: RequisitionStatus }>(`SELECT r.requisition_number,r.status
@@ -4903,17 +5014,117 @@ function createGroupedRequisitions(req: AuthRequest, actor: User, input: Record<
   }
   return createdIds.map(publicCreatedRequisition);
 }
-function createRequisitionsFromStaging(req: AuthRequest, actor: User, input: Record<string, unknown>) {
+function selectedOpenStagingRows(input: Record<string, unknown>) {
   const rawIds = Array.isArray(input.stagingItemIds) ? input.stagingItemIds : [];
   const stagingIds = uniquePositiveIds(rawIds.map(value=>Number(value)));
   if (!stagingIds.length) throw new Error('Select at least one staged item.');
   const placeholders = stagingIds.map(()=>'?').join(',');
   const rows = all<RequisitionStagingRow>(`SELECT * FROM requisition_staging_items WHERE id IN (${placeholders}) ORDER BY id`, stagingIds);
   if (rows.length !== stagingIds.length) throw new Error('One or more staged items were not found.');
+  const batchIds = uniquePositiveIds(rows.map(row=>Number(row.batch_id)));
+  if (batchIds.length !== 1) throw new Error('Selected items must belong to one Requisition Batch.');
+  const batch = requisitionBatchById(batchIds[0]);
+  if (!batch || !['Open','Ready'].includes(batch.status)) throw new Error('The Requisition Batch is no longer open.');
   for (const row of rows) {
     if (!['Need to Order','Ready for Requisition'].includes(row.status)) throw new Error(`${row.part_number} is no longer available for requisition creation.`);
     if (row.inventory_part_id && activeRequisitionCountForPart(row.inventory_part_id) > 0) throw new Error(`Active requisition already exists for ${row.part_number}.`);
   }
+  return {batch,rows};
+}
+type StagingPreviewGroup = { vendorName: string; rows: RequisitionStagingRow[] };
+type StagingPreviewRecord = {
+  actorUserId: number;
+  batchId: number;
+  createdAt: string;
+  expiresAt: number;
+  header: RequisitionHeaderInput;
+  input: Record<string, unknown>;
+  snapshot: Array<{ id: number; updatedAt: string; status: RequisitionStagingStatus }>;
+  groups: StagingPreviewGroup[];
+};
+const stagingPreviewCache = new Map<string, StagingPreviewRecord>();
+function stagingPreviewRecord(actor: User, token: string) {
+  const record = stagingPreviewCache.get(token);
+  if (!record || record.expiresAt <= Date.now()) {
+    stagingPreviewCache.delete(token);
+    throw new Error('Requisition preview expired. Generate a new preview.');
+  }
+  if (record.actorUserId !== actor.id) throw new Error('Requisition preview not found.');
+  return record;
+}
+function createStagingPreview(actor: User, input: Record<string, unknown>) {
+  for (const [cachedToken,cached] of stagingPreviewCache) if (cached.expiresAt <= Date.now()) stagingPreviewCache.delete(cachedToken);
+  const {batch,rows} = selectedOpenStagingRows(input);
+  const header = parseRequisitionHeaderInput(input, actor, { requirePreviewFields: true });
+  const grouped = new Map<string, StagingPreviewGroup>();
+  for (const row of rows) {
+    const key = requisitionVendorKey(row.vendor_name);
+    const group = grouped.get(key) ?? {vendorName:requisitionVendorName(row.vendor_name),rows:[]};
+    group.rows.push(row);
+    grouped.set(key,group);
+  }
+  const token = crypto.randomBytes(24).toString('hex');
+  const record: StagingPreviewRecord = {
+    actorUserId: actor.id,
+    batchId: batch.id,
+    createdAt: now(),
+    expiresAt: Date.now() + 30 * 60 * 1000,
+    header,
+    input: {...input,...header,stagingItemIds:rows.map(row=>row.id)},
+    snapshot: rows.map(row=>({id:row.id,updatedAt:row.updated_at,status:row.status})),
+    groups:[...grouped.values()],
+  };
+  stagingPreviewCache.set(token,record);
+  return {
+    token,
+    batch: publicRequisitionBatch(batch),
+    previews: record.groups.map((group,index)=>({
+      id: index,
+      vendorName: group.vendorName,
+      lineCount: group.rows.length,
+      total: group.rows.reduce((sum,row)=>sum + Number(row.quantity_requested) * Number(row.unit_cost ?? 0),0),
+      pdfUrl: `/api/requisition-staging/previews/${token}/${index}/pdf`,
+    })),
+  };
+}
+async function buildStagingPreviewPdf(record: StagingPreviewRecord, groupIndex: number) {
+  const group = record.groups[groupIndex];
+  if (!group) throw new Error('Requisition preview not found.');
+  const header = record.header;
+  const batch = requisitionBatchById(record.batchId);
+  return buildRequisitionPdf({
+    vendor: group.vendorName,
+    requisitionNumber: `PREVIEW ${groupIndex + 1} OF ${record.groups.length}`,
+    requestedBy: header.requisitionedByName,
+    createdAt: record.createdAt,
+    notes: header.notes,
+    header: {
+      poNo: '', requestDate: localDateOnly(), vendorName: group.vendorName, poInitiator: header.poInitiator,
+      shipVia: header.shipVia, confirmedWith: header.confirmedWith,
+      workOrderNo: header.workOrderNumber || batch?.work_order_number || '', comments: header.notes,
+      requisitionedBy: header.requisitionedByName, taxExempt: header.taxExempt,
+      materialCert: header.materialCert, fob: header.fob,
+    },
+    items: group.rows.map(row=>({
+      partNumber:row.part_number,description:row.description,locationName:row.location_name,
+      quantityRequested:Number(row.quantity_requested),unitCost:Number(row.unit_cost ?? 0),
+      supplierPartNumber:row.supplier_part_number || row.part_number,dueDate:row.needed_by_date ?? '',notes:row.notes,unitOfMeasure:'EA',
+    })),
+  });
+}
+function validateStagingPreviewForConfirmation(actor: User, token: string) {
+  const record = stagingPreviewRecord(actor,token);
+  const current = record.snapshot.map(snapshot=>requisitionStagingById(snapshot.id));
+  if (current.some(row=>!row)) throw new Error('A staged item changed after preview. Generate a new preview.');
+  for (let index=0; index<record.snapshot.length; index += 1) {
+    const snapshot = record.snapshot[index];
+    const row = current[index]!;
+    if (row.updated_at !== snapshot.updatedAt || row.status !== snapshot.status || row.batch_id !== record.batchId) throw new Error('A staged item changed after preview. Generate a new preview.');
+  }
+  return record;
+}
+function createRequisitionsFromStaging(req: AuthRequest, actor: User, input: Record<string, unknown>) {
+  const {batch,rows} = selectedOpenStagingRows(input);
   const header = parseRequisitionHeaderInput(input, actor, { requirePreviewFields: true });
   const timestamp = now();
   const groups = new Map<string, RequisitionStagingRow[]>();
@@ -4939,13 +5150,21 @@ function createRequisitionsFromStaging(req: AuthRequest, actor: User, input: Rec
       run(`INSERT INTO inventory_requisition_lines (requisition_id,inventory_part_id,part_number,description,vendor_name,location_name,quantity_requested,unit_cost,unit_of_measure,item_number,notes,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [
         requisitionId,row.inventory_part_id ?? 0,row.part_number,row.description,row.vendor_name,row.location_name,row.quantity_requested,row.unit_cost,'EA',row.supplier_part_number || row.part_number,row.notes,timestamp,timestamp,
       ]);
-      run('DELETE FROM requisition_staging_items WHERE id=?', [row.id]);
+      run("UPDATE requisition_staging_items SET status='Requisition Created',created_requisition_id=?,created_requisition_number=?,updated_by_user_id=?,updated_at=? WHERE id=?", [requisitionId,requisitionNumber,actor.id,timestamp,row.id]);
     }
+    run('INSERT OR IGNORE INTO requisition_batch_requisitions (batch_id,requisition_id,created_at) VALUES (?,?,?)', [batch.id,requisitionId,timestamp]);
     const historyRow = requisitionById(requisitionId, { includeDeleted: true });
     if (historyRow) recordRequisitionHistory({action:'requested_from_staging',actor,row:historyRow,newValue:requisitionHistoryValue(historyRow),createdAt:timestamp});
     const details = {requisitionNumber,requisitionId,stagingItemIds:groupRows.map(row=>row.id),vendorName:first.vendor_name,lineCount:groupRows.length};
     inventoryAudit(req,'requisition created from staged items','requisition',requisitionId,details);
     audit(req,'requisition created from staged items','requisition',requisitionId,details);
+  }
+  const openItems = one<{ count: number }>("SELECT COUNT(*) AS count FROM requisition_staging_items WHERE batch_id=? AND status IN ('Need to Order','Ready for Requisition')", [batch.id])?.count ?? 0;
+  if (!openItems) {
+    run("UPDATE requisition_batches SET status='Converted',is_general=0,converted_at=?,updated_by_user_id=?,updated_at=? WHERE id=?", [timestamp,actor.id,timestamp,batch.id]);
+    if (batch.is_general) ensureGeneralRequisitionBatch(actor.id);
+  } else {
+    run('UPDATE requisition_batches SET updated_by_user_id=?,updated_at=? WHERE id=?', [actor.id,timestamp,batch.id]);
   }
   syncRequisitionPartFlags(rows.map(row=>row.inventory_part_id).filter((id): id is number=>Boolean(id)),timestamp);
   return createdIds.map(publicCreatedRequisition);
@@ -5152,6 +5371,7 @@ function resetStatusCounts() {
       inventoryLocations: rowCount('inventory_locations'),
       requisitions: rowCount('inventory_requisitions'),
       requisitionLines: rowCount('inventory_requisition_lines'),
+      requisitionBatches: rowCount('requisition_batches'),
       requisitionStagingItems: rowCount('requisition_staging_items'),
       historyCounts,
       futureTableCounts,
@@ -5181,10 +5401,13 @@ function resetTableGroup(section: keyof typeof resetTableAllowlists, deletedCoun
 }
 function resetRequisitionsData(deletedCounts: Record<string, number>) {
   deletedCounts.requisitionStagingItems = deleteRows('requisition_staging_items');
+  deletedCounts.requisitionBatchRequisitions = deleteRows('requisition_batch_requisitions');
+  deletedCounts.requisitionBatches = deleteRows('requisition_batches');
   deletedCounts.inventoryRequisitionLines = deleteRows('inventory_requisition_lines');
   deletedCounts.inventoryRequisitions = deleteRows('inventory_requisitions');
   if (tableExists('inventory_parts')) run("UPDATE inventory_parts SET requisition='', updated_at=? WHERE requisition<>''", [now()]);
   resetSqliteSequence('requisition_staging_items');
+  resetSqliteSequence('requisition_batches');
   resetSqliteSequence('inventory_requisition_lines');
   resetSqliteSequence('inventory_requisitions');
 }
@@ -6930,10 +7153,53 @@ app.get('/api/settings/network-links', requireAuth, requirePermission('settings.
     primaryLanUrl: lanUrls[0] ?? null,
   });
 });
+app.get('/api/requisition-batches', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+  try {
+    ensureGeneralRequisitionBatch();
+    res.json({ok:true,batches:requisitionBatchList(queryText(req.query.view) || 'active')});
+  } catch (error) {
+    res.status(400).json({ok:false,error:safeErrorMessage(error)});
+  }
+});
+app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  try {
+    const input = validateRequisitionBatchInput(req.body);
+    if (!['Open','Ready'].includes(input.status)) throw new Error('A new Requisition Batch must be Open or Ready.');
+    const timestamp = now();
+    const result = run(`INSERT INTO requisition_batches (name,description,asset_machine,work_order_number,needed_by_date,status,is_general,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?,?,?)`, [
+      input.name,input.description,input.assetMachine,input.workOrderNumber,input.neededByDate || null,input.status,actor.id,actor.id,timestamp,timestamp,
+    ]);
+    res.status(201).json({ok:true,batch:publicRequisitionBatch(requisitionBatchById(Number(result.lastInsertRowid))!)});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/required|invalid|must/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  const batchId = Number(req.params.id);
+  try {
+    const existing = requisitionBatchById(batchId);
+    if (!existing) throw new Error('Requisition Batch not found.');
+    if (existing.status === 'Converted') throw new Error('Converted Requisition Batches cannot be edited.');
+    const input = validateRequisitionBatchInput(req.body,existing);
+    const timestamp = now();
+    run(`UPDATE requisition_batches SET name=?,description=?,asset_machine=?,work_order_number=?,needed_by_date=?,status=?,updated_by_user_id=?,closed_at=?,updated_at=? WHERE id=?`, [
+      input.name,input.description,input.assetMachine,input.workOrderNumber,input.neededByDate || null,input.status,actor.id,input.status==='Closed'?timestamp:null,timestamp,batchId,
+    ]);
+    res.json({ok:true,batch:publicRequisitionBatch(requisitionBatchById(batchId)!)});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found/i.test(message) ? 404 : /required|invalid|cannot/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
 app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
   try {
-    const items = requisitionStagingList(queryText(req.query.search ?? req.query.q));
-    res.json({ok:true,items,openCount:items.length});
+    const batchId = Number(req.query.batchId ?? 0);
+    const includeCompleted = ['1','true','yes'].includes(String(req.query.includeCompleted ?? '').toLowerCase());
+    const items = requisitionStagingList(queryText(req.query.search ?? req.query.q), Number.isInteger(batchId) && batchId > 0 ? batchId : undefined, includeCompleted);
+    res.json({ok:true,items,openCount:items.filter(item=>item.status==='Need to Order'||item.status==='Ready for Requisition').length});
   } catch (error) {
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
@@ -6947,11 +7213,11 @@ app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.w
     db.exec('BEGIN IMMEDIATE');
     try {
       if (input.inventoryPartId) {
-        const existing = activeStagingForPart(input.inventoryPartId);
+        const existing = activeStagingForPart(input.inventoryPartId,input.batchId);
         if (existing) throw new Error(`Inventory part is already staged (staging item ${existing.id}).`);
       }
-      const result = run(`INSERT INTO requisition_staging_items (inventory_part_id,part_number,description,vendor_name,supplier_part_number,quantity_requested,unit_cost,location_name,asset_machine,work_order_number,priority,notes,requested_by,date_added,needed_by_date,status,created_requisition_id,created_requisition_number,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'',?,?,?,?)`, [
-        input.inventoryPartId,input.partNumber,input.description,input.vendor,input.supplierPartNumber,input.quantityRequested,input.unitCost,input.location,input.assetMachine,input.workOrderNumber,input.priority,input.notes,input.requestedBy || actor.full_name,timestamp,input.neededByDate || null,input.status,actor.id,actor.id,timestamp,timestamp,
+      const result = run(`INSERT INTO requisition_staging_items (batch_id,inventory_part_id,part_number,description,vendor_name,supplier_part_number,quantity_requested,unit_cost,location_name,asset_machine,work_order_number,priority,notes,requested_by,date_added,needed_by_date,status,created_requisition_id,created_requisition_number,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'',?,?,?,?)`, [
+        input.batchId,input.inventoryPartId,input.partNumber,input.description,input.vendor,input.supplierPartNumber,input.quantityRequested,input.unitCost,input.location,input.assetMachine,input.workOrderNumber,input.priority,input.notes,input.requestedBy || actor.full_name,timestamp,input.neededByDate || null,input.status,actor.id,actor.id,timestamp,timestamp,
       ]);
       itemId = Number(result.lastInsertRowid);
       db.exec('COMMIT');
@@ -6965,6 +7231,54 @@ app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.w
     res.status(/already staged/i.test(message) ? 409 : /required|must|invalid|not found/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
+app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  const actor = req.user!;
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    const batch = validateOpenRequisitionBatch(input.batchId);
+    const rawItems = Array.isArray(input.items) ? input.items : [];
+    if (!rawItems.length) throw new Error('Select at least one Inventory item.');
+    const updateExisting = input.updateExisting === true;
+    const prepared = rawItems.map(raw=>{
+      const item = isRecord(raw) ? raw : {};
+      const inventoryPartId = Number(item.inventoryPartId ?? item.id);
+      const part = nativePartRowById(inventoryPartId);
+      if (!part) throw new Error('Inventory part not found.');
+      return {part,quantityRequested:validateQuantityRequested(item.quantityRequested ?? item.quantity)};
+    });
+    const duplicates = prepared.map(item=>({item,existing:activeStagingForPart(item.part.id,batch.id)})).filter(entry=>Boolean(entry.existing));
+    if (duplicates.length && !updateExisting) {
+      return res.status(409).json({ok:false,error:`${duplicates.length} selected part${duplicates.length===1?' is':'s are'} already in ${batch.name}. Confirm to update the existing quantities.`,duplicates:duplicates.map(entry=>({inventoryPartId:entry.item.part.id,stagingItemId:entry.existing!.id,partNumber:entry.item.part.part_number}))});
+    }
+    const timestamp = now();
+    let addedCount = 0;
+    let updatedCount = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const entry of prepared) {
+        const existing = activeStagingForPart(entry.part.id,batch.id);
+        if (existing) {
+          run('UPDATE requisition_staging_items SET quantity_requested=?,updated_by_user_id=?,updated_at=? WHERE id=?', [entry.quantityRequested,actor.id,timestamp,existing.id]);
+          updatedCount += 1;
+        } else {
+          run(`INSERT INTO requisition_staging_items (batch_id,inventory_part_id,part_number,description,vendor_name,supplier_part_number,quantity_requested,unit_cost,location_name,asset_machine,work_order_number,priority,notes,requested_by,date_added,needed_by_date,status,created_requisition_id,created_requisition_number,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'',?,?,?,?)`, [
+            batch.id,entry.part.id,entry.part.part_number,entry.part.description,entry.part.vendor_name ?? '',entry.part.supplier_part_number ?? '',entry.quantityRequested,Number(entry.part.unit_cost ?? 0),entry.part.location_name ?? '',batch.asset_machine,batch.work_order_number,'Normal','',actor.full_name,timestamp,batch.needed_by_date,'Need to Order',actor.id,actor.id,timestamp,timestamp,
+          ]);
+          addedCount += 1;
+        }
+      }
+      run('UPDATE requisition_batches SET updated_by_user_id=?,updated_at=? WHERE id=?', [actor.id,timestamp,batch.id]);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    res.status(201).json({ok:true,batch:publicRequisitionBatch(requisitionBatchById(batch.id)!),addedCount,updatedCount,totalCount:addedCount+updatedCount});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/required|select|not found|must|positive|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
 app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const itemId = Number(req.params.id);
@@ -6974,14 +7288,14 @@ app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('invent
     if (!isOpenRequisitionStagingStatus(existing.status)) throw new Error('Only open staged items can be edited.');
     const input = validateRequisitionStagingInput(req.body, existing);
     if (input.inventoryPartId) {
-      const duplicate = activeStagingForPart(input.inventoryPartId);
+      const duplicate = activeStagingForPart(input.inventoryPartId,input.batchId);
       if (duplicate && duplicate.id !== itemId && ['Need to Order','Ready for Requisition'].includes(input.status)) throw new Error(`Inventory part is already staged (staging item ${duplicate.id}).`);
     }
     const timestamp = now();
     db.exec('BEGIN IMMEDIATE');
     try {
-      run(`UPDATE requisition_staging_items SET inventory_part_id=?,part_number=?,description=?,vendor_name=?,supplier_part_number=?,quantity_requested=?,unit_cost=?,location_name=?,asset_machine=?,work_order_number=?,priority=?,notes=?,requested_by=?,needed_by_date=?,status=?,updated_by_user_id=?,updated_at=? WHERE id=?`, [
-        input.inventoryPartId,input.partNumber,input.description,input.vendor,input.supplierPartNumber,input.quantityRequested,input.unitCost,input.location,input.assetMachine,input.workOrderNumber,input.priority,input.notes,input.requestedBy || actor.full_name,input.neededByDate || null,input.status,actor.id,timestamp,itemId,
+      run(`UPDATE requisition_staging_items SET batch_id=?,inventory_part_id=?,part_number=?,description=?,vendor_name=?,supplier_part_number=?,quantity_requested=?,unit_cost=?,location_name=?,asset_machine=?,work_order_number=?,priority=?,notes=?,requested_by=?,needed_by_date=?,status=?,updated_by_user_id=?,updated_at=? WHERE id=?`, [
+        input.batchId,input.inventoryPartId,input.partNumber,input.description,input.vendor,input.supplierPartNumber,input.quantityRequested,input.unitCost,input.location,input.assetMachine,input.workOrderNumber,input.priority,input.notes,input.requestedBy || actor.full_name,input.neededByDate || null,input.status,actor.id,timestamp,itemId,
       ]);
       db.exec('COMMIT');
     } catch (error) {
@@ -7036,19 +7350,50 @@ app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inven
     res.status(/not found/i.test(message) ? 404 : /only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
+app.post('/api/requisition-staging/preview', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+  try {
+    const input = isRecord(req.body) ? req.body : {};
+    res.json({ok:true,...createStagingPreview(req.user!,input)});
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found|select|must|required|already exists|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth, requirePermission('inventory.view'), async (req:AuthRequest,res)=>{
+  try {
+    const record = stagingPreviewRecord(req.user!,String(req.params.token));
+    const groupIndex = Number(req.params.groupIndex);
+    if (!Number.isInteger(groupIndex) || groupIndex < 0 || groupIndex >= record.groups.length) throw new Error('Requisition preview not found.');
+    const buffer = await buildStagingPreviewPdf(record,groupIndex);
+    const fileName = `MCC_Requisition_Preview_${safeFileToken(record.groups[groupIndex].vendorName)}.pdf`;
+    if (String(req.query.download ?? '').toLowerCase() === 'true') sendDownload(res,fileName,'application/pdf',buffer);
+    else {
+      res.setHeader('Content-Type','application/pdf');
+      res.setHeader('Content-Disposition',`inline; filename="${fileName}"`);
+      res.send(buffer);
+    }
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    res.status(/not found|expired/i.test(message) ? 404 : 500).json({ok:false,error:message});
+  }
+});
 app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
+    const token = textField(input,['previewToken','token']);
+    if (!token) throw new Error('Preview Requisition before creating the official requisition.');
+    const preview = validateStagingPreviewForConfirmation(actor,token);
     let requisitions: ReturnType<typeof publicCreatedRequisition>[] = [];
     db.exec('BEGIN IMMEDIATE');
     try {
-      requisitions = createRequisitionsFromStaging(req,actor,input);
+      requisitions = createRequisitionsFromStaging(req,actor,preview.input);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
     }
+    stagingPreviewCache.delete(token);
     res.status(201).json({ok:true,requisition:requisitions[0],requisitions,summary:requisitionSummary()});
   } catch (error) {
     sendRequisitionError(req,res,'requisition create from staging','selection',error);

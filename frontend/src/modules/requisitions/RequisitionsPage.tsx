@@ -73,21 +73,25 @@ type ReasonAction = {
   requisitions: Requisition[];
 };
 
-type StagingStatus = 'Need to Order' | 'Ready for Requisition';
+type StagingStatus = 'Need to Order' | 'Ready for Requisition' | 'Requisition Created';
 type StagingPriority = 'Critical' | 'High' | 'Normal' | 'Low';
 type StagingItem = {
-  id: number; inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string;
+  id: number; batchId: number | null; inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string;
   quantityRequested: number; unitCost: number; location: string; assetMachine: string; workOrderNumber: string; priority: StagingPriority;
-  notes: string; requestedBy: string; dateAdded: string; neededByDate: string; status: StagingStatus;
+  notes: string; requestedBy: string; dateAdded: string; neededByDate: string; status: StagingStatus; createdRequisitionNumber?: string;
 };
 type InventoryOption = { id: string; partNumber: string; description: string; vendor: string; supplierPartNumber: string; unitCost: number | null; location: string; isInRequisitionStaging?: boolean };
 type StagingForm = {
-  inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string; quantityRequested: string;
+  batchId: number | null; inventoryPartId: number | null; partNumber: string; description: string; vendor: string; supplierPartNumber: string; quantityRequested: string;
   unitCost: string; location: string; assetMachine: string; workOrderNumber: string; priority: StagingPriority; notes: string; requestedBy: string;
   neededByDate: string; status: StagingStatus;
 };
 type StagingCreateResult = { id: number; requisitionNumber: string; vendorName: string; lineCount: number; pdfUrl: string };
 type StagingReviewForm = { poInitiator: string; requisitionedByName: string; taxExempt: ''|'No'|'Yes'; workOrderNumber: string; confirmedWith: string; materialCert: 'No'|'Yes'; shipVia: string; fob: 'Origin'|'Destination'; notes: string };
+type RequisitionBatchStatus = 'Open'|'Ready'|'Converted'|'Closed';
+type RequisitionBatch = { id:number; name:string; description:string; assetMachine:string; workOrderNumber:string; neededByDate:string; status:RequisitionBatchStatus; isGeneral:boolean; itemCount:number; openItemCount:number; convertedItemCount:number; requisitions:Array<{id:number;requisitionNumber:string}>; createdBy:string; createdAt:string; convertedAt:string };
+type RequisitionBatchForm = { name:string; description:string; assetMachine:string; workOrderNumber:string; neededByDate:string; status:'Open'|'Ready' };
+type StagingPdfPreview = { id:number; vendorName:string; lineCount:number; total:number; pdfUrl:string };
 
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const deleteRoles = new Set(['Admin','Manager']);
@@ -175,12 +179,12 @@ function editFormFromRequisition(requisition: Requisition): EditForm {
   };
 }
 
-function blankStagingForm(requestedBy = ''): StagingForm {
-  return {inventoryPartId:null,partNumber:'',description:'',vendor:'',supplierPartNumber:'',quantityRequested:'',unitCost:'',location:'',assetMachine:'',workOrderNumber:'',priority:'Normal',notes:'',requestedBy,neededByDate:'',status:'Need to Order'};
+function blankStagingForm(requestedBy = '', batchId: number|null = null): StagingForm {
+  return {batchId,inventoryPartId:null,partNumber:'',description:'',vendor:'',supplierPartNumber:'',quantityRequested:'',unitCost:'',location:'',assetMachine:'',workOrderNumber:'',priority:'Normal',notes:'',requestedBy,neededByDate:'',status:'Need to Order'};
 }
 
 function stagingFormFromItem(item: StagingItem): StagingForm {
-  return {inventoryPartId:item.inventoryPartId,partNumber:item.partNumber,description:item.description,vendor:item.vendor,supplierPartNumber:item.supplierPartNumber,quantityRequested:String(item.quantityRequested),unitCost:String(item.unitCost),location:item.location,assetMachine:item.assetMachine,workOrderNumber:item.workOrderNumber,priority:item.priority,notes:item.notes,requestedBy:item.requestedBy,neededByDate:item.neededByDate,status:item.status};
+  return {batchId:item.batchId,inventoryPartId:item.inventoryPartId,partNumber:item.partNumber,description:item.description,vendor:item.vendor,supplierPartNumber:item.supplierPartNumber,quantityRequested:String(item.quantityRequested),unitCost:String(item.unitCost),location:item.location,assetMachine:item.assetMachine,workOrderNumber:item.workOrderNumber,priority:item.priority,notes:item.notes,requestedBy:item.requestedBy,neededByDate:item.neededByDate,status:item.status};
 }
 
 function blankStagingReviewForm(userFullName = ''): StagingReviewForm {
@@ -210,6 +214,12 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [reasonError,setReasonError]=useState('');
   const [reasonSaving,setReasonSaving]=useState(false);
   const [stagingItems,setStagingItems]=useState<StagingItem[]>([]);
+  const [requisitionBatches,setRequisitionBatches]=useState<RequisitionBatch[]>([]);
+  const [batchView,setBatchView]=useState<'active'|'completed'>('active');
+  const [activeBatchId,setActiveBatchId]=useState<number|null>(null);
+  const [batchEditing,setBatchEditing]=useState(false);
+  const [batchForm,setBatchForm]=useState<RequisitionBatchForm>({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
+  const [batchFormError,setBatchFormError]=useState('');
   const [stagingSearch,setStagingSearch]=useState('');
   const [stagingSelectedIds,setStagingSelectedIds]=useState<Set<number>>(()=>new Set());
   const [stagingEditing,setStagingEditing]=useState<StagingItem|'new'|null>(null);
@@ -220,23 +230,35 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [inventorySearch,setInventorySearch]=useState('');
   const [reviewingStaging,setReviewingStaging]=useState(false);
   const [stagingReviewForm,setStagingReviewForm]=useState<StagingReviewForm>(()=>blankStagingReviewForm(userFullName));
+  const [stagingPreviewToken,setStagingPreviewToken]=useState('');
+  const [stagingPdfPreviews,setStagingPdfPreviews]=useState<StagingPdfPreview[]>([]);
+  const [activeStagingPreviewId,setActiveStagingPreviewId]=useState(0);
+  const [stagingPreviewUrl,setStagingPreviewUrl]=useState('');
+  const [stagingPreviewLoading,setStagingPreviewLoading]=useState(false);
   const [createdFromStaging,setCreatedFromStaging]=useState<StagingCreateResult[]>([]);
 
   const canWrite = writeRoles.has(userRole);
   const canDelete = deleteRoles.has(userRole);
 
-  async function loadStaging() {
+  async function loadStaging(nextView: 'active'|'completed' = batchView, preferredBatchId: number|null = activeBatchId) {
     setLoading(true);
     setNotice(null);
     try {
-      const [result,summaryResult] = await Promise.all([
-        api<{items:StagingItem[]}>('/api/requisition-staging'),
+      const [batchResult,summaryResult] = await Promise.all([
+        api<{batches:RequisitionBatch[]}>(`/api/requisition-batches?view=${nextView}`),
         api<Summary & {ok:boolean}>('/api/requisitions/summary'),
       ]);
+      const nextBatches = batchResult.batches ?? [];
+      const selectedBatchId = nextBatches.some(batch=>batch.id===preferredBatchId) ? preferredBatchId : nextBatches[0]?.id ?? null;
+      const result = selectedBatchId ? await api<{items:StagingItem[]}>(`/api/requisition-staging?batchId=${selectedBatchId}&includeCompleted=${nextView==='completed'}`) : {items:[]};
+      setRequisitionBatches(nextBatches);
+      setActiveBatchId(selectedBatchId);
       setStagingItems(result.items ?? []);
+      setStagingSelectedIds(new Set());
       setSummary(summaryResult ?? emptySummary);
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
+      setRequisitionBatches([]);
       setStagingItems([]);
     } finally {
       setLoading(false);
@@ -308,6 +330,28 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   },[previewing]);
+  const activeRequisitionBatch = useMemo(()=>requisitionBatches.find(batch=>batch.id===activeBatchId) ?? null,[requisitionBatches,activeBatchId]);
+  const activeStagingPdfPreview = useMemo(()=>stagingPdfPreviews.find(preview=>preview.id===activeStagingPreviewId) ?? stagingPdfPreviews[0] ?? null,[stagingPdfPreviews,activeStagingPreviewId]);
+  useEffect(()=>{
+    if (!activeStagingPdfPreview) {
+      setStagingPreviewUrl('');
+      setStagingPreviewLoading(false);
+      return;
+    }
+    let disposed = false;
+    let objectUrl = '';
+    setStagingPreviewUrl('');
+    setStagingPreviewLoading(true);
+    pdfObjectUrl(activeStagingPdfPreview.pdfUrl)
+      .then(url=>{
+        if (disposed) return URL.revokeObjectURL(url);
+        objectUrl=url;
+        setStagingPreviewUrl(url);
+      })
+      .catch(error=>{if(!disposed)setStagingFormError((error as Error).message);})
+      .finally(()=>{if(!disposed)setStagingPreviewLoading(false);});
+    return ()=>{disposed=true;if(objectUrl)URL.revokeObjectURL(objectUrl);};
+  },[activeStagingPdfPreview]);
 
   const filteredRequisitions = useMemo(()=>{
     const needle = search.trim().toLowerCase();
@@ -380,11 +424,11 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   function openNewStaging(inventory?: InventoryOption) {
-    if (!canWrite) return;
+    if (!canWrite || !activeBatchId || batchView !== 'active') return;
     setStagingEditing('new');
     setStagingForm(inventory ? {
-      ...blankStagingForm(userFullName),inventoryPartId:Number(inventory.id),partNumber:inventory.partNumber,description:inventory.description,vendor:inventory.vendor,supplierPartNumber:inventory.supplierPartNumber,unitCost:inventory.unitCost === null ? '' : String(inventory.unitCost),location:inventory.location,
-    } : blankStagingForm(userFullName));
+      ...blankStagingForm(userFullName,activeBatchId),inventoryPartId:Number(inventory.id),partNumber:inventory.partNumber,description:inventory.description,vendor:inventory.vendor,supplierPartNumber:inventory.supplierPartNumber,unitCost:inventory.unitCost === null ? '' : String(inventory.unitCost),location:inventory.location,assetMachine:activeRequisitionBatch?.assetMachine ?? '',workOrderNumber:activeRequisitionBatch?.workOrderNumber ?? '',neededByDate:activeRequisitionBatch?.neededByDate ?? '',
+    } : {...blankStagingForm(userFullName,activeBatchId),assetMachine:activeRequisitionBatch?.assetMachine ?? '',workOrderNumber:activeRequisitionBatch?.workOrderNumber ?? '',neededByDate:activeRequisitionBatch?.neededByDate ?? ''});
     setStagingFormError('');
     setCreatedFromStaging([]);
   }
@@ -397,7 +441,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   function stageInventoryOption(part: InventoryOption) {
-    const existing = stagingItems.find(item=>item.inventoryPartId === Number(part.id) && ['Need to Order','Ready for Requisition'].includes(item.status));
+    const existing = stagingItems.find(item=>item.batchId===activeBatchId&&item.inventoryPartId === Number(part.id) && ['Need to Order','Ready for Requisition'].includes(item.status));
     if (existing) {
       setNotice({kind:'error',text:`${part.partNumber} is already staged. Update its existing quantity instead.`});
       openEditStaging(existing);
@@ -440,7 +484,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       await api(isEdit ? `/api/requisition-staging/${stagingEditing.id}` : '/api/requisition-staging', {method:isEdit?'PATCH':'POST',body:JSON.stringify({...stagingForm,quantityRequested:quantity,unitCost})});
       closeStagingEditor(true);
       setInventorySearch('');
-      await Promise.all([loadStaging(),loadInventoryOptions()]);
+      await Promise.all([loadStaging(batchView,activeBatchId),loadInventoryOptions()]);
       setNotice({kind:'success',text:isEdit?'Staged item updated.':'Item added to Requisition Staging List.'});
     } catch (err) {
       setStagingFormError((err as Error).message);
@@ -455,12 +499,26 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     try {
       await api(`/api/requisition-staging/${item.id}`, {method:'DELETE'});
       setStagingSelectedIds(current=>{const next=new Set(current);next.delete(item.id);return next;});
-      await Promise.all([loadStaging(),loadInventoryOptions()]);
+      await Promise.all([loadStaging(batchView,activeBatchId),loadInventoryOptions()]);
       setNotice({kind:'success',text:`${item.partNumber} removed from the staging list.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function selectRequisitionBatch(batch: RequisitionBatch) {
+    setActiveBatchId(batch.id);
+    setStagingSelectedIds(new Set());
+    setLoading(true);
+    try {
+      const result = await api<{items:StagingItem[]}>(`/api/requisition-staging?batchId=${batch.id}&includeCompleted=${batchView==='completed'}`);
+      setStagingItems(result.items ?? []);
+    } catch (err) {
+      setNotice({kind:'error',text:(err as Error).message});
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -472,7 +530,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     try {
       const result = await api<{removedCount:number}>('/api/requisition-staging/clear-selected',{method:'POST',body:JSON.stringify({ids})});
       setStagingSelectedIds(new Set());
-      await Promise.all([loadStaging(),loadInventoryOptions()]);
+      await Promise.all([loadStaging(batchView,activeBatchId),loadInventoryOptions()]);
       setNotice({kind:'success',text:`Removed ${result.removedCount} item${result.removedCount===1?'':'s'} from the staging list.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
@@ -499,10 +557,12 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     setStagingReviewForm(blankStagingReviewForm(userFullName));
     setReviewingStaging(true);
     setStagingFormError('');
+    setStagingPreviewToken('');
+    setStagingPdfPreviews([]);
     setCreatedFromStaging([]);
   }
 
-  async function createFromStaging(event: FormEvent) {
+  async function generateStagingPreview(event: FormEvent) {
     event.preventDefault();
     if (!selectedStagingItems.length) return;
     if (!stagingReviewForm.poInitiator.trim() || !stagingReviewForm.requisitionedByName.trim() || !stagingReviewForm.taxExempt) {
@@ -512,13 +572,74 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     setStagingSaving(true);
     setStagingFormError('');
     try {
-      const result = await api<{requisitions:StagingCreateResult[]}>('/api/requisition-staging/create-requisitions',{method:'POST',body:JSON.stringify({...stagingReviewForm,stagingItemIds:selectedStagingItems.map(item=>item.id)})});
+      const result = await api<{token:string;previews:StagingPdfPreview[]}>('/api/requisition-staging/preview',{method:'POST',body:JSON.stringify({...stagingReviewForm,stagingItemIds:selectedStagingItems.map(item=>item.id)})});
+      setStagingPreviewToken(result.token);
+      setStagingPdfPreviews(result.previews ?? []);
+      setActiveStagingPreviewId(result.previews?.[0]?.id ?? 0);
+    } catch (err) {
+      setStagingFormError((err as Error).message);
+    } finally {
+      setStagingSaving(false);
+    }
+  }
+
+  async function createFromStaging() {
+    if (!stagingPreviewToken) return;
+    setStagingSaving(true);
+    setStagingFormError('');
+    try {
+      const result = await api<{requisitions:StagingCreateResult[]}>('/api/requisition-staging/create-requisitions',{method:'POST',body:JSON.stringify({previewToken:stagingPreviewToken})});
       setCreatedFromStaging(result.requisitions ?? []);
       setStagingSelectedIds(new Set());
-      await Promise.all([loadStaging(),loadInventoryOptions()]);
+      setStagingPreviewToken('');
+      setStagingPdfPreviews([]);
+      await Promise.all([loadStaging(batchView,null),loadInventoryOptions()]);
       setNotice({kind:'success',text:`Created ${result.requisitions?.length ?? 0} official vendor requisition${result.requisitions?.length === 1 ? '' : 's'} from staged items.`});
     } catch (err) {
       setStagingFormError((err as Error).message);
+    } finally {
+      setStagingSaving(false);
+    }
+  }
+
+  function backToStagingReview() {
+    setStagingPreviewToken('');
+    setStagingPdfPreviews([]);
+    setStagingPreviewUrl('');
+    setStagingFormError('');
+  }
+
+  function printStagingPreview() {
+    const frame = document.getElementById('staging-requisition-preview-frame') as HTMLIFrameElement|null;
+    frame?.contentWindow?.focus();
+    frame?.contentWindow?.print();
+  }
+
+  async function downloadStagingPreview() {
+    if (!activeStagingPdfPreview) return;
+    await downloadFile(`${activeStagingPdfPreview.pdfUrl}?download=true`,`MCC_Requisition_Preview_${activeStagingPdfPreview.vendorName}.pdf`);
+  }
+
+  function openBatchCreator() {
+    setBatchForm({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
+    setBatchFormError('');
+    setBatchEditing(true);
+  }
+
+  async function saveRequisitionBatch(event: FormEvent) {
+    event.preventDefault();
+    if (!batchForm.name.trim()) return setBatchFormError('Batch name is required.');
+    if (!isValidMccDateValue(batchForm.neededByDate)) return setBatchFormError('Needed-by Date must be valid when entered.');
+    setStagingSaving(true);
+    setBatchFormError('');
+    try {
+      const result = await api<{batch:RequisitionBatch}>('/api/requisition-batches',{method:'POST',body:JSON.stringify(batchForm)});
+      setBatchEditing(false);
+      setBatchView('active');
+      await loadStaging('active',result.batch.id);
+      setNotice({kind:'success',text:`Requisition Batch “${result.batch.name}” created.`});
+    } catch (err) {
+      setBatchFormError((err as Error).message);
     } finally {
       setStagingSaving(false);
     }
@@ -708,24 +829,36 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
         <section className="mcc-card requisitions-table-card staging-list-card">
           <div className="staging-list-heading">
             <div><p className="eyebrow">Purchase preparation</p><h3>Requisition Staging List</h3><p>A working list of items to order later. Select items when you are ready to build a requisition.</p></div>
-            {canWrite&&<button className="primary-button" type="button" onClick={()=>openNewStaging()}>Manually Add Item</button>}
+            {canWrite&&<button className="primary-button" type="button" onClick={openBatchCreator}>Create Requisition Batch</button>}
           </div>
-          <div className="staging-toolbar">
-            <label className="form-field"><span>Search staged items</span><input value={stagingSearch} onChange={event=>setStagingSearch(event.target.value)} placeholder="Part, vendor, machine, WO#, status..." /></label>
-            {canWrite&&<label className="form-field"><span>Search Inventory to add</span><input value={inventorySearch} onChange={event=>setInventorySearch(event.target.value)} placeholder="Part number, description, vendor..." /></label>}
+          <div className="requisition-batch-view-pills" role="tablist" aria-label="Requisition Batch views">
+            <button className={batchView==='active'?'active':''} type="button" onClick={()=>{setBatchView('active');void loadStaging('active',null);}}>Open Batches</button>
+            <button className={batchView==='completed'?'active':''} type="button" onClick={()=>{setBatchView('completed');void loadStaging('completed',null);}}>Converted / Closed</button>
           </div>
-          {canWrite&&inventoryMatches.length>0&&(
-            <div className="staging-inventory-results">
-              {inventoryMatches.map(part=><button key={part.id} type="button" onClick={()=>stageInventoryOption(part)}><strong>{part.partNumber}</strong><span>{part.description}</span><small>{part.vendor || 'No vendor'}{part.isInRequisitionStaging?' / Already staged':''}</small></button>)}
+          <div className="requisition-batch-grid">
+            {requisitionBatches.map(batch=><button className={batch.id===activeBatchId?'requisition-batch-card active':'requisition-batch-card'} key={batch.id} type="button" onClick={()=>void selectRequisitionBatch(batch)}>
+              <span className={`requisition-batch-status status-${batch.status.toLowerCase()}`}>{batch.status}</span>
+              <strong>{batch.name}</strong>
+              <span>{batchView==='active'?batch.openItemCount:batch.convertedItemCount} item{(batchView==='active'?batch.openItemCount:batch.convertedItemCount)===1?'':'s'}</span>
+              {(batch.assetMachine||batch.workOrderNumber)&&<small>{batch.assetMachine||'No asset'}{batch.workOrderNumber?` / WO# ${batch.workOrderNumber}`:''}</small>}
+            </button>)}
+            {!loading&&!requisitionBatches.length&&<p className="empty-batch-message">No {batchView==='active'?'open':'converted or closed'} Requisition Batches.</p>}
+          </div>
+          {activeRequisitionBatch&&<div className="active-requisition-batch-heading"><div><span>Requisition Batch</span><strong>{activeRequisitionBatch.name}</strong><small>{activeRequisitionBatch.description||'No batch notes.'}</small></div>{batchView==='active'&&canWrite&&<button className="secondary-button compact-button" type="button" onClick={()=>openNewStaging()}>Manually Add Item</button>}<div className="batch-requisition-links">{activeRequisitionBatch.requisitions.map(requisition=><button className="secondary-button compact-button" key={requisition.id} type="button" onClick={()=>openCreatedRequisition(requisition.requisitionNumber)}>Open {requisition.requisitionNumber}</button>)}</div></div>}
+          {activeRequisitionBatch&&batchView==='active'&&<>
+            <div className="staging-toolbar">
+              <label className="form-field"><span>Search staged items</span><input value={stagingSearch} onChange={event=>setStagingSearch(event.target.value)} placeholder="Part, vendor, machine, WO#, status..." /></label>
+              {canWrite&&<label className="form-field"><span>Search Inventory to add</span><input value={inventorySearch} onChange={event=>setInventorySearch(event.target.value)} placeholder="Part number, description, vendor..." /></label>}
             </div>
-          )}
-          <div className="requisition-selection-toolbar">
-            <span>Selected: {selectedStagingItems.length}</span>
-            <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!visibleSelectableStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
-            <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Unselect All</button>
-            {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>void clearSelectedStagingItems()} disabled={!selectedStagingItems.length||stagingSaving}>Clear Selected Items</button>}
-            {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Create Requisition Draft</button>}
-          </div>
+            {canWrite&&inventoryMatches.length>0&&<div className="staging-inventory-results">{inventoryMatches.map(part=><button key={part.id} type="button" onClick={()=>stageInventoryOption(part)}><strong>{part.partNumber}</strong><span>{part.description}</span><small>{part.vendor||'No vendor'}</small></button>)}</div>}
+            <div className="requisition-selection-toolbar">
+              <span>Selected: {selectedStagingItems.length}</span>
+              <button className="secondary-button compact-button" type="button" onClick={toggleVisibleStagingSelection} disabled={!visibleSelectableStagingItems.length}>{allVisibleStagingSelected?'Unselect Visible':'Select Visible'}</button>
+              <button className="secondary-button compact-button" type="button" onClick={()=>setStagingSelectedIds(new Set())} disabled={!stagingSelectedIds.size}>Unselect All</button>
+              {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>void clearSelectedStagingItems()} disabled={!selectedStagingItems.length||stagingSaving}>Clear Selected Items</button>}
+              {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Preview Requisition</button>}
+            </div>
+          </>}
           <div className="table-card requisitions-table-wrap staging-table-wrap">
             <table className="requisition-staging-table">
               <thead><tr><th>Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
@@ -733,12 +866,12 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                 {filteredStagingItems.map(item=>{
                   const selectable=['Need to Order','Ready for Requisition'].includes(item.status);
                   return <tr key={item.id}>
-                    <td><input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} /></td>
+                    <td>{batchView==='active'?<input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} />:'-'}</td>
                     <td><span className={`staging-priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span></td>
                     <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>
                     <td><strong className="staging-part-number">{item.partNumber}</strong>{item.supplierPartNumber&&<small className="staging-supplier-number">Supplier: {item.supplierPartNumber}</small>}</td>
                     <td className="inventory-description-cell">{item.description}</td><td>{formatQuantity(item.quantityRequested)}</td><td>{item.vendor}</td><td>{item.location||'-'}</td><td>{item.assetMachine||'-'}</td><td>{item.workOrderNumber||'-'}</td><td>{item.neededByDate||'-'}</td><td>{item.requestedBy||'-'}</td>
-                    <td><div className="requisition-row-actions">{canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{canWrite&&selectable&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}</div></td>
+                    <td><div className="requisition-row-actions">{batchView==='active'&&canWrite&&selectable&&<button className="secondary-button compact-button" type="button" onClick={()=>openEditStaging(item)}>Edit</button>}{batchView==='active'&&canWrite&&selectable&&<button className="danger-button compact-button" type="button" onClick={()=>void removeStagingItem(item)} disabled={busyId===item.id}>Remove</button>}{batchView==='completed'&&item.createdRequisitionNumber&&<button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(item.createdRequisitionNumber!)}>Open Requisition</button>}</div></td>
                   </tr>;
                 })}
                 {!loading&&!filteredStagingItems.length&&<tr><td colSpan={13} className="empty-table-cell">No staged items match this view.</td></tr>}
@@ -824,6 +957,24 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
         </div>
       </section>}
 
+      {batchEditing&&(
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setBatchEditing(false);}}>
+          <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveRequisitionBatch}>
+            <div className="modal-heading"><div><p className="eyebrow">Requisition Batch</p><h3>Create Requisition Batch</h3></div><button className="link-button compact-button" type="button" onClick={()=>setBatchEditing(false)}>Close</button></div>
+            <div className="staging-editor-grid">
+              <label className="form-field"><span>Batch Name <b className="required-marker">*</b></span><input value={batchForm.name} onChange={event=>setBatchForm({...batchForm,name:event.target.value})} autoFocus placeholder="Press 51 Repair" /></label>
+              <label className="form-field"><span>Status</span><select value={batchForm.status} onChange={event=>setBatchForm({...batchForm,status:event.target.value as 'Open'|'Ready'})}><option>Open</option><option>Ready</option></select></label>
+              <label className="form-field"><span>Asset / Machine</span><input value={batchForm.assetMachine} onChange={event=>setBatchForm({...batchForm,assetMachine:event.target.value})} /></label>
+              <label className="form-field"><span>Work Order</span><input value={batchForm.workOrderNumber} onChange={event=>setBatchForm({...batchForm,workOrderNumber:event.target.value})} /></label>
+              <MccDateInput label="Needed-by Date" value={batchForm.neededByDate} onChange={neededByDate=>setBatchForm({...batchForm,neededByDate})} />
+              <label className="form-field staging-editor-wide"><span>Description / Notes</span><textarea value={batchForm.description} onChange={event=>setBatchForm({...batchForm,description:event.target.value})} /></label>
+            </div>
+            {batchFormError&&<p className="form-message error">{batchFormError}</p>}
+            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setBatchEditing(false)}>Cancel</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Creating...':'Create Requisition Batch'}</button></div>
+          </form>
+        </div>
+      )}
+
       {stagingEditing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)closeStagingEditor();}}>
           <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveStagingItem}>
@@ -852,11 +1003,11 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {reviewingStaging&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setReviewingStaging(false);}}>
-          <form className="mcc-card requisition-modal staging-review-modal" onSubmit={createFromStaging}>
-            <div className="modal-heading"><div><p className="eyebrow">Review before creation</p><h3>Create Requisition Draft</h3></div><button className="link-button compact-button" type="button" onClick={()=>setReviewingStaging(false)} disabled={stagingSaving}>Close</button></div>
-            {!createdFromStaging.length&&<>
+          <form className="mcc-card requisition-modal staging-review-modal" onSubmit={generateStagingPreview}>
+            <div className="modal-heading"><div><p className="eyebrow">Review before official creation</p><h3>{stagingPreviewToken?'Requisition PDF Preview':'Preview Requisition'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>setReviewingStaging(false)} disabled={stagingSaving}>Close</button></div>
+            {!createdFromStaging.length&&!stagingPreviewToken&&<>
               <div className="staging-review-summary"><strong>{selectedStagingItems.length} staged item{selectedStagingItems.length===1?'':'s'}</strong><span>{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size} vendor requisition{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size===1?'':'s'} will be created using the existing vendor grouping.</span></div>
-              <div className="staging-review-items">{selectedStagingItems.map(item=><div key={item.id}><strong>{item.partNumber}</strong><span>{item.vendor}</span><span>Qty {formatQuantity(item.quantityRequested)}</span><small>{item.description}</small></div>)}</div>
+              <div className="staging-review-items">{selectedStagingItems.map(item=><div key={item.id}><strong className="staging-review-part-number">{item.partNumber}</strong><span>{item.vendor}</span><span>Qty {formatQuantity(item.quantityRequested)}</span><small>{item.description}</small></div>)}</div>
               <div className="staging-editor-grid">
                 <label className="form-field"><span>P.O. Initiator <b className="required-marker">*</b></span><input value={stagingReviewForm.poInitiator} onChange={event=>setStagingReviewForm({...stagingReviewForm,poInitiator:event.target.value})} /></label>
                 <label className="form-field"><span>Requisitioned By <b className="required-marker">*</b></span><input value={stagingReviewForm.requisitionedByName} onChange={event=>setStagingReviewForm({...stagingReviewForm,requisitionedByName:event.target.value})} /></label>
@@ -869,9 +1020,15 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                 <label className="form-field staging-editor-wide"><span>Requisition Notes</span><textarea value={stagingReviewForm.notes} onChange={event=>setStagingReviewForm({...stagingReviewForm,notes:event.target.value})} /></label>
               </div>
             </>}
-            {createdFromStaging.length>0&&<div className="staging-created-list"><h4>Requisition drafts created</h4>{createdFromStaging.map(created=><div key={created.id}><strong>{created.requisitionNumber}</strong><span>{created.vendorName} / {created.lineCount} line{created.lineCount===1?'':'s'}</span><div><button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(created.requisitionNumber)}>Open Requisition</button><button className="secondary-button compact-button" type="button" onClick={()=>void downloadFile(`/api/requisitions/${created.id}/pdf`,`MCC_Requisition_${created.requisitionNumber}.pdf`)}>PDF</button></div></div>)}</div>}
+            {!createdFromStaging.length&&stagingPreviewToken&&<div className="staging-pdf-preview-stage">
+              {stagingPdfPreviews.length>1&&<div className="requisition-preview-tabs" role="tablist" aria-label="Vendor requisition previews">{stagingPdfPreviews.map(preview=><button className={preview.id===activeStagingPdfPreview?.id?'active':''} key={preview.id} type="button" onClick={()=>setActiveStagingPreviewId(preview.id)}><strong>{preview.vendorName}</strong><span>{preview.lineCount} line{preview.lineCount===1?'':'s'} / {preview.total.toLocaleString(undefined,{style:'currency',currency:'USD'})}</span></button>)}</div>}
+              {activeStagingPdfPreview&&<div className="staging-review-summary"><strong>{activeStagingPdfPreview.vendorName}</strong><span>{activeStagingPdfPreview.lineCount} line{activeStagingPdfPreview.lineCount===1?'':'s'} / Total {activeStagingPdfPreview.total.toLocaleString(undefined,{style:'currency',currency:'USD'})}</span></div>}
+              {stagingPreviewLoading&&<div className="requisition-preview-placeholder">Generating PDF preview...</div>}
+              {stagingPreviewUrl&&<iframe id="staging-requisition-preview-frame" className="requisition-preview-frame" title={`Preview ${activeStagingPdfPreview?.vendorName??'requisition'}`} src={stagingPreviewUrl} />}
+            </div>}
+            {createdFromStaging.length>0&&<div className="staging-created-list"><h4>Official requisitions created</h4>{createdFromStaging.map(created=><div key={created.id}><strong>{created.requisitionNumber}</strong><span>{created.vendorName} / {created.lineCount} line{created.lineCount===1?'':'s'}</span><div><button className="secondary-button compact-button" type="button" onClick={()=>openCreatedRequisition(created.requisitionNumber)}>Open Requisition</button><button className="secondary-button compact-button" type="button" onClick={()=>void downloadFile(`/api/requisitions/${created.id}/pdf`,`MCC_Requisition_${created.requisitionNumber}.pdf`)}>PDF</button></div></div>)}</div>}
             {stagingFormError&&<p className="form-message error">{stagingFormError}</p>}
-            <div className="modal-actions">{!createdFromStaging.length?<><button className="secondary-button" type="button" onClick={()=>setReviewingStaging(false)}>Back</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Creating...':'Confirm and Create Drafts'}</button></>:<button className="primary-button" type="button" onClick={()=>setReviewingStaging(false)}>Done</button>}</div>
+            <div className="modal-actions">{createdFromStaging.length?<button className="primary-button" type="button" onClick={()=>setReviewingStaging(false)}>Done</button>:stagingPreviewToken?<><button className="secondary-button" type="button" onClick={backToStagingReview}>Back / Edit</button><button className="secondary-button" type="button" onClick={printStagingPreview} disabled={!stagingPreviewUrl}>Print Preview</button><button className="secondary-button" type="button" onClick={()=>void downloadStagingPreview()} disabled={!activeStagingPdfPreview}>Download Preview</button><button className="primary-button" type="button" onClick={()=>void createFromStaging()} disabled={stagingSaving}>{stagingSaving?'Creating...':'Confirm & Create Requisition'}</button></>:<><button className="secondary-button" type="button" onClick={()=>setReviewingStaging(false)}>Back</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Generating...':'Generate PDF Preview'}</button></>}</div>
           </form>
         </div>
       )}

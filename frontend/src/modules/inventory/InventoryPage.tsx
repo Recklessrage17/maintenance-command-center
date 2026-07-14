@@ -55,6 +55,8 @@ type VendorRequisitionForm = {
   requisitionType: RequisitionType; poNo: string; poInitiator: string; shipVia: string; poClass: string; requestDate: string; vendorName: string; vendorAddress: string; confirmedWith: string; assetNo: string; moldNo: string; equipmentNo: string; partNo: string; jobNo: string; initials: string; tsNo: string; codeNo: string; workOrderNo: string; comments: string; departmentManager: string; requisitionedBy: string; authorizedBy: string; taxExempt: 'No' | 'Yes'; materialCert: 'No' | 'Yes'; fob: 'Origin' | 'Destination'; priority: string;
 };
 type VendorRequisitionGroup = { key: string; vendorName: string; items: InventoryPart[]; requiresReview: boolean };
+type RequisitionBatch = { id:number; name:string; description:string; assetMachine:string; workOrderNumber:string; neededByDate:string; status:'Open'|'Ready'|'Converted'|'Closed'; isGeneral:boolean; openItemCount:number };
+type RequisitionBatchForm = { name:string; description:string; assetMachine:string; workOrderNumber:string; neededByDate:string; status:'Open'|'Ready' };
 
 type NativeSummary = {
   totalParts: number;
@@ -447,8 +449,12 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const [form,setForm]=useState<PartForm>(blankForm);
   const [formError,setFormError]=useState('');
   const [saving,setSaving]=useState(false);
-  const [stagingPart,setStagingPart]=useState<InventoryPart|null>(null);
-  const [stagingQuantity,setStagingQuantity]=useState('');
+  const [stagingParts,setStagingParts]=useState<InventoryPart[]>([]);
+  const [stagingQuantities,setStagingQuantities]=useState<Record<string,string>>({});
+  const [stagingBatches,setStagingBatches]=useState<RequisitionBatch[]>([]);
+  const [stagingBatchId,setStagingBatchId]=useState<number|null>(null);
+  const [creatingStagingBatch,setCreatingStagingBatch]=useState(false);
+  const [stagingBatchForm,setStagingBatchForm]=useState<RequisitionBatchForm>({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
   const [stagingError,setStagingError]=useState('');
   const [stagingSaving,setStagingSaving]=useState(false);
   const [toolsBusy,setToolsBusy]=useState('');
@@ -927,40 +933,77 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
     setFormError('');
   }
 
-  function openStaging(part: InventoryPart) {
+  async function openStaging(partOrParts: InventoryPart|InventoryPart[]) {
     if (!writeEnabled) return;
-    setStagingPart(part);
-    setStagingQuantity('');
+    const nextParts = Array.isArray(partOrParts) ? partOrParts : [partOrParts];
+    const uniqueParts = [...new Map(nextParts.map(part=>[part.id,part])).values()];
+    if (!uniqueParts.length) return;
+    setStagingParts(uniqueParts);
+    setStagingQuantities(Object.fromEntries(uniqueParts.map(part=>[part.id,''])));
     setStagingError('');
     setNotice(null);
+    setCreatingStagingBatch(false);
+    try {
+      const result = await api<{batches:RequisitionBatch[]}>('/api/requisition-batches?view=active');
+      setStagingBatches(result.batches ?? []);
+      setStagingBatchId(result.batches?.[0]?.id ?? null);
+    } catch (err) {
+      setStagingError((err as Error).message);
+    }
   }
 
   function closeStaging(force = false) {
     if (stagingSaving && !force) return;
-    setStagingPart(null);
-    setStagingQuantity('');
+    setStagingParts([]);
+    setStagingQuantities({});
+    setStagingBatches([]);
+    setStagingBatchId(null);
+    setCreatingStagingBatch(false);
     setStagingError('');
   }
 
   async function submitStaging(event: FormEvent) {
     event.preventDefault();
-    if (!stagingPart) return;
-    const quantity = Number(stagingQuantity);
-    if (!stagingQuantity.trim() || !Number.isFinite(quantity) || quantity <= 0) {
-      setStagingError('Quantity Needed must be a positive number.');
+    if (!stagingParts.length) return;
+    if (!stagingBatchId) {
+      setStagingError('Choose a destination Requisition Batch.');
       return;
     }
+    const items = stagingParts.map(part=>({inventoryPartId:Number(part.id),quantityRequested:Number(stagingQuantities[part.id])}));
+    if (items.some((item,index)=>!stagingQuantities[stagingParts[index].id]?.trim()||!Number.isFinite(item.quantityRequested)||item.quantityRequested<=0)) return setStagingError('Quantity Needed must be a positive number for every item.');
     setStagingSaving(true);
     setStagingError('');
     try {
-      const updating = Boolean(stagingPart.isInRequisitionStaging && stagingPart.requisitionStagingItemId);
-      await api(updating ? `/api/requisition-staging/${stagingPart.requisitionStagingItemId}` : '/api/requisition-staging', {
-        method: updating ? 'PATCH' : 'POST',
-        body: JSON.stringify({inventoryPartId:Number(stagingPart.id),quantityRequested:quantity,status:'Need to Order'}),
-      });
+      const send = async (updateExisting:boolean) => {
+        const response = await fetch('/api/requisition-staging/bulk',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({batchId:stagingBatchId,items,updateExisting})});
+        const body = await response.json().catch(()=>({}));
+        if (!response.ok) {
+          if (response.status===409&&!updateExisting&&window.confirm(`${body.error}\n\nUpdate the existing staged quantities?`)) return send(true);
+          throw new Error(body.error||'Unable to stage selected items.');
+        }
+        return body as {addedCount:number;updatedCount:number;batch:RequisitionBatch};
+      };
+      const result = await send(false);
       closeStaging(true);
-      showNotice('success', updating ? `Updated staged quantity for ${stagingPart.partNumber}.` : `${stagingPart.partNumber} added to Requisition Staging List.`);
+      showNotice('success', `Staged ${result.addedCount} new item${result.addedCount===1?'':'s'} and updated ${result.updatedCount} existing item${result.updatedCount===1?'':'s'} in ${result.batch.name}.`);
       await refresh();
+    } catch (err) {
+      setStagingError((err as Error).message);
+    } finally {
+      setStagingSaving(false);
+    }
+  }
+
+  async function createStagingBatchFromInventory() {
+    if (!stagingBatchForm.name.trim()) return setStagingError('Batch name is required.');
+    if (!isValidMccDateValue(stagingBatchForm.neededByDate)) return setStagingError('Needed-by Date must be valid when entered.');
+    setStagingSaving(true);
+    setStagingError('');
+    try {
+      const result = await api<{batch:RequisitionBatch}>('/api/requisition-batches',{method:'POST',body:JSON.stringify(stagingBatchForm)});
+      setStagingBatches(current=>[result.batch,...current]);
+      setStagingBatchId(result.batch.id);
+      setCreatingStagingBatch(false);
     } catch (err) {
       setStagingError((err as Error).message);
     } finally {
@@ -1189,6 +1232,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
           </div>
         )}
         <button className="primary-button preview-requisition-button" type="button" onClick={startSelectedRequisition} disabled={!writeEnabled||!selectedParts.length}>Preview Requisition</button>
+        <button className="secondary-button stage-selected-button" type="button" onClick={()=>void openStaging(selectedParts)} disabled={!writeEnabled||!selectedParts.length}>Stage Selected</button>
       </div>
     );
   }
@@ -1371,8 +1415,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                             <button className={selectedPartIds.has(part.id) ? 'secondary-button compact-button selected' : 'secondary-button compact-button'} type="button" onClick={()=>togglePartSelection(part.id)} disabled={!writeEnabled}>{selectedPartIds.has(part.id) ? 'Selected' : 'Select'}</button>
                             <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
                           </div>
-                          <button className="secondary-button compact-button inventory-stage-button" type="button" onClick={()=>openStaging(part)} disabled={!writeEnabled}>
-                            Stage for Requisition
+                          <button className="secondary-button compact-button inventory-stage-button" type="button" onClick={()=>void openStaging(part)} disabled={!writeEnabled} title="Stage for Requisition">
+                            Stage
                           </button>
                           {(part.isInRequisitionStaging||part.hasActiveRequisitionRecord)&&<div className="inventory-row-action-flags">
                             {part.isInRequisitionStaging&&<span className="inventory-staged-pill" title={part.requisitionStagingStatus || 'In Requisition Staging List'}>Staged</span>}
@@ -1456,26 +1500,32 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
         </div>
       )}
 
-      {stagingPart&&(
+      {stagingParts.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeStaging(); }}>
-          <form className="mcc-card staging-quantity-modal" onSubmit={submitStaging}>
+          <form className="mcc-card staging-quantity-modal staging-destination-modal" onSubmit={submitStaging}>
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">Requisition Staging List</p>
-                <h3>{stagingPart.partNumber}</h3>
+                <p className="eyebrow">Stage for Requisition</p>
+                <h3>{stagingParts.length===1?stagingParts[0].partNumber:`${stagingParts.length} selected Inventory items`}</h3>
               </div>
               <button className="link-button compact-button" type="button" onClick={()=>closeStaging()}>Close</button>
             </div>
-            <p>{stagingPart.description}</p>
-            {stagingPart.isInRequisitionStaging&&<p className="staging-duplicate-warning" role="status">This part is already staged. Enter a new quantity to update the existing staged item.</p>}
-            <label className="form-field">
-              <span>Quantity Needed <b className="required-marker" aria-label="required">*</b></span>
-              <input inputMode="decimal" value={stagingQuantity} onChange={event=>setStagingQuantity(event.target.value)} placeholder="Enter quantity needed" autoFocus />
-            </label>
+            <div className="staging-destination-heading"><strong>Choose a Requisition Batch</strong><button className="secondary-button compact-button" type="button" onClick={()=>{setCreatingStagingBatch(current=>!current);setStagingBatchForm({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});}}>{creatingStagingBatch?'Choose Existing':'Create New Batch'}</button></div>
+            {!creatingStagingBatch&&<div className="staging-batch-choice-grid">{stagingBatches.map(batch=><button className={batch.id===stagingBatchId?'staging-batch-choice active':'staging-batch-choice'} type="button" key={batch.id} onClick={()=>setStagingBatchId(batch.id)}><strong>{batch.name}</strong><span>{batch.openItemCount} item{batch.openItemCount===1?'':'s'}</span>{(batch.assetMachine||batch.workOrderNumber)&&<small>{batch.assetMachine||'No asset'}{batch.workOrderNumber?` / WO# ${batch.workOrderNumber}`:''}</small>}</button>)}</div>}
+            {creatingStagingBatch&&<div className="staging-editor-grid staging-inline-batch-form">
+              <label className="form-field"><span>Batch Name <b className="required-marker">*</b></span><input value={stagingBatchForm.name} onChange={event=>setStagingBatchForm({...stagingBatchForm,name:event.target.value})} placeholder="Maint Restock" autoFocus /></label>
+              <label className="form-field"><span>Status</span><select value={stagingBatchForm.status} onChange={event=>setStagingBatchForm({...stagingBatchForm,status:event.target.value as 'Open'|'Ready'})}><option>Open</option><option>Ready</option></select></label>
+              <label className="form-field"><span>Asset / Machine</span><input value={stagingBatchForm.assetMachine} onChange={event=>setStagingBatchForm({...stagingBatchForm,assetMachine:event.target.value})} /></label>
+              <label className="form-field"><span>Work Order</span><input value={stagingBatchForm.workOrderNumber} onChange={event=>setStagingBatchForm({...stagingBatchForm,workOrderNumber:event.target.value})} /></label>
+              <MccDateInput label="Needed-by Date" value={stagingBatchForm.neededByDate} onChange={neededByDate=>setStagingBatchForm({...stagingBatchForm,neededByDate})} />
+              <label className="form-field staging-editor-wide"><span>Description / Notes</span><textarea value={stagingBatchForm.description} onChange={event=>setStagingBatchForm({...stagingBatchForm,description:event.target.value})} /></label>
+              <button className="secondary-button staging-editor-wide" type="button" onClick={()=>void createStagingBatchFromInventory()} disabled={stagingSaving}>{stagingSaving?'Creating...':'Create and Select Batch'}</button>
+            </div>}
+            <div className="staging-bulk-quantity-list">{stagingParts.map((part,index)=><div key={part.id}><div><strong>{part.partNumber}</strong><span>{part.description}</span><small>{part.vendor||'No vendor'} / {part.location||'No location'}</small></div><label className="form-field"><span>Quantity Needed <b className="required-marker">*</b></span><input inputMode="decimal" value={stagingQuantities[part.id]??''} onChange={event=>setStagingQuantities(current=>({...current,[part.id]:event.target.value}))} placeholder="Enter quantity" autoFocus={index===0} /></label></div>)}</div>
             {stagingError&&<p className="form-message error">{stagingError}</p>}
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeStaging()}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Saving...':stagingPart.isInRequisitionStaging?'Update Staged Quantity':'Add to Staging List'}</button>
+              <button className="primary-button" type="submit" disabled={stagingSaving||creatingStagingBatch||!stagingBatchId}>{stagingSaving?'Saving...':`Stage ${stagingParts.length} Item${stagingParts.length===1?'':'s'}`}</button>
             </div>
           </form>
         </div>
