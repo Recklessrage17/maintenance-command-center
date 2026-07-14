@@ -714,7 +714,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
             {canWrite&&<button className="primary-button compact-button" type="button" onClick={openStagingReview} disabled={!selectedStagingItems.length}>Create Requisition Draft</button>}
           </div>
           <div className="table-card requisitions-table-wrap staging-table-wrap">
-            <table>
+            <table className="requisition-staging-table">
               <thead><tr><th>Select</th><th>Priority</th><th>Status</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Vendor</th><th>Location</th><th>Asset / Machine</th><th>WO#</th><th>Needed By</th><th>Requested By</th><th>Actions</th></tr></thead>
               <tbody>
                 {filteredStagingItems.map(item=>{

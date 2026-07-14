@@ -868,8 +868,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .segmented-control button.active { color: #001523; background: linear-gradient(135deg, #44d7ff, #3c7dff); }
 .page-count { display: inline-flex !important; min-height: 30px; align-items: center; margin: 0 !important; padding: 0 4px; color: #dff7ff !important; font-size: .78rem !important; font-weight: 900 !important; white-space: nowrap; }
 .pager-button { width: auto; min-width: 58px; }
-.inventory-table-wrap { width: 100%; max-width: 100%; min-width: 0; max-height: calc(100vh - 238px); overflow: auto; border-radius: 10px; -webkit-overflow-scrolling: touch; }
-.inventory-table-wrap table { min-width: 1080px; table-layout: fixed; }
+.inventory-table-wrap { width: 100%; max-width: 100%; min-width: 0; max-height: calc(100vh - 238px); overflow: auto; padding-bottom: 8px; border-radius: 10px; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
+.inventory-table-wrap table { min-width: 1300px; table-layout: fixed; }
 .inventory-table-wrap th { position: sticky; top: 0; z-index: 2; background: rgba(5, 22, 40, 0.98); box-shadow: 0 1px 0 rgba(85, 191, 236, 0.24); }
 .inventory-table-wrap th, .inventory-table-wrap td { padding: 8px 10px; font-size: .82rem; vertical-align: top; }
 .inventory-table-wrap th { font-size: .7rem; letter-spacing: .06em; }
@@ -880,7 +880,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-table-wrap th:nth-child(5), .inventory-table-wrap td:nth-child(5) { width: 68px; }
 .inventory-table-wrap th:nth-child(6), .inventory-table-wrap td:nth-child(6) { width: 92px; }
 .inventory-table-wrap th:nth-child(7), .inventory-table-wrap td:nth-child(7) { width: 150px; }
-.inventory-table-wrap th:nth-child(8), .inventory-table-wrap td:nth-child(8) { width: 112px; }
+.inventory-table-wrap th:nth-child(8), .inventory-table-wrap td:nth-child(8) { width: 220px; }
 .inventory-table-wrap td:nth-child(6), .inventory-table-wrap td:nth-child(7) { white-space: nowrap; }
 .sort-header { display: inline-flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; padding: 0; border: 0; color: #44d7ff; background: transparent; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 900; text-align: left; text-transform: uppercase; }
 .sort-header:hover, .sort-header.active { color: #bff3ff; }
@@ -909,8 +909,13 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-row-new.inventory-row-selected td { background: rgba(18, 97, 71, 0.24); box-shadow: inset 3px 0 0 rgba(54, 229, 170, 0.9), inset 0 0 0 999px rgba(68, 215, 255, 0.03); }
 .muted-cell { display: inline !important; margin: 0 !important; color: #7fa9bb !important; font-size: .82rem !important; }
 .empty-table-cell { color: #a9c5d6; text-align: center; padding: 24px !important; }
-.inventory-row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; align-items: stretch; }
+.inventory-row-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-items: stretch; min-width: 0; }
+.inventory-row-actions-primary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .inventory-row-actions .compact-button { width: 100%; min-height: 26px; padding: 0 6px; border-radius: 8px; font-size: .68rem; white-space: nowrap; line-height: 1.1; }
+.inventory-stage-button { grid-column: 1 / -1; min-height: 30px !important; padding-inline: 10px !important; }
+.inventory-row-action-flags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.inventory-actions-column { min-width: 220px; }
+.inventory-table-wrap td.inventory-actions-column { padding-right: 14px; padding-bottom: 12px; }
 .inventory-row-actions .compact-button.selected { color: #001523; border-color: rgba(68, 215, 255, 0.9); background: linear-gradient(135deg, #44d7ff, #3c7dff); }
 .row-requisition-note { grid-column: 1 / -1; display: inline-flex !important; justify-self: start; margin: -1px 0 0 !important; color: #bfe9ff !important; font-size: .64rem !important; font-weight: 900 !important; line-height: 1.1; text-transform: uppercase; }
 .vendor-name-link, .vendor-list-name-button, .inactive-vendor-link { appearance: none; display: inline; max-width: 100%; padding: 0; border: 0; background: transparent; font: inherit; font-weight: 900; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
@@ -1172,7 +1177,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-numeric-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .staging-quantity-modal { width: min(520px,100%); }
 .staging-duplicate-warning { padding: 10px 13px; border: 1px solid rgba(255,211,111,.45); border-radius: 999px; color: #fff2c2 !important; background: rgba(91,70,19,.28); }
-.inventory-stage-label-short { display: none; }
 .inventory-staged-pill { display: inline-flex; align-items: center; min-height: 25px; padding: 0 9px; border: 1px solid rgba(54,229,170,.45); border-radius: 999px; color: #d9ffe9 !important; background: rgba(18,97,71,.32); font-size: .68rem; font-weight: 950; }
 
 .requisition-view-pills { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px; border: 1px solid rgba(143,205,233,.2); border-radius: 999px; background: rgba(4,18,34,.62); }
@@ -1187,10 +1191,29 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .staging-inventory-results button { display: grid; gap: 3px; min-width: 0; padding: 10px 12px; border: 1px solid rgba(143,205,233,.24); border-radius: 16px; color: #eafaff; background: rgba(10,32,55,.7); cursor: pointer; font: inherit; text-align: left; }
 .staging-inventory-results button:hover { border-color: rgba(54,229,170,.62); }
 .staging-inventory-results span,.staging-inventory-results small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.staging-table-wrap { max-height: calc(100vh - 385px); }
-.staging-table-wrap table { min-width: 1520px; }
+.staging-table-wrap { width: 100%; max-width: 100%; min-width: 0; max-height: calc(100vh - 385px); overflow: auto; padding-bottom: 8px; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
+.staging-table-wrap .requisition-staging-table { width: 100%; min-width: 1940px; table-layout: fixed; }
+.staging-table-wrap .requisition-staging-table th,
+.staging-table-wrap .requisition-staging-table td { box-sizing: border-box; }
+.staging-table-wrap .requisition-staging-table th:nth-child(1), .staging-table-wrap .requisition-staging-table td:nth-child(1) { width: 64px; text-align: center; }
+.staging-table-wrap .requisition-staging-table th:nth-child(2), .staging-table-wrap .requisition-staging-table td:nth-child(2) { width: 142px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(3), .staging-table-wrap .requisition-staging-table td:nth-child(3) { width: 164px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(4), .staging-table-wrap .requisition-staging-table td:nth-child(4) { width: 154px; white-space: nowrap; }
+.staging-table-wrap .requisition-staging-table th:nth-child(5), .staging-table-wrap .requisition-staging-table td:nth-child(5) { width: 300px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(6), .staging-table-wrap .requisition-staging-table td:nth-child(6) { width: 68px; white-space: nowrap; }
+.staging-table-wrap .requisition-staging-table th:nth-child(7), .staging-table-wrap .requisition-staging-table td:nth-child(7) { width: 154px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(8), .staging-table-wrap .requisition-staging-table td:nth-child(8) { width: 124px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(9), .staging-table-wrap .requisition-staging-table td:nth-child(9) { width: 154px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(10), .staging-table-wrap .requisition-staging-table td:nth-child(10) { width: 112px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(11), .staging-table-wrap .requisition-staging-table td:nth-child(11) { width: 122px; white-space: nowrap; }
+.staging-table-wrap .requisition-staging-table th:nth-child(12), .staging-table-wrap .requisition-staging-table td:nth-child(12) { width: 142px; }
+.staging-table-wrap .requisition-staging-table th:nth-child(13), .staging-table-wrap .requisition-staging-table td:nth-child(13) { width: 240px; }
+.staging-table-wrap .requisition-staging-table td:nth-child(5) { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.staging-table-wrap .requisition-staging-table td:nth-child(13) { padding-right: 14px; }
+.staging-table-wrap .requisition-row-actions { align-items: flex-start; }
+.staging-table-wrap .requisition-row-actions .compact-button { max-width: 100%; white-space: nowrap; }
 .staging-supplier-number { display: block; margin-top: 4px; color: #91bfd0; white-space: nowrap; }
-.staging-priority-pill,.staging-status-pill { display: inline-flex; align-items: center; min-height: 27px; padding: 0 9px; border: 1px solid rgba(143,205,233,.3); border-radius: 999px; font-size: .68rem; font-weight: 950; white-space: nowrap; }
+.staging-priority-pill,.staging-status-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 122px; min-height: 28px; padding: 5px 11px; border: 1px solid rgba(143,205,233,.3); border-radius: 999px; font-size: .68rem; font-weight: 950; line-height: 1; vertical-align: middle; white-space: nowrap; box-sizing: border-box; }
 .staging-priority-pill.priority-critical { color: #ffe3e7; border-color: rgba(255,117,138,.58); background: rgba(126,32,48,.48); }
 .staging-priority-pill.priority-high { color: #ffe3bd; border-color: rgba(255,160,90,.5); background: rgba(112,61,18,.42); }
 .staging-priority-pill.priority-normal { color: #dff7ff; border-color: rgba(68,215,255,.42); background: rgba(5,61,86,.4); }
@@ -1221,8 +1244,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 620px) {
   .requisition-view-pills { border-radius: 20px; }
   .requisition-view-pills button { flex: 1 1 140px; }
-  .inventory-stage-label-full { display: none; }
-  .inventory-stage-label-short { display: inline; }
+  .inventory-stage-button { font-size: .66rem; }
   .staging-review-items > div { grid-template-columns: 1fr; }
 }
 .requisition-review-list { display: grid; gap: 8px; }

@@ -1330,7 +1330,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                 <th aria-sort={sortAria('quantity')}>{renderSortHeader('quantity','Qty')}</th>
                 <th aria-sort={sortAria('unitCost')}>{renderSortHeader('unitCost','Cost')}</th>
                 <th aria-sort={sortAria('status')}>{renderSortHeader('status','Status')}</th>
-                {showWriteActions&&<th>Actions</th>}
+                {showWriteActions&&<th className="inventory-actions-column">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -1365,16 +1365,19 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                     <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
                     <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span></div></td>
                     {showWriteActions&&(
-                      <td>
+                      <td className="inventory-actions-column">
                         <div className="inventory-row-actions">
-                          <button className={selectedPartIds.has(part.id) ? 'secondary-button compact-button selected' : 'secondary-button compact-button'} type="button" onClick={()=>togglePartSelection(part.id)} disabled={!writeEnabled}>{selectedPartIds.has(part.id) ? 'Selected' : 'Select'}</button>
-                          <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
+                          <div className="inventory-row-actions-primary">
+                            <button className={selectedPartIds.has(part.id) ? 'secondary-button compact-button selected' : 'secondary-button compact-button'} type="button" onClick={()=>togglePartSelection(part.id)} disabled={!writeEnabled}>{selectedPartIds.has(part.id) ? 'Selected' : 'Select'}</button>
+                            <button className="secondary-button compact-button" type="button" onClick={()=>openEdit(part)} disabled={!writeEnabled}>Edit</button>
+                          </div>
                           <button className="secondary-button compact-button inventory-stage-button" type="button" onClick={()=>openStaging(part)} disabled={!writeEnabled}>
-                            <span className="inventory-stage-label-full">Add to Requisition Staging</span>
-                            <span className="inventory-stage-label-short">Stage for Requisition</span>
+                            Stage for Requisition
                           </button>
-                          {part.isInRequisitionStaging&&<span className="inventory-staged-pill" title={part.requisitionStagingStatus || 'In Requisition Staging List'}>Staged</span>}
-                          {part.hasActiveRequisitionRecord&&<span className="row-requisition-note" title={part.activeRequisitionNumber || undefined}>Active req</span>}
+                          {(part.isInRequisitionStaging||part.hasActiveRequisitionRecord)&&<div className="inventory-row-action-flags">
+                            {part.isInRequisitionStaging&&<span className="inventory-staged-pill" title={part.requisitionStagingStatus || 'In Requisition Staging List'}>Staged</span>}
+                            {part.hasActiveRequisitionRecord&&<span className="row-requisition-note" title={part.activeRequisitionNumber || undefined}>Active req</span>}
+                          </div>}
                         </div>
                       </td>
                     )}
