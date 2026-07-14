@@ -1,8 +1,9 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
-import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, uploadMeasurementRecordFiles } from './MeasurementInspectionLogsTools';
+import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, RECORD_LOGS_UPDATED_EVENT, loadMeasurementRecordLogs, measurementRecordIsImage, measurementRecordIsPdf, readMeasurementRecordFile, type MeasurementLogEntry, uploadMeasurementRecordFiles } from './MeasurementInspectionLogsTools';
 import { MachineComponentImageCard } from './MachineComponentImageCard';
+import { MaintenancePhotoReview, prepareMaintenancePhoto } from './MaintenancePhotoReview';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAsset = {
@@ -34,7 +35,7 @@ const replacementGroups: Array<{ title: string; enabled: (form: AssetForm) => bo
 const editableRoles = new Set(['Maintenance Tech 3','Manager','Admin']);
 const deleteRoles = new Set(['Manager','Admin']);
 const measurementFolderDeleteRoles = new Set(['Maintenance Tech 3','Tier 3','Manager','Admin','Administrator']);
-const recordLogFileAccept = '.pdf,.png,.jpg,.jpeg,.csv,.txt,.xlsx,.xls,.doc,.docx';
+const recordLogFileAccept = '.pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xls,.doc,.docx';
 const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
   { key: 'machineLength', label: 'Machine Length' },
   { key: 'machineWidth', label: 'Machine Width' },
@@ -659,10 +660,22 @@ function MachineDetailAccordionSection({sectionKey,title,summary,status,expanded
 function DetailStatusPill({status}:{status:ConditionStatus}) { return <span className={`machine-section-status-pill condition-${status}`}>{conditionLabels[status]}</span>; }
 function SummaryBadge({label,value,tone}:{label:string;value:ReactNode;tone:string}) { return <div className="machine-detail-summary-card"><span className="machine-detail-summary-label">{label}</span><strong className={`machine-detail-summary-pill ${tone}`}>{value}</strong></div>; }
 function DetailItem({label,value,tone}:{label:string;value:ReactNode;tone?:'note'|'critical'}) { return <div className={`machine-detail-pill ${tone === 'critical' ? 'machine-critical-text' : tone === 'note' ? 'machine-note-text' : ''}`}><span className="machine-detail-pill-label">{label}</span><strong className="machine-detail-pill-value">{value}</strong></div>; }
-function MachineRecordLogActions({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
+function MachineRecordLogActions({asset,onOpen,onUploaded}:{asset:MachineAsset;onOpen:()=>void;onUploaded?:()=>void}) {
   const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const cameraInputRef = useRef<HTMLInputElement|null>(null);
   const [uploading,setUploading]=useState(false);
   const [message,setMessage]=useState('');
+  const [pendingPhoto,setPendingPhoto]=useState<File|null>(null);
+
+  async function stagePhoto(file:File) {
+    try {
+      setMessage('Preparing photo…');
+      setPendingPhoto(await prepareMaintenancePhoto(file));
+      setMessage('');
+    } catch (error) {
+      setMessage((error as Error).message || 'Photo could not be prepared.');
+    }
+  }
 
   async function uploadFiles(files: File[]) {
     if (!files.length) return;
@@ -670,11 +683,13 @@ function MachineRecordLogActions({asset,onOpen}:{asset:MachineAsset;onOpen:()=>v
     setMessage('');
     try {
       const result = await uploadMeasurementRecordFiles(asset, files);
-      if (result.count) setMessage(`${result.count} file${result.count === 1 ? '' : 's'} uploaded to ${asset.assetNumber}.`);
+      if (result.count) {
+        setMessage(`${result.count} file${result.count === 1 ? '' : 's'} uploaded to ${asset.assetNumber}.`);
+        onUploaded?.();
+      }
     } catch (error) {
       console.error('Record upload failed', error);
-      setMessage('Upload failed.');
-      window.alert('Record upload failed. Check console for details.');
+      setMessage((error as Error).message || 'Upload failed.');
     } finally {
       setUploading(false);
     }
@@ -683,20 +698,100 @@ function MachineRecordLogActions({asset,onOpen}:{asset:MachineAsset;onOpen:()=>v
   return <div className="machine-record-launch-action-stack">
     <div className="machine-record-launch-actions">
       <button className="primary-button compact-button" type="button" onClick={()=>fileInputRef.current?.click()} disabled={uploading}>{uploading ? 'Uploading...' : 'Upload File'}</button>
+      <button className="secondary-button compact-button machine-camera-button" type="button" onClick={()=>cameraInputRef.current?.click()} disabled={uploading}>Take Photo</button>
       <button className="secondary-button compact-button" type="button" onClick={onOpen}>Open Record Logs</button>
     </div>
     {message&&<small className={message === 'Upload failed.' ? 'machine-record-upload-message error' : 'machine-record-upload-message'}>{message}</small>}
-    <input ref={fileInputRef} type="file" multiple hidden accept={recordLogFileAccept} onChange={event=>{ const files = Array.from(event.target.files ?? []); void uploadFiles(files); event.currentTarget.value = ''; }} />
+    <input ref={fileInputRef} type="file" multiple hidden accept={recordLogFileAccept} onChange={event=>{ const files = Array.from(event.target.files ?? []); if(files.length===1&&files[0].type.startsWith('image/')) void stagePhoto(files[0]); else void uploadFiles(files); event.currentTarget.value = ''; }} />
+    <input ref={cameraInputRef} type="file" hidden accept="image/*" capture="environment" onChange={event=>{ const file=event.target.files?.[0]; if(file)void stagePhoto(file); event.currentTarget.value=''; }} />
+    {pendingPhoto&&<MaintenancePhotoReview file={pendingPhoto} title={`Save photo to ${asset.assetNumber}?`} detail="Review the maintenance photo before adding it to Inspection Records." saving={uploading} onRetake={()=>{setPendingPhoto(null);cameraInputRef.current?.click();}} onCancel={()=>setPendingPhoto(null)} onSave={()=>void uploadFiles([pendingPhoto]).then(()=>setPendingPhoto(null))} />}
   </div>;
 }
 function MachineRecordLogsLaunchPanel({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
-  return <section className="machine-measurement-panel">
-    <div className="machine-measurement-panel-heading"><div><p className="eyebrow">Inspection Records</p><h4>Screw & Barrel Inspection Records</h4></div><span className="machine-measurement-setup-pill">{asset.assetNumber}</span></div>
-    <div className="machine-record-launch-card">
-      <div className="machine-record-launch-copy"><span className="measurement-asset-pill">{asset.assetNumber}</span><strong>Asset-specific record logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
-      <MachineRecordLogActions asset={asset} onOpen={onOpen} />
-    </div>
+  const [expanded,setExpanded]=useState(false);
+  const [records,setRecords]=useState<MeasurementLogEntry[]>([]);
+  const [loading,setLoading]=useState(false);
+  const [viewerRecord,setViewerRecord]=useState<MeasurementLogEntry|null>(null);
+  async function refresh() {
+    setLoading(true);
+    try { setRecords(await loadMeasurementRecordLogs(asset)); }
+    finally { setLoading(false); }
+  }
+  useEffect(()=>{
+    if(expanded)void refresh();
+  },[expanded,asset.id]);
+  useEffect(()=>{
+    function onUpdated(){ if(expanded)void refresh(); }
+    window.addEventListener(RECORD_LOGS_UPDATED_EVENT,onUpdated);
+    return()=>window.removeEventListener(RECORD_LOGS_UPDATED_EVENT,onUpdated);
+  },[expanded,asset.id]);
+  const newest=records[0] ?? null;
+  return <section className={`machine-measurement-panel machine-record-accordion${expanded?' is-open':''}`}>
+    <button className="machine-measurement-panel-heading machine-record-accordion-header" type="button" onClick={()=>setExpanded(current=>!current)} aria-expanded={expanded} aria-controls={`machine-record-panel-${asset.id}`}>
+      <div><p className="eyebrow">Inspection Records</p><h4>Screw & Barrel Inspection Records</h4></div><span className="machine-record-accordion-header-meta"><span className="machine-measurement-setup-pill">{asset.assetNumber}</span><span className="machine-accordion-chevron" aria-hidden="true">v</span></span>
+    </button>
+    {expanded&&<div className="machine-record-accordion-body" id={`machine-record-panel-${asset.id}`}>
+      <div className="machine-record-launch-card">
+        <div className="machine-record-launch-copy"><span className="measurement-asset-pill">{asset.assetNumber}</span><strong>Asset-specific record logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
+        <MachineRecordLogActions asset={asset} onOpen={onOpen} onUploaded={()=>void refresh()} />
+      </div>
+      {loading&&!newest?<div className="machine-record-newest-empty">Loading newest record…</div>:newest?<NewestInspectionRecordPreview record={newest} onOpen={()=>setViewerRecord(newest)} />:<div className="machine-record-newest-empty"><strong>No inspection records yet.</strong><span>Upload a completed record or take a maintenance photo.</span></div>}
+    </div>}
+    {viewerRecord&&<InspectionRecordViewer asset={asset} record={viewerRecord} onClose={()=>setViewerRecord(null)} />}
   </section>;
+}
+
+function NewestInspectionRecordPreview({record,onOpen}:{record:MeasurementLogEntry;onOpen:()=>void}) {
+  const [thumbnailUrl,setThumbnailUrl]=useState(record.storage==='server'&&record.contentUrl?record.contentUrl:'');
+  useEffect(()=>{
+    const serverUrl=record.storage==='server'&&record.contentUrl?record.contentUrl:'';
+    setThumbnailUrl(serverUrl);
+    if(!measurementRecordIsImage(record)||serverUrl) return;
+    let active=true;
+    let objectUrl='';
+    void readMeasurementRecordFile(record).then(stored=>{if(stored&&active){objectUrl=URL.createObjectURL(stored.blob);setThumbnailUrl(objectUrl);}}).catch(()=>undefined);
+    return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
+  },[record.id,record.contentUrl,record.storage]);
+  return <button className="machine-record-newest-preview" type="button" onClick={onOpen}>
+    <span className="machine-record-preview-thumbnail">{thumbnailUrl?<img src={thumbnailUrl} alt="" />:<span aria-hidden="true">{measurementRecordIsPdf(record)?'PDF':'FILE'}</span>}</span>
+    <span className="machine-record-preview-main"><small>Newest record</small><strong>{record.name}</strong><span className="machine-record-preview-pills"><em className="measurement-asset-pill">{record.assetNumber}</em><em className={record.hasStoredFile?'measurement-status-pill status-ready':'measurement-status-pill status-log-only'}>{record.hasStoredFile?'READY':'LOG ONLY'}</em></span><span>Record date: {new Date(`${record.recordDate}T12:00:00`).toLocaleDateString()}</span><small>Uploaded {new Date(record.uploadedAt).toLocaleString()}</small></span>
+    <span className="machine-record-preview-open">Open full view</span>
+  </button>;
+}
+
+function escapePrintHtml(value:string) { return value.replace(/[&<>'"]/g,character=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[character] ?? character); }
+
+function InspectionRecordViewer({asset,record,onClose}:{asset:MachineAsset;record:MeasurementLogEntry;onClose:()=>void}) {
+  const [url,setUrl]=useState('');
+  const [error,setError]=useState('');
+  const [fit,setFit]=useState(true);
+  useEffect(()=>{
+    let active=true;
+    let objectUrl='';
+    void readMeasurementRecordFile(record).then(stored=>{if(!stored)throw new Error('Stored record is unavailable.');objectUrl=URL.createObjectURL(stored.blob);if(active)setUrl(objectUrl);}).catch(loadError=>{if(active)setError((loadError as Error).message);});
+    return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
+  },[record.id]);
+  useEffect(()=>{function onKeyDown(event:KeyboardEvent){if(event.key==='Escape')onClose();}document.addEventListener('keydown',onKeyDown);return()=>document.removeEventListener('keydown',onKeyDown);},[onClose]);
+  function download(){if(!url)return;const link=document.createElement('a');link.href=url;link.download=record.name;document.body.appendChild(link);link.click();link.remove();}
+  function openOriginal(){if(!url)return;const opened=window.open(url,'_blank','noopener,noreferrer');if(!opened)setError('Allow pop-ups to open this record.');}
+  function printImage(){
+    if(!url)return;
+    const printWindow=window.open('','_blank','width=1100,height=850');
+    if(!printWindow){setError('Allow pop-ups to open the printable record.');return;}
+    const generated=new Intl.DateTimeFormat(undefined,{dateStyle:'long',timeStyle:'short'}).format(new Date());
+    printWindow.document.write(`<!doctype html><html><head><title>${escapePrintHtml(record.name)}</title><style>body{margin:0;padding:32px;font-family:Arial,sans-serif;color:#111}header{border-bottom:2px solid #222;padding-bottom:14px;margin-bottom:22px}h1{margin:0 0 6px;font-size:23px}p{margin:4px 0;color:#444}.image{display:flex;justify-content:center;align-items:center;min-height:520px;border:1px solid #bbb;padding:16px}.image img{max-width:100%;max-height:70vh;object-fit:contain}.generated{font-size:12px;color:#666;margin-top:16px}@media print{body{padding:12mm}.image{min-height:0;break-inside:avoid}.image img{max-height:72vh}}</style></head><body><header><h1>${escapePrintHtml(asset.assetNumber)}${asset.assetName?` - ${escapePrintHtml(asset.assetName)}`:''}</h1><p>Inspection record: <strong>${escapePrintHtml(record.name)}</strong></p><p>Record date: ${escapePrintHtml(new Date(`${record.recordDate}T12:00:00`).toLocaleDateString())}</p></header><div class="image"><img id="record-print-image" src="${escapePrintHtml(url)}"></div><p class="generated">Generated / printed: ${escapePrintHtml(generated)}</p></body></html>`);
+    printWindow.document.close();
+    const image=printWindow.document.getElementById('record-print-image') as HTMLImageElement|null;
+    const print=()=>{printWindow.focus();printWindow.print();};
+    if(image?.complete)setTimeout(print,100);else image?.addEventListener('load',print,{once:true});
+  }
+  const isImage=measurementRecordIsImage(record);
+  const isPdf=measurementRecordIsPdf(record);
+  return createPortal(<div className="modal-backdrop inspection-record-viewer-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card inspection-record-viewer" role="dialog" aria-modal="true" aria-label={`${record.name} viewer`}>
+    <div className="modal-heading"><div><p className="eyebrow">{asset.assetNumber}{asset.assetName?` · ${asset.assetName}`:''}</p><h3>{record.name}</h3><p>Record date {new Date(`${record.recordDate}T12:00:00`).toLocaleDateString()} · Uploaded {new Date(record.uploadedAt).toLocaleString()}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
+    <div className={`inspection-record-viewer-canvas${fit?' is-fit':' is-zoom'}`}>{error?<p className="form-message error">{error}</p>:!url?<p>Loading record…</p>:isImage?<img src={url} alt={record.name} />:isPdf?<object data={url} type="application/pdf" aria-label={record.name}><p>Use Open Original to view this PDF.</p></object>:<div className="inspection-record-unsupported"><strong>Preview is not available for this file type.</strong><span>{record.type || 'Unknown file type'} · {record.name}</span></div>}</div>
+    <div className="modal-actions inspection-record-viewer-actions">{isImage&&<button className="secondary-button" type="button" onClick={()=>setFit(current=>!current)}>{fit?'Zoom':'Fit Image'}</button>}<button className="secondary-button" type="button" onClick={download} disabled={!url}>{isImage?'Download Image':'Download'}</button>{isImage?<button className="secondary-button" type="button" onClick={printImage} disabled={!url}>Print / Save as PDF</button>:<><button className="secondary-button" type="button" onClick={openOriginal} disabled={!url}>Open Original</button>{isPdf&&<button className="secondary-button" type="button" onClick={openOriginal} disabled={!url}>Print</button>}</>}<button className="link-button" type="button" onClick={onClose}>Close</button></div>
+  </section></div>,document.body);
 }
 function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onReplacement,onRecordLogs}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onRecordLogs:(asset:MachineAsset)=>void}) {
   const disabled = !canEdit;

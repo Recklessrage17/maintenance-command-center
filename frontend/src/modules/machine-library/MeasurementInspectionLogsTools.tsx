@@ -3,8 +3,8 @@ import { MccDateInput, formatDateDisplay, isValidMccDateValue, localIsoDate } fr
 
 type MachineImportMode = 'add_new_only' | 'upsert';
 type MachineToolCategory = 'measurement' | 'brand' | 'doc';
-export type MachineRecordLogAsset = { id?: number | string; assetNumber: string; brand?: string; model?: string; serialNumber?: string };
-type MeasurementLogEntry = { id: string; name: string; size: number; type: string; uploadedAt: string; recordDate: string; year: string; assetId: string; assetNumber: string; brand?: string; model?: string; serialNumber?: string; hasStoredFile?: boolean };
+export type MachineRecordLogAsset = { id?: number | string; assetNumber: string; assetName?: string; brand?: string; model?: string; serialNumber?: string };
+export type MeasurementLogEntry = { id: string; serverId?: number; name: string; size: number; type: string; uploadedAt: string; recordDate: string; year: string; assetId: string; assetNumber: string; assetName?: string; brand?: string; model?: string; serialNumber?: string; hasStoredFile?: boolean; storage?: 'server' | 'browser'; contentUrl?: string; downloadUrl?: string };
 type StoredMeasurementFile = { id: string; name: string; type: string; uploadedAt: string; recordDate?: string; blob: Blob };
 type TemplateFile = { id: string; name: string; type: string; updatedAt: string; blob: Blob };
 
@@ -18,7 +18,7 @@ const TEMPLATE_DB_VERSION = 1;
 const TEMPLATE_STORE = 'templates';
 const DEFAULT_TEMPLATE_ID = 'screw-barrel-default-template';
 const DEFAULT_TEMPLATE_NAME = 'JBT Screw & Barrel Measurement Sheet OLD/NEW Rev. 9';
-const RECORD_LOGS_UPDATED_EVENT = 'mcc:measurement-record-logs-updated';
+export const RECORD_LOGS_UPDATED_EVENT = 'mcc:measurement-record-logs-updated';
 const unassignedAsset: MachineRecordLogAsset = { id: 'unassigned', assetNumber: 'Unassigned' };
 const toolCategoryLabels: Record<MachineToolCategory, string> = {
   measurement: 'Measurement',
@@ -94,6 +94,7 @@ function normalizeRecord(log: Partial<MeasurementLogEntry>, assetOverride?: Mach
   const asset = assetOverride ?? {
     id: log.assetId || log.assetNumber || unassignedAsset.id,
     assetNumber: log.assetNumber || unassignedAsset.assetNumber,
+    assetName: log.assetName,
     brand: log.brand,
     model: log.model,
     serialNumber: log.serialNumber,
@@ -108,11 +109,21 @@ function normalizeRecord(log: Partial<MeasurementLogEntry>, assetOverride?: Mach
     year: recordYear(recordDate),
     assetId: normalizedAssetId(asset),
     assetNumber: assetLabel(asset),
+    assetName: log.assetName || asset.assetName || '',
     brand: asset.brand || '',
     model: asset.model || '',
     serialNumber: asset.serialNumber || '',
     hasStoredFile: Boolean(log.hasStoredFile),
+    serverId: Number.isInteger(Number(log.serverId)) ? Number(log.serverId) : undefined,
+    storage: log.storage === 'server' ? 'server' : 'browser',
+    contentUrl: log.contentUrl,
+    downloadUrl: log.downloadUrl,
   };
+}
+
+function newestRecordSort(a: MeasurementLogEntry, b: MeasurementLogEntry) {
+  const byDate = b.recordDate.localeCompare(a.recordDate);
+  return byDate || b.uploadedAt.localeCompare(a.uploadedAt) || b.id.localeCompare(a.id);
 }
 
 function readLogs(): MeasurementLogEntry[] {
@@ -122,7 +133,7 @@ function readLogs(): MeasurementLogEntry[] {
     if (!Array.isArray(parsed)) return [];
     const logs = parsed.map((log: Partial<MeasurementLogEntry>) => normalizeRecord(log));
     if (!window.localStorage.getItem(LOG_STORAGE_KEY) && logs.length) writeLogs(logs);
-    return logs.sort((a,b)=>(b.recordDate || b.uploadedAt).localeCompare(a.recordDate || a.uploadedAt));
+    return logs.sort(newestRecordSort);
   } catch {
     return [];
   }
@@ -134,6 +145,24 @@ function writeLogs(logs: MeasurementLogEntry[]) {
 
 function notifyRecordLogsUpdated() {
   window.dispatchEvent(new Event(RECORD_LOGS_UPDATED_EVENT));
+}
+
+export async function loadMeasurementRecordLogs(asset?: MachineRecordLogAsset) {
+  const numericAssetId = Number(asset?.id);
+  const url = Number.isInteger(numericAssetId) && numericAssetId > 0
+    ? `/api/machine-library/assets/${numericAssetId}/inspection-records`
+    : '/api/machine-library/inspection-records';
+  let serverLogs: MeasurementLogEntry[] = [];
+  try {
+    const response = await fetch(url, { credentials: 'include' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Inspection records could not be loaded.');
+    serverLogs = Array.isArray(data.records) ? data.records.map((log: Partial<MeasurementLogEntry>) => normalizeRecord(log)) : [];
+  } catch (error) {
+    console.error('Persisted inspection records could not be loaded', error);
+  }
+  const legacy = scopeLogs(readLogs(), asset).filter(log => log.storage !== 'server');
+  return [...serverLogs, ...legacy].sort(newestRecordSort);
 }
 
 function availableYears(logs: MeasurementLogEntry[]) {
@@ -173,6 +202,21 @@ async function saveStoredFile(file: File, id: string, uploadedAt: string, record
 export async function uploadMeasurementRecordFiles(asset: MachineRecordLogAsset, files: File[]) {
   const recordDate = localIsoDate(new Date());
   if (!files.length) return { count: 0, recordDate };
+  const numericAssetId = Number(asset.id);
+  if (Number.isInteger(numericAssetId) && numericAssetId > 0) {
+    const uploaded: MeasurementLogEntry[] = [];
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('recordDate', recordDate);
+      const response = await fetch(`/api/machine-library/assets/${numericAssetId}/inspection-records`, { method: 'POST', credentials: 'include', body: formData });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Upload failed for ${file.name}.`);
+      uploaded.push(normalizeRecord(data.record as Partial<MeasurementLogEntry>));
+    }
+    notifyRecordLogsUpdated();
+    return { count: uploaded.length, recordDate, records: uploaded };
+  }
   const uploadedAt = new Date().toISOString();
   const newLogs: MeasurementLogEntry[] = [];
   for (const file of files) {
@@ -182,7 +226,7 @@ export async function uploadMeasurementRecordFiles(asset: MachineRecordLogAsset,
   }
   writeLogs([...newLogs, ...readLogs()]);
   notifyRecordLogsUpdated();
-  return { count: newLogs.length, recordDate };
+  return { count: newLogs.length, recordDate, records: newLogs };
 }
 
 async function readStoredFile(id: string) {
@@ -194,6 +238,23 @@ async function readStoredFile(id: string) {
   });
   db.close();
   return file;
+}
+
+export async function readMeasurementRecordFile(log: MeasurementLogEntry) {
+  if (log.storage === 'server' && log.contentUrl) {
+    const response = await fetch(log.contentUrl, { credentials: 'include' });
+    if (!response.ok) throw new Error('Stored inspection record could not be opened.');
+    return { id: log.id, name: log.name, type: log.type || response.headers.get('content-type') || 'application/octet-stream', uploadedAt: log.uploadedAt, recordDate: log.recordDate, blob: await response.blob() } satisfies StoredMeasurementFile;
+  }
+  return readStoredFile(log.id);
+}
+
+export function measurementRecordIsImage(log: MeasurementLogEntry) {
+  return log.type.toLowerCase().startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(log.name);
+}
+
+export function measurementRecordIsPdf(log: MeasurementLogEntry) {
+  return log.type.toLowerCase().includes('pdf') || /\.pdf$/i.test(log.name);
 }
 
 async function deleteStoredFile(id: string) {
@@ -280,7 +341,7 @@ function scopeLogs(logs: MeasurementLogEntry[], asset?: MachineRecordLogAsset) {
 
 async function backupLogs(logs: MeasurementLogEntry[], asset?: MachineRecordLogAsset) {
   const files = await Promise.all(logs.map(async log => {
-    const stored = await readStoredFile(log.id).catch(() => undefined);
+    const stored = await readMeasurementRecordFile(log).catch(() => undefined);
     return stored ? { id: log.id, name: stored.name, type: stored.type, uploadedAt: stored.uploadedAt, recordDate: log.recordDate, dataUrl: await blobToDataUrl(stored.blob) } : null;
   }));
   const template = await readTemplateFile().catch(() => undefined);
@@ -437,15 +498,17 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   const readyYearLogs = yearLogs.filter(log => log.hasStoredFile);
 
   useEffect(()=>{
-    function refreshLogs() {
-      const nextLogs = readLogs();
+    let cancelled = false;
+    async function refreshLogs() {
+      const nextLogs = await loadMeasurementRecordLogs(asset);
+      if (cancelled) return;
       setLogs(nextLogs);
       const nextYears = availableYears(scopeLogs(nextLogs, asset));
       setSelectedYear(current=>nextYears.includes(current) ? current : nextYears[0]);
     }
-    refreshLogs();
+    void refreshLogs();
     window.addEventListener(RECORD_LOGS_UPDATED_EVENT, refreshLogs);
-    return ()=>window.removeEventListener(RECORD_LOGS_UPDATED_EVENT, refreshLogs);
+    return ()=>{ cancelled = true; window.removeEventListener(RECORD_LOGS_UPDATED_EVENT, refreshLogs); };
   },[asset]);
   useEffect(()=>{
     if (!years.includes(selectedYear)) setSelectedYear(years[0]);
@@ -475,7 +538,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     }
     if (!files.length) return;
     const result = await uploadMeasurementRecordFiles(asset, files);
-    setLogs(readLogs());
+    setLogs(await loadMeasurementRecordLogs(asset));
     setSelectedYear(recordYear(result.recordDate));
     setSelectedIds(new Set());
   }
@@ -488,7 +551,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
       const imported: MeasurementLogEntry[] = [];
       for (const rawLog of parsed.logs ?? []) {
         const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const importedLog = normalizeRecord({ ...rawLog, id }, asset);
+        const importedLog = normalizeRecord({ ...rawLog, id, serverId: undefined, storage: 'browser', contentUrl: undefined, downloadUrl: undefined }, asset);
         const fileEntry = fileMap.get(String(rawLog.id ?? rawLog.name)) ?? fileMap.get(importedLog.name);
         if (fileEntry?.dataUrl) {
           const blob = await dataUrlToBlob(fileEntry.dataUrl);
@@ -513,8 +576,8 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     }
   }
 
-  async function openLogFile(id: string) {
-    const stored = await readStoredFile(id);
+  async function openLogFile(log: MeasurementLogEntry) {
+    const stored = await readMeasurementRecordFile(log);
     if (!stored) {
       window.alert('Upload again to print.');
       return;
@@ -525,10 +588,18 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     window.setTimeout(() => window.URL.revokeObjectURL(url), 30000);
   }
 
-  function updateRecordDate(id: string, recordDate: string) {
+  async function updateRecordDate(log: MeasurementLogEntry, recordDate: string) {
     if (!isValidMccDateValue(recordDate, true)) return;
     const nextYear = recordYear(recordDate);
-    replaceLogs(readLogs().map(log=>log.id === id ? { ...log, recordDate, year: recordYear(recordDate) } : log));
+    if (log.storage === 'server' && log.serverId) {
+      const response = await fetch(`/api/machine-library/inspection-records/${log.serverId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recordDate }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { window.alert(data.error || 'Record date could not be updated.'); return; }
+      setLogs(await loadMeasurementRecordLogs(asset));
+      notifyRecordLogsUpdated();
+    } else {
+      replaceLogs(readLogs().map(item=>item.id === log.id ? { ...item, recordDate, year: recordYear(recordDate) } : item));
+    }
     setSelectedYear(nextYear);
     if (!asset) setOpenYear(nextYear);
   }
@@ -544,7 +615,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     try {
       const fileName = combinedPdfFileName(ready, label, activeYear, Boolean(asset));
       const payloadRecords = (await Promise.all(ready.map(async log => {
-        const stored = await readStoredFile(log.id).catch(() => undefined);
+        const stored = await readMeasurementRecordFile(log).catch(() => undefined);
         if (!stored) return null;
         return { ...log, dataUrl: await blobToDataUrl(stored.blob), type: stored.type || log.type, name: stored.name || log.name };
       }))).filter(Boolean);
@@ -577,7 +648,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     const objectUrls: string[] = [];
     try {
       for (const log of selectedLogs) {
-        const stored = await readStoredFile(log.id).catch(() => undefined);
+        const stored = await readMeasurementRecordFile(log).catch(() => undefined);
         if (!stored) continue;
         const url = window.URL.createObjectURL(stored.blob);
         objectUrls.push(url);
@@ -600,8 +671,13 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
       return;
     }
     if (!window.confirm(`Delete ${ids.length} selected record log(s)?`)) return;
-    await Promise.all(ids.map(id=>deleteStoredFile(id).catch(()=>undefined)));
-    replaceLogs(readLogs().filter(log => !ids.includes(log.id)));
+    const targets = logs.filter(log => ids.includes(log.id));
+    await Promise.all(targets.map(log => log.storage === 'server' && log.serverId
+      ? fetch(`/api/machine-library/inspection-records/${log.serverId}`, { method: 'DELETE', credentials: 'include' }).then(response => { if (!response.ok) throw new Error('Delete failed.'); })
+      : deleteStoredFile(log.id)).map(promise => promise.catch(() => undefined)));
+    writeLogs(readLogs().filter(log => !ids.includes(log.id)));
+    setLogs(await loadMeasurementRecordLogs(asset));
+    notifyRecordLogsUpdated();
     setSelectedIds(new Set());
   }
 
@@ -620,8 +696,13 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
       window.alert('Folder delete cancelled.');
       return;
     }
-    await Promise.all(deleteIds.map(id=>deleteStoredFile(id).catch(()=>undefined)));
-    replaceLogs(readLogs().filter(log => !deleteIds.includes(log.id)));
+    const targets = scopedLogs.filter(log => deleteIds.includes(log.id));
+    await Promise.all(targets.map(log => log.storage === 'server' && log.serverId
+      ? fetch(`/api/machine-library/inspection-records/${log.serverId}`, { method: 'DELETE', credentials: 'include' }).then(response => { if (!response.ok) throw new Error('Delete failed.'); })
+      : deleteStoredFile(log.id)).map(promise => promise.catch(() => undefined)));
+    writeLogs(readLogs().filter(log => !deleteIds.includes(log.id)));
+    setLogs(await loadMeasurementRecordLogs(asset));
+    notifyRecordLogsUpdated();
     setSelectedIds(new Set());
   }
 
@@ -696,8 +777,8 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
           return <article className={ready ? 'measurement-log-row measurement-record-row' : 'measurement-log-row measurement-record-row log-only'} key={log.id}>
             <label className="measurement-log-select" title={ready ? 'Select record' : 'Upload this record again before printing.'}><input type="checkbox" checked={checked} disabled={!ready} onChange={event=>toggleSelected(log.id,event.target.checked)} /><span /></label>
             <div className="measurement-log-main"><div className="measurement-record-title-line"><span className="measurement-asset-pill">{log.assetNumber}</span><span className="measurement-record-date-pill">{formatDateDisplay(log.recordDate)}</span><strong>{log.name}</strong></div><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Screw & Barrel Inspection Records / {log.year || recordYear(log.recordDate)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
-            <div className="measurement-record-date-cell"><MccDateInput label="Record Date" value={log.recordDate} onChange={recordDate=>updateRecordDate(log.id, recordDate)} /></div>
-            <div className="measurement-log-row-actions"><em className={ready ? 'measurement-status-pill status-ready' : 'measurement-status-pill status-log-only'}>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log.id)}>Open</button></div>
+            <div className="measurement-record-date-cell"><MccDateInput label="Record Date" value={log.recordDate} onChange={recordDate=>void updateRecordDate(log, recordDate)} /></div>
+            <div className="measurement-log-row-actions"><em className={ready ? 'measurement-status-pill status-ready' : 'measurement-status-pill status-log-only'}>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log)}>Open</button></div>
           </article>;
         })}
         {!yearLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records in this folder yet.</strong><span>{asset ? `Upload completed records for ${assetLabel(asset)}.` : 'Open an asset Record Logs panel to upload completed records.'}</span></div>}

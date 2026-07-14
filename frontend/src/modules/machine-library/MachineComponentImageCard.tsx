@@ -1,5 +1,6 @@
 import { type DragEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { MaintenancePhotoReview, prepareMaintenancePhoto } from './MaintenancePhotoReview';
 
 export type MachineComponentImageType = 'screw' | 'screw-tip';
 
@@ -34,6 +35,7 @@ function downloadImage(image: ComponentImage) {
 
 export function MachineComponentImageCard({assetId,assetNumber,assetName,componentType,componentName,canEdit}:{assetId:number;assetNumber:string;assetName:string;componentType:MachineComponentImageType;componentName:string;canEdit:boolean}) {
   const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const cameraInputRef = useRef<HTMLInputElement|null>(null);
   const [image,setImage]=useState<ComponentImage|null>(null);
   const [loading,setLoading]=useState(true);
   const [uploading,setUploading]=useState(false);
@@ -42,6 +44,7 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
   const [replacePromptOpen,setReplacePromptOpen]=useState(false);
   const [message,setMessage]=useState('');
   const [error,setError]=useState('');
+  const [pendingPhoto,setPendingPhoto]=useState<File|null>(null);
 
   useEffect(()=>{
     let cancelled=false;
@@ -81,6 +84,18 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
     if(file.size===0) throw new Error('The selected image is empty.');
   }
 
+  async function stagePhoto(file:File) {
+    try {
+      setError('');
+      setMessage('Preparing photo…');
+      setPendingPhoto(await prepareMaintenancePhoto(file));
+      setMessage('');
+    } catch(photoError) {
+      setMessage('');
+      setError((photoError as Error).message);
+    }
+  }
+
   async function uploadImage(file:File) {
     if(!canEdit||uploading) return;
     try {
@@ -108,7 +123,7 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
     event.stopPropagation();
     setDraggingOver(false);
     const file=event.dataTransfer.files[0];
-    if(file) void uploadImage(file);
+    if(file) void stagePhoto(file);
   }
 
   function printImage() {
@@ -128,7 +143,7 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
     else printableImage?.addEventListener('load',openPrintDialog,{once:true});
   }
 
-  const fileInput=<input ref={fileInputRef} className="component-image-file-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={event=>{const file=event.target.files?.[0];if(file)void uploadImage(file);}} />;
+  const fileInput=<><input ref={fileInputRef} className="component-image-file-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={event=>{const file=event.target.files?.[0];if(file)void stagePhoto(file);event.currentTarget.value='';}} /><input ref={cameraInputRef} className="component-image-file-input" type="file" accept="image/*" capture="environment" onChange={event=>{const file=event.target.files?.[0];if(file)void stagePhoto(file);event.currentTarget.value='';}} /></>;
 
   return <>
     <div className={`machine-component-image-card${draggingOver?' is-drag-over':''}${image?' has-image':''}`} onDragEnter={event=>{if(canEdit){event.preventDefault();setDraggingOver(true);}}} onDragOver={event=>{if(canEdit)event.preventDefault();}} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setDraggingOver(false);}} onDrop={handleDrop}>
@@ -141,7 +156,7 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
         <svg className="component-image-placeholder-icon" viewBox="0 0 96 76" aria-hidden="true"><rect x="5" y="8" width="86" height="60" rx="10"/><circle cx="69" cy="27" r="8"/><path d="M14 58l20-20 14 13 10-9 24 16"/><path d="M29 8l5-5h28l5 5"/></svg>
         <strong>No component image uploaded</strong>
         <small>{canEdit?'Drop an image here or click to browse.':'No current reference image.'}</small>
-        {canEdit&&<button className="primary-button compact-button" type="button" onClick={event=>{event.stopPropagation();chooseFile();}} disabled={uploading}>{uploading?'Uploading…':'Upload Image'}</button>}
+        {canEdit&&<div className="component-image-empty-actions"><button className="primary-button compact-button" type="button" onClick={event=>{event.stopPropagation();chooseFile();}} disabled={uploading}>{uploading?'Uploading…':'Upload Image'}</button><button className="secondary-button compact-button" type="button" onClick={event=>{event.stopPropagation();cameraInputRef.current?.click();}} disabled={uploading}>Take Photo</button></div>}
       </div>}
       {draggingOver&&<div className="component-image-drop-message">Drop image to upload</div>}
       {message&&<p className="component-image-message" role="status">{message}</p>}
@@ -154,5 +169,6 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
       <div className="modal-actions component-image-viewer-actions"><button className="secondary-button" type="button" onClick={()=>downloadImage(image)}>Download Image</button><button className="secondary-button" type="button" onClick={printImage}>Print / Save as PDF</button>{canEdit&&<button className="primary-button" type="button" onClick={()=>setReplacePromptOpen(true)}>Replace Image</button>}<button className="link-button" type="button" onClick={()=>setViewerOpen(false)}>Close</button></div>
     </section></div>,document.body)}
     {replacePromptOpen&&image&&createPortal(<div className="modal-backdrop component-image-replace-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setReplacePromptOpen(false);}}><section className="mcc-card component-image-replace-dialog" role="dialog" aria-modal="true" aria-labelledby={`replace-${assetId}-${componentType}`}><p className="eyebrow">Replace {componentName} Image</p><h3 id={`replace-${assetId}-${componentType}`}>Do you want to save the current image before replacing it?</h3><div className="component-image-replace-actions"><button className="secondary-button" type="button" onClick={()=>{downloadImage(image);setReplacePromptOpen(false);}}>Save Image</button><button className="secondary-button" type="button" onClick={()=>{printImage();setReplacePromptOpen(false);}}>Save as PDF</button><button className="primary-button" type="button" onClick={()=>{setReplacePromptOpen(false);chooseFile();}}>Replace Without Saving</button><button className="link-button" type="button" onClick={()=>setReplacePromptOpen(false)}>Cancel</button></div></section></div>,document.body)}
+    {pendingPhoto&&<MaintenancePhotoReview file={pendingPhoto} title={`Save ${componentName} image?`} detail={`${assetNumber} · ${componentName}`} saving={uploading} onRetake={()=>{setPendingPhoto(null);cameraInputRef.current?.click();}} onCancel={()=>setPendingPhoto(null)} onSave={()=>void uploadImage(pendingPhoto).then(()=>setPendingPhoto(null))} />}
   </>;
 }

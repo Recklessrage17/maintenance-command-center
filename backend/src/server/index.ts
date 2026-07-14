@@ -34,6 +34,7 @@ const backupsDir = path.resolve(__dirname, '../../backups');
 const uploadsDir = path.resolve(__dirname, '../../uploads');
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
+const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -43,9 +44,11 @@ const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toStr
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(brandingUploadsDir, { recursive: true });
 fs.mkdirSync(machineComponentImagesDir, { recursive: true });
+fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
+const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
@@ -87,6 +90,7 @@ CREATE TABLE IF NOT EXISTS requisition_batch_requisitions (batch_id INTEGER NOT 
 CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
+CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
@@ -109,6 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (as
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
 CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_component_images (asset_id,component_type);
+CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
 CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
 CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
@@ -226,10 +231,12 @@ CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition
   db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
+CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
-CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_component_images (asset_id,component_type);`);
+CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_component_images (asset_id,component_type);
+CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);`);
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
@@ -1775,7 +1782,7 @@ const backupDataAreaDefinitions = [
   { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_batches','requisition_batch_requisitions','requisition_staging_items'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
-  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machines','machine_library','machine_pms'] },
+  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machines','machine_library','machine_pms'] },
   { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment','equipment_library','equipment_pms'] },
   { key: 'facilityRecords', label: 'Facility', tables: ['facility_documents','facility_info','building_prints','facility_pms'] },
   { key: 'users', label: 'Users/Roles', tables: ['users'] },
@@ -1856,7 +1863,7 @@ function masterBackupRecordCounts() {
     requisitionBatches: tableCount('requisition_batches'),
     requisitionStagingItems: tableCount('requisition_staging_items'),
     historyLogs: tableCount('history_logs'),
-    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machines','machine_library','machine_pms']),
+    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machines','machine_library','machine_pms']),
     equipmentRecords: tableGroupCount(['equipment_assets','equipment','equipment_library','equipment_pms']),
     facilityRecords: tableGroupCount(['facility_documents','facility_info','building_prints','facility_pms']),
     preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
@@ -2129,6 +2136,7 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
   }
   fs.mkdirSync(brandingUploadsDir, { recursive: true });
   fs.mkdirSync(machineComponentImagesDir, { recursive: true });
+  fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
   return restoredFolders;
 }
 function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
@@ -6047,6 +6055,7 @@ type MachineConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type MachineComponentImageType = 'screw' | 'screw-tip' | 'barrel' | 'barrel-end-cap' | 'screw-2' | 'screw-2-tip' | 'barrel-2' | 'barrel-2-end-cap' | 'plunger' | 'plunger-barrel' | 'plunger-barrel-end-cap';
 type MachineComponentImageRow = { id:number; asset_id:number; component_type:MachineComponentImageType; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null };
+type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
 type MachineAssetRow = {
   id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
@@ -6243,6 +6252,63 @@ function receiveMachineComponentImage(req: Request,res:Response,next:NextFunctio
   machineComponentImageUpload.single('image')(req,res,error=>{
     if (!error) return next();
     const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Component image must be 10 MB or smaller.' : safeErrorMessage(error,[],'Component image upload failed.');
+    res.status(400).json({ok:false,error:message});
+  });
+}
+const machineInspectionRecordExtensions = new Map([
+  ['.pdf','application/pdf'],['.png','image/png'],['.jpg','image/jpeg'],['.jpeg','image/jpeg'],['.webp','image/webp'],
+  ['.csv','text/csv'],['.txt','text/plain'],['.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ['.xls','application/vnd.ms-excel'],['.doc','application/msword'],['.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+]);
+function validMachineInspectionDate(value: unknown) {
+  const clean = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return localDateOnly();
+  const parsed = new Date(`${clean}T12:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10)!==clean ? localDateOnly() : clean;
+}
+function safeMachineInspectionOriginalName(value: string, extension: string) {
+  const base = path.basename(value,path.extname(value)).replace(/[\r\n"]/g,'').trim().slice(0,140) || 'inspection-record';
+  return `${base}${extension}`;
+}
+function validatedMachineInspectionRecord(file: Express.Multer.File) {
+  const extension = path.extname(file.originalname).toLowerCase();
+  const expectedMime = machineInspectionRecordExtensions.get(extension);
+  if (!expectedMime) throw new Error('Inspection record must be a PDF, image, spreadsheet, Word document, CSV, or text file.');
+  if (extension==='.pdf' && file.buffer.subarray(0,5).toString('ascii')!=='%PDF-') throw new Error('Inspection record PDF contents are invalid.');
+  if (['.png','.jpg','.jpeg','.webp'].includes(extension)) {
+    const bytes = file.buffer;
+    const isPng = bytes.length>=4 && bytes[0]===0x89 && bytes[1]===0x50 && bytes[2]===0x4e && bytes[3]===0x47;
+    const isJpeg = bytes.length>=3 && bytes[0]===0xff && bytes[1]===0xd8 && bytes[2]===0xff;
+    const isWebp = bytes.length>=12 && bytes.subarray(0,4).toString('ascii')==='RIFF' && bytes.subarray(8,12).toString('ascii')==='WEBP';
+    if ((extension==='.png'&&!isPng) || (['.jpg','.jpeg'].includes(extension)&&!isJpeg) || (extension==='.webp'&&!isWebp)) throw new Error('Inspection record image extension does not match its contents.');
+  }
+  return { extension, mimeType: expectedMime };
+}
+function machineInspectionRecordFilePath(storedReference: string) {
+  const relative = storedReference.replace(/\\/g,'/');
+  if (!relative.startsWith('uploads/machine-inspection-records/')) throw new Error('Inspection record file reference is invalid.');
+  const resolved = path.resolve(__dirname,'../../',relative);
+  const root = path.resolve(machineInspectionRecordsDir);
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Inspection record file reference is invalid.');
+  return resolved;
+}
+function machineInspectionRecordById(id: number) {
+  return one<MachineInspectionRecordRow>(`SELECT r.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number FROM machine_inspection_records r JOIN machine_assets a ON a.id=r.asset_id WHERE r.id=? AND a.deleted=0`,[id]);
+}
+function publicMachineInspectionRecord(row: MachineInspectionRecordRow) {
+  const baseUrl = `/api/machine-library/inspection-records/${row.id}/file`;
+  const version = encodeURIComponent(row.uploaded_at);
+  return {
+    id:`server-${row.id}`,serverId:row.id,name:row.original_filename,size:Number(row.file_size),type:row.mime_type,uploadedAt:row.uploaded_at,
+    recordDate:row.record_date,year:row.record_date.slice(0,4),assetId:String(row.asset_id),assetNumber:row.asset_number ?? '',
+    assetName:row.asset_name ?? '',brand:row.brand ?? '',model:row.model ?? '',serialNumber:row.serial_number ?? '',hasStoredFile:true,
+    storage:'server',contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}`,
+  };
+}
+function receiveMachineInspectionRecord(req: Request,res:Response,next:NextFunction) {
+  machineInspectionRecordUpload.single('file')(req,res,error=>{
+    if (!error) return next();
+    const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Inspection record must be 25 MB or smaller.' : safeErrorMessage(error,[],'Inspection record upload failed.');
     res.status(400).json({ok:false,error:message});
   });
 }
@@ -6756,6 +6822,80 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
   const assets = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params).map(publicMachineAsset);
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
   res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});
+});
+app.get('/api/machine-library/inspection-records', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const assetId = Number(req.query.assetId);
+  const filtered = Number.isInteger(assetId) && assetId>0;
+  const where = filtered ? 'WHERE r.asset_id=? AND a.deleted=0' : 'WHERE a.deleted=0';
+  const params: SqlParam[] = filtered ? [assetId] : [];
+  const records = all<MachineInspectionRecordRow>(`SELECT r.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number FROM machine_inspection_records r JOIN machine_assets a ON a.id=r.asset_id ${where} ORDER BY r.record_date DESC,r.uploaded_at DESC,r.id DESC`,params).map(publicMachineInspectionRecord);
+  res.json({ok:true,records});
+});
+app.get('/api/machine-library/assets/:id/inspection-records', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset = machineAssetById(Number(req.params.id));
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const records = all<MachineInspectionRecordRow>(`SELECT r.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number FROM machine_inspection_records r JOIN machine_assets a ON a.id=r.asset_id WHERE r.asset_id=? AND a.deleted=0 ORDER BY r.record_date DESC,r.uploaded_at DESC,r.id DESC`,[asset.id]).map(publicMachineInspectionRecord);
+  res.json({ok:true,records});
+});
+app.post('/api/machine-library/assets/:id/inspection-records', requireAuth, requirePermission('machine.view'), receiveMachineInspectionRecord, (req:AuthRequest,res)=>{
+  let storedPath = '';
+  try {
+    const asset = machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    if (!req.file) throw new Error('Choose an inspection record file.');
+    const detected = validatedMachineInspectionRecord(req.file);
+    const uploadedAt = now();
+    const recordDate = validMachineInspectionDate(req.body?.recordDate);
+    const storedName = `asset-${asset.id}-record-${Date.now()}-${crypto.randomBytes(6).toString('hex')}${detected.extension}`;
+    storedPath = path.join(machineInspectionRecordsDir,storedName);
+    fs.writeFileSync(storedPath,req.file.buffer,{flag:'wx'});
+    const storedReference = `uploads/machine-inspection-records/${storedName}`;
+    const originalFilename = safeMachineInspectionOriginalName(req.file.originalname,detected.extension);
+    const result = run('INSERT INTO machine_inspection_records (asset_id,original_filename,mime_type,file_size,record_date,stored_file_reference,uploaded_at,uploaded_by_user_id) VALUES (?,?,?,?,?,?,?,?)',[
+      asset.id,originalFilename,detected.mimeType,req.file.size,recordDate,storedReference,uploadedAt,req.user!.id,
+    ]);
+    const saved = machineInspectionRecordById(Number(result.lastInsertRowid))!;
+    scheduleAutoBackup('machine inspection record uploaded',req.user!);
+    res.status(201).json({ok:true,record:publicMachineInspectionRecord(saved)});
+  } catch (error) {
+    if (storedPath && fs.existsSync(storedPath)) fs.rmSync(storedPath,{force:true});
+    const message = safeErrorMessage(error,[],'Inspection record upload failed.');
+    res.status(/not found/i.test(message)?404:/choose|must be|invalid|extension|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+  }
+});
+app.get('/api/machine-library/inspection-records/:id/file', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  try {
+    const record = machineInspectionRecordById(Number(req.params.id));
+    if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
+    const filePath = machineInspectionRecordFilePath(record.stored_file_reference);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ok:false,error:'Stored inspection record is missing.'});
+    const safeName = safeMachineInspectionOriginalName(record.original_filename,path.extname(record.original_filename).toLowerCase());
+    res.setHeader('Content-Type',record.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Length',String(fs.statSync(filePath).size));
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('Content-Disposition',`${String(req.query.download)==='true'?'attachment':'inline'}; filename="${safeName}"`);
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Inspection record could not be opened.')});
+  }
+});
+app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const record = machineInspectionRecordById(Number(req.params.id));
+  if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
+  const recordDate = validMachineInspectionDate(req.body?.recordDate);
+  run('UPDATE machine_inspection_records SET record_date=? WHERE id=?',[recordDate,record.id]);
+  scheduleAutoBackup('machine inspection record date updated',req.user!);
+  res.json({ok:true,record:publicMachineInspectionRecord(machineInspectionRecordById(record.id)!)});
+});
+app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const record = machineInspectionRecordById(Number(req.params.id));
+  if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
+  const filePath = machineInspectionRecordFilePath(record.stored_file_reference);
+  run('DELETE FROM machine_inspection_records WHERE id=?',[record.id]);
+  if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
+  scheduleAutoBackup('machine inspection record deleted',req.user!);
+  res.json({ok:true});
 });
 app.get('/api/machine-library/assets/:id/component-images', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset = machineAssetById(Number(req.params.id));
