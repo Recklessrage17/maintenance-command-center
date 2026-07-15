@@ -35,6 +35,7 @@ const uploadsDir = path.resolve(__dirname, '../../uploads');
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
 const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
+const machineAssetNotesDir = path.join(uploadsDir, 'machine-asset-notes');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -45,10 +46,12 @@ fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(brandingUploadsDir, { recursive: true });
 fs.mkdirSync(machineComponentImagesDir, { recursive: true });
 fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
+fs.mkdirSync(machineAssetNotesDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
 const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
+const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 25 * 1024 * 1024 } });
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
@@ -91,6 +94,8 @@ CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUT
 CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
@@ -114,6 +119,8 @@ CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COL
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
 CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_component_images (asset_id,component_type);
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);
 CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
 CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
 CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
@@ -232,11 +239,15 @@ CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
 CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_component_images (asset_id,component_type);
-CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);`);
+CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);`);
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
@@ -1784,7 +1795,7 @@ const backupDataAreaDefinitions = [
   { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_batches','requisition_batch_requisitions','requisition_staging_items'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
-  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machines','machine_library','machine_pms'] },
+  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machines','machine_library','machine_pms'] },
   { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment','equipment_library','equipment_pms'] },
   { key: 'facilityRecords', label: 'Facility', tables: ['facility_documents','facility_info','building_prints','facility_pms'] },
   { key: 'users', label: 'Users/Roles', tables: ['users'] },
@@ -1865,7 +1876,7 @@ function masterBackupRecordCounts() {
     requisitionBatches: tableCount('requisition_batches'),
     requisitionStagingItems: tableCount('requisition_staging_items'),
     historyLogs: tableCount('history_logs'),
-    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machines','machine_library','machine_pms']),
+    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machines','machine_library','machine_pms']),
     equipmentRecords: tableGroupCount(['equipment_assets','equipment','equipment_library','equipment_pms']),
     facilityRecords: tableGroupCount(['facility_documents','facility_info','building_prints','facility_pms']),
     preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
@@ -2139,6 +2150,7 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
   fs.mkdirSync(brandingUploadsDir, { recursive: true });
   fs.mkdirSync(machineComponentImagesDir, { recursive: true });
   fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
+  fs.mkdirSync(machineAssetNotesDir, { recursive: true });
   return restoredFolders;
 }
 function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
@@ -6058,6 +6070,8 @@ type MachineReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_ca
 type MachineComponentImageType = 'screw' | 'screw-tip' | 'barrel' | 'barrel-end-cap' | 'screw-2' | 'screw-2-tip' | 'barrel-2' | 'barrel-2-end-cap' | 'plunger' | 'plunger-barrel' | 'plunger-barrel-end-cap';
 type MachineComponentImageRow = { id:number; asset_id:number; component_type:MachineComponentImageType; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null };
 type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
+type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; created_by_name?:string };
+type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string };
 type MachineAssetRow = {
   id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
@@ -6306,6 +6320,185 @@ function publicMachineInspectionRecord(row: MachineInspectionRecordRow) {
     assetName:row.asset_name ?? '',brand:row.brand ?? '',model:row.model ?? '',serialNumber:row.serial_number ?? '',hasStoredFile:true,
     storage:'server',contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}`,
   };
+}
+const machineAssetNoteAttachmentTypes = new Map([
+  ['.pdf','application/pdf'],['.doc','application/msword'],['.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['.jpg','image/jpeg'],['.jpeg','image/jpeg'],['.png','image/png'],['.webp','image/webp'],
+]);
+function validMachineAssetNoteDate(value: unknown) {
+  const clean = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) throw new Error('Enter a valid note date.');
+  const parsed = new Date(`${clean}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10)!==clean) throw new Error('Enter a valid note date.');
+  return clean;
+}
+function validatedMachineAssetNoteAttachment(file: Express.Multer.File) {
+  const extension = path.extname(file.originalname).toLowerCase();
+  const mimeType = machineAssetNoteAttachmentTypes.get(extension);
+  if (!mimeType) throw new Error('Attachments must be PDF, Word, JPG, JPEG, PNG, or WEBP files.');
+  const bytes = file.buffer;
+  const matches = extension==='.pdf' ? bytes.subarray(0,5).toString('ascii')==='%PDF-'
+    : extension==='.png' ? bytes.length>=4 && bytes[0]===0x89 && bytes[1]===0x50 && bytes[2]===0x4e && bytes[3]===0x47
+      : ['.jpg','.jpeg'].includes(extension) ? bytes.length>=3 && bytes[0]===0xff && bytes[1]===0xd8 && bytes[2]===0xff
+        : extension==='.webp' ? bytes.length>=12 && bytes.subarray(0,4).toString('ascii')==='RIFF' && bytes.subarray(8,12).toString('ascii')==='WEBP'
+          : extension==='.docx' ? bytes.length>=4 && bytes[0]===0x50 && bytes[1]===0x4b && bytes[2]===0x03 && bytes[3]===0x04
+            : bytes.length>=8 && bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]));
+  if (!matches) throw new Error(`${path.basename(file.originalname)} does not match its file type.`);
+  return { extension, mimeType };
+}
+function safeMachineAssetNoteOriginalName(value: string, extension: string) {
+  const base = path.basename(value,path.extname(value)).replace(/[\r\n"]/g,'').trim().slice(0,140) || 'attachment';
+  return `${base}${extension}`;
+}
+function machineAssetNoteFilePath(storedReference: string) {
+  const relative = storedReference.replace(/\\/g,'/');
+  if (!relative.startsWith('uploads/machine-asset-notes/')) throw new Error('Asset note file reference is invalid.');
+  const resolved = path.resolve(__dirname,'../../',relative);
+  const root = path.resolve(machineAssetNotesDir);
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Asset note file reference is invalid.');
+  return resolved;
+}
+function machineAssetNoteById(noteId: number) {
+  return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name
+    FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
+    WHERE n.id=? AND a.deleted=0`,[noteId]);
+}
+function machineAssetNoteAttachments(noteId: number) {
+  return all<MachineAssetNoteAttachmentRow>('SELECT * FROM machine_asset_note_attachments WHERE note_id=? ORDER BY created_at,id',[noteId]);
+}
+function publicMachineAssetNoteAttachment(row: MachineAssetNoteAttachmentRow) {
+  const baseUrl = `/api/machine-library/asset-note-attachments/${row.id}/file`;
+  const version = encodeURIComponent(row.created_at);
+  return { id:row.id,noteId:row.note_id,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),createdAt:row.created_at,contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}` };
+}
+function publicMachineAssetNote(row: MachineAssetNoteRow) {
+  const pdfBaseUrl = `/api/machine-library/asset-notes/${row.id}/pdf`;
+  const version = encodeURIComponent(row.updated_at);
+  const attachments = machineAssetNoteAttachments(row.id).map(publicMachineAssetNoteAttachment);
+  return { id:row.id,assetId:row.asset_id,title:row.title,noteDate:row.note_date,body:row.body,createdBy:row.created_by_name ?? 'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,
+    pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`,attachments };
+}
+function receiveMachineAssetNote(req: Request,res:Response,next:NextFunction) {
+  machineAssetNoteUpload.array('attachments',10)(req,res,error=>{
+    if (!error) return next();
+    const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Each attachment must be 25 MB or smaller.' : safeErrorMessage(error,[],'Asset note upload failed.');
+    res.status(400).json({ok:false,error:message});
+  });
+}
+function safeMachineAssetNotePdfText(value: unknown) {
+  return String(value ?? '')
+    .replace(/[\u2018\u2019]/g,"'").replace(/[\u201c\u201d]/g,'"').replace(/[\u2013\u2014]/g,'-').replace(/\u2026/g,'...').replace(/\u2022/g,'-')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x09\x0a\x0d\x20-\x7e]/g,'?');
+}
+function notePdfLines(text: string, font: PDFFont, size: number, maxWidth: number) {
+  const lines: string[] = [];
+  for (const paragraph of safeMachineAssetNotePdfText(text).replace(/\r/g,'').split('\n')) {
+    const rawWords = paragraph.trim().split(/\s+/).filter(Boolean);
+    const words:string[]=[];
+    for (const rawWord of rawWords) {
+      if (font.widthOfTextAtSize(rawWord,size)<=maxWidth) { words.push(rawWord); continue; }
+      let segment='';
+      for (const character of rawWord) {
+        if (segment&&font.widthOfTextAtSize(`${segment}${character}`,size)>maxWidth) { words.push(segment); segment=character; }
+        else segment+=character;
+      }
+      if (segment) words.push(segment);
+    }
+    if (!words.length) { lines.push(''); continue; }
+    let line = '';
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate,size)<=maxWidth) line=candidate;
+      else { if (line) lines.push(line); line=word; }
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: MachineAssetNoteAttachmentRow[]) {
+  const pdf = await PDFDocument.create();
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const blue = rgb(0.02,0.35,0.65);
+  const blueDark = rgb(0.02,0.16,0.3);
+  const blueSoft = rgb(0.9,0.96,1);
+  const ink = rgb(0.07,0.1,0.14);
+  const muted = rgb(0.32,0.4,0.48);
+  const width = 612;
+  const height = 792;
+  const margin = 44;
+  const generatedAt = new Date();
+  let page: PDFPage;
+  let y = 0;
+  const addPage = () => {
+    page = pdf.addPage([width,height]);
+    page.drawRectangle({x:0,y:height-74,width,height:74,color:blueSoft});
+    page.drawRectangle({x:0,y:height-74,width:9,height:74,color:blue});
+    page.drawText('ASSET MAINTENANCE NOTE',{x:margin,y:height-34,size:10,font:bold,color:blue});
+    page.drawText(truncateToFit(safeMachineAssetNotePdfText(note.title),bold,18,width-margin*2),{x:margin,y:height-57,size:18,font:bold,color:blueDark});
+    y=height-102;
+    return page;
+  };
+  const ensureSpace = (heightNeeded:number) => { if (y-heightNeeded<52) addPage(); };
+  page=addPage();
+  const assetLabel = `${note.asset_number ?? ''}${note.asset_name ? ` - ${note.asset_name}` : ''}`;
+  const metadata = [
+    ['Asset',assetLabel || '-'],['Brand / Model',[note.brand,note.model].filter(Boolean).join(' / ') || '-'],['Serial Number',note.serial_number || '-'],
+    ['Note Date',note.note_date],['Created By',note.created_by_name || 'Unknown user'],['Created',new Date(note.created_at).toLocaleString('en-US')],
+  ];
+  metadata.forEach(([label,value],index)=>{
+    const column=index%2;
+    const row=Math.floor(index/2);
+    const x=margin+column*262;
+    const top=y-row*48;
+    page.drawText(label.toUpperCase(),{x,y:top,size:7,font:bold,color:blue});
+    page.drawText(truncateToFit(safeMachineAssetNotePdfText(value),regular,10,238),{x,y:top-17,size:10,font:regular,color:ink});
+  });
+  y-=154;
+  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:blueSoft});
+  page.drawText('NOTE DETAILS',{x:margin,y:y-12,size:9,font:bold,color:blue});
+  y-=34;
+  const bodyLines=notePdfLines(note.body,regular,10.5,width-margin*2);
+  for (const line of bodyLines) {
+    ensureSpace(16);
+    if (line) page.drawText(line,{x:margin,y,size:10.5,font:regular,color:ink});
+    y-=15;
+  }
+  y-=12;
+  ensureSpace(56);
+  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:blueSoft});
+  page.drawText('ATTACHMENTS',{x:margin,y:y-12,size:9,font:bold,color:blue});
+  y-=34;
+  const attachmentLines=attachments.length ? attachments.map(item=>`${item.original_filename} (${path.extname(item.original_filename).replace('.','').toUpperCase() || item.mime_type})`) : ['No attachments'];
+  for (const attachmentLine of attachmentLines) {
+    const wrapped=notePdfLines(attachmentLine,regular,9.5,width-margin*2-18);
+    for (let index=0;index<wrapped.length;index+=1) {
+      ensureSpace(15);
+      page.drawText(`${index===0?'- ':'  '}${wrapped[index]}`,{x:margin+4,y,size:9.5,font:regular,color:attachments.length?ink:muted});
+      y-=14;
+    }
+  }
+  const pages=pdf.getPages();
+  pages.forEach((item,index)=>{
+    item.drawRectangle({x:margin,y:35,width:width-margin*2,height:1,color:blueSoft});
+    item.drawText(`Generated ${generatedAt.toLocaleString('en-US')}`,{x:margin,y:19,size:7.5,font:regular,color:muted});
+    const pageLabel=`Page ${index+1} of ${pages.length}`;
+    item.drawText(pageLabel,{x:width-margin-regular.widthOfTextAtSize(pageLabel,7.5),y:19,size:7.5,font:regular,color:muted});
+  });
+  return Buffer.from(await pdf.save());
+}
+async function regenerateMachineAssetNotePdf(noteId:number) {
+  const note=machineAssetNoteById(noteId);
+  if (!note) throw new Error('Asset note not found.');
+  const attachments=machineAssetNoteAttachments(note.id);
+  const pdfBuffer=await buildMachineAssetNotePdf(note,attachments);
+  const pdfFilename=`${safeFileToken(note.asset_number || 'Asset')}_Asset_Note_${safeFileToken(note.title)}_${note.note_date}.pdf`;
+  const storedName=`asset-${note.asset_id}-note-${note.id}-${Date.now()}-${crypto.randomBytes(5).toString('hex')}.pdf`;
+  const storedPath=path.join(machineAssetNotesDir,storedName);
+  fs.writeFileSync(storedPath,pdfBuffer,{flag:'wx'});
+  const oldReference=note.pdf_stored_reference;
+  run('UPDATE machine_asset_notes SET pdf_filename=?,pdf_stored_reference=? WHERE id=?',[pdfFilename,`uploads/machine-asset-notes/${storedName}`,note.id]);
+  if (oldReference) { const oldPath=machineAssetNoteFilePath(oldReference); if (oldPath!==storedPath&&fs.existsSync(oldPath)) fs.rmSync(oldPath,{force:true}); }
 }
 function receiveMachineInspectionRecord(req: Request,res:Response,next:NextFunction) {
   machineInspectionRecordUpload.single('file')(req,res,error=>{
@@ -6898,6 +7091,152 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
   if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
   scheduleAutoBackup('machine inspection record deleted',req.user!);
   res.json({ok:true});
+});
+app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.id));
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name
+    FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
+    WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicMachineAssetNote);
+  res.json({ok:true,notes});
+});
+app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
+  let noteId=0;
+  const storedFiles:string[]=[];
+  try {
+    const asset=machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const title=String(req.body?.title ?? '').replace(/\s+/g,' ').trim().slice(0,180);
+    const body=String(req.body?.body ?? '').replace(/\r/g,'').trim().slice(0,30000);
+    const noteDate=validMachineAssetNoteDate(req.body?.noteDate);
+    if (!title) throw new Error('Note Title is required.');
+    if (!body) throw new Error('Note Body is required.');
+    const files=(req.files ?? []) as Express.Multer.File[];
+    const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));
+    const timestamp=now();
+    const result=run('INSERT INTO machine_asset_notes (asset_id,title,note_date,body,pdf_filename,pdf_stored_reference,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[
+      asset.id,title,noteDate,body,'','',req.user!.id,req.user!.id,timestamp,timestamp,
+    ]);
+    noteId=Number(result.lastInsertRowid);
+    for (const {file,detected} of validated) {
+      const storedName=`asset-${asset.id}-note-${noteId}-attachment-${Date.now()}-${crypto.randomBytes(5).toString('hex')}${detected.extension}`;
+      const storedPath=path.join(machineAssetNotesDir,storedName);
+      fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});
+      storedFiles.push(storedPath);
+      run('INSERT INTO machine_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[
+        noteId,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/machine-asset-notes/${storedName}`,req.user!.id,timestamp,
+      ]);
+    }
+    await regenerateMachineAssetNotePdf(noteId);
+    scheduleAutoBackup('machine asset note created',req.user!);
+    res.status(201).json({ok:true,note:publicMachineAssetNote(machineAssetNoteById(noteId)!)});
+  } catch (error) {
+    if (noteId) {
+      const note=machineAssetNoteById(noteId);
+      run('DELETE FROM machine_asset_note_attachments WHERE note_id=?',[noteId]);
+      run('DELETE FROM machine_asset_notes WHERE id=?',[noteId]);
+      if (note?.pdf_stored_reference) { const pdfPath=machineAssetNoteFilePath(note.pdf_stored_reference); if (fs.existsSync(pdfPath)) fs.rmSync(pdfPath,{force:true}); }
+    }
+    for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
+    const message=safeErrorMessage(error,[],'Asset note could not be saved.');
+    res.status(/not found/i.test(message)?404:/required|valid|must be|match|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+  }
+});
+app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
+  const newAttachmentIds:number[]=[];
+  const storedFiles:string[]=[];
+  let previous:MachineAssetNoteRow|null=null;
+  try {
+    const existing=machineAssetNoteById(Number(req.params.noteId));
+    if (!existing) return res.status(404).json({ok:false,error:'Asset note not found.'});
+    previous=existing;
+    const title=String(req.body?.title ?? '').replace(/\s+/g,' ').trim().slice(0,180);
+    const body=String(req.body?.body ?? '').replace(/\r/g,'').trim().slice(0,30000);
+    const noteDate=validMachineAssetNoteDate(req.body?.noteDate);
+    if (!title) throw new Error('Note Title is required.');
+    if (!body) throw new Error('Note Body is required.');
+    const files=(req.files ?? []) as Express.Multer.File[];
+    const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));
+    const timestamp=now();
+    run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[title,noteDate,body,req.user!.id,timestamp,existing.id]);
+    for (const {file,detected} of validated) {
+      const storedName=`asset-${existing.asset_id}-note-${existing.id}-attachment-${Date.now()}-${crypto.randomBytes(5).toString('hex')}${detected.extension}`;
+      const storedPath=path.join(machineAssetNotesDir,storedName);
+      fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});
+      storedFiles.push(storedPath);
+      const result=run('INSERT INTO machine_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[
+        existing.id,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/machine-asset-notes/${storedName}`,req.user!.id,timestamp,
+      ]);
+      newAttachmentIds.push(Number(result.lastInsertRowid));
+    }
+    await regenerateMachineAssetNotePdf(existing.id);
+    scheduleAutoBackup('machine asset note updated',req.user!);
+    res.json({ok:true,note:publicMachineAssetNote(machineAssetNoteById(existing.id)!)});
+  } catch (error) {
+    for (const attachmentId of newAttachmentIds) run('DELETE FROM machine_asset_note_attachments WHERE id=?',[attachmentId]);
+    for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
+    if (previous) run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[previous.title,previous.note_date,previous.body,previous.updated_by_user_id,previous.updated_at,previous.id]);
+    const message=safeErrorMessage(error,[],'Asset note could not be updated.');
+    res.status(/not found/i.test(message)?404:/required|valid|must be|match|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+  }
+});
+app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  const note=machineAssetNoteById(Number(req.params.noteId));
+  if (!note) return res.status(404).json({ok:false,error:'Asset note not found.'});
+  const attachments=machineAssetNoteAttachments(note.id);
+  run('DELETE FROM machine_asset_note_attachments WHERE note_id=?',[note.id]);
+  run('DELETE FROM machine_asset_notes WHERE id=?',[note.id]);
+  for (const item of attachments) { const filePath=machineAssetNoteFilePath(item.stored_file_reference); if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true}); }
+  if (note.pdf_stored_reference) { const pdfPath=machineAssetNoteFilePath(note.pdf_stored_reference); if (fs.existsSync(pdfPath)) fs.rmSync(pdfPath,{force:true}); }
+  scheduleAutoBackup('machine asset note deleted',req.user!);
+  res.json({ok:true});
+});
+app.delete('/api/machine-library/asset-note-attachments/:attachmentId', requireAuth, requirePermission('machine.write'), async (req:AuthRequest,res)=>{
+  try {
+    const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM machine_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);
+    if (!attachment || !machineAssetNoteById(attachment.note_id)) return res.status(404).json({ok:false,error:'Asset note attachment not found.'});
+    const filePath=machineAssetNoteFilePath(attachment.stored_file_reference);
+    run('DELETE FROM machine_asset_note_attachments WHERE id=?',[attachment.id]);
+    await regenerateMachineAssetNotePdf(attachment.note_id);
+    if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
+    scheduleAutoBackup('machine asset note attachment deleted',req.user!);
+    res.json({ok:true,note:publicMachineAssetNote(machineAssetNoteById(attachment.note_id)!)});
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Attachment could not be deleted.')});
+  }
+});
+app.get('/api/machine-library/asset-notes/:noteId/pdf', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  try {
+    const note=machineAssetNoteById(Number(req.params.noteId));
+    if (!note || !note.pdf_stored_reference) return res.status(404).json({ok:false,error:'Asset note PDF not found.'});
+    const filePath=machineAssetNoteFilePath(note.pdf_stored_reference);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ok:false,error:'Stored asset note PDF is missing.'});
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Length',String(fs.statSync(filePath).size));
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('Content-Disposition',`${String(req.query.download)==='true'?'attachment':'inline'}; filename="${safeMachineAssetNoteOriginalName(note.pdf_filename,'.pdf')}"`);
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Asset note PDF could not be opened.')});
+  }
+});
+app.get('/api/machine-library/asset-note-attachments/:attachmentId/file', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  try {
+    const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM machine_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);
+    if (!attachment || !machineAssetNoteById(attachment.note_id)) return res.status(404).json({ok:false,error:'Asset note attachment not found.'});
+    const filePath=machineAssetNoteFilePath(attachment.stored_file_reference);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ok:false,error:'Stored attachment is missing.'});
+    const extension=path.extname(attachment.original_filename).toLowerCase();
+    res.setHeader('Content-Type',attachment.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Length',String(fs.statSync(filePath).size));
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('Content-Disposition',`${String(req.query.download)==='true'||['.doc','.docx'].includes(extension)?'attachment':'inline'}; filename="${safeMachineAssetNoteOriginalName(attachment.original_filename,extension)}"`);
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Attachment could not be opened.')});
+  }
 });
 app.get('/api/machine-library/assets/:id/component-images', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset = machineAssetById(Number(req.params.id));

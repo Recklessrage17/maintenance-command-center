@@ -1,0 +1,208 @@
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+
+type AssetIdentity = { id:number; assetNumber:string; assetName:string; brand:string; model:string; serialNumber:string };
+type AssetNoteAttachment = { id:number; noteId:number; filename:string; mimeType:string; fileSize:number; createdAt:string; contentUrl:string; downloadUrl:string };
+type AssetNote = { id:number; assetId:number; title:string; noteDate:string; body:string; createdBy:string; createdAt:string; updatedAt:string; pdfFilename:string; pdfUrl:string; pdfDownloadUrl:string; attachments:AssetNoteAttachment[] };
+type NoteDraft = { title:string; noteDate:string; body:string };
+type ViewerFile = { filename:string; mimeType:string; contentUrl:string; downloadUrl:string; label:string };
+
+const attachmentAccept='.pdf,.doc,.docx,.jpg,.jpeg,.png,.webp';
+
+async function responseJson<T>(response:Response) {
+  const data=await response.json().catch(()=>({})) as T & {error?:string};
+  if(!response.ok) throw new Error(data.error || 'Request failed.');
+  return data;
+}
+function formatDate(value:string) {
+  const date=new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+function formatDateTime(value:string) {
+  const date=new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+function formatFileSize(size:number) {
+  if(!Number.isFinite(size)||size<=0) return '';
+  if(size<1024) return `${size} B`;
+  if(size<1024*1024) return `${(size/1024).toFixed(size<10240?1:0)} KB`;
+  return `${(size/(1024*1024)).toFixed(1)} MB`;
+}
+function fileKind(file:{filename:string;mimeType:string}) {
+  const extension=file.filename.split('.').pop()?.toLowerCase() ?? '';
+  if(file.mimeType==='application/pdf'||extension==='pdf') return 'pdf';
+  if(file.mimeType.startsWith('image/')||['jpg','jpeg','png','webp'].includes(extension)) return 'image';
+  if(['doc','docx'].includes(extension)||/word/.test(file.mimeType)) return 'word';
+  return 'file';
+}
+function fileKindLabel(file:{filename:string;mimeType:string}) {
+  const extension=file.filename.split('.').pop()?.toUpperCase();
+  return extension || (fileKind(file)==='image'?'IMAGE':'FILE');
+}
+function triggerDownload(url:string,filename:string) {
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+function escapePrintHtml(value:string) { return value.replace(/[&<>'"]/g,character=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[character] ?? character); }
+
+export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEdit:boolean}) {
+  const [expanded,setExpanded]=useState(false);
+  const [notes,setNotes]=useState<AssetNote[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  const [editing,setEditing]=useState<AssetNote|null>(null);
+  const [adding,setAdding]=useState(false);
+  const [draft,setDraft]=useState<NoteDraft>({title:'',noteDate:localIsoDate(new Date()),body:''});
+  const [pendingAttachments,setPendingAttachments]=useState<File[]>([]);
+  const [saving,setSaving]=useState(false);
+  const [viewer,setViewer]=useState<ViewerFile|null>(null);
+  const fileInputRef=useRef<HTMLInputElement|null>(null);
+
+  async function loadNotes() {
+    setLoading(true);
+    setError('');
+    try {
+      const data=await responseJson<{ok:boolean;notes:AssetNote[]}>(await fetch(`/api/machine-library/assets/${asset.id}/notes`,{credentials:'include'}));
+      setNotes(data.notes);
+    } catch(loadError) {
+      setError((loadError as Error).message || 'Asset notes could not be loaded.');
+    } finally { setLoading(false); }
+  }
+  useEffect(()=>{ setExpanded(false); setAdding(false); setEditing(null); setPendingAttachments([]); void loadNotes(); },[asset.id]);
+
+  const attachmentCount=useMemo(()=>notes.reduce((count,note)=>count+note.attachments.length,0),[notes]);
+  const summary=loading?'Loading notes...':`${notes[0]?.title || 'No notes'} · ${notes.length} note${notes.length===1?'':'s'} · ${attachmentCount} attachment${attachmentCount===1?'':'s'}`;
+
+  function beginAdd() {
+    setEditing(null);
+    setAdding(true);
+    setPendingAttachments([]);
+    setDraft({title:'',noteDate:localIsoDate(new Date()),body:''});
+    setError('');
+  }
+  function beginEdit(note:AssetNote) {
+    setEditing(note);
+    setAdding(false);
+    setPendingAttachments([]);
+    setDraft({title:note.title,noteDate:note.noteDate,body:note.body});
+    setError('');
+  }
+  function cancelForm() {
+    setAdding(false);
+    setEditing(null);
+    setPendingAttachments([]);
+  }
+  function addPending(files:File[]) {
+    const accepted=files.filter(file=>['pdf','image','word'].includes(fileKind({filename:file.name,mimeType:file.type})));
+    if(accepted.length!==files.length) setError('Attachments must be PDF, Word, JPG, JPEG, PNG, or WEBP files.');
+    setPendingAttachments(current=>[...current,...accepted].slice(0,10));
+  }
+  async function saveNote(event:FormEvent) {
+    event.preventDefault();
+    const title=draft.title.trim();
+    const body=draft.body.trim();
+    if(!title||!body) { setError('Note Title and Note Body are required.'); return; }
+    if(!isValidMccDateValue(draft.noteDate,true)) { setError('Enter a valid note date.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const formData=new FormData();
+      formData.append('title',title);
+      formData.append('noteDate',draft.noteDate);
+      formData.append('body',body);
+      pendingAttachments.forEach(file=>formData.append('attachments',file,file.name));
+      const url=editing?`/api/machine-library/asset-notes/${editing.id}`:`/api/machine-library/assets/${asset.id}/notes`;
+      await responseJson(await fetch(url,{method:editing?'PUT':'POST',credentials:'include',body:formData}));
+      cancelForm();
+      await loadNotes();
+    } catch(saveError) {
+      setError((saveError as Error).message || 'Asset note could not be saved.');
+    } finally { setSaving(false); }
+  }
+  async function deleteNote(note:AssetNote) {
+    if(!window.confirm(`Delete asset note “${note.title}” and all of its attachments?`)) return;
+    setError('');
+    try {
+      await responseJson(await fetch(`/api/machine-library/asset-notes/${note.id}`,{method:'DELETE',credentials:'include'}));
+      if(editing?.id===note.id) cancelForm();
+      await loadNotes();
+    } catch(deleteError) { setError((deleteError as Error).message || 'Asset note could not be deleted.'); }
+  }
+  async function deleteAttachment(note:AssetNote,attachment:AssetNoteAttachment) {
+    if(!window.confirm(`Delete attachment “${attachment.filename}” from ${note.title}?`)) return;
+    setError('');
+    try {
+      await responseJson(await fetch(`/api/machine-library/asset-note-attachments/${attachment.id}`,{method:'DELETE',credentials:'include'}));
+      await loadNotes();
+    } catch(deleteError) { setError((deleteError as Error).message || 'Attachment could not be deleted.'); }
+  }
+  function openAttachment(attachment:AssetNoteAttachment) {
+    const kind=fileKind(attachment);
+    if(kind==='word') { triggerDownload(attachment.downloadUrl,attachment.filename); return; }
+    setViewer({filename:attachment.filename,mimeType:attachment.mimeType,contentUrl:attachment.contentUrl,downloadUrl:attachment.downloadUrl,label:`${asset.assetNumber} attachment`});
+  }
+
+  return <article className={`machine-detail-accordion-card asset-notes-card${expanded?' is-open':''}`}>
+    <div className="machine-detail-accordion-header">
+      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={`asset-notes-panel-${asset.id}`} onClick={()=>setExpanded(current=>!current)}>
+        <span className="machine-detail-section-title">Asset Notes &amp; Attachments</span>
+        <span className="machine-detail-section-summary">{summary}</span>
+        <span className="machine-accordion-chevron" aria-hidden="true">v</span>
+      </button>
+    </div>
+    <div className="machine-detail-accordion-panel asset-notes-panel" id={`asset-notes-panel-${asset.id}`} aria-hidden={!expanded}>
+      <div className="asset-notes-toolbar"><div><strong>Working asset notes</strong><small>Saved notes automatically create a maintenance-style PDF.</small></div>{canEdit&&<button className="primary-button compact-button" type="button" onClick={beginAdd}>Add Note</button>}</div>
+      {error&&<p className="form-message error">{error}</p>}
+      {(adding||editing)&&<form className="asset-note-form" onSubmit={saveNote}>
+        <label className="form-field"><span>Note Title *</span><input value={draft.title} maxLength={180} onChange={event=>setDraft(current=>({...current,title:event.target.value}))} required /></label>
+        <MccDateInput label="Note Date *" value={draft.noteDate} onChange={value=>setDraft(current=>({...current,noteDate:value}))} required />
+        <label className="form-field asset-note-body-field"><span>Note Body *</span><textarea value={draft.body} maxLength={30000} rows={7} onChange={event=>setDraft(current=>({...current,body:event.target.value}))} required /></label>
+        <div className="asset-note-attachment-picker"><div><strong>Optional attachments</strong><small>PDF, Word, JPG, JPEG, PNG, or WEBP · up to 25 MB each</small></div><button className="secondary-button compact-button" type="button" onClick={()=>fileInputRef.current?.click()}>Add Attachments</button><input ref={fileInputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{addPending(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>
+        {pendingAttachments.length>0&&<div className="asset-attachment-grid">{pendingAttachments.map((file,index)=><PendingAttachmentChip key={`${file.name}-${file.size}-${index}`} file={file} onRemove={()=>setPendingAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} />)}</div>}
+        <div className="modal-actions"><button className="secondary-button" type="button" onClick={cancelForm} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving?'Saving & generating PDF...':'Save Note'}</button></div>
+      </form>}
+      {!adding&&!editing&&loading&&<div className="machine-record-newest-empty">Loading asset notes...</div>}
+      {!adding&&!editing&&!loading&&notes.length===0&&<div className="machine-record-newest-empty"><strong>No notes</strong><span>Add a working maintenance note and optional supporting files.</span></div>}
+      {!adding&&!editing&&notes.length>0&&<div className="asset-note-list">{notes.map(note=><section className="asset-note-entry" key={note.id}>
+        <div className="asset-note-entry-heading"><div><span className="asset-note-date-pill">{formatDate(note.noteDate)}</span><h5>{note.title}</h5><small>Created by {note.createdBy} · {formatDateTime(note.createdAt)}{note.updatedAt!==note.createdAt?' · edited':''}</small></div><div className="asset-note-actions"><button className="secondary-button compact-button" type="button" onClick={()=>setViewer({filename:note.pdfFilename,mimeType:'application/pdf',contentUrl:note.pdfUrl,downloadUrl:note.pdfDownloadUrl,label:`${asset.assetNumber} asset note`})}>Open Note PDF</button><button className="secondary-button compact-button" type="button" onClick={()=>triggerDownload(note.pdfDownloadUrl,note.pdfFilename)}>Download Note PDF</button><button className="secondary-button compact-button" type="button" onClick={()=>window.open(note.pdfUrl,'_blank','noopener,noreferrer')}>Print Note PDF</button>{canEdit&&<><button className="secondary-button compact-button" type="button" onClick={()=>beginEdit(note)}>Edit Note</button><button className="danger-button compact-button" type="button" onClick={()=>void deleteNote(note)}>Delete Note</button></>}</div></div>
+        <p className="asset-note-body-preview">{note.body}</p>
+        {note.attachments.length>0&&<div className="asset-attachment-grid">{note.attachments.map(attachment=><AttachmentChip key={attachment.id} attachment={attachment} canDelete={canEdit} onOpen={()=>openAttachment(attachment)} onDownload={()=>triggerDownload(attachment.downloadUrl,attachment.filename)} onDelete={()=>void deleteAttachment(note,attachment)} />)}</div>}
+      </section>)}</div>}
+    </div>
+    {viewer&&<AssetFileViewer asset={asset} file={viewer} onClose={()=>setViewer(null)} />}
+  </article>;
+}
+
+function PendingAttachmentChip({file,onRemove}:{file:File;onRemove:()=>void}) {
+  const kind=fileKind({filename:file.name,mimeType:file.type});
+  return <div className={`asset-attachment-chip kind-${kind}`}><span className="asset-file-icon" aria-hidden="true">{kind==='pdf'?'PDF':kind==='word'?'W':'IMG'}</span><span><strong>{file.name}</strong><small>{fileKindLabel({filename:file.name,mimeType:file.type})}{file.size?` · ${formatFileSize(file.size)}`:''}</small></span><button className="link-button compact-button" type="button" onClick={onRemove}>Remove</button></div>;
+}
+function AttachmentChip({attachment,canDelete,onOpen,onDownload,onDelete}:{attachment:AssetNoteAttachment;canDelete:boolean;onOpen:()=>void;onDownload:()=>void;onDelete:()=>void}) {
+  const kind=fileKind(attachment);
+  return <div className={`asset-attachment-chip kind-${kind}`}><button className="asset-file-icon asset-file-icon-button" type="button" onClick={onOpen} aria-label={`Open ${attachment.filename}`}>{kind==='pdf'?'PDF':kind==='word'?'W':'IMG'}</button><button className="asset-attachment-name" type="button" onClick={onOpen}><strong>{attachment.filename}</strong><small>{fileKindLabel(attachment)}{attachment.fileSize?` · ${formatFileSize(attachment.fileSize)}`:''}</small></button><div className="asset-attachment-actions"><button className="link-button compact-button" type="button" onClick={onDownload}>Download</button>{canDelete&&<button className="link-button compact-button danger-text" type="button" onClick={onDelete}>Delete</button>}</div></div>;
+}
+function AssetFileViewer({asset,file,onClose}:{asset:AssetIdentity;file:ViewerFile;onClose:()=>void}) {
+  const kind=fileKind(file);
+  const [fit,setFit]=useState(true);
+  useEffect(()=>{function onKeyDown(event:KeyboardEvent){if(event.key==='Escape')onClose();}document.addEventListener('keydown',onKeyDown);return()=>document.removeEventListener('keydown',onKeyDown);},[onClose]);
+  function printFile() {
+    if(kind==='pdf') { window.open(file.contentUrl,'_blank','noopener,noreferrer'); return; }
+    const printWindow=window.open('','_blank','width=1100,height=850');
+    if(!printWindow) return;
+    printWindow.document.write(`<!doctype html><html><head><title>${escapePrintHtml(file.filename)}</title><style>body{padding:28px;font-family:Arial,sans-serif;color:#10233a}header{border-bottom:3px solid #0b69b7;margin-bottom:20px;padding-bottom:12px}h1{font-size:22px;margin:0 0 5px}p{margin:4px 0}.image{display:flex;justify-content:center}.image img{max-width:100%;max-height:72vh;object-fit:contain}@media print{body{padding:10mm}}</style></head><body><header><h1>${escapePrintHtml(asset.assetNumber)}${asset.assetName?` - ${escapePrintHtml(asset.assetName)}`:''}</h1><p>${escapePrintHtml(file.filename)}</p><p>Generated ${escapePrintHtml(new Date().toLocaleString())}</p></header><div class="image"><img id="asset-note-print-image" src="${escapePrintHtml(file.contentUrl)}"></div></body></html>`);
+    printWindow.document.close();
+    const image=printWindow.document.getElementById('asset-note-print-image') as HTMLImageElement|null;
+    const print=()=>{printWindow.focus();printWindow.print();};
+    if(image?.complete)setTimeout(print,100);else image?.addEventListener('load',print,{once:true});
+  }
+  return createPortal(<div className="modal-backdrop inspection-record-viewer-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card inspection-record-viewer" role="dialog" aria-modal="true" aria-label={`${file.filename} viewer`}>
+    <div className="modal-heading"><div><p className="eyebrow">{file.label}</p><h3>{file.filename}</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
+    <div className={`inspection-record-viewer-canvas${fit?' is-fit':' is-zoom'}`}>{kind==='image'?<img src={file.contentUrl} alt={file.filename} />:<object data={file.contentUrl} type="application/pdf" aria-label={file.filename}><p>Use Open Original to view this PDF.</p></object>}</div>
+    <div className="modal-actions inspection-record-viewer-actions">{kind==='image'&&<button className="secondary-button" type="button" onClick={()=>setFit(current=>!current)}>{fit?'Zoom':'Fit Image'}</button>}<button className="secondary-button" type="button" onClick={()=>triggerDownload(file.downloadUrl,file.filename)}>Download</button><button className="secondary-button" type="button" onClick={printFile}>{kind==='image'?'Print / Save as PDF':'Print'}</button>{kind==='pdf'&&<button className="secondary-button" type="button" onClick={()=>window.open(file.contentUrl,'_blank','noopener,noreferrer')}>Open Original</button>}<button className="link-button" type="button" onClick={onClose}>Close</button></div>
+  </section></div>,document.body);
+}

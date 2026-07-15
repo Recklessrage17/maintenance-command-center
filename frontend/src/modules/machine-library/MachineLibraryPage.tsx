@@ -4,6 +4,7 @@ import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '.
 import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, RECORD_LOGS_UPDATED_EVENT, loadMeasurementRecordLogs, measurementRecordIsImage, measurementRecordIsPdf, readMeasurementRecordFile, type MeasurementLogEntry, uploadMeasurementRecordFiles } from './MeasurementInspectionLogsTools';
 import { MachineComponentImageCard } from './MachineComponentImageCard';
 import { MaintenancePhotoReview, prepareMaintenancePhoto } from './MaintenancePhotoReview';
+import { AssetNotesAttachments } from './AssetNotesAttachments';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type MachineAsset = {
@@ -20,7 +21,7 @@ type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDi
 type StringFormKey = { [K in keyof AssetForm]: AssetForm[K] extends string ? K : never }[keyof AssetForm];
 type BooleanFormKey = { [K in keyof AssetForm]: AssetForm[K] extends boolean ? K : never }[keyof AssetForm];
 type ConditionFormKey = { [K in keyof AssetForm]: AssetForm[K] extends ConditionStatus ? K : never }[keyof AssetForm];
-type MachineDetailEditableSectionKey = 'basic' | 'electrical' | 'screw' | 'screwTip' | 'barrel' | 'barrelEndCap' | 'screw2' | 'screw2Tip' | 'barrel2' | 'barrel2EndCap' | 'plunger' | 'plungerBarrel' | 'plungerBarrelEndCap' | 'notes';
+type MachineDetailEditableSectionKey = 'basic' | 'electrical' | 'screw' | 'screwTip' | 'barrel' | 'barrelEndCap' | 'screw2' | 'screw2Tip' | 'barrel2' | 'barrel2EndCap' | 'plunger' | 'plungerBarrel' | 'plungerBarrelEndCap';
 type MachineDetailSectionKey = MachineDetailEditableSectionKey | 'inspection';
 
 const blankAssetForm: AssetForm = {
@@ -57,7 +58,6 @@ const machineDetailSectionFields: Record<MachineDetailEditableSectionKey, readon
   plunger: ['plungerType','plungerInstalledDate','plungerLength','plungerDiameter','plungerRebuildRepaired','plungerConditionStatus'],
   plungerBarrel: ['plungerBarrelType','plungerBarrelInstalledDate','plungerBarrelLength','plungerBarrelDiameter','plungerBarrelRebuildRepaired','plungerBarrelConditionStatus'],
   plungerBarrelEndCap: ['plungerBarrelEndCapInstalledDate'],
-  notes: ['notes','criticalNotes'],
 };
 const machineDateFieldLabels: Partial<Record<keyof AssetForm, string>> = {
   screwInstalledDate: 'Screw Installed Date',
@@ -390,7 +390,6 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
                 <div><span>Plunger Barrel</span><strong>{componentSummary(asset.plungerBarrelType || asset.plungerBarrelDiameter, asset.plungerBarrelInstalledDate)}</strong></div>
               </>}
             </div>
-            {(asset.notes || asset.criticalNotes)&&<div className="machine-card-notes">{asset.notes&&<p className="machine-note-text">{asset.notes}</p>}{asset.criticalNotes&&<p className="machine-critical-text">{asset.criticalNotes}</p>}</div>}
             <div className="machine-card-actions">
               <button className="primary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); openEdit(asset); }}>{canEdit?'View/Edit':'View'}</button>
               <button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Record Logs</button>
@@ -603,15 +602,6 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,on
         edit: <DateWithAge label="Plunger Barrel End Cap Installed Date" value={draft.plungerBarrelEndCapInstalledDate} set={v=>setDraftField('plungerBarrelEndCapInstalledDate',v)} disabled={!canEdit}/>,
       },
     ] : []),
-    {
-      key: 'notes',
-      editableKey: 'notes',
-      title: 'Notes / Critical Notes',
-      summary: detailSummary(currentAsset.criticalNotes ? 'Critical notes set' : 'No critical notes', currentAsset.notes ? 'Notes set' : 'No notes'),
-      status: currentAsset.criticalNotes ? <span className="machine-section-alert-pill">Critical</span> : undefined,
-      view: <><DetailItem label="Notes" value={detailValue(currentAsset.notes)} tone="note" /><DetailItem label="Critical Notes" value={detailValue(currentAsset.criticalNotes)} tone="critical" /></>,
-      edit: <><Area tone="note" label="Notes" value={draft.notes} set={v=>setDraftField('notes',v)} disabled={!canEdit}/><Area tone="critical" label="Critical Notes" value={draft.criticalNotes} set={v=>setDraftField('criticalNotes',v)} disabled={!canEdit}/></>,
-    },
   ];
 
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-modal machine-detail-modal">
@@ -632,6 +622,7 @@ function MachineDetailModal({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,on
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
         return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
+      <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} />
     </div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section></div>;
@@ -741,20 +732,35 @@ function MachineRecordLogsLaunchPanel({asset,onOpen}:{asset:MachineAsset;onOpen:
   </section>;
 }
 
+function measurementAgeLabel(value:string) {
+  const match=value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!match) return 'Check record date';
+  const measured=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));
+  if(measured.getFullYear()!==Number(match[1])||measured.getMonth()!==Number(match[2])-1||measured.getDate()!==Number(match[3])) return 'Check record date';
+  const today=new Date();
+  today.setHours(0,0,0,0);
+  measured.setHours(0,0,0,0);
+  const days=Math.round((today.getTime()-measured.getTime())/(24*60*60*1000));
+  if(days<0) return 'Check record date';
+  if(days===0) return 'Last measured: Today';
+  return `Last measured: ${days} day${days===1?'':'s'} ago`;
+}
 function NewestInspectionRecordPreview({record,onOpen}:{record:MeasurementLogEntry;onOpen:()=>void}) {
-  const [thumbnailUrl,setThumbnailUrl]=useState(record.storage==='server'&&record.contentUrl?record.contentUrl:'');
+  const isImage=measurementRecordIsImage(record);
+  const isPdf=measurementRecordIsPdf(record);
+  const [thumbnailUrl,setThumbnailUrl]=useState(isImage&&record.storage==='server'&&record.contentUrl?record.contentUrl:'');
   useEffect(()=>{
-    const serverUrl=record.storage==='server'&&record.contentUrl?record.contentUrl:'';
+    const serverUrl=isImage&&record.storage==='server'&&record.contentUrl?record.contentUrl:'';
     setThumbnailUrl(serverUrl);
-    if(!measurementRecordIsImage(record)||serverUrl) return;
+    if(!isImage||serverUrl) return;
     let active=true;
     let objectUrl='';
     void readMeasurementRecordFile(record).then(stored=>{if(stored&&active){objectUrl=URL.createObjectURL(stored.blob);setThumbnailUrl(objectUrl);}}).catch(()=>undefined);
     return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
-  },[record.id,record.contentUrl,record.storage]);
-  return <button className="machine-record-newest-preview" type="button" onClick={onOpen}>
-    <span className="machine-record-preview-thumbnail">{thumbnailUrl?<img src={thumbnailUrl} alt="" />:<span aria-hidden="true">{measurementRecordIsPdf(record)?'PDF':'FILE'}</span>}</span>
-    <span className="machine-record-preview-main"><small>Newest record</small><strong>{record.name}</strong><span className="machine-record-preview-pills"><em className="measurement-asset-pill">{record.assetNumber}</em><em className={record.hasStoredFile?'measurement-status-pill status-ready':'measurement-status-pill status-log-only'}>{record.hasStoredFile?'READY':'LOG ONLY'}</em></span><span>Record date: {new Date(`${record.recordDate}T12:00:00`).toLocaleDateString()}</span><small>Uploaded {new Date(record.uploadedAt).toLocaleString()}</small></span>
+  },[record.id,record.contentUrl,record.storage,isImage]);
+  return <button className={`machine-record-newest-preview${isImage?' has-image':' is-file'}`} type="button" onClick={onOpen}>
+    {isImage&&<span className="machine-record-preview-thumbnail">{thumbnailUrl?<img src={thumbnailUrl} alt="" />:<span aria-hidden="true">IMG</span>}</span>}
+    <span className="machine-record-preview-main"><small>Newest record</small><strong className="machine-record-preview-filename">{isPdf&&<span className="machine-record-inline-file-icon pdf" aria-hidden="true">PDF</span>}{record.name}</strong><span className="machine-record-preview-pills"><em className="measurement-asset-pill">{record.assetNumber}</em><em className={record.hasStoredFile?'measurement-status-pill status-ready':'measurement-status-pill status-log-only'}>{record.hasStoredFile?'READY':'LOG ONLY'}</em></span><span className="machine-record-date-row"><span>Record date: {new Date(`${record.recordDate}T12:00:00`).toLocaleDateString()}</span><em className={`machine-last-measured-pill${measurementAgeLabel(record.recordDate)==='Check record date'?' warning':''}`}>{measurementAgeLabel(record.recordDate)}</em></span><small>Uploaded {new Date(record.uploadedAt).toLocaleString()}</small></span>
     <span className="machine-record-preview-open">Open full view</span>
   </button>;
 }
@@ -807,7 +813,6 @@ function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onRepl
     {form.hasPlungerInjection&&<section className="machine-form-section"><span>Plunger Injection</span><div className="machine-screw-barrel-grid"><PlungerBox title="Plunger Box" form={form} setField={setField} disabled={disabled}/><PlungerBarrelBox title="Plunger Barrel / Cylinder Barrel Box" form={form} setField={setField} disabled={disabled}/></div></section>}
     {asset&&<RecordLogsRow asset={asset} onOpen={()=>onRecordLogs(asset)} />}
     {asset&&<ReplacementUpdatesPanel asset={asset} form={form} canEdit={canEdit} onReplacement={onReplacement} />}
-    <MachineSection title="Notes / Critical Notes"><Area tone="note" label="Notes" value={form.notes} set={v=>setField('notes',v)} disabled={disabled}/><Area tone="critical" label="Critical Notes" value={form.criticalNotes} set={v=>setField('criticalNotes',v)} disabled={disabled}/></MachineSection>
     <div className="machine-placeholder-grid"><section>Linked Inventory Parts coming next</section><section>Machine PM schedules coming next</section><section>Machine documents coming next</section><section>History preview available from Logs</section></div>
     <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!canEdit}>{asset?'Save Machine Asset':'Create Machine Asset'}</button></div>
   </form></div>;
