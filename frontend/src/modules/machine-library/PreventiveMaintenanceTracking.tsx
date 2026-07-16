@@ -4,14 +4,14 @@ import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../component
 
 type AssetIdentity={id:number;assetNumber:string;assetName:string};
 type PmIntervalType='hourly'|'days'|'bi_weekly'|'weekly'|'monthly'|'quarterly'|'bi_annual'|'annual'|'cycles';
-type PmStatus='Current'|'Due Soon'|'Overdue'|'Hold'|'Inactive'|'Setup incomplete';
+type PmStatus='Current'|'Due Soon'|'Due Now'|'Overdue'|'Hold'|'Inactive'|'Setup incomplete';
 type PmScheduleStatus='active'|'hold'|'inactive';
 type PmTask={id:number;assetId:number;title:string;instructions:string;intervalType:PmIntervalType;intervalLabel:string;intervalValue:number;lastCompletedDate:string|null;lastCompletedMeter:number|null;currentMeter:number|null;nextDueDate:string|null;nextDueMeter:number|null;scheduleStatus:PmScheduleStatus;notes:string;status:PmStatus;countdown:string;historyCount:number;createdAt:string;updatedAt:string};
 type PmHistory={id:number;completionDate:string;completedMeter:number|null;performedBy:string;completionNotes:string;previousDueDate:string|null;previousDueMeter:number|null;nextDueDate:string|null;nextDueMeter:number|null;createdAt:string};
 type PmSummary={total:number;dueSoon:number;overdue:number;nextDueDate:string|null;nextDueMeter:number|null};
 type PmDraft={title:string;instructions:string;intervalType:PmIntervalType|'';intervalValue:string;lastCompletedDate:string;lastCompletedMeter:string;currentMeter:string;scheduleStatus:PmScheduleStatus;notes:string};
 type PmDraftErrorKey='title'|'intervalType'|'interval'|'date'|'lastMeter'|'currentMeter';
-type PmDuePreview={label:string;value:string;legend:string;tone:'current'|'due-soon'|'overdue'|'hold'|'incomplete'};
+type PmDuePreview={label:string;value:string;legend:string;tone:'current'|'due-soon'|'due-now'|'overdue'|'hold'|'inactive'|'incomplete'};
 
 const intervalOptions:Array<{key:PmIntervalType;label:string}>=[
   {key:'hourly',label:'Hourly'},{key:'days',label:'Days'},{key:'bi_weekly',label:'Bi-weekly'},{key:'weekly',label:'Weekly'},{key:'monthly',label:'Monthly'},{key:'quarterly',label:'Quarterly'},{key:'bi_annual',label:'Bi-Annual'},{key:'annual',label:'Annual'},{key:'cycles',label:'Cycles'},
@@ -26,7 +26,7 @@ const fixedIntervals=new Set<string>(Object.keys(fixedCadences));
 const intervalGuidance:Partial<Record<PmIntervalType,string>>={hourly:'0.0 hrs',cycles:'0 cycles',days:'0 days',weekly:'0 weeks',monthly:'0 months'};
 const blankDraft:PmDraft={title:'',instructions:'',intervalType:'',intervalValue:'',lastCompletedDate:'',lastCompletedMeter:'',currentMeter:'',scheduleStatus:'active',notes:''};
 const emptySummary:PmSummary={total:0,dueSoon:0,overdue:0,nextDueDate:null,nextDueMeter:null};
-const validStatuses=new Set<PmStatus>(['Current','Due Soon','Overdue','Hold','Inactive','Setup incomplete']);
+const validStatuses=new Set<PmStatus>(['Current','Due Soon','Due Now','Overdue','Hold','Inactive','Setup incomplete']);
 
 function isRecord(value:unknown):value is Record<string,unknown>{return Boolean(value)&&typeof value==='object'&&!Array.isArray(value);}
 function safeString(value:unknown,fallback=''){return typeof value==='string'?value:fallback;}
@@ -62,7 +62,7 @@ function normalizePmHistory(value:unknown):PmHistory[]{
 }
 
 async function requestJson<T>(url:string,init?:RequestInit) {
-  const response=await fetch(url,{credentials:'include',headers:{...(init?.body?{'Content-Type':'application/json'}:{}),...(init?.headers??{})},...init});
+  const response=await fetch(url,{...init,credentials:'include',headers:{...(init?.body?{'Content-Type':'application/json'}:{}),...(init?.headers??{})}});
   const contentType=response.headers.get('content-type')??'';
   const isJson=contentType.toLowerCase().includes('application/json');
   if(!response.ok){
@@ -119,6 +119,11 @@ function pmDuePreview(draft:PmDraft):PmDuePreview {
   if(!draft.intervalType)return {label:'Next PM Due Date',value:'Not calculated',legend:'Select an interval type to calculate the next due value.',tone:'incomplete'};
   const due=calculatedDue(draft);
   const hold=draft.scheduleStatus==='hold';
+  const inactive=draft.scheduleStatus==='inactive';
+  if(inactive){
+    const reference=due?.nextMeter!==null&&due?.nextMeter!==undefined?`Reference due at ${due.nextMeter.toLocaleString()} ${draft.intervalType==='hourly'?'hours':'cycles'}`:due?.nextDate?formatDate(due.nextDate):'Reference due not calculated';
+    return {label:meterIntervals.has(draft.intervalType)?'Stored meter reference':'Stored due date reference',value:reference,legend:'Inactive — PM tracking paused',tone:'inactive'};
+  }
   if(!due)return {label:meterIntervals.has(draft.intervalType)?'Next meter due':'Next PM Due Date',value:'Setup incomplete',legend:meterIntervals.has(draft.intervalType)?'Add the last completed meter and a valid interval.':'Add a valid starting date and interval.',tone:'incomplete'};
   if(due.nextMeter!==null){
     const unit=draft.intervalType==='hourly'?'hours':'cycles';
@@ -126,13 +131,15 @@ function pmDuePreview(draft:PmDraft):PmDuePreview {
     if(draft.currentMeter==='')return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Setup incomplete - current ${unit} not entered.`,tone:'incomplete'};
     const current=Number(draft.currentMeter);if(!Number.isFinite(current)||current<0)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Setup incomplete - enter valid current ${unit}.`,tone:'incomplete'};const remaining=due.nextMeter-current;const threshold=Math.max(1,due.amount*meterDueSoonRatio);
     if(remaining<0)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Overdue by ${Math.abs(remaining).toLocaleString()} ${unit}.`,tone:'overdue'};
-    if(remaining<=threshold)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:remaining===0?'Due Soon - due now.':`Due Soon - ${remaining.toLocaleString()} ${unit} remain.`,tone:'due-soon'};
+    if(remaining===0)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:'Due Now — perform maintenance now',tone:'due-now'};
+    if(remaining<=threshold)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Due Soon - ${remaining.toLocaleString()} ${unit} remain.`,tone:'due-soon'};
     return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Current - ${remaining.toLocaleString()} ${unit} remain.`,tone:'current'};
   }
   const nextDate=due.nextDate!;const today=localIsoDate(new Date());const days=Math.round((Date.parse(`${nextDate}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
   if(hold)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:'Hold - schedule preserved while overdue tracking is paused.',tone:'hold'};
   if(days<0)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Overdue by ${Math.abs(days)} day${Math.abs(days)===1?'':'s'}.`,tone:'overdue'};
-  if(days<=calendarDueSoonDays)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:days===0?'Due Soon - due today.':`Due Soon - due in ${days} day${days===1?'':'s'}.`,tone:'due-soon'};
+  if(days===0)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:'Due Now — perform maintenance today',tone:'due-now'};
+  if(days<=calendarDueSoonDays)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Due Soon - due in ${days} day${days===1?'':'s'}.`,tone:'due-soon'};
   return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Current - due in ${days} days.`,tone:'current'};
 }
 function PmUnavailablePanel({message='Preventive maintenance tracking is temporarily unavailable. The rest of this asset record is still available.'}:{message?:string}){
@@ -189,7 +196,7 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
       </div>
       <div className="machine-detail-accordion-panel" id={`pm-tracking-panel-${asset.id}`} aria-hidden={!expanded}>
         <div className="pm-panel-toolbar glass-toolbar"><div><strong>PM schedules</strong><small>Track calendar, hour-meter, and cycle-based maintenance.</small></div>{canEdit&&<button className="primary-button glass-button glass-button--primary" type="button" onClick={()=>setFormTask(null)}>Add Preventive Maintenance Tracking</button>}</div>
-        <div className="pm-due-legend" aria-label="Preventive maintenance due status legend"><span className="pm-due-legend--current">Current</span><span className="pm-due-legend--due-soon">Due Soon</span><span className="pm-due-legend--overdue">Overdue</span></div>
+        <div className="pm-due-legend" aria-label="Preventive maintenance due status legend"><span className="pm-due-legend--current">Current</span><span className="pm-due-legend--due-soon">Due Soon</span><span className="pm-due-legend--due-now">Due Now</span><span className="pm-due-legend--overdue">Overdue</span></div>
         {error&&<p className="form-message error">{error}</p>}
         {loading&&<div className="glass-empty-state">Loading preventive maintenance tracking...</div>}
         {!loading&&!error&&!safeTasks.length&&<div className="glass-empty-state"><strong>No preventive maintenance tracking yet.</strong><span>Add the first schedule to calculate due dates or meter targets for this asset.</span></div>}
@@ -211,7 +218,7 @@ function PmTaskCard({task,canEdit,onView,onEdit,onComplete,onDeactivate,onHistor
   return <article className="pm-task-card glass-card">
     <div className="pm-task-card-heading"><div><span className="eyebrow">{cadenceLabel(task.intervalType,task.intervalValue)}</span><h4>{safeString(task.title,'Untitled PM task')}</h4></div><span className={`glass-pill pm-status pm-status--${statusClass}`}>{status==='Hold'?'HOLD':status}</span></div>
     <div className="pm-task-values"><div><span>{meter?`Last completed ${task.intervalType==='hourly'?'hours':'cycles'}`:'Last completed date'}</span><strong>{meter?formatMeter(task.lastCompletedMeter):formatDate(task.lastCompletedDate)}</strong></div><div><span>{meter?'Next meter due':'Next PM Due Date'}</span><strong>{meter?formatMeter(task.nextDueMeter):formatDate(task.nextDueDate)}</strong></div></div>
-    <p className={`pm-countdown pm-countdown--${statusClass}`}>{safeString(task.countdown,status==='Setup incomplete'?'PM setup is incomplete':'')}</p>
+    <p className={`pm-countdown pm-countdown--${statusClass}${status==='Due Now'?' pm-due-now-text':''}`}>{safeString(task.countdown,status==='Setup incomplete'?'PM setup is incomplete':'')}</p>
     <div className="pm-card-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onView}>View</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onHistory}>View History ({safeCount(task.historyCount)})</button>{canEdit&&<button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onEdit}>Edit</button>}{canEdit&&task.scheduleStatus==='active'&&<button className="primary-button compact-button glass-button glass-button--success" type="button" onClick={onComplete}>Mark Complete</button>}{canEdit&&task.scheduleStatus!=='inactive'&&<button className="secondary-button compact-button glass-button glass-button--warning" type="button" onClick={onDeactivate}>Deactivate</button>}</div>
   </article>;
 }
@@ -238,8 +245,8 @@ function PmFormModal({asset,task,onClose,onSaved}:{asset:AssetIdentity;task:PmTa
   const meter=meterIntervals.has(draft.intervalType);const fixed=fixedIntervals.has(draft.intervalType);
   const fixedCadence=draft.intervalType?fixedCadences[draft.intervalType]:undefined;const validation=pmDraftErrors(draft);const preview=pmDuePreview(draft);
   const intervalPlaceholder=draft.intervalType?intervalGuidance[draft.intervalType]??'': '';const meterUnit=draft.intervalType==='hourly'?'Hours':'Cycles';
-  function field<K extends keyof PmDraft>(key:K,value:PmDraft[K]){setDraft(current=>({...current,[key]:value}));}
-  async function submit(event:FormEvent){event.preventDefault();setSubmitted(true);const firstInvalid=(['title','intervalType','interval','date','lastMeter','currentMeter'] as PmDraftErrorKey[]).find(key=>validation[key]);if(firstInvalid){setError('');requestAnimationFrame(()=>{const container=formRef.current?.querySelector<HTMLElement>(`[data-pm-field="${firstInvalid}"]`);const target=container?.matches('input,select,textarea,button,[tabindex]')?container:container?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]');container?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});target?.focus({preventScroll:true});});return;}setSaving(true);setError('');try{const payload={title:draft.title,instructions:draft.instructions,intervalType:draft.intervalType,intervalValue:fixedCadence?.value??Number(draft.intervalValue),lastCompletedDate:meter?null:(draft.lastCompletedDate||null),lastCompletedMeter:meter?Number(draft.lastCompletedMeter):null,currentMeter:meter&&draft.currentMeter!==''?Number(draft.currentMeter):null,scheduleStatus:draft.scheduleStatus,notes:draft.notes};await requestJson(task?`/api/machine-library/preventive-maintenance/${task.id}`:`/api/machine-library/assets/${asset.id}/preventive-maintenance`,{method:task?'PUT':'POST',body:JSON.stringify(payload),headers:task?undefined:{'Idempotency-Key':createRequestId.current}});await onSaved();}catch(value){setError((value as Error).message||'PM tracking could not be saved.');}finally{setSaving(false);}}
+  function field<K extends keyof PmDraft>(key:K,value:PmDraft[K]){setDraft(current=>({...current,[key]:value}));if(key==='title')setError('');}
+  async function submit(event:FormEvent){event.preventDefault();setSubmitted(true);const firstInvalid=(['title','intervalType','interval','date','lastMeter','currentMeter'] as PmDraftErrorKey[]).find(key=>validation[key]);if(firstInvalid){setError('');requestAnimationFrame(()=>{const container=formRef.current?.querySelector<HTMLElement>(`[data-pm-field="${firstInvalid}"]`);const target=container?.matches('input,select,textarea,button,[tabindex]')?container:container?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]');container?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});target?.focus({preventScroll:true});});return;}setSaving(true);setError('');try{const payload={title:draft.title.replace(/\s+/g,' ').trim(),instructions:draft.instructions,intervalType:draft.intervalType,intervalValue:fixedCadence?.value??Number(draft.intervalValue),lastCompletedDate:meter?null:(draft.lastCompletedDate||null),lastCompletedMeter:meter?Number(draft.lastCompletedMeter):null,currentMeter:meter&&draft.currentMeter!==''?Number(draft.currentMeter):null,scheduleStatus:draft.scheduleStatus,notes:draft.notes};await requestJson(task?`/api/machine-library/preventive-maintenance/${task.id}`:`/api/machine-library/assets/${asset.id}/preventive-maintenance`,{method:task?'PUT':'POST',body:JSON.stringify(payload),headers:task?undefined:{'Idempotency-Key':createRequestId.current}});await onSaved();}catch(value){setError((value as Error).message||'PM tracking could not be saved.');}finally{setSaving(false);}}
   return createPortal(<div className="modal-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!saving)onClose();}}><section className="mcc-card glass-modal-shell pm-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-labelledby="pm-form-title"><form ref={formRef} onSubmit={submit} noValidate>
     <div className="modal-heading"><div><p className="eyebrow">{safeString(asset.assetNumber,'Machine asset')} · {safeString(asset.assetName,'Machine asset')}</p><h3 id="pm-form-title">{task?'Edit':'Add'} Preventive Maintenance Tracking</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={saving}>Close</button></div>
     <div className="pm-form-grid"><label className="form-field pm-form-wide"><span>PM Title *</span><input className="glass-input" data-pm-field="title" value={draft.title} maxLength={180} onChange={e=>field('title',e.target.value)} aria-invalid={submitted&&Boolean(validation.title)} required />{submitted&&validation.title&&<small className="pm-inline-error">{validation.title}</small>}</label><label className="form-field pm-form-wide"><span>Instructions</span><textarea className="glass-input" rows={4} maxLength={12000} value={draft.instructions} onChange={e=>field('instructions',e.target.value)} /></label>
@@ -249,7 +256,7 @@ function PmFormModal({asset,task,onClose,onSaved}:{asset:AssetIdentity;task:PmTa
       {meter&&<label className="form-field"><span>Last Completed {meterUnit} *</span><input className="glass-input" data-pm-field="lastMeter" type="number" min="0" step={draft.intervalType==='hourly'?'0.1':'1'} placeholder={draft.intervalType==='hourly'?'0.0 hrs':'0 cycles'} value={draft.lastCompletedMeter} onChange={e=>field('lastCompletedMeter',e.target.value)} aria-invalid={submitted&&Boolean(validation.lastMeter)} required />{submitted&&validation.lastMeter&&<small className="pm-inline-error">{validation.lastMeter}</small>}</label>}
       {meter&&<label className="form-field"><span>Current {meterUnit} <small>(optional)</small></span><input className="glass-input" data-pm-field="currentMeter" type="number" min="0" step={draft.intervalType==='hourly'?'0.1':'1'} placeholder={draft.intervalType==='hourly'?'0.0 hrs':'0 cycles'} value={draft.currentMeter} onChange={e=>field('currentMeter',e.target.value)} aria-invalid={submitted&&Boolean(validation.currentMeter)} />{submitted&&validation.currentMeter&&<small className="pm-inline-error">{validation.currentMeter}</small>}</label>}
       <label className="form-field"><span>Status</span><select className="glass-input" value={draft.scheduleStatus} onChange={e=>field('scheduleStatus',e.target.value as PmScheduleStatus)}><option value="active">Active</option><option value="hold">Hold</option><option value="inactive">Inactive</option></select></label>
-      <div className={`pm-due-preview pm-due-preview--${preview.tone} glass-card glass-card--nested`}><span>{preview.label}</span><strong>{preview.value}</strong><small className="pm-due-status-line">{preview.legend}</small></div>
+      <div className={`pm-due-preview pm-due-preview--${preview.tone} glass-card glass-card--nested`}><span>{preview.label}</span><strong>{preview.value}</strong><small className={`pm-due-status-line${preview.tone==='due-now'?' pm-due-now-text':''}`}>{preview.legend}</small></div>
       <label className="form-field pm-form-wide"><span>Notes</span><textarea className="glass-input" rows={3} maxLength={12000} value={draft.notes} onChange={e=>field('notes',e.target.value)} /></label>
     </div>{error&&<p className="form-message error">{error}</p>}<div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={saving}>{saving?'Saving...':'Save PM Tracking'}</button></div>
   </form></section></div>,document.body);

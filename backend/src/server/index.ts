@@ -6611,20 +6611,22 @@ function validatePmTaskInput(value:unknown) {
 }
 function pmTaskById(id:number) { return one<PmTaskRow>('SELECT * FROM pm_tasks WHERE id=?',[id]); }
 function pmTaskStatus(row:PmTaskRow) {
+  if (!row.active) return {status:'Inactive',countdown:'Inactive — PM tracking paused'};
   if (row.hold) return {status:'Hold',countdown:'Schedule on hold - due tracking is paused'};
-  if (!row.active) return {status:'Inactive',countdown:'Not actively tracked'};
   if (pmMeterIntervals.has(row.interval_type)) {
     if (row.next_due_meter===null || row.current_meter===null) return {status:'Setup incomplete',countdown:'Add completed and current meter values'};
     const remaining=row.next_due_meter-row.current_meter;
     if (remaining<0) return {status:'Overdue',countdown:`${Math.abs(remaining).toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} past due`};
-    if (remaining<=Math.max(1,row.interval_value*pmMeterDueSoonRatio)) return {status:'Due Soon',countdown:remaining===0?'Due now':`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
+    if (remaining===0) return {status:'Due Now',countdown:'Due Now — perform maintenance now'};
+    if (remaining<=Math.max(1,row.interval_value*pmMeterDueSoonRatio)) return {status:'Due Soon',countdown:`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
     return {status:'Current',countdown:`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
   }
   if (!row.next_due_date) return {status:'Setup incomplete',countdown:'Add a last completed date'};
   const today=new Date().toISOString().slice(0,10);
   const days=Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
   if (days<0) return {status:'Overdue',countdown:`${Math.abs(days)} day${Math.abs(days)===1?'':'s'} past due`};
-  if (days<=pmCalendarDueSoonDays) return {status:'Due Soon',countdown:days===0?'Due today':`Due in ${days} day${days===1?'':'s'}`};
+  if (days===0) return {status:'Due Now',countdown:'Due Now — perform maintenance today'};
+  if (days<=pmCalendarDueSoonDays) return {status:'Due Soon',countdown:`Due in ${days} day${days===1?'':'s'}`};
   return {status:'Current',countdown:`Due in ${days} days`};
 }
 function publicPmTask(row:PmTaskRow) {
@@ -7250,7 +7252,7 @@ app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireA
     res.status(201).json({ok:true,task:publicPmTask(task)});
   } catch (error) {
     const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be created.');
-    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
   }
 });
 app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
@@ -7270,7 +7272,7 @@ app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requir
     res.json({ok:true,task:publicPmTask(task)});
   } catch (error) {
     const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be updated.');
-    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
   }
 });
 app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{

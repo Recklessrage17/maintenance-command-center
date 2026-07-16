@@ -1039,9 +1039,10 @@ button.glass-attachment:focus-visible {
 
 .pm-status--current { color: #aef4dc; border-color: rgba(64, 216, 162, 0.34); background: rgba(20, 104, 78, 0.3); }
 .pm-status--due-soon { color: #ffe09a; border-color: rgba(246, 185, 65, 0.42); background: rgba(116, 73, 11, 0.34); }
+.pm-status--due-now { color: #ff8da0; border-color: rgba(255, 91, 116, 0.5); background: rgba(128, 25, 43, 0.38); }
 .pm-status--overdue { color: #ffc1c1; border-color: rgba(249, 98, 98, 0.42); background: rgba(121, 31, 39, 0.36); }
 .pm-status--hold { color: #d8caff; border-color: rgba(166, 139, 255, 0.42); background: rgba(67, 48, 122, 0.38); }
-.pm-status--inactive { color: #c7d4dd; border-color: rgba(163, 184, 197, 0.3); background: rgba(52, 66, 76, 0.45); }
+.pm-status--inactive { color: #ff9aaa; border-color: rgba(255, 91, 116, 0.44); background: rgba(111, 29, 43, 0.38); }
 .pm-status--setup-incomplete { color: #c9def0; border-color: rgba(115, 168, 207, 0.34); background: rgba(38, 68, 91, 0.42); }
 
 .pm-task-values,
@@ -1073,6 +1074,8 @@ button.glass-attachment:focus-visible {
 
 .pm-countdown--current { color: #aef4dc; }
 .pm-countdown--due-soon { color: #ffe09a; }
+.pm-countdown--due-now,
+.pm-countdown--inactive { color: #ff8da0; }
 .pm-countdown--overdue { color: #ffc1c1; }
 .pm-countdown--hold { color: #d8caff; }
 
@@ -1096,6 +1099,7 @@ button.glass-attachment:focus-visible {
 
 .pm-due-legend--current { color: #aef4dc; background: rgba(20, 104, 78, 0.24); }
 .pm-due-legend--due-soon { color: #ffe09a; background: rgba(116, 73, 11, 0.28); }
+.pm-due-legend--due-now { color: #ff8da0; background: rgba(128, 25, 43, 0.34); }
 .pm-due-legend--overdue { color: #ffc1c1; background: rgba(121, 31, 39, 0.3); }
 
 .pm-assignee {
@@ -1187,6 +1191,12 @@ button.glass-attachment:focus-visible {
 .pm-due-preview--due-soon { border-color: rgba(246, 185, 65, 0.42); }
 .pm-due-preview--due-soon strong,
 .pm-due-preview--due-soon .pm-due-status-line { color: #ffe09a; }
+.pm-due-preview--due-now,
+.pm-due-preview--inactive { border-color: rgba(255, 91, 116, 0.46); }
+.pm-due-preview--due-now strong,
+.pm-due-preview--due-now .pm-due-status-line,
+.pm-due-preview--inactive strong,
+.pm-due-preview--inactive .pm-due-status-line { color: #ff8da0; }
 .pm-due-preview--overdue { border-color: rgba(249, 98, 98, 0.42); }
 .pm-due-preview--overdue strong,
 .pm-due-preview--overdue .pm-due-status-line { color: #ffc1c1; }
@@ -1194,6 +1204,21 @@ button.glass-attachment:focus-visible {
 .pm-due-preview--hold strong,
 .pm-due-preview--hold .pm-due-status-line { color: #d8caff; }
 .pm-due-preview--incomplete .pm-due-status-line { color: var(--glass-text-muted); }
+
+@keyframes pmDueNowPulse {
+  0%, 100% { opacity: 1; text-shadow: 0 0 0 rgba(255, 90, 110, 0); }
+  50% { opacity: 0.68; text-shadow: 0 0 12px rgba(255, 90, 110, 0.66); }
+}
+
+.pm-due-now-text {
+  color: #ff758a;
+  font-weight: 900;
+  animation: pmDueNowPulse 1.15s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pm-due-now-text { animation: none; }
+}
 
 .pm-view-modal,
 .pm-history-modal {
