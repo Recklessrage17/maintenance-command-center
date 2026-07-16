@@ -22,7 +22,8 @@ if (fs.existsSync(rootEnvPath)) {
 }
 
 const app = express();
-const port = 4273;
+const configuredPort = Number(process.env.PORT ?? 4273);
+const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 4273;
 const appName = 'Maintenance Command Center';
 const version = '0.1.0';
 const mit3Url = 'http://localhost:4173';
@@ -96,7 +97,7 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
@@ -247,7 +248,7 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
@@ -262,6 +263,8 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,complet
 CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);`);
   const pmTaskColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_tasks)').map(column => column.name));
   if (!pmTaskColumns.has('hold')) run('ALTER TABLE pm_tasks ADD COLUMN hold INTEGER NOT NULL DEFAULT 0');
+  if (!pmTaskColumns.has('client_request_id')) run('ALTER TABLE pm_tasks ADD COLUMN client_request_id TEXT');
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_tasks_client_request ON pm_tasks (client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id<>'';");
   run('UPDATE pm_tasks SET hold=0 WHERE hold IS NULL');
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
@@ -7219,22 +7222,27 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
   scheduleAutoBackup('machine inspection record deleted',req.user!);
   res.json({ok:true});
 });
-app.get('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
-  const asset=machineAssetById(Number(req.params.id));
+app.get('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
   const tasks=all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? ORDER BY active DESC,hold ASC,COALESCE(next_due_date,\'9999-12-31\'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE',[asset.id]).map(publicPmTask);
-  const nextDate=tasks.filter(task=>task.scheduleStatus==='active'&&task.nextDueDate).map(task=>task.nextDueDate as string).sort()[0] ?? null;
-  const nextMeter=tasks.filter(task=>task.scheduleStatus==='active'&&task.nextDueMeter!==null).sort((a,b)=>(a.nextDueMeter ?? Infinity)-(b.nextDueMeter ?? Infinity))[0]?.nextDueMeter ?? null;
-  res.json({ok:true,tasks,summary:{total:tasks.length,dueSoon:tasks.filter(task=>task.status==='Due Soon').length,overdue:tasks.filter(task=>task.status==='Overdue').length,nextDueDate:nextDate,nextDueMeter:nextMeter}});
+  res.status(200).json(tasks);
 });
-app.post('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
   try {
-    const asset=machineAssetById(Number(req.params.id));
+    const asset=machineAssetById(Number(req.params.assetId));
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const clientRequestId=String(req.get('Idempotency-Key') ?? '').trim();
+    if (clientRequestId && !/^[A-Za-z0-9._:-]{8,128}$/.test(clientRequestId)) return res.status(400).json({ok:false,error:'Invalid PM save request identifier.'});
+    const existingRequest=clientRequestId?one<PmTaskRow>('SELECT * FROM pm_tasks WHERE client_request_id=?',[clientRequestId]):undefined;
+    if (existingRequest) {
+      if (existingRequest.asset_id!==asset.id) return res.status(409).json({ok:false,error:'PM save request identifier is already in use.'});
+      return res.status(200).json({ok:true,task:publicPmTask(existingRequest),duplicatePrevented:true});
+    }
     const input=validatePmTaskInput(req.body);
     const timestamp=now();
-    const result=run(`INSERT INTO pm_tasks (asset_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
-      asset.id,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp,
+    const result=run(`INSERT INTO pm_tasks (asset_id,client_request_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
+      asset.id,clientRequestId||null,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp,
     ]);
     const task=pmTaskById(Number(result.lastInsertRowid))!;
     recordPmAudit({action:'pm_created',task,asset,actor:req.user!,newValue:pmHistoryValue(task)});
@@ -9091,6 +9099,7 @@ app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermi
     sendMit3InventoryError(req,res,operation,targetId,error);
   }
 });
+app.use('/api', (_req,res)=>res.status(404).json({ok:false,error:'API route not found.'}));
 app.use(express.static(frontendDistPath));
 app.get('*', (_req,res)=>res.sendFile(path.join(frontendDistPath,'index.html')));
 app.listen(port,()=>{
