@@ -1,0 +1,634 @@
+/*
+ * MCC opt-in glass system
+ *
+ * Apply these utilities only to new components or sections that are already
+ * being reworked. Keep dense data surfaces opaque enough to scan, and avoid
+ * nesting blurred surfaces. Attachment tiles should only be rendered when a
+ * matching attachment exists.
+ */
+
+:root {
+  --glass-surface-panel: linear-gradient(
+    180deg,
+    rgba(18, 42, 58, 0.84),
+    rgba(8, 22, 34, 0.8)
+  );
+  --glass-surface-card: linear-gradient(
+    180deg,
+    rgba(10, 31, 45, 0.82),
+    rgba(5, 18, 29, 0.86)
+  );
+  --glass-surface-dense: rgba(5, 18, 29, 0.94);
+  --glass-surface-control: rgba(6, 20, 31, 0.88);
+  --glass-border: rgba(90, 210, 255, 0.22);
+  --glass-border-strong: rgba(110, 225, 255, 0.48);
+  --glass-inner-highlight: rgba(255, 255, 255, 0.07);
+  --glass-text: #eefaff;
+  --glass-text-muted: #add0df;
+  --glass-placeholder: #7fa8ba;
+  --glass-cyan: #44d7ff;
+  --glass-teal: #36e5aa;
+  --glass-success: #54dfa2;
+  --glass-warning: #ffc466;
+  --glass-danger: #ff758a;
+  --glass-panel-radius: 16px;
+  --glass-card-radius: 14px;
+  --glass-control-radius: 12px;
+  --glass-shadow-panel: 0 16px 40px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 var(--glass-inner-highlight);
+  --glass-shadow-card: 0 10px 28px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --glass-focus-ring: 0 0 0 3px rgba(54, 220, 255, 0.16);
+  --glass-transition: 160ms ease;
+}
+
+/* Major surfaces: avoid nesting these because each one uses backdrop blur. */
+.glass-panel,
+.glass-modal-shell {
+  min-width: 0;
+  color: var(--glass-text);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface-panel);
+  box-shadow: var(--glass-shadow-panel);
+  backdrop-filter: blur(16px) saturate(118%);
+  -webkit-backdrop-filter: blur(16px) saturate(118%);
+}
+
+.glass-panel {
+  border-radius: var(--glass-panel-radius);
+}
+
+.glass-panel--highlight {
+  box-shadow: var(--glass-shadow-panel),
+    inset 0 2px 0 rgba(165, 236, 255, 0.06);
+}
+
+.glass-panel--dense,
+.glass-card--dense {
+  background: var(--glass-surface-dense);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.glass-card {
+  min-width: 0;
+  color: var(--glass-text);
+  border: 1px solid rgba(92, 200, 240, 0.18);
+  border-radius: var(--glass-card-radius);
+  background: var(--glass-surface-card);
+  box-shadow: var(--glass-shadow-card);
+  backdrop-filter: blur(12px) saturate(112%);
+  -webkit-backdrop-filter: blur(12px) saturate(112%);
+}
+
+.glass-panel > :first-child,
+.glass-card > :first-child,
+.glass-modal-shell > :first-child {
+  margin-top: 0;
+}
+
+.glass-panel > :last-child,
+.glass-card > :last-child,
+.glass-modal-shell > :last-child {
+  margin-bottom: 0;
+}
+
+/* Toolbars and responsive action groups. */
+.glass-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.glass-toolbar__group,
+.glass-button-group {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Buttons use a visible label in addition to any icon so color is not the cue. */
+.glass-button {
+  appearance: none;
+  min-height: 44px;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 1px solid rgba(110, 220, 255, 0.28);
+  border-radius: var(--glass-control-radius);
+  color: var(--glass-text);
+  background: linear-gradient(
+    180deg,
+    rgba(45, 94, 120, 0.85),
+    rgba(18, 52, 72, 0.9)
+  );
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+  transition: transform var(--glass-transition),
+    border-color var(--glass-transition),
+    background-color var(--glass-transition),
+    box-shadow var(--glass-transition);
+}
+
+.glass-button:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: rgba(110, 230, 255, 0.58);
+  box-shadow: 0 11px 24px rgba(0, 0, 0, 0.28),
+    0 0 18px rgba(68, 215, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.glass-button:focus-visible {
+  outline: 2px solid rgba(128, 236, 255, 0.94);
+  outline-offset: 2px;
+  box-shadow: var(--glass-focus-ring);
+}
+
+.glass-button:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: translateY(0);
+}
+
+.glass-button:disabled,
+.glass-button[aria-disabled="true"] {
+  opacity: 0.56;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.glass-button--primary {
+  color: #001820;
+  border-color: rgba(159, 241, 255, 0.7);
+  background: linear-gradient(135deg, #58ddff, #36e5aa);
+}
+
+.glass-button--secondary {
+  color: var(--glass-text);
+  background: linear-gradient(
+    180deg,
+    rgba(24, 54, 72, 0.78),
+    rgba(7, 24, 37, 0.9)
+  );
+}
+
+.glass-button--success {
+  color: #eafff4;
+  border-color: rgba(84, 223, 162, 0.52);
+  background: linear-gradient(180deg, rgba(25, 125, 88, 0.84), rgba(10, 58, 44, 0.92));
+}
+
+.glass-button--warning {
+  color: #fff8e6;
+  border-color: rgba(255, 196, 102, 0.58);
+  background: linear-gradient(180deg, rgba(145, 91, 20, 0.88), rgba(67, 42, 13, 0.94));
+}
+
+.glass-button--danger {
+  color: #fff0f2;
+  border-color: rgba(255, 117, 138, 0.58);
+  background: linear-gradient(180deg, rgba(142, 43, 61, 0.86), rgba(64, 18, 31, 0.94));
+}
+
+/* Pills cover status, asset, vendor, linked part, and role labels. */
+.glass-pill {
+  min-height: 28px;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid rgba(120, 211, 242, 0.26);
+  border-radius: 999px;
+  color: #def6ff;
+  background: rgba(7, 35, 51, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  font-size: 0.75rem;
+  font-weight: 850;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.glass-pill--cyan,
+.glass-pill--linked {
+  color: #dffaff;
+  border-color: rgba(68, 215, 255, 0.42);
+  background: rgba(5, 61, 86, 0.68);
+}
+
+.glass-pill--success {
+  color: #dcffed;
+  border-color: rgba(84, 223, 162, 0.42);
+  background: rgba(18, 97, 71, 0.54);
+}
+
+.glass-pill--warning {
+  color: #fff2cf;
+  border-color: rgba(255, 196, 102, 0.46);
+  background: rgba(105, 66, 16, 0.62);
+}
+
+.glass-pill--danger {
+  color: #ffe5e9;
+  border-color: rgba(255, 117, 138, 0.48);
+  background: rgba(113, 30, 46, 0.62);
+}
+
+a.glass-pill--linked,
+button.glass-pill--linked {
+  min-height: 36px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(68, 215, 255, 0.42);
+  text-underline-offset: 3px;
+}
+
+a.glass-pill--linked:hover,
+a.glass-pill--linked:focus-visible,
+button.glass-pill--linked:hover,
+button.glass-pill--linked:focus-visible {
+  border-color: rgba(68, 215, 255, 0.74);
+  color: #ffffff;
+  outline: 2px solid rgba(68, 215, 255, 0.76);
+  outline-offset: 2px;
+}
+
+/* Modal backdrop and shell remain separate so portals can reuse the shell. */
+.glass-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background: rgba(0, 7, 14, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.glass-modal-shell {
+  width: min(720px, 100%);
+  max-height: calc(100dvh - 36px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-radius: var(--glass-panel-radius);
+  overflow: hidden;
+}
+
+.glass-modal-shell:focus-visible {
+  outline: 2px solid rgba(110, 230, 255, 0.9);
+  outline-offset: 3px;
+  box-shadow: var(--glass-shadow-panel), var(--glass-focus-ring);
+}
+
+.glass-modal__header,
+.glass-modal__body,
+.glass-modal__actions {
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.glass-modal__header {
+  border-bottom: 1px solid rgba(90, 210, 255, 0.16);
+}
+
+.glass-modal__body {
+  overflow: auto;
+}
+
+.glass-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(90, 210, 255, 0.16);
+  background: rgba(3, 15, 24, 0.46);
+}
+
+/* Form controls: add .glass-input directly to input, select, or textarea. */
+.glass-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(90, 180, 220, 0.28);
+  border-radius: var(--glass-control-radius);
+  color: var(--glass-text);
+  background: var(--glass-surface-control);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  font: inherit;
+  line-height: 1.35;
+  transition: border-color var(--glass-transition), box-shadow var(--glass-transition);
+}
+
+textarea.glass-input {
+  min-height: 112px;
+  resize: vertical;
+}
+
+select.glass-input {
+  color-scheme: dark;
+  background-color: #071823;
+}
+
+.glass-input::placeholder {
+  color: var(--glass-placeholder);
+  opacity: 1;
+}
+
+.glass-input:hover:not(:disabled) {
+  border-color: rgba(90, 210, 255, 0.48);
+}
+
+.glass-input:focus,
+.glass-input:focus-visible {
+  outline: none;
+  border-color: rgba(54, 220, 255, 0.82);
+  box-shadow: var(--glass-focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-input:disabled,
+.glass-input[aria-disabled="true"] {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+/* Empty states favor readable copy over transparency. */
+.glass-empty-state {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 28px 22px;
+  border: 1px dashed rgba(110, 220, 255, 0.3);
+  border-radius: var(--glass-card-radius);
+  color: var(--glass-text-muted);
+  background: rgba(5, 18, 29, 0.9);
+  text-align: center;
+}
+
+.glass-empty-state > * {
+  max-width: 56ch;
+  margin: 0;
+}
+
+/* Render attachment items only for files that exist; empty groups stay hidden. */
+.glass-attachments {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  gap: 10px;
+}
+
+.glass-attachments:empty,
+.glass-attachment[hidden],
+.glass-file-icon[hidden] {
+  display: none;
+}
+
+.glass-attachment {
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(92, 200, 240, 0.18);
+  border-radius: 12px;
+  color: var(--glass-text);
+  background: rgba(5, 18, 29, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+a.glass-attachment,
+button.glass-attachment {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  transition: border-color var(--glass-transition), transform var(--glass-transition);
+}
+
+a.glass-attachment:hover,
+a.glass-attachment:focus-visible,
+button.glass-attachment:hover,
+button.glass-attachment:focus-visible {
+  border-color: var(--glass-border-strong);
+  outline: 2px solid rgba(68, 215, 255, 0.68);
+  outline-offset: 2px;
+  transform: translateY(-1px);
+}
+
+.glass-attachment__copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.glass-attachment__copy strong,
+.glass-attachment__copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.glass-attachment__copy span {
+  color: var(--glass-text-muted);
+  font-size: 0.75rem;
+}
+
+.glass-file-icon {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #247fa1, #123b52);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  font-size: 0.62rem;
+  font-weight: 950;
+  letter-spacing: 0.035em;
+  line-height: 1;
+}
+
+.glass-file-icon::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.24);
+  border-left: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.glass-file-icon--pdf {
+  background: linear-gradient(145deg, #c84d61, #671b2c);
+}
+
+.glass-file-icon--docx {
+  background: linear-gradient(145deg, #438bd6, #173f78);
+}
+
+.glass-file-icon--image {
+  background: linear-gradient(145deg, #8a69d6, #3f2b79);
+}
+
+.glass-file-icon--spreadsheet {
+  background: linear-gradient(145deg, #3ea879, #17583d);
+}
+
+/* Use on a subtree or page when device constraints call for opaque surfaces. */
+.glass-reduced-effects .glass-panel,
+.glass-reduced-effects .glass-card,
+.glass-reduced-effects .glass-modal-shell,
+.glass-reduced-effects .glass-modal-backdrop {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel,
+  .glass-card,
+  .glass-modal-shell {
+    background: #0a1f2d;
+  }
+
+  .glass-modal-backdrop {
+    background: rgba(0, 7, 14, 0.94);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-panel,
+  .glass-card,
+  .glass-modal-shell {
+    background: #0a1f2d;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .glass-input,
+  .glass-attachment {
+    background: #071823;
+  }
+
+  .glass-modal-backdrop {
+    background: rgba(0, 7, 14, 0.96);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-button,
+  .glass-input,
+  .glass-attachment {
+    scroll-behavior: auto;
+    transition: none;
+  }
+
+  .glass-button:hover:not(:disabled):not([aria-disabled="true"]),
+  a.glass-attachment:hover,
+  a.glass-attachment:focus-visible,
+  button.glass-attachment:hover,
+  button.glass-attachment:focus-visible {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .glass-panel,
+  .glass-card,
+  .glass-button,
+  .glass-pill,
+  .glass-modal-shell,
+  .glass-input,
+  .glass-empty-state,
+  .glass-attachment,
+  .glass-file-icon {
+    border-color: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .glass-toolbar {
+    align-items: stretch;
+  }
+
+  .glass-toolbar__group,
+  .glass-button-group {
+    width: 100%;
+  }
+
+  .glass-button-group .glass-button {
+    flex: 1 1 180px;
+  }
+
+  .glass-modal-backdrop {
+    place-items: end center;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  .glass-modal-shell {
+    max-height: calc(100dvh - 20px);
+  }
+}
+
+@media (max-width: 520px) {
+  .glass-panel {
+    border-radius: 14px;
+  }
+
+  .glass-modal__header,
+  .glass-modal__body,
+  .glass-modal__actions {
+    padding: 14px;
+  }
+
+  .glass-modal__actions .glass-button {
+    flex: 1 1 100%;
+  }
+
+  .glass-attachments {
+    grid-template-columns: 1fr;
+  }
+
+  .glass-attachment {
+    min-height: 50px;
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 7px 8px;
+  }
+
+  .glass-file-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    font-size: 0.55rem;
+  }
+}
