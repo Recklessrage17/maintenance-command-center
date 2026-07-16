@@ -89,14 +89,24 @@ function formatDate(value:unknown) {
 }
 function formatMeter(value:unknown) { return typeof value==='number'&&Number.isFinite(value)?value.toLocaleString():'Not set'; }
 function formatNumber(value:unknown){return typeof value==='number'&&Number.isFinite(value)?value.toLocaleString():'0';}
+function pluralizedUnit(value:number,singular:string,plural=`${singular}s`){return Math.abs(value)===1?singular:plural;}
+function formatMeterMetric(value:number|null,intervalType:PmIntervalType){if(value===null)return 'Not set';return `${formatNumber(value)} ${intervalType==='hourly'?pluralizedUnit(value,'hr'):pluralizedUnit(value,'cycle')}`;}
 function taskToDraft(task:PmTask):PmDraft { return {title:safeString(task.title),instructions:safeString(task.instructions),intervalType:task.intervalType,intervalValue:fixedIntervals.has(task.intervalType)?'':String(safeNumber(task.intervalValue)??''),lastCompletedDate:safeDateValue(task.lastCompletedDate)??'',lastCompletedMeter:safeNumber(task.lastCompletedMeter)===null?'':String(task.lastCompletedMeter),currentMeter:safeNumber(task.currentMeter)===null?'':String(task.currentMeter),scheduleStatus:task.scheduleStatus,notes:safeString(task.notes)}; }
 function addDays(value:string,days:number){const date=new Date(`${value}T12:00:00Z`);if(Number.isNaN(date.getTime())||!Number.isFinite(days))return null;date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
 function addMonths(value:string,months:number){const date=new Date(`${value}T12:00:00Z`);if(Number.isNaN(date.getTime())||!Number.isFinite(months))return null;const day=date.getUTCDate();date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()+months);const last=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0,12)).getUTCDate();date.setUTCDate(Math.min(day,last));return date.toISOString().slice(0,10);}
 function cadenceLabel(intervalType:PmIntervalType,intervalValue:number) {
-  const fixed=fixedCadences[intervalType];
-  if(fixed)return fixed.label;
-  const units:Record<'hourly'|'cycles'|'days'|'weekly'|'monthly',string>={hourly:'hours',cycles:'cycles',days:'days',weekly:'weeks',monthly:'months'};
-  return `Every ${formatNumber(intervalValue)} ${units[intervalType as keyof typeof units]??'intervals'}`;
+  const fixedLabels:Partial<Record<PmIntervalType,string>>={bi_weekly:'Bi-weekly',quarterly:'Quarterly',bi_annual:'Bi-annual',annual:'Annual'};
+  if(fixedLabels[intervalType])return fixedLabels[intervalType]!;
+  const units:Record<'hourly'|'cycles'|'days'|'weekly'|'monthly',{singular:string;plural:string}>={hourly:{singular:'hour',plural:'hours'},cycles:{singular:'cycle',plural:'cycles'},days:{singular:'day',plural:'days'},weekly:{singular:'week',plural:'weeks'},monthly:{singular:'month',plural:'months'}};
+  const unit=units[intervalType as keyof typeof units];
+  return `Every ${formatNumber(intervalValue)} ${unit?pluralizedUnit(intervalValue,unit.singular,unit.plural):'intervals'}`;
+}
+function calendarPastDueText(intervalType:PmIntervalType,nextDate:string,today:string,daysPastDue:number){
+  if(['monthly','quarterly','bi_annual','annual'].includes(intervalType)){
+    const due=new Date(`${nextDate}T12:00:00Z`);const current=new Date(`${today}T12:00:00Z`);let months=(current.getUTCFullYear()-due.getUTCFullYear())*12+current.getUTCMonth()-due.getUTCMonth();if(current.getUTCDate()<due.getUTCDate())months-=1;
+    if(months>=1)return `Past due by ${months.toLocaleString()} ${pluralizedUnit(months,'month')}`;
+  }
+  return `Past due by ${daysPastDue.toLocaleString()} ${pluralizedUnit(daysPastDue,'day')}`;
 }
 function calculatedDue(draft:PmDraft){
   if(!draft.intervalType)return null;
@@ -130,14 +140,14 @@ function pmDuePreview(draft:PmDraft):PmDuePreview {
     if(hold)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:'Hold - schedule preserved while overdue tracking is paused.',tone:'hold'};
     if(draft.currentMeter==='')return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Setup incomplete - current ${unit} not entered.`,tone:'incomplete'};
     const current=Number(draft.currentMeter);if(!Number.isFinite(current)||current<0)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Setup incomplete - enter valid current ${unit}.`,tone:'incomplete'};const remaining=due.nextMeter-current;const threshold=Math.max(1,due.amount*meterDueSoonRatio);
-    if(remaining<0)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Overdue by ${Math.abs(remaining).toLocaleString()} ${unit}.`,tone:'overdue'};
+    if(remaining<0){const overdue=Math.abs(remaining);return {label:'Overdue',value:`Past due by ${overdue.toLocaleString()} ${pluralizedUnit(overdue,draft.intervalType==='hourly'?'hour':'cycle')}`,legend:'',tone:'overdue'};}
     if(remaining===0)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:'Due Now — perform maintenance now',tone:'due-now'};
     if(remaining<=threshold)return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Due Soon - ${remaining.toLocaleString()} ${unit} remain.`,tone:'due-soon'};
     return {label:'Next meter due',value:`Next due at ${due.nextMeter.toLocaleString()} ${unit}`,legend:`Current - ${remaining.toLocaleString()} ${unit} remain.`,tone:'current'};
   }
   const nextDate=due.nextDate!;const today=localIsoDate(new Date());const days=Math.round((Date.parse(`${nextDate}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
   if(hold)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:'Hold - schedule preserved while overdue tracking is paused.',tone:'hold'};
-  if(days<0)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Overdue by ${Math.abs(days)} day${Math.abs(days)===1?'':'s'}.`,tone:'overdue'};
+  if(days<0)return {label:'Overdue',value:calendarPastDueText(draft.intervalType,nextDate,today,Math.abs(days)),legend:'',tone:'overdue'};
   if(days===0)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:'Due Now — perform maintenance today',tone:'due-now'};
   if(days<=calendarDueSoonDays)return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Due Soon - due in ${days} day${days===1?'':'s'}.`,tone:'due-soon'};
   return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Current - due in ${days} days.`,tone:'current'};
@@ -196,7 +206,6 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
       </div>
       <div className="machine-detail-accordion-panel" id={`pm-tracking-panel-${asset.id}`} aria-hidden={!expanded}>
         <div className="pm-panel-toolbar glass-toolbar"><div><strong>PM schedules</strong><small>Track calendar, hour-meter, and cycle-based maintenance.</small></div>{canEdit&&<button className="primary-button glass-button glass-button--primary" type="button" onClick={()=>setFormTask(null)}>Add Preventive Maintenance Tracking</button>}</div>
-        <div className="pm-due-legend" aria-label="Preventive maintenance due status legend"><span className="pm-due-legend--current">Current</span><span className="pm-due-legend--due-soon">Due Soon</span><span className="pm-due-legend--due-now">Due Now</span><span className="pm-due-legend--overdue">Overdue</span></div>
         {error&&<p className="form-message error">{error}</p>}
         {loading&&<div className="glass-empty-state">Loading preventive maintenance tracking...</div>}
         {!loading&&!error&&!safeTasks.length&&<div className="glass-empty-state"><strong>No preventive maintenance tracking yet.</strong><span>Add the first schedule to calculate due dates or meter targets for this asset.</span></div>}
@@ -216,8 +225,8 @@ function PmTaskCard({task,canEdit,onView,onEdit,onComplete,onDeactivate,onHistor
   const status=validStatuses.has(task.status)?task.status:'Setup incomplete';
   const statusClass=status.toLowerCase().replace(/\s+/g,'-');
   return <article className="pm-task-card glass-card">
-    <div className="pm-task-card-heading"><div><span className="eyebrow">{cadenceLabel(task.intervalType,task.intervalValue)}</span><h4>{safeString(task.title,'Untitled PM task')}</h4></div><span className={`glass-pill pm-status pm-status--${statusClass}`}>{status==='Hold'?'HOLD':status}</span></div>
-    <div className="pm-task-values"><div><span>{meter?`Last completed ${task.intervalType==='hourly'?'hours':'cycles'}`:'Last completed date'}</span><strong>{meter?formatMeter(task.lastCompletedMeter):formatDate(task.lastCompletedDate)}</strong></div><div><span>{meter?'Next meter due':'Next PM Due Date'}</span><strong>{meter?formatMeter(task.nextDueMeter):formatDate(task.nextDueDate)}</strong></div></div>
+    <div className="pm-task-card-heading"><div><span className="pm-interval-label">Interval: {cadenceLabel(task.intervalType,task.intervalValue)}</span><h4>{safeString(task.title,'Untitled PM task')}</h4></div><span className={`glass-pill pm-status pm-status--${statusClass}`}>{status==='Hold'?'HOLD':status}</span></div>
+    <div className="pm-task-metrics"><div className="pm-metric-pill pm-metric-pill--last"><span>Last completed</span><strong>{meter?formatMeterMetric(task.lastCompletedMeter,task.intervalType):formatDate(task.lastCompletedDate)}</strong></div><div className={`pm-metric-pill pm-metric-pill--${statusClass}`}><span>Next due</span><strong>{meter?formatMeterMetric(task.nextDueMeter,task.intervalType):formatDate(task.nextDueDate)}</strong></div></div>
     <p className={`pm-countdown pm-countdown--${statusClass}${status==='Due Now'?' pm-due-now-text':''}`}>{safeString(task.countdown,status==='Setup incomplete'?'PM setup is incomplete':'')}</p>
     <div className="pm-card-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onView}>View</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onHistory}>View History ({safeCount(task.historyCount)})</button>{canEdit&&<button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onEdit}>Edit</button>}{canEdit&&task.scheduleStatus==='active'&&<button className="primary-button compact-button glass-button glass-button--success" type="button" onClick={onComplete}>Mark Complete</button>}{canEdit&&task.scheduleStatus!=='inactive'&&<button className="secondary-button compact-button glass-button glass-button--warning" type="button" onClick={onDeactivate}>Deactivate</button>}</div>
   </article>;
@@ -256,7 +265,8 @@ function PmFormModal({asset,task,onClose,onSaved}:{asset:AssetIdentity;task:PmTa
       {meter&&<label className="form-field"><span>Last Completed {meterUnit} *</span><input className="glass-input" data-pm-field="lastMeter" type="number" min="0" step={draft.intervalType==='hourly'?'0.1':'1'} placeholder={draft.intervalType==='hourly'?'0.0 hrs':'0 cycles'} value={draft.lastCompletedMeter} onChange={e=>field('lastCompletedMeter',e.target.value)} aria-invalid={submitted&&Boolean(validation.lastMeter)} required />{submitted&&validation.lastMeter&&<small className="pm-inline-error">{validation.lastMeter}</small>}</label>}
       {meter&&<label className="form-field"><span>Current {meterUnit} <small>(optional)</small></span><input className="glass-input" data-pm-field="currentMeter" type="number" min="0" step={draft.intervalType==='hourly'?'0.1':'1'} placeholder={draft.intervalType==='hourly'?'0.0 hrs':'0 cycles'} value={draft.currentMeter} onChange={e=>field('currentMeter',e.target.value)} aria-invalid={submitted&&Boolean(validation.currentMeter)} />{submitted&&validation.currentMeter&&<small className="pm-inline-error">{validation.currentMeter}</small>}</label>}
       <label className="form-field"><span>Status</span><select className="glass-input" value={draft.scheduleStatus} onChange={e=>field('scheduleStatus',e.target.value as PmScheduleStatus)}><option value="active">Active</option><option value="hold">Hold</option><option value="inactive">Inactive</option></select></label>
-      <div className={`pm-due-preview pm-due-preview--${preview.tone} glass-card glass-card--nested`}><span>{preview.label}</span><strong>{preview.value}</strong><small className={`pm-due-status-line${preview.tone==='due-now'?' pm-due-now-text':''}`}>{preview.legend}</small></div>
+      <div className="pm-due-legend pm-form-legend" aria-label="Preventive maintenance due status legend"><span className="pm-due-legend--current">Current</span><span className="pm-due-legend--due-soon">Due Soon</span><span className="pm-due-legend--due-now">Due Now</span><span className="pm-due-legend--overdue">Overdue</span></div>
+      <div className={`pm-due-preview pm-due-preview--${preview.tone} glass-card glass-card--nested`}><span>{preview.label}</span><strong>{preview.value}</strong>{preview.legend&&<small className={`pm-due-status-line${preview.tone==='due-now'?' pm-due-now-text':''}`}>{preview.legend}</small>}</div>
       <label className="form-field pm-form-wide"><span>Notes</span><textarea className="glass-input" rows={3} maxLength={12000} value={draft.notes} onChange={e=>field('notes',e.target.value)} /></label>
     </div>{error&&<p className="form-message error">{error}</p>}<div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={saving}>{saving?'Saving...':'Save PM Tracking'}</button></div>
   </form></section></div>,document.body);

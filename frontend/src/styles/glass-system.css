@@ -997,7 +997,7 @@ button.glass-attachment:focus-visible {
 }
 
 .pm-panel-toolbar small,
-.pm-task-card span,
+.pm-metric-pill span,
 .pm-value span,
 .pm-prose > span,
 .pm-due-preview span,
@@ -1014,9 +1014,9 @@ button.glass-attachment:focus-visible {
 .pm-task-card {
   display: grid;
   align-content: start;
-  gap: 13px;
+  gap: 10px;
   min-width: 0;
-  padding: 16px;
+  padding: 15px;
 }
 
 .pm-task-card-heading {
@@ -1027,32 +1027,43 @@ button.glass-attachment:focus-visible {
 }
 
 .pm-task-card-heading h4 {
-  margin: 3px 0 0;
+  margin: 4px 0 0;
   color: var(--glass-text);
   overflow-wrap: anywhere;
 }
 
-.pm-status {
-  flex: 0 0 auto;
-  border-color: rgba(126, 217, 239, 0.26);
+.pm-interval-label {
+  color: #9fc3d3;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
 }
 
-.pm-status--current { color: #aef4dc; border-color: rgba(64, 216, 162, 0.34); background: rgba(20, 104, 78, 0.3); }
-.pm-status--due-soon { color: #ffe09a; border-color: rgba(246, 185, 65, 0.42); background: rgba(116, 73, 11, 0.34); }
-.pm-status--due-now { color: #ff8da0; border-color: rgba(255, 91, 116, 0.5); background: rgba(128, 25, 43, 0.38); }
-.pm-status--overdue { color: #ffc1c1; border-color: rgba(249, 98, 98, 0.42); background: rgba(121, 31, 39, 0.36); }
-.pm-status--hold { color: #d8caff; border-color: rgba(166, 139, 255, 0.42); background: rgba(67, 48, 122, 0.38); }
-.pm-status--inactive { color: #ff9aaa; border-color: rgba(255, 91, 116, 0.44); background: rgba(111, 29, 43, 0.38); }
-.pm-status--setup-incomplete { color: #c9def0; border-color: rgba(115, 168, 207, 0.34); background: rgba(38, 68, 91, 0.42); }
+.pm-status {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-width: 1px;
+  font-weight: 900;
+  letter-spacing: 0.035em;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
 
-.pm-task-values,
+.pm-status--current { color: #c2ffe9; border-color: rgba(68, 236, 176, 0.68); background: rgba(16, 118, 84, 0.42); box-shadow: 0 0 16px rgba(57, 226, 167, 0.16), inset 0 1px 0 rgba(255,255,255,0.17); }
+.pm-status--due-soon { color: #ffe8a8; border-color: rgba(255, 196, 74, 0.72); background: rgba(132, 82, 9, 0.45); box-shadow: 0 0 16px rgba(255, 187, 54, 0.17), inset 0 1px 0 rgba(255,255,255,0.16); }
+.pm-status--due-now { color: #ffd0d8; border-color: rgba(255, 91, 116, 0.82); background: rgba(142, 22, 45, 0.5); box-shadow: 0 0 19px rgba(255, 67, 99, 0.25), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pm-status--overdue { color: #ffd4da; border-color: rgba(255, 72, 93, 0.88); background: rgba(139, 18, 36, 0.55); box-shadow: 0 0 22px rgba(255, 48, 76, 0.31), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pm-status--hold { color: #e5dcff; border-color: rgba(181, 157, 255, 0.62); background: rgba(72, 51, 132, 0.46); box-shadow: 0 0 15px rgba(153, 121, 255, 0.14), inset 0 1px 0 rgba(255,255,255,0.15); }
+.pm-status--inactive { color: #ffb3bf; border-color: rgba(222, 91, 111, 0.62); background: rgba(103, 35, 48, 0.5); box-shadow: 0 0 14px rgba(221, 67, 91, 0.14), inset 0 1px 0 rgba(255,255,255,0.13); }
+.pm-status--setup-incomplete { color: #d5ebf7; border-color: rgba(124, 187, 226, 0.52); background: rgba(38, 68, 91, 0.48); box-shadow: 0 0 13px rgba(89, 180, 227, 0.1), inset 0 1px 0 rgba(255,255,255,0.12); }
+
 .pm-view-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px;
 }
 
-.pm-task-values > div,
 .pm-value {
   display: grid;
   gap: 4px;
@@ -1062,10 +1073,40 @@ button.glass-attachment:focus-visible {
   background: rgba(3, 17, 27, 0.58);
 }
 
-.pm-task-values strong,
 .pm-value strong {
   color: var(--glass-text);
 }
+
+.pm-task-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-metric-pill {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 36px;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 11px;
+  border: 1px solid rgba(106, 205, 240, 0.42);
+  border-radius: 999px;
+  background: rgba(3, 18, 29, 0.68);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.pm-metric-pill span { font-size: 0.7rem; }
+.pm-metric-pill strong { color: var(--glass-text); font-size: 0.88rem; white-space: nowrap; }
+.pm-metric-pill--last { border-color: rgba(63, 199, 244, 0.58); box-shadow: 0 0 12px rgba(46, 184, 232, 0.08), inset 0 1px 0 rgba(255,255,255,0.09); }
+.pm-metric-pill--current { border-color: rgba(63, 220, 166, 0.58); }
+.pm-metric-pill--due-soon { border-color: rgba(246, 185, 65, 0.62); }
+.pm-metric-pill--due-now,
+.pm-metric-pill--overdue { border-color: rgba(255, 82, 107, 0.72); box-shadow: 0 0 13px rgba(255, 58, 91, 0.12), inset 0 1px 0 rgba(255,255,255,0.09); }
+.pm-metric-pill--inactive { border-color: rgba(207, 84, 105, 0.48); }
+.pm-metric-pill--hold { border-color: rgba(166, 139, 255, 0.5); }
 
 .pm-countdown {
   margin: 0;
@@ -1084,6 +1125,11 @@ button.glass-attachment:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 14px;
+}
+
+.pm-form-legend {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .pm-due-legend span {
@@ -1274,10 +1320,13 @@ button.glass-attachment:focus-visible {
 }
 
 @media (max-width: 760px) {
-  .pm-panel-toolbar,
-  .pm-task-card-heading {
+  .pm-panel-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .pm-task-card-heading {
+    flex-wrap: wrap;
   }
 
   .pm-panel-toolbar .glass-button,
@@ -1307,10 +1356,6 @@ button.glass-attachment:focus-visible {
 }
 
 @media (max-width: 520px) {
-  .pm-task-values {
-    grid-template-columns: 1fr;
-  }
-
   .pm-task-card {
     padding: 13px;
   }

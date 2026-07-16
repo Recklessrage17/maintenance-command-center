@@ -6610,21 +6610,30 @@ function validatePmTaskInput(value:unknown) {
   };
 }
 function pmTaskById(id:number) { return one<PmTaskRow>('SELECT * FROM pm_tasks WHERE id=?',[id]); }
+function pmQuantityUnit(value:number,singular:string,plural=`${singular}s`){return Math.abs(value)===1?singular:plural;}
+function pmCalendarPastDueText(row:PmTaskRow,today:string,daysPastDue:number){
+  if (row.next_due_date && ['monthly','quarterly','bi_annual','annual'].includes(row.interval_type)) {
+    const due=new Date(`${row.next_due_date}T12:00:00Z`);const current=new Date(`${today}T12:00:00Z`);let months=(current.getUTCFullYear()-due.getUTCFullYear())*12+current.getUTCMonth()-due.getUTCMonth();if(current.getUTCDate()<due.getUTCDate())months-=1;
+    if (months>=1) return `Past due by ${months.toLocaleString()} ${pmQuantityUnit(months,'month')}`;
+  }
+  return `Past due by ${daysPastDue.toLocaleString()} ${pmQuantityUnit(daysPastDue,'day')}`;
+}
 function pmTaskStatus(row:PmTaskRow) {
   if (!row.active) return {status:'Inactive',countdown:'Inactive — PM tracking paused'};
   if (row.hold) return {status:'Hold',countdown:'Schedule on hold - due tracking is paused'};
   if (pmMeterIntervals.has(row.interval_type)) {
     if (row.next_due_meter===null || row.current_meter===null) return {status:'Setup incomplete',countdown:'Add completed and current meter values'};
     const remaining=row.next_due_meter-row.current_meter;
-    if (remaining<0) return {status:'Overdue',countdown:`${Math.abs(remaining).toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} past due`};
+    const meterUnit=(value:number)=>pmQuantityUnit(value,row.interval_type==='hourly'?'hour':'cycle');
+    if (remaining<0) return {status:'Overdue',countdown:`Past due by ${Math.abs(remaining).toLocaleString()} ${meterUnit(remaining)}`};
     if (remaining===0) return {status:'Due Now',countdown:'Due Now — perform maintenance now'};
-    if (remaining<=Math.max(1,row.interval_value*pmMeterDueSoonRatio)) return {status:'Due Soon',countdown:`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
-    return {status:'Current',countdown:`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
+    if (remaining<=Math.max(1,row.interval_value*pmMeterDueSoonRatio)) return {status:'Due Soon',countdown:`${remaining.toLocaleString()} ${meterUnit(remaining)} remaining`};
+    return {status:'Current',countdown:`${remaining.toLocaleString()} ${meterUnit(remaining)} remaining`};
   }
   if (!row.next_due_date) return {status:'Setup incomplete',countdown:'Add a last completed date'};
   const today=new Date().toISOString().slice(0,10);
   const days=Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
-  if (days<0) return {status:'Overdue',countdown:`${Math.abs(days)} day${Math.abs(days)===1?'':'s'} past due`};
+  if (days<0) return {status:'Overdue',countdown:pmCalendarPastDueText(row,today,Math.abs(days))};
   if (days===0) return {status:'Due Now',countdown:'Due Now — perform maintenance today'};
   if (days<=pmCalendarDueSoonDays) return {status:'Due Soon',countdown:`Due in ${days} day${days===1?'':'s'}`};
   return {status:'Current',countdown:`Due in ${days} days`};
