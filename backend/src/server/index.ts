@@ -51,7 +51,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fil
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
 const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
-const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 25 * 1024 * 1024 } });
+const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
@@ -121,6 +123,10 @@ CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_compone
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
+CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
 CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
 CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
@@ -241,6 +247,8 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
@@ -248,6 +256,10 @@ CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_compone
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
+CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);`);
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
@@ -6072,6 +6084,9 @@ type MachineComponentImageRow = { id:number; asset_id:number; component_type:Mac
 type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
 type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; created_by_name?:string };
 type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string };
+type PmIntervalType = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | 'quarterly' | 'bi_annual' | 'annual' | 'cycles';
+type PmTaskRow = { id:number; asset_id:number; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
+type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; completion_notes:string; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
 type MachineAssetRow = {
   id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
@@ -6381,7 +6396,7 @@ function publicMachineAssetNote(row: MachineAssetNoteRow) {
 function receiveMachineAssetNote(req: Request,res:Response,next:NextFunction) {
   machineAssetNoteUpload.array('attachments',10)(req,res,error=>{
     if (!error) return next();
-    const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Each attachment must be 25 MB or smaller.' : safeErrorMessage(error,[],'Asset note upload failed.');
+    const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Each attachment must be 50 MB or smaller.' : safeErrorMessage(error,[],'Asset note upload failed.');
     res.status(400).json({ok:false,error:message});
   });
 }
@@ -6509,6 +6524,103 @@ function receiveMachineInspectionRecord(req: Request,res:Response,next:NextFunct
 }
 function machineAssetById(id: number, includeDeleted = false) {
   return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
+}
+const pmIntervalLabels: Record<PmIntervalType,string> = { hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles' };
+const pmIntervalTypes = Object.keys(pmIntervalLabels) as PmIntervalType[];
+const pmMeterIntervals = new Set<PmIntervalType>(['hourly','cycles']);
+const pmFixedCalendarIntervals: Partial<Record<PmIntervalType,{days?:number;months?:number}>> = {
+  bi_weekly:{days:14}, weekly:{days:7}, monthly:{months:1}, quarterly:{months:3}, bi_annual:{months:6}, annual:{months:12},
+};
+function validPmDate(value:unknown, label:string, required=false) {
+  const clean=String(value ?? '').trim();
+  if (!clean && !required) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) throw new Error(`Enter a valid ${label}.`);
+  const parsed=new Date(`${clean}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10)!==clean) throw new Error(`Enter a valid ${label}.`);
+  return clean;
+}
+function optionalPmNumber(value:unknown, label:string) {
+  if (value===null || value===undefined || String(value).trim()==='') return null;
+  const parsed=Number(value);
+  if (!Number.isFinite(parsed) || parsed<0) throw new Error(`${label} must be zero or greater.`);
+  return parsed;
+}
+function addPmDays(date:string, days:number) {
+  const parsed=new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate()+days);
+  return parsed.toISOString().slice(0,10);
+}
+function addPmMonths(date:string, months:number) {
+  const parsed=new Date(`${date}T12:00:00Z`);
+  const day=parsed.getUTCDate();
+  parsed.setUTCDate(1);
+  parsed.setUTCMonth(parsed.getUTCMonth()+months);
+  const lastDay=new Date(Date.UTC(parsed.getUTCFullYear(),parsed.getUTCMonth()+1,0,12)).getUTCDate();
+  parsed.setUTCDate(Math.min(day,lastDay));
+  return parsed.toISOString().slice(0,10);
+}
+function pmDueValues(intervalType:PmIntervalType, intervalValue:number, completedDate:string|null, completedMeter:number|null) {
+  if (pmMeterIntervals.has(intervalType)) return { nextDueDate:null,nextDueMeter:completedMeter===null?null:completedMeter+intervalValue };
+  if (!completedDate) return { nextDueDate:null,nextDueMeter:null };
+  if (intervalType==='days') return { nextDueDate:addPmDays(completedDate,intervalValue),nextDueMeter:null };
+  const fixed=pmFixedCalendarIntervals[intervalType];
+  if (fixed?.days) return { nextDueDate:addPmDays(completedDate,fixed.days),nextDueMeter:null };
+  if (fixed?.months) return { nextDueDate:addPmMonths(completedDate,fixed.months),nextDueMeter:null };
+  return { nextDueDate:null,nextDueMeter:null };
+}
+function validatePmTaskInput(value:unknown) {
+  const input=isRecord(value) ? value : {};
+  const title=String(input.title ?? '').replace(/\s+/g,' ').trim().slice(0,180);
+  if (!title) throw new Error('PM title is required.');
+  const intervalType=String(input.intervalType ?? '').trim() as PmIntervalType;
+  if (!pmIntervalTypes.includes(intervalType)) throw new Error('Choose a valid PM interval type.');
+  const requestedInterval=Number(input.intervalValue);
+  if (!Number.isFinite(requestedInterval) || requestedInterval<=0) throw new Error('Interval value must be greater than zero.');
+  const intervalValue=pmFixedCalendarIntervals[intervalType] ? 1 : requestedInterval;
+  if (intervalType==='days' && !Number.isInteger(intervalValue)) throw new Error('Day intervals must use a whole number.');
+  const lastCompletedDate=validPmDate(input.lastCompletedDate,'last completed date');
+  const lastCompletedMeter=optionalPmNumber(input.lastCompletedMeter,'Last completed meter');
+  const currentMeter=optionalPmNumber(input.currentMeter,'Current meter');
+  const active=!(input.active===false || input.active===0 || String(input.active).toLowerCase()==='false' || String(input.active)==='0');
+  const due=pmDueValues(intervalType,intervalValue,lastCompletedDate,lastCompletedMeter);
+  return {
+    title,
+    instructions:String(input.instructions ?? '').replace(/\r/g,'').trim().slice(0,12000),
+    intervalType,intervalValue,lastCompletedDate,lastCompletedMeter,currentMeter,
+    assignedTo:String(input.assignedTo ?? '').replace(/\s+/g,' ').trim().slice(0,180),
+    active,
+    notes:String(input.notes ?? '').replace(/\r/g,'').trim().slice(0,12000),
+    ...due,
+  };
+}
+function pmTaskById(id:number) { return one<PmTaskRow>('SELECT * FROM pm_tasks WHERE id=?',[id]); }
+function pmTaskStatus(row:PmTaskRow) {
+  if (!row.active) return {status:'Inactive',countdown:'Not actively tracked'};
+  if (pmMeterIntervals.has(row.interval_type)) {
+    if (row.next_due_meter===null || row.current_meter===null) return {status:'Setup incomplete',countdown:'Add completed and current meter values'};
+    const remaining=row.next_due_meter-row.current_meter;
+    if (remaining<0) return {status:'Overdue',countdown:`${Math.abs(remaining).toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} past due`};
+    if (remaining<=Math.max(1,row.interval_value*0.1)) return {status:'Due Soon',countdown:remaining===0?'Due now':`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
+    return {status:'Current',countdown:`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
+  }
+  if (!row.next_due_date) return {status:'Setup incomplete',countdown:'Add a last completed date'};
+  const today=new Date().toISOString().slice(0,10);
+  const days=Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
+  if (days<0) return {status:'Overdue',countdown:`${Math.abs(days)} day${Math.abs(days)===1?'':'s'} past due`};
+  if (days<=14) return {status:'Due Soon',countdown:days===0?'Due today':`Due in ${days} day${days===1?'':'s'}`};
+  return {status:'Current',countdown:`Due in ${days} days`};
+}
+function publicPmTask(row:PmTaskRow) {
+  const state=pmTaskStatus(row);
+  const historyCount=one<{count:number}>('SELECT COUNT(*) AS count FROM pm_history WHERE pm_task_id=?',[row.id])?.count ?? 0;
+  return { id:row.id,assetId:row.asset_id,title:row.title,instructions:row.instructions,intervalType:row.interval_type,intervalLabel:pmIntervalLabels[row.interval_type],intervalValue:Number(row.interval_value),lastCompletedDate:row.last_completed_date,lastCompletedMeter:row.last_completed_meter,currentMeter:row.current_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,assignedTo:row.assigned_to,active:Boolean(row.active),notes:row.notes,status:state.status,countdown:state.countdown,historyCount,createdAt:row.created_at,updatedAt:row.updated_at };
+}
+function publicPmHistory(row:PmHistoryRow) {
+  return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
+}
+function pmHistoryValue(row:PmTaskRow) { return publicPmTask(row) as Record<string,unknown>; }
+function recordPmAudit(input:{action:string;task:PmTaskRow;asset:MachineAssetRow;actor:User;oldValue?:Record<string,unknown>|null;newValue?:Record<string,unknown>|null;reasonNote?:string}) {
+  recordHistoryLog({section:'preventive_maintenance',action:input.action,entityType:'pm_task',entityId:input.task.id,entityLabel:input.task.title,assetId:String(input.asset.id),machineName:input.asset.asset_number,oldValue:input.oldValue,newValue:input.newValue,reasonNote:input.reasonNote,actor:input.actor});
 }
 function normalizedMachineAssetNumber(value: string) {
   return value.trim().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').toLowerCase();
@@ -7092,6 +7204,109 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
   scheduleAutoBackup('machine inspection record deleted',req.user!);
   res.json({ok:true});
 });
+app.get('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.id));
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const tasks=all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? ORDER BY active DESC,COALESCE(next_due_date,\'9999-12-31\'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE',[asset.id]).map(publicPmTask);
+  const nextDate=tasks.filter(task=>task.active&&task.nextDueDate).map(task=>task.nextDueDate as string).sort()[0] ?? null;
+  const nextMeter=tasks.filter(task=>task.active&&task.nextDueMeter!==null).sort((a,b)=>(a.nextDueMeter ?? Infinity)-(b.nextDueMeter ?? Infinity))[0]?.nextDueMeter ?? null;
+  res.json({ok:true,tasks,summary:{total:tasks.length,dueSoon:tasks.filter(task=>task.status==='Due Soon').length,overdue:tasks.filter(task=>task.status==='Overdue').length,nextDueDate:nextDate,nextDueMeter:nextMeter}});
+});
+app.post('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const asset=machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const input=validatePmTaskInput(req.body);
+    const timestamp=now();
+    const result=run(`INSERT INTO pm_tasks (asset_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,assigned_to,active,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
+      asset.id,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.assignedTo,input.active?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp,
+    ]);
+    const task=pmTaskById(Number(result.lastInsertRowid))!;
+    recordPmAudit({action:'pm_created',task,asset,actor:req.user!,newValue:pmHistoryValue(task)});
+    scheduleAutoBackup('preventive maintenance created',req.user!);
+    res.status(201).json({ok:true,task:publicPmTask(task)});
+  } catch (error) {
+    const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be created.');
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
+  }
+});
+app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const existing=pmTaskById(Number(req.params.pmId));
+    if (!existing) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+    const asset=machineAssetById(existing.asset_id);
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const input=validatePmTaskInput(req.body);
+    const oldValue=pmHistoryValue(existing);
+    run(`UPDATE pm_tasks SET title=?,instructions=?,interval_type=?,interval_value=?,last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,assigned_to=?,active=?,notes=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
+      input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.assignedTo,input.active?1:0,input.notes,req.user!.id,now(),existing.id,
+    ]);
+    const task=pmTaskById(existing.id)!;
+    recordPmAudit({action:'pm_updated',task,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(task)});
+    scheduleAutoBackup('preventive maintenance updated',req.user!);
+    res.json({ok:true,task:publicPmTask(task)});
+  } catch (error) {
+    const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be updated.');
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
+  }
+});
+app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  const task=pmTaskById(Number(req.params.pmId));
+  if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+  const asset=machineAssetById(task.asset_id);
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const oldValue=pmHistoryValue(task);
+  run('UPDATE pm_tasks SET active=0,updated_by_user_id=?,updated_at=? WHERE id=?',[req.user!.id,now(),task.id]);
+  const updated=pmTaskById(task.id)!;
+  recordPmAudit({action:'pm_deactivated',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated)});
+  scheduleAutoBackup('preventive maintenance deactivated',req.user!);
+  res.json({ok:true,task:publicPmTask(updated)});
+});
+app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const task=pmTaskById(Number(req.params.pmId));
+    if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+    const asset=machineAssetById(task.asset_id);
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    if (!task.active) throw new Error('Inactive preventive maintenance tracking cannot be completed.');
+    const completionDate=validPmDate((isRecord(req.body)?req.body.completionDate:null) ?? new Date().toISOString().slice(0,10),'completion date',true)!;
+    const completedMeter=optionalPmNumber(isRecord(req.body)?req.body.completedMeter:null,'Completed meter');
+    if (pmMeterIntervals.has(task.interval_type) && completedMeter===null) throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);
+    const completionNotes=String(isRecord(req.body)?req.body.completionNotes ?? '':'').replace(/\r/g,'').trim().slice(0,12000);
+    const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);
+    const timestamp=now();
+    const oldValue=pmHistoryValue(task);
+    let historyId=0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,completion_date,completed_meter,performed_by_user_id,performed_by_name,completion_notes,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,[
+        task.id,task.asset_id,completionDate,completedMeter,req.user!.id,req.user!.full_name,completionNotes,task.next_due_date,task.next_due_meter,due.nextDueDate,due.nextDueMeter,timestamp,
+      ]);
+      historyId=Number(result.lastInsertRowid);
+      run(`UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
+        completionDate,pmMeterIntervals.has(task.interval_type)?completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?completedMeter:task.current_meter,due.nextDueDate,due.nextDueMeter,req.user!.id,timestamp,task.id,
+      ]);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    const updated=pmTaskById(task.id)!;
+    const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=?',[historyId])!;
+    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated),reasonNote:completionNotes});
+    scheduleAutoBackup('preventive maintenance completed',req.user!);
+    res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});
+  } catch (error) {
+    const message=safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.');
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
+  }
+});
+app.get('/api/machine-library/preventive-maintenance/:pmId/history', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const task=pmTaskById(Number(req.params.pmId));
+  if (!task || !machineAssetById(task.asset_id)) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+  const history=all<PmHistoryRow>('SELECT * FROM pm_history WHERE pm_task_id=? ORDER BY completion_date DESC,id DESC',[task.id]).map(publicPmHistory);
+  res.json({ok:true,task:publicPmTask(task),history});
+});
 app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.id));
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
@@ -7139,7 +7354,7 @@ app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission
     }
     for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
     const message=safeErrorMessage(error,[],'Asset note could not be saved.');
-    res.status(/not found/i.test(message)?404:/required|valid|must be|match|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+    res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
 app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
@@ -7177,7 +7392,7 @@ app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermissi
     for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
     if (previous) run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[previous.title,previous.note_date,previous.body,previous.updated_by_user_id,previous.updated_at,previous.id]);
     const message=safeErrorMessage(error,[],'Asset note could not be updated.');
-    res.status(/not found/i.test(message)?404:/required|valid|must be|match|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+    res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
 app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{

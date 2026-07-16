@@ -9,6 +9,7 @@ type NoteDraft = { title:string; noteDate:string; body:string };
 type ViewerFile = { filename:string; mimeType:string; contentUrl:string; downloadUrl:string; label:string };
 
 const attachmentAccept='.pdf,.doc,.docx,.jpg,.jpeg,.png,.webp';
+const maxAttachmentBytes=50*1024*1024;
 
 async function responseJson<T>(response:Response) {
   const data=await response.json().catch(()=>({})) as T & {error?:string};
@@ -98,8 +99,11 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
     setPendingAttachments([]);
   }
   function addPending(files:File[]) {
-    const accepted=files.filter(file=>['pdf','image','word'].includes(fileKind({filename:file.name,mimeType:file.type})));
-    if(accepted.length!==files.length) setError('Attachments must be PDF, Word, JPG, JPEG, PNG, or WEBP files.');
+    setError('');
+    const supported=files.filter(file=>['pdf','image','word'].includes(fileKind({filename:file.name,mimeType:file.type})));
+    const accepted=supported.filter(file=>file.size<=maxAttachmentBytes);
+    if(supported.some(file=>file.size>maxAttachmentBytes)) setError('Each attachment must be 50 MB or smaller.');
+    else if(supported.length!==files.length) setError('Attachments must be PDF, Word, JPG, JPEG, PNG, or WEBP files.');
     setPendingAttachments(current=>[...current,...accepted].slice(0,10));
   }
   async function saveNote(event:FormEvent) {
@@ -162,7 +166,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
         <label className="form-field"><span>Note Title *</span><input className="glass-input" value={draft.title} maxLength={180} onChange={event=>setDraft(current=>({...current,title:event.target.value}))} required /></label>
         <MccDateInput label="Note Date *" value={draft.noteDate} onChange={value=>setDraft(current=>({...current,noteDate:value}))} required />
         <label className="form-field asset-note-body-field"><span>Note Body *</span><textarea className="glass-input" value={draft.body} maxLength={30000} rows={7} onChange={event=>setDraft(current=>({...current,body:event.target.value}))} required /></label>
-        <div className="asset-note-attachment-picker glass-card glass-card--nested"><div><strong>Optional attachments</strong><small>PDF, Word, JPG, JPEG, PNG, or WEBP · up to 25 MB each</small></div><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>fileInputRef.current?.click()}>Add Attachments</button><input ref={fileInputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{addPending(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>
+        <div className="asset-note-attachment-picker glass-card glass-card--nested"><div><strong>Optional attachments</strong><small>PDF, Word, JPG, JPEG, PNG, or WEBP · up to 50 MB each</small></div><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>fileInputRef.current?.click()}>Add Attachments</button><input ref={fileInputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{addPending(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>
         {pendingAttachments.length>0&&<div className="asset-attachment-grid glass-attachments">{pendingAttachments.map((file,index)=><PendingAttachmentChip key={`${file.name}-${file.size}-${index}`} file={file} onRemove={()=>setPendingAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} />)}</div>}
         <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={cancelForm} disabled={saving}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={saving}>{saving?'Saving & generating PDF...':'Save Note'}</button></div>
       </form>}

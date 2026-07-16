@@ -912,3 +912,241 @@ button.glass-attachment:focus-visible {
     font-size: 0.55rem;
   }
 }
+
+/* Preventive Maintenance Tracking: new Machine Library showcase surface. */
+.pm-tracking-card.glass-panel {
+  background: linear-gradient(155deg, rgba(12, 40, 57, 0.62), rgba(4, 18, 29, 0.7));
+  border-color: rgba(79, 211, 244, 0.24);
+}
+
+.pm-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.pm-panel-toolbar > div {
+  display: grid;
+  gap: 3px;
+}
+
+.pm-panel-toolbar small,
+.pm-task-card span,
+.pm-value span,
+.pm-prose > span,
+.pm-due-preview span,
+.pm-history-entry span {
+  color: var(--glass-text-muted);
+}
+
+.pm-task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+  gap: 14px;
+}
+
+.pm-task-card {
+  display: grid;
+  align-content: start;
+  gap: 13px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.pm-task-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-task-card-heading h4 {
+  margin: 3px 0 0;
+  color: var(--glass-text);
+  overflow-wrap: anywhere;
+}
+
+.pm-status {
+  flex: 0 0 auto;
+  border-color: rgba(126, 217, 239, 0.26);
+}
+
+.pm-status--current { color: #aef4dc; border-color: rgba(64, 216, 162, 0.34); background: rgba(20, 104, 78, 0.3); }
+.pm-status--due-soon { color: #ffe09a; border-color: rgba(246, 185, 65, 0.42); background: rgba(116, 73, 11, 0.34); }
+.pm-status--overdue { color: #ffc1c1; border-color: rgba(249, 98, 98, 0.42); background: rgba(121, 31, 39, 0.36); }
+.pm-status--inactive { color: #c7d4dd; border-color: rgba(163, 184, 197, 0.3); background: rgba(52, 66, 76, 0.45); }
+.pm-status--setup-incomplete { color: #c9def0; border-color: rgba(115, 168, 207, 0.34); background: rgba(38, 68, 91, 0.42); }
+
+.pm-task-values,
+.pm-view-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.pm-task-values > div,
+.pm-value {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(103, 200, 230, 0.13);
+  border-radius: 11px;
+  background: rgba(3, 17, 27, 0.58);
+}
+
+.pm-task-values strong,
+.pm-value strong {
+  color: var(--glass-text);
+}
+
+.pm-countdown {
+  margin: 0;
+  color: var(--glass-text);
+}
+
+.pm-assignee {
+  justify-self: start;
+}
+
+.pm-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.pm-card-actions .glass-button {
+  flex: 0 1 auto;
+  min-height: 44px;
+}
+
+.pm-modal {
+  width: min(820px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+.pm-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.pm-form-wide,
+.pm-due-preview {
+  grid-column: 1 / -1;
+}
+
+.pm-due-preview,
+.pm-prose {
+  display: grid;
+  gap: 5px;
+  padding: 13px;
+}
+
+.pm-due-preview strong {
+  color: #bcefff;
+}
+
+.pm-view-modal,
+.pm-history-modal {
+  width: min(900px, calc(100vw - 32px));
+}
+
+.pm-prose {
+  margin-top: 12px;
+}
+
+.pm-prose p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pm-history-notice {
+  color: var(--glass-text-muted);
+}
+
+.pm-history-list {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid rgba(90, 180, 220, 0.2);
+  border-radius: 12px;
+  background: rgba(2, 13, 21, 0.9);
+}
+
+.pm-history-entry {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.65fr) minmax(280px, 1.35fr);
+  gap: 12px;
+  padding: 13px;
+  background: rgba(8, 27, 39, 0.94);
+}
+
+.pm-history-entry > div {
+  display: grid;
+  gap: 3px;
+}
+
+.pm-history-due {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pm-history-entry p {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 9px;
+  border-top: 1px solid rgba(99, 181, 210, 0.12);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .pm-panel-toolbar,
+  .pm-task-card-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pm-panel-toolbar .glass-button,
+  .pm-card-actions .glass-button {
+    flex: 1 1 150px;
+  }
+
+  .pm-form-grid,
+  .pm-view-grid,
+  .pm-history-entry,
+  .pm-history-due {
+    grid-template-columns: 1fr;
+  }
+
+  .pm-form-wide,
+  .pm-due-preview,
+  .pm-history-entry p {
+    grid-column: 1;
+  }
+
+  .pm-modal,
+  .pm-view-modal,
+  .pm-history-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+  }
+}
+
+@media (max-width: 520px) {
+  .pm-task-values {
+    grid-template-columns: 1fr;
+  }
+
+  .pm-task-card {
+    padding: 13px;
+  }
+
+  .pm-status {
+    align-self: flex-start;
+  }
+}
