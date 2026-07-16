@@ -914,24 +914,6 @@ button.glass-attachment:focus-visible {
 }
 
 /* Shared responsive sizing for MCC detail surfaces and true dialogs. */
-.modal-backdrop.glass-modal-backdrop.mcc-page-detail-backdrop {
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 100%;
-  height: auto;
-  min-height: 100dvh;
-  place-items: start center;
-  align-items: start;
-  padding:
-    calc(var(--mcc-topbar-safe-offset) + 8px)
-    max(24px, env(safe-area-inset-right))
-    max(24px, env(safe-area-inset-bottom))
-    max(24px, env(safe-area-inset-left));
-  overflow: visible;
-  overflow-y: visible;
-  overscroll-behavior: auto;
-}
-
 .mcc-card.mcc-detail-shell,
 .glass-modal-shell.mcc-detail-shell {
   width: min(1500px, calc(100vw - 48px));
@@ -977,15 +959,6 @@ button.glass-attachment:focus-visible {
 }
 
 @media (max-width: 760px) {
-  .modal-backdrop.glass-modal-backdrop.mcc-page-detail-backdrop {
-    place-items: start center;
-    padding:
-      calc(var(--mcc-topbar-safe-offset) + 6px)
-      max(10px, env(safe-area-inset-right))
-      max(14px, env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left));
-  }
-
   .mcc-card.mcc-detail-shell,
   .glass-modal-shell.mcc-detail-shell,
   .mcc-card.mcc-wide-modal,
