@@ -1439,7 +1439,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {modal&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeModal(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={submitForm}>
+          <form className="mcc-card inventory-modal mcc-wide-modal" onSubmit={submitForm}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">{modal==='edit'?'Edit Part':'Add Part'}</p>
@@ -1560,7 +1560,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {reviewGroups[reviewIndex]&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReview(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void passVendorRequisition(); }}>
+          <form className="mcc-card inventory-modal mcc-wide-modal" onSubmit={event=>{ event.preventDefault(); void passVendorRequisition(); }}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Vendor requisition {reviewIndex + 1} of {reviewGroups.length}</p>
@@ -1611,7 +1611,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {requisitionLines.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeRequisition(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void generateRequisitionPreview(); }}>
+          <form className="mcc-card inventory-modal mcc-wide-modal" onSubmit={event=>{ event.preventDefault(); void generateRequisitionPreview(); }}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Preview Requisition</p>
@@ -1700,7 +1700,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {previewRequisitions.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closePreview(); }}>
-          <div className="mcc-card requisition-preview-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-requisition-preview-title">
+          <div className="mcc-card requisition-preview-modal mcc-full-view-dialog" role="dialog" aria-modal="true" aria-labelledby="inventory-requisition-preview-title">
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">{previewRequisitions.length === 1 ? 'Requisition preview' : `${previewRequisitions.length} requisition previews`}</p>

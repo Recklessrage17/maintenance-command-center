@@ -913,6 +913,69 @@ button.glass-attachment:focus-visible {
   }
 }
 
+/* Shared responsive sizing for MCC detail surfaces and true dialogs. */
+.mcc-card.mcc-detail-shell,
+.glass-modal-shell.mcc-detail-shell {
+  width: min(1500px, calc(100vw - 48px));
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  margin-inline: auto;
+  overflow: visible;
+}
+
+.mcc-detail-shell .machine-detail-accordion-card.is-open .machine-detail-accordion-panel {
+  max-height: none;
+  overflow: visible;
+}
+
+.mcc-card.mcc-wide-modal,
+.glass-modal-shell.mcc-wide-modal {
+  width: min(1200px, calc(100vw - 32px));
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: var(--mcc-modal-available-height);
+  margin-inline: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mcc-wide-modal .inventory-form-sections {
+  overflow-y: visible;
+}
+
+.mcc-card.mcc-full-view-dialog,
+.glass-modal-shell.mcc-full-view-dialog {
+  width: min(1500px, calc(100vw - 24px));
+  max-width: 100%;
+  height: min(920px, var(--mcc-modal-available-height));
+  min-height: 0;
+  max-height: var(--mcc-modal-available-height);
+  margin-inline: auto;
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .mcc-card.mcc-detail-shell,
+  .glass-modal-shell.mcc-detail-shell,
+  .mcc-card.mcc-wide-modal,
+  .glass-modal-shell.mcc-wide-modal,
+  .mcc-card.mcc-full-view-dialog,
+  .glass-modal-shell.mcc-full-view-dialog {
+    width: calc(100vw - 20px);
+  }
+
+  .mcc-card.mcc-wide-modal,
+  .glass-modal-shell.mcc-wide-modal,
+  .mcc-card.mcc-full-view-dialog,
+  .glass-modal-shell.mcc-full-view-dialog {
+    max-height: var(--mcc-modal-available-height);
+  }
+}
+
 /* Preventive Maintenance Tracking: new Machine Library showcase surface. */
 .pm-tracking-card.glass-panel {
   background: linear-gradient(155deg, rgba(12, 40, 57, 0.62), rgba(4, 18, 29, 0.7));

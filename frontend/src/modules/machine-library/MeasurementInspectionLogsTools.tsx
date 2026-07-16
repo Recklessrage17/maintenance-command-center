@@ -472,7 +472,7 @@ function MeasurementQuickActions() {
 
 export function AssetMeasurementRecordLogsModal({ asset, canManageYearFolders, onClose }: { asset: MachineRecordLogAsset; canManageYearFolders: boolean; onClose: () => void }) {
   return <div className="modal-backdrop measurement-modal-backdrop" role="dialog" aria-modal="true">
-    <section className="mcc-card measurement-record-modal">
+    <section className="mcc-card measurement-record-modal mcc-wide-modal">
       <div className="modal-heading measurement-modal-heading"><div><p className="eyebrow">Screw & Barrel Inspection Records</p><h3>{assetLabel(asset)} Record Logs</h3><p>{[asset.brand, asset.model, asset.serialNumber ? `S/N ${asset.serialNumber}` : ''].filter(Boolean).join(' / ')}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
       <MeasurementRecordLogsPanel asset={asset} canManageYearFolders={canManageYearFolders} />
     </section>

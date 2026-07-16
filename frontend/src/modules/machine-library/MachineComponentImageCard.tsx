@@ -162,7 +162,7 @@ export function MachineComponentImageCard({assetId,assetNumber,assetName,compone
       {message&&<p className="component-image-message" role="status">{message}</p>}
       {error&&<p className="component-image-message error" role="alert">{error}</p>}
     </div>
-    {viewerOpen&&image&&createPortal(<div className="modal-backdrop component-image-viewer-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setViewerOpen(false);}}><section className="mcc-card component-image-viewer" role="dialog" aria-modal="true" aria-label={`${componentName} full-size image`}>
+    {viewerOpen&&image&&createPortal(<div className="modal-backdrop component-image-viewer-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setViewerOpen(false);}}><section className="mcc-card component-image-viewer mcc-full-view-dialog" role="dialog" aria-modal="true" aria-label={`${componentName} full-size image`}>
       <div className="modal-heading"><div><p className="eyebrow">{assetNumber}{assetName?` · ${assetName}`:''}</p><h3>{componentName} Image</h3></div><button className="link-button compact-button" type="button" onClick={()=>setViewerOpen(false)}>Close</button></div>
       <div className="component-image-viewer-canvas"><img src={image.contentUrl} alt={`${assetNumber} ${componentName}`} /></div>
       <small className="component-image-viewer-filename">{image.filename||componentName}</small>

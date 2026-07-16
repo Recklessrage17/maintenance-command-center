@@ -1083,7 +1083,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {batchEditing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setBatchEditing(false);}}>
-          <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveRequisitionBatch}>
+          <form className="mcc-card requisition-modal staging-editor-modal mcc-wide-modal" onSubmit={saveRequisitionBatch}>
             <div className="modal-heading"><div><p className="eyebrow">Requisition Batch</p><h3>{editingBatchId===null?'Create Requisition Batch':'Edit Requisition Batch'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>setBatchEditing(false)}>Close</button></div>
             <div className="staging-editor-grid">
               <label className="form-field"><span>Batch Name <b className="required-marker">*</b></span><input value={batchForm.name} onChange={event=>setBatchForm({...batchForm,name:event.target.value})} autoFocus placeholder="Press 51 Repair" /></label>
@@ -1101,7 +1101,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {stagingEditing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)closeStagingEditor();}}>
-          <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveStagingItem}>
+          <form className="mcc-card requisition-modal staging-editor-modal mcc-wide-modal" onSubmit={saveStagingItem}>
             <div className="modal-heading"><div><p className="eyebrow">Requisition Staging List</p><h3>{stagingEditing==='new'?'Add staged item':`Edit ${stagingEditing.partNumber}`}</h3></div><button className="link-button compact-button" type="button" onClick={()=>closeStagingEditor()}>Close</button></div>
             <div className="staging-editor-grid">
               <label className="form-field"><span>Part Number <b className="required-marker">*</b></span><input value={stagingForm.partNumber} onChange={event=>setStagingForm({...stagingForm,partNumber:event.target.value})} /></label>
@@ -1127,7 +1127,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {reviewingStaging&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setReviewingStaging(false);}}>
-          <form className="mcc-card requisition-modal staging-review-modal" onSubmit={generateStagingPreview}>
+          <form className="mcc-card requisition-modal staging-review-modal mcc-wide-modal" onSubmit={generateStagingPreview}>
             <div className="modal-heading"><div><p className="eyebrow">Review before official creation</p><h3>{stagingPreviewToken?'Requisition PDF Preview':'Preview Requisition'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>setReviewingStaging(false)} disabled={stagingSaving}>Close</button></div>
             {!createdFromStaging.length&&!stagingPreviewToken&&<>
               <div className="staging-review-summary"><strong>{selectedStagingItems.length} staged item{selectedStagingItems.length===1?'':'s'}</strong><span>{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size} vendor requisition{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size===1?'':'s'} will be created using the existing vendor grouping.</span></div>
@@ -1183,7 +1183,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {editing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeEdit(); }}>
-          <form className="mcc-card requisition-modal" onSubmit={saveEdit}>
+          <form className="mcc-card requisition-modal mcc-wide-modal" onSubmit={saveEdit}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Edit requisition</p>
@@ -1216,7 +1216,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {previewing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closePreview(); }}>
-          <div className="mcc-card requisition-preview-modal" role="dialog" aria-modal="true" aria-labelledby="requisition-page-preview-title">
+          <div className="mcc-card requisition-preview-modal mcc-full-view-dialog" role="dialog" aria-modal="true" aria-labelledby="requisition-page-preview-title">
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">PDF preview</p>

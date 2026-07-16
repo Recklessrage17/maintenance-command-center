@@ -388,7 +388,7 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget&&!saving) onClose(); }}>
-      <section className="mcc-card vendor-modal vendor-contacts-modal" role="dialog" aria-modal="true" aria-label={`${vendor.companyName} contacts`}>
+      <section className="mcc-card vendor-modal vendor-contacts-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-label={`${vendor.companyName} contacts`}>
         <div className="modal-heading">
           <div>
             <p className="eyebrow">Vendor Contacts</p>
@@ -451,7 +451,7 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
 export function VendorDetailModal({vendor,onClose,onEdit,onEmailCopied}:{vendor:VendorRecord;onClose:()=>void;onEdit?:()=>void;onEmailCopied?:(email:string)=>void}) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) onClose(); }}>
-      <section className="mcc-card vendor-modal vendor-detail-modal" role="dialog" aria-modal="true" aria-label={`${vendor.companyName} vendor details`}>
+      <section className="mcc-card vendor-modal vendor-detail-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-label={`${vendor.companyName} vendor details`}>
         <div className="modal-heading">
           <div>
             <p className="eyebrow">Vendor details</p>
@@ -509,7 +509,7 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget&&!saving) onClose(); }}>
-      <form className="mcc-card vendor-modal" onSubmit={submit}>
+      <form className="mcc-card vendor-modal mcc-wide-modal" onSubmit={submit}>
         <div className="modal-heading">
           <div>
             <p className="eyebrow">{mode === 'edit' ? 'Edit Vendor' : 'Add Vendor'}</p>
