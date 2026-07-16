@@ -1040,6 +1040,7 @@ button.glass-attachment:focus-visible {
 .pm-status--current { color: #aef4dc; border-color: rgba(64, 216, 162, 0.34); background: rgba(20, 104, 78, 0.3); }
 .pm-status--due-soon { color: #ffe09a; border-color: rgba(246, 185, 65, 0.42); background: rgba(116, 73, 11, 0.34); }
 .pm-status--overdue { color: #ffc1c1; border-color: rgba(249, 98, 98, 0.42); background: rgba(121, 31, 39, 0.36); }
+.pm-status--hold { color: #d8caff; border-color: rgba(166, 139, 255, 0.42); background: rgba(67, 48, 122, 0.38); }
 .pm-status--inactive { color: #c7d4dd; border-color: rgba(163, 184, 197, 0.3); background: rgba(52, 66, 76, 0.45); }
 .pm-status--setup-incomplete { color: #c9def0; border-color: rgba(115, 168, 207, 0.34); background: rgba(38, 68, 91, 0.42); }
 
@@ -1070,6 +1071,33 @@ button.glass-attachment:focus-visible {
   color: var(--glass-text);
 }
 
+.pm-countdown--current { color: #aef4dc; }
+.pm-countdown--due-soon { color: #ffe09a; }
+.pm-countdown--overdue { color: #ffc1c1; }
+.pm-countdown--hold { color: #d8caff; }
+
+.pm-due-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.pm-due-legend span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid rgba(126, 217, 239, 0.22);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.pm-due-legend--current { color: #aef4dc; background: rgba(20, 104, 78, 0.24); }
+.pm-due-legend--due-soon { color: #ffe09a; background: rgba(116, 73, 11, 0.28); }
+.pm-due-legend--overdue { color: #ffc1c1; background: rgba(121, 31, 39, 0.3); }
+
 .pm-assignee {
   justify-self: start;
 }
@@ -1098,6 +1126,40 @@ button.glass-attachment:focus-visible {
   gap: 14px;
 }
 
+.pm-date-field {
+  min-width: 0;
+}
+
+.pm-fixed-cadence.glass-input {
+  min-height: 48px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding-block: 8px;
+}
+
+.pm-fixed-cadence span,
+.pm-input-guidance {
+  color: #8fa8b5;
+  font-size: 0.72rem;
+}
+
+.pm-fixed-cadence strong {
+  color: var(--glass-text);
+  font-size: 0.9rem;
+}
+
+.pm-form-grid .glass-input::placeholder {
+  color: #839aa7;
+  opacity: 1;
+}
+
+.pm-inline-error {
+  color: #ffb8c1;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .pm-form-wide,
 .pm-due-preview {
   grid-column: 1 / -1;
@@ -1113,6 +1175,25 @@ button.glass-attachment:focus-visible {
 .pm-due-preview strong {
   color: #bcefff;
 }
+
+.pm-due-status-line {
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.pm-due-preview--current { border-color: rgba(64, 216, 162, 0.34); }
+.pm-due-preview--current strong,
+.pm-due-preview--current .pm-due-status-line { color: #aef4dc; }
+.pm-due-preview--due-soon { border-color: rgba(246, 185, 65, 0.42); }
+.pm-due-preview--due-soon strong,
+.pm-due-preview--due-soon .pm-due-status-line { color: #ffe09a; }
+.pm-due-preview--overdue { border-color: rgba(249, 98, 98, 0.42); }
+.pm-due-preview--overdue strong,
+.pm-due-preview--overdue .pm-due-status-line { color: #ffc1c1; }
+.pm-due-preview--hold { border-color: rgba(166, 139, 255, 0.42); }
+.pm-due-preview--hold strong,
+.pm-due-preview--hold .pm-due-status-line { color: #d8caff; }
+.pm-due-preview--incomplete .pm-due-status-line { color: var(--glass-text-muted); }
 
 .pm-view-modal,
 .pm-history-modal {

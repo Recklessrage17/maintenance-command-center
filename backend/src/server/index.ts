@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
@@ -260,6 +260,9 @@ CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_as
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);`);
+  const pmTaskColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_tasks)').map(column => column.name));
+  if (!pmTaskColumns.has('hold')) run('ALTER TABLE pm_tasks ADD COLUMN hold INTEGER NOT NULL DEFAULT 0');
+  run('UPDATE pm_tasks SET hold=0 WHERE hold IS NULL');
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
@@ -6085,7 +6088,8 @@ type MachineInspectionRecordRow = { id:number; asset_id:number; original_filenam
 type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; created_by_name?:string };
 type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string };
 type PmIntervalType = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | 'quarterly' | 'bi_annual' | 'annual' | 'cycles';
-type PmTaskRow = { id:number; asset_id:number; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
+type PmScheduleStatus = 'active' | 'hold' | 'inactive';
+type PmTaskRow = { id:number; asset_id:number; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; hold:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
 type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; completion_notes:string; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
 type MachineAssetRow = {
   id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
@@ -6528,8 +6532,10 @@ function machineAssetById(id: number, includeDeleted = false) {
 const pmIntervalLabels: Record<PmIntervalType,string> = { hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles' };
 const pmIntervalTypes = Object.keys(pmIntervalLabels) as PmIntervalType[];
 const pmMeterIntervals = new Set<PmIntervalType>(['hourly','cycles']);
-const pmFixedCalendarIntervals: Partial<Record<PmIntervalType,{days?:number;months?:number}>> = {
-  bi_weekly:{days:14}, weekly:{days:7}, monthly:{months:1}, quarterly:{months:3}, bi_annual:{months:6}, annual:{months:12},
+const pmCalendarDueSoonDays = 14;
+const pmMeterDueSoonRatio = 0.1;
+const pmFixedCalendarIntervals: Partial<Record<PmIntervalType,{days?:number;months?:number;intervalValue:number}>> = {
+  bi_weekly:{days:14,intervalValue:14}, quarterly:{months:3,intervalValue:3}, bi_annual:{months:6,intervalValue:6}, annual:{months:12,intervalValue:12},
 };
 function validPmDate(value:unknown, label:string, required=false) {
   const clean=String(value ?? '').trim();
@@ -6563,6 +6569,8 @@ function pmDueValues(intervalType:PmIntervalType, intervalValue:number, complete
   if (pmMeterIntervals.has(intervalType)) return { nextDueDate:null,nextDueMeter:completedMeter===null?null:completedMeter+intervalValue };
   if (!completedDate) return { nextDueDate:null,nextDueMeter:null };
   if (intervalType==='days') return { nextDueDate:addPmDays(completedDate,intervalValue),nextDueMeter:null };
+  if (intervalType==='weekly') return { nextDueDate:addPmDays(completedDate,intervalValue*7),nextDueMeter:null };
+  if (intervalType==='monthly') return { nextDueDate:addPmMonths(completedDate,intervalValue),nextDueMeter:null };
   const fixed=pmFixedCalendarIntervals[intervalType];
   if (fixed?.days) return { nextDueDate:addPmDays(completedDate,fixed.days),nextDueMeter:null };
   if (fixed?.months) return { nextDueDate:addPmMonths(completedDate,fixed.months),nextDueMeter:null };
@@ -6574,46 +6582,53 @@ function validatePmTaskInput(value:unknown) {
   if (!title) throw new Error('PM title is required.');
   const intervalType=String(input.intervalType ?? '').trim() as PmIntervalType;
   if (!pmIntervalTypes.includes(intervalType)) throw new Error('Choose a valid PM interval type.');
+  const fixedCadence=pmFixedCalendarIntervals[intervalType];
   const requestedInterval=Number(input.intervalValue);
-  if (!Number.isFinite(requestedInterval) || requestedInterval<=0) throw new Error('Interval value must be greater than zero.');
-  const intervalValue=pmFixedCalendarIntervals[intervalType] ? 1 : requestedInterval;
-  if (intervalType==='days' && !Number.isInteger(intervalValue)) throw new Error('Day intervals must use a whole number.');
-  const lastCompletedDate=validPmDate(input.lastCompletedDate,'last completed date');
+  if (!fixedCadence && (!Number.isFinite(requestedInterval) || requestedInterval<=0)) throw new Error('How long is the interval must be greater than zero.');
+  const intervalValue=fixedCadence?.intervalValue ?? requestedInterval;
+  if (['cycles','days','weekly','monthly'].includes(intervalType) && !Number.isInteger(intervalValue)) throw new Error(`${pmIntervalLabels[intervalType]} intervals must use a whole number.`);
+  const lastCompletedDate=validPmDate(input.lastCompletedDate,'last completed date / starting date',Boolean(fixedCadence));
   const lastCompletedMeter=optionalPmNumber(input.lastCompletedMeter,'Last completed meter');
   const currentMeter=optionalPmNumber(input.currentMeter,'Current meter');
-  const active=!(input.active===false || input.active===0 || String(input.active).toLowerCase()==='false' || String(input.active)==='0');
+  if (intervalType==='cycles' && ((lastCompletedMeter!==null&&!Number.isInteger(lastCompletedMeter)) || (currentMeter!==null&&!Number.isInteger(currentMeter)))) throw new Error('Cycle values must use whole numbers.');
+  const requestedStatus=String(input.scheduleStatus ?? input.status ?? '').trim().toLowerCase();
+  const legacyActive=!(input.active===false || input.active===0 || String(input.active).toLowerCase()==='false' || String(input.active)==='0');
+  const scheduleStatus:PmScheduleStatus=requestedStatus===''?(legacyActive?'active':'inactive'):requestedStatus==='active'||requestedStatus==='hold'||requestedStatus==='inactive'?requestedStatus as PmScheduleStatus:(()=>{throw new Error('Choose Active, Hold, or Inactive status.');})();
+  const active=scheduleStatus!=='inactive';
+  const hold=scheduleStatus==='hold';
   const due=pmDueValues(intervalType,intervalValue,lastCompletedDate,lastCompletedMeter);
   return {
     title,
     instructions:String(input.instructions ?? '').replace(/\r/g,'').trim().slice(0,12000),
     intervalType,intervalValue,lastCompletedDate,lastCompletedMeter,currentMeter,
-    assignedTo:String(input.assignedTo ?? '').replace(/\s+/g,' ').trim().slice(0,180),
-    active,
+    active,hold,scheduleStatus,
     notes:String(input.notes ?? '').replace(/\r/g,'').trim().slice(0,12000),
     ...due,
   };
 }
 function pmTaskById(id:number) { return one<PmTaskRow>('SELECT * FROM pm_tasks WHERE id=?',[id]); }
 function pmTaskStatus(row:PmTaskRow) {
+  if (row.hold) return {status:'Hold',countdown:'Schedule on hold - due tracking is paused'};
   if (!row.active) return {status:'Inactive',countdown:'Not actively tracked'};
   if (pmMeterIntervals.has(row.interval_type)) {
     if (row.next_due_meter===null || row.current_meter===null) return {status:'Setup incomplete',countdown:'Add completed and current meter values'};
     const remaining=row.next_due_meter-row.current_meter;
     if (remaining<0) return {status:'Overdue',countdown:`${Math.abs(remaining).toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} past due`};
-    if (remaining<=Math.max(1,row.interval_value*0.1)) return {status:'Due Soon',countdown:remaining===0?'Due now':`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
+    if (remaining<=Math.max(1,row.interval_value*pmMeterDueSoonRatio)) return {status:'Due Soon',countdown:remaining===0?'Due now':`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
     return {status:'Current',countdown:`${remaining.toLocaleString()} ${pmIntervalLabels[row.interval_type].toLowerCase()} remaining`};
   }
   if (!row.next_due_date) return {status:'Setup incomplete',countdown:'Add a last completed date'};
   const today=new Date().toISOString().slice(0,10);
   const days=Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
   if (days<0) return {status:'Overdue',countdown:`${Math.abs(days)} day${Math.abs(days)===1?'':'s'} past due`};
-  if (days<=14) return {status:'Due Soon',countdown:days===0?'Due today':`Due in ${days} day${days===1?'':'s'}`};
+  if (days<=pmCalendarDueSoonDays) return {status:'Due Soon',countdown:days===0?'Due today':`Due in ${days} day${days===1?'':'s'}`};
   return {status:'Current',countdown:`Due in ${days} days`};
 }
 function publicPmTask(row:PmTaskRow) {
   const state=pmTaskStatus(row);
   const historyCount=one<{count:number}>('SELECT COUNT(*) AS count FROM pm_history WHERE pm_task_id=?',[row.id])?.count ?? 0;
-  return { id:row.id,assetId:row.asset_id,title:row.title,instructions:row.instructions,intervalType:row.interval_type,intervalLabel:pmIntervalLabels[row.interval_type],intervalValue:Number(row.interval_value),lastCompletedDate:row.last_completed_date,lastCompletedMeter:row.last_completed_meter,currentMeter:row.current_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,assignedTo:row.assigned_to,active:Boolean(row.active),notes:row.notes,status:state.status,countdown:state.countdown,historyCount,createdAt:row.created_at,updatedAt:row.updated_at };
+  const scheduleStatus:PmScheduleStatus=row.hold?'hold':row.active?'active':'inactive';
+  return { id:row.id,assetId:row.asset_id,title:row.title,instructions:row.instructions,intervalType:row.interval_type,intervalLabel:pmIntervalLabels[row.interval_type],intervalValue:Number(row.interval_value),lastCompletedDate:row.last_completed_date,lastCompletedMeter:row.last_completed_meter,currentMeter:row.current_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,scheduleStatus,active:Boolean(row.active),notes:row.notes,status:state.status,countdown:state.countdown,historyCount,createdAt:row.created_at,updatedAt:row.updated_at };
 }
 function publicPmHistory(row:PmHistoryRow) {
   return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
@@ -7207,9 +7222,9 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
 app.get('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.id));
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
-  const tasks=all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? ORDER BY active DESC,COALESCE(next_due_date,\'9999-12-31\'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE',[asset.id]).map(publicPmTask);
-  const nextDate=tasks.filter(task=>task.active&&task.nextDueDate).map(task=>task.nextDueDate as string).sort()[0] ?? null;
-  const nextMeter=tasks.filter(task=>task.active&&task.nextDueMeter!==null).sort((a,b)=>(a.nextDueMeter ?? Infinity)-(b.nextDueMeter ?? Infinity))[0]?.nextDueMeter ?? null;
+  const tasks=all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? ORDER BY active DESC,hold ASC,COALESCE(next_due_date,\'9999-12-31\'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE',[asset.id]).map(publicPmTask);
+  const nextDate=tasks.filter(task=>task.scheduleStatus==='active'&&task.nextDueDate).map(task=>task.nextDueDate as string).sort()[0] ?? null;
+  const nextMeter=tasks.filter(task=>task.scheduleStatus==='active'&&task.nextDueMeter!==null).sort((a,b)=>(a.nextDueMeter ?? Infinity)-(b.nextDueMeter ?? Infinity))[0]?.nextDueMeter ?? null;
   res.json({ok:true,tasks,summary:{total:tasks.length,dueSoon:tasks.filter(task=>task.status==='Due Soon').length,overdue:tasks.filter(task=>task.status==='Overdue').length,nextDueDate:nextDate,nextDueMeter:nextMeter}});
 });
 app.post('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
@@ -7218,8 +7233,8 @@ app.post('/api/machine-library/assets/:id/preventive-maintenance', requireAuth, 
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
     const input=validatePmTaskInput(req.body);
     const timestamp=now();
-    const result=run(`INSERT INTO pm_tasks (asset_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,assigned_to,active,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
-      asset.id,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.assignedTo,input.active?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp,
+    const result=run(`INSERT INTO pm_tasks (asset_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
+      asset.id,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp,
     ]);
     const task=pmTaskById(Number(result.lastInsertRowid))!;
     recordPmAudit({action:'pm_created',task,asset,actor:req.user!,newValue:pmHistoryValue(task)});
@@ -7238,8 +7253,8 @@ app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requir
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
     const input=validatePmTaskInput(req.body);
     const oldValue=pmHistoryValue(existing);
-    run(`UPDATE pm_tasks SET title=?,instructions=?,interval_type=?,interval_value=?,last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,assigned_to=?,active=?,notes=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
-      input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.assignedTo,input.active?1:0,input.notes,req.user!.id,now(),existing.id,
+    run(`UPDATE pm_tasks SET title=?,instructions=?,interval_type=?,interval_value=?,last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,active=?,hold=?,notes=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
+      input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,now(),existing.id,
     ]);
     const task=pmTaskById(existing.id)!;
     recordPmAudit({action:'pm_updated',task,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(task)});
@@ -7256,7 +7271,7 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', require
   const asset=machineAssetById(task.asset_id);
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
   const oldValue=pmHistoryValue(task);
-  run('UPDATE pm_tasks SET active=0,updated_by_user_id=?,updated_at=? WHERE id=?',[req.user!.id,now(),task.id]);
+  run('UPDATE pm_tasks SET active=0,hold=0,updated_by_user_id=?,updated_at=? WHERE id=?',[req.user!.id,now(),task.id]);
   const updated=pmTaskById(task.id)!;
   recordPmAudit({action:'pm_deactivated',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated)});
   scheduleAutoBackup('preventive maintenance deactivated',req.user!);
@@ -7269,6 +7284,7 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAu
     const asset=machineAssetById(task.asset_id);
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
     if (!task.active) throw new Error('Inactive preventive maintenance tracking cannot be completed.');
+    if (task.hold) throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');
     const completionDate=validPmDate((isRecord(req.body)?req.body.completionDate:null) ?? new Date().toISOString().slice(0,10),'completion date',true)!;
     const completedMeter=optionalPmNumber(isRecord(req.body)?req.body.completedMeter:null,'Completed meter');
     if (pmMeterIntervals.has(task.interval_type) && completedMeter===null) throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);
