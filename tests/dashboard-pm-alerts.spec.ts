@@ -28,8 +28,9 @@ async function mockDashboard(page:Page,alerts=fixtureAlerts) {
   await page.route(/\/api\/machine-library\/preventive-maintenance\/\d+\/history$/,route=>route.fulfill({json:{ok:true,history:[{id:1,completionDate:'2026-06-17',completedMeter:1000,performedBy:'Dashboard Tester',completionNotes:'Completed',createdAt:'2026-06-17T12:00:00Z'}]}}));
 }
 async function activate(locator:Locator,mobile:boolean){if(mobile)await locator.tap();else await locator.click();}
+function pdfPageCount(pdf:Uint8Array){return new TextDecoder('latin1').decode(pdf).match(/\/Type\s*\/Page\b/g)?.length??0;}
 
-test('sorts attention PMs, opens details, excludes paused schedules, and prints a blank work order',async({page},testInfo)=>{
+test('sorts attention PMs, opens details, excludes paused schedules, and prints a one-page blank-number work order',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   await mockDashboard(page);
   await page.goto('/');
@@ -60,6 +61,30 @@ test('sorts attention PMs, opens details, excludes paused schedules, and prints 
   await expect(workOrder).toContainText('Performed By: ______________________________');
   await expect(workOrder).toContainText('Signature: _________________________________');
   await expect(workOrder).not.toContainText('JBT');
+  const printLayout=await workOrder.evaluate(element=>{
+    const style=getComputedStyle(element);
+    const backdrop=element.closest('.dashboard-pm-backdrop') as HTMLElement;
+    const detail=element.closest('.dashboard-pm-detail') as HTMLElement;
+    return {
+      rootDisplay:getComputedStyle(document.getElementById('root')!).display,
+      top:element.getBoundingClientRect().top,
+      position:style.position,
+      margin:style.margin,
+      transform:style.transform,
+      minHeight:style.minHeight,
+      height:style.height,
+      breakBefore:style.breakBefore,
+      pageBreakBefore:style.pageBreakBefore,
+      backdropPosition:getComputedStyle(backdrop).position,
+      backdropMargin:getComputedStyle(backdrop).margin,
+      detailPosition:getComputedStyle(detail).position,
+    };
+  });
+  expect(printLayout).toMatchObject({rootDisplay:'none',position:'static',margin:'0px',transform:'none',minHeight:'0px',breakBefore:'auto',pageBreakBefore:'auto',backdropPosition:'static',backdropMargin:'0px',detailPosition:'static'});
+  expect(printLayout.top).toBeLessThanOrEqual(1);
+  expect(printLayout.height).not.toBe('100vh');
+  const pdf=await page.pdf({preferCSSPageSize:true,printBackground:true});
+  expect(pdfPageCount(pdf)).toBe(1);
 });
 
 test('shows the compact empty state when no preventive maintenance needs attention',async({page})=>{
