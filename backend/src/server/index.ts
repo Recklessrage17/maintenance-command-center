@@ -6720,6 +6720,27 @@ function publicPmTask(row:PmTaskRow) {
 function publicPmHistory(row:PmHistoryRow) {
   return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
 }
+function machineAssetPmCardSummary(tasks:PmTaskRow[]) {
+  if (!tasks.length) return null;
+  const counts={overdue:0,dueNow:0,dueSoon:0,hold:0,inactive:0,current:0,incomplete:0};
+  for (const task of tasks) {
+    const status=pmTaskStatus(task).status;
+    if (status==='Overdue') counts.overdue+=1;
+    else if (status==='Due Now') counts.dueNow+=1;
+    else if (status==='Due Soon') counts.dueSoon+=1;
+    else if (status==='Hold') counts.hold+=1;
+    else if (status==='Inactive') counts.inactive+=1;
+    else if (status==='Current') counts.current+=1;
+    else counts.incomplete+=1;
+  }
+  if (counts.overdue) return {total:tasks.length,status:'overdue',label:`PM: ${counts.overdue} Overdue`};
+  if (counts.dueNow) return {total:tasks.length,status:'due-now',label:`PM: ${counts.dueNow} Due Now`};
+  if (counts.dueSoon) return {total:tasks.length,status:'due-soon',label:`PM: ${counts.dueSoon} Due Soon`};
+  if (counts.hold) return {total:tasks.length,status:'hold',label:'PM: On Hold'};
+  if (counts.current) return {total:tasks.length,status:'current',label:'PM: Current'};
+  if (counts.inactive===tasks.length) return {total:tasks.length,status:'inactive',label:'PM: Inactive'};
+  return {total:tasks.length,status:'incomplete',label:'PM: Setup Incomplete'};
+}
 function pmHistoryValue(row:PmTaskRow) { return publicPmTask(row) as Record<string,unknown>; }
 function recordPmAudit(input:{action:string;task:PmTaskRow;asset:MachineAssetRow;actor:User;oldValue?:Record<string,unknown>|null;newValue?:Record<string,unknown>|null;reasonNote?:string}) {
   recordHistoryLog({section:'preventive_maintenance',action:input.action,entityType:'pm_task',entityId:input.task.id,entityLabel:input.task.title,assetId:String(input.asset.id),machineName:input.asset.asset_number,oldValue:input.oldValue,newValue:input.newValue,reasonNote:input.reasonNote,actor:input.actor});
@@ -7230,7 +7251,12 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
   }
   if (brand) { where.push('lower(a.brand)=lower(?)'); params.push(brand); }
   if (status && machineStatuses.includes(status as MachineAssetStatus)) { where.push('a.status=?'); params.push(status); }
-  const assets = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params).map(publicMachineAsset);
+  const assetRows = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params);
+  const assets = assetRows.map(row=>({
+    ...publicMachineAsset(row),
+    pmSummary:machineAssetPmCardSummary(all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC',[row.id])),
+    historyPreview:all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 3",[String(row.id),String(row.id),row.asset_number]).map(publicHistoryRecord),
+  }));
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
   res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});
 });

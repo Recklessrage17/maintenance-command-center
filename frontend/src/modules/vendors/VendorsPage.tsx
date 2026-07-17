@@ -365,7 +365,7 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
   const [loading,setLoading]=useState(true);
   const [editing,setEditing]=useState<VendorContactRecord|null>(null);
   const [editingExpanded,setEditingExpanded]=useState(true);
-  const [expandedContacts,setExpandedContacts]=useState<Set<number>>(new Set());
+  const [expandedContacts,setExpandedContacts]=useState<Set<number>>(()=>new Set((vendor.contacts ?? []).filter(contact=>contact.isPrimary&&contact.id!==undefined).map(contact=>contact.id!)));
   const [contactErrors,setContactErrors]=useState<ContactFieldErrors>({});
   const [error,setError]=useState('');
   const [saving,setSaving]=useState(false);
@@ -646,7 +646,14 @@ function VendorCard({vendor,onView,onEdit,onDelete,onContacts,onEmailCopied}:{ve
         <MccMetricPill label="City / State" value={cityState(vendor) || '-'} />
         <MccMetricPill label="Country" value={vendor.country || '-'} />
       </div>
-      <button className="vendor-contact-summary-button" type="button" onClick={onContacts} title="Open vendor contacts"><MccContactPill><span>{contactCountText(vendor.contactCount)}</span>{vendor.primaryContactName&&<strong>Primary Contact: {vendor.primaryContactName}{primaryContact?.contactTitle ? ` · ${primaryContact.contactTitle}` : ''}</strong>}</MccContactPill></button>
+      <button className="vendor-contact-summary-button" type="button" onClick={onContacts} title="Open vendor contacts">
+        <span className="vendor-primary-contact-line">
+          <MccContactPill className="vendor-primary-contact-name">{vendor.primaryContactName || 'No primary contact'}</MccContactPill>
+          <span className="vendor-primary-contact-label">Primary Contact</span>
+          <MccStatusPill variant="neutral" className="vendor-contact-count-badge">{contactCountText(vendor.contactCount)}</MccStatusPill>
+        </span>
+        {primaryContact?.contactTitle&&<small className="vendor-primary-contact-title">{primaryContact.contactTitle}</small>}
+      </button>
       <div className="vendor-card-actions">
         <button className="secondary-button compact-button" type="button" onClick={onView}>View</button>
         <button className="secondary-button compact-button" type="button" onClick={onEdit}>Edit</button>

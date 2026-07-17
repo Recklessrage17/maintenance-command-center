@@ -89,6 +89,8 @@ function formatDate(value:unknown) {
 }
 function formatMeter(value:unknown) { return typeof value==='number'&&Number.isFinite(value)?value.toLocaleString():'Not set'; }
 function formatNumber(value:unknown){return typeof value==='number'&&Number.isFinite(value)?value.toLocaleString():'0';}
+function escapePrintHtml(value:unknown){return String(value??'').replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]??character));}
+function printFileToken(value:string){return value.trim().replace(/[^A-Za-z0-9._-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,80)||'PM';}
 function pluralizedUnit(value:number,singular:string,plural=`${singular}s`){return Math.abs(value)===1?singular:plural;}
 function formatMeterMetric(value:number|null,intervalType:PmIntervalType){if(value===null)return 'Not set';return `${formatNumber(value)} ${intervalType==='hourly'?pluralizedUnit(value,'hr'):pluralizedUnit(value,'cycle')}`;}
 function taskToDraft(task:PmTask):PmDraft { return {title:safeString(task.title),instructions:safeString(task.instructions),intervalType:task.intervalType,intervalValue:fixedIntervals.has(task.intervalType)?'':String(safeNumber(task.intervalValue)??''),lastCompletedDate:safeDateValue(task.lastCompletedDate)??'',lastCompletedMeter:safeNumber(task.lastCompletedMeter)===null?'':String(task.lastCompletedMeter),currentMeter:safeNumber(task.currentMeter)===null?'':String(task.currentMeter),scheduleStatus:task.scheduleStatus,notes:safeString(task.notes)}; }
@@ -214,7 +216,7 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
       </div>
     </article>
     {formTask!==undefined&&<PmFormModal asset={asset} task={formTask} onClose={()=>setFormTask(undefined)} onSaved={async()=>{setFormTask(undefined);await load();}} />}
-    {viewTask&&<PmViewModal task={viewTask} onClose={()=>setViewTask(null)} />}
+    {viewTask&&<PmViewModal asset={asset} task={viewTask} onClose={()=>setViewTask(null)} />}
     {completeTask&&<PmCompleteModal task={completeTask} onClose={()=>setCompleteTask(null)} onSaved={async()=>{setCompleteTask(null);await load();}} />}
     {historyTask&&<PmHistoryModal task={historyTask} onClose={()=>setHistoryTask(null)} />}
   </>;
@@ -272,9 +274,33 @@ function PmFormModal({asset,task,onClose,onSaved}:{asset:AssetIdentity;task:PmTa
   </form></section></div>,document.body);
 }
 
-function PmViewModal({task,onClose}:{task:PmTask;onClose:()=>void}) {
+function printPmSchedule(asset:AssetIdentity,task:PmTask) {
+  const printWindow=window.open('','_blank','width=960,height=760');
+  if(!printWindow){window.alert('Allow pop-ups to print or save this PM schedule as a PDF.');return;}
+  printWindow.opener=null;
   const meter=meterIntervals.has(task.intervalType);
-  return createPortal(<div className="modal-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card glass-modal-shell pm-modal pm-view-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-labelledby="pm-view-title"><div className="modal-heading"><div><p className="eyebrow">Preventive Maintenance Tracking</p><h3 id="pm-view-title">{safeString(task.title,'Untitled PM task')}</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div><div className="pm-view-grid"><PmValue label="Status" value={validStatuses.has(task.status)?task.status:'Setup incomplete'}/><PmValue label="Interval" value={cadenceLabel(task.intervalType,task.intervalValue)}/><PmValue label={meter?`Last completed ${task.intervalType==='hourly'?'hours':'cycles'}`:'Last completed date'} value={meter?formatMeter(task.lastCompletedMeter):formatDate(task.lastCompletedDate)}/><PmValue label={meter?`Current ${task.intervalType==='hourly'?'hours':'cycles'}`:'Current meter'} value={meter?formatMeter(task.currentMeter):'Not applicable'}/><PmValue label={meter?'Next meter due':'Next PM Due Date'} value={meter?formatMeter(task.nextDueMeter):formatDate(task.nextDueDate)}/></div>{task.instructions&&<div className="pm-prose glass-card glass-card--nested"><span>Instructions</span><p>{task.instructions}</p></div>}{task.notes&&<div className="pm-prose glass-card glass-card--nested"><span>Notes</span><p>{task.notes}</p></div>}<div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></section></div>,document.body);
+  const generated=new Date();
+  const dateStamp=localIsoDate(generated);
+  const fileName=`${printFileToken(asset.assetNumber)}_${printFileToken(task.title)}_PM_Schedule_${dateStamp}`;
+  const fields=[
+    ['Asset',`${safeString(asset.assetNumber,'Machine asset')}${asset.assetName?` - ${asset.assetName}`:''}`],
+    ['PM Title',safeString(task.title,'Untitled PM task')],
+    ['Status',validStatuses.has(task.status)?task.status:'Setup incomplete'],
+    ['Due Condition',safeString(task.countdown,task.status)],
+    ['Interval',cadenceLabel(task.intervalType,task.intervalValue)],
+    [meter?`Last completed ${task.intervalType==='hourly'?'hours':'cycles'}`:'Last completed date',meter?formatMeter(task.lastCompletedMeter):formatDate(task.lastCompletedDate)],
+    ...(meter?[[`Current ${task.intervalType==='hourly'?'hours':'cycles'}`,formatMeter(task.currentMeter)]]:[]),
+    [meter?'Next meter due':'Next PM Due Date',meter?formatMeter(task.nextDueMeter):formatDate(task.nextDueDate)],
+  ];
+  const detailHtml=fields.map(([label,value])=>`<div class="detail"><span>${escapePrintHtml(label)}</span><strong>${escapePrintHtml(value)}</strong></div>`).join('');
+  const proseHtml=[task.instructions?`<section><h2>Instructions</h2><p>${escapePrintHtml(task.instructions)}</p></section>`:'',task.notes?`<section><h2>Notes</h2><p>${escapePrintHtml(task.notes)}</p></section>`:''].join('');
+  printWindow.document.write(`<!doctype html><html><head><title>${escapePrintHtml(fileName)}</title><meta charset="utf-8"><style>@page{size:Letter;margin:14mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#10283a;background:#fff}.title{padding:22px 24px;color:#fff;background:linear-gradient(135deg,#075c8f,#087e91)}.title p{margin:0 0 5px;font-size:12px;letter-spacing:.08em;text-transform:uppercase}.title h1{margin:0;font-size:25px}.summary{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 20px;border:1px solid #9fcddd;border-top:0;background:#eff9fc}.summary strong{font-size:18px}.status{display:inline-flex;padding:6px 11px;border:2px solid #087e91;border-radius:999px;color:#075c78;background:#dff7f4;font-size:12px;font-weight:800}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0}.detail{display:grid;gap:4px;padding:11px 13px;border:1px solid #bdd9e4;border-radius:10px;background:#f7fbfd;break-inside:avoid}.detail span{color:#35728c;font-size:10px;font-weight:800;text-transform:uppercase}.detail strong{font-size:14px}section{margin-top:14px;padding:14px 16px;border:1px solid #bdd9e4;border-radius:10px;break-inside:avoid}section h2{margin:0 0 8px;color:#075c8f;font-size:14px}section p{margin:0;white-space:pre-wrap;line-height:1.45}.generated{margin-top:18px;color:#557584;font-size:10px}.actions{margin-bottom:12px}.actions button{padding:8px 12px;border:0;border-radius:8px;color:#fff;background:#075c8f;font-weight:700;cursor:pointer}@media print{.actions{display:none}.title,.summary,.detail,section{-webkit-print-color-adjust:exact;print-color-adjust:exact}}@media(max-width:620px){.grid{grid-template-columns:1fr}}</style></head><body><div class="actions"><button onclick="window.print()">Print / Save PDF</button></div><header class="title"><p>Maintenance Schedule</p><h1>Preventive Maintenance Schedule</h1></header><div class="summary"><strong>${escapePrintHtml(asset.assetNumber)}${asset.assetName?` - ${escapePrintHtml(asset.assetName)}`:''}</strong><span class="status">${escapePrintHtml(task.status)}</span></div><main><div class="grid">${detailHtml}</div>${proseHtml}<p class="generated">Generated ${escapePrintHtml(generated.toLocaleString())}</p></main><script>setTimeout(()=>window.print(),350)<\/script></body></html>`);
+  printWindow.document.close();
+}
+
+function PmViewModal({asset,task,onClose}:{asset:AssetIdentity;task:PmTask;onClose:()=>void}) {
+  const meter=meterIntervals.has(task.intervalType);
+  return createPortal(<div className="modal-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card glass-modal-shell pm-modal pm-view-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-labelledby="pm-view-title"><div className="modal-heading"><div><p className="eyebrow">Preventive Maintenance Tracking</p><h3 id="pm-view-title">{safeString(task.title,'Untitled PM task')}</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div><div className="pm-view-grid"><PmValue label="Status" value={validStatuses.has(task.status)?task.status:'Setup incomplete'}/><PmValue label="Interval" value={cadenceLabel(task.intervalType,task.intervalValue)}/><PmValue label={meter?`Last completed ${task.intervalType==='hourly'?'hours':'cycles'}`:'Last completed date'} value={meter?formatMeter(task.lastCompletedMeter):formatDate(task.lastCompletedDate)}/><PmValue label={meter?`Current ${task.intervalType==='hourly'?'hours':'cycles'}`:'Current meter'} value={meter?formatMeter(task.currentMeter):'Not applicable'}/><PmValue label={meter?'Next meter due':'Next PM Due Date'} value={meter?formatMeter(task.nextDueMeter):formatDate(task.nextDueDate)}/></div>{task.instructions&&<div className="pm-prose glass-card glass-card--nested"><span>Instructions</span><p>{task.instructions}</p></div>}{task.notes&&<div className="pm-prose glass-card glass-card--nested"><span>Notes</span><p>{task.notes}</p></div>}<div className="modal-actions glass-modal__actions"><button className="primary-button glass-button glass-button--primary" type="button" onClick={()=>printPmSchedule(asset,task)}>Print / Save PDF</button><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></section></div>,document.body);
 }
 function PmValue({label,value}:{label:string;value:string}){return <div className="pm-value glass-card glass-card--nested"><span>{label}</span><strong>{value}</strong></div>;}
 

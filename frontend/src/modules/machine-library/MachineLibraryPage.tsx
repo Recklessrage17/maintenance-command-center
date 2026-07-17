@@ -9,15 +9,16 @@ import { AssetNotesAttachments } from './AssetNotesAttachments';
 import { PreventiveMaintenanceTracking } from './PreventiveMaintenanceTracking';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
+type HistoryRecord = { id: number; action: string; entityLabel: string; userName: string; reasonNote: string; createdAt: string };
+type MachinePmCardSummary = { total:number; status:'overdue'|'due-now'|'due-soon'|'hold'|'inactive'|'current'|'incomplete'; label:string };
 type MachineAsset = {
-  id: number; assetNumber: string; assetName: string; brand: string; model: string; serialNumber: string; machineYear: string; machineType: string; powerType: string; shotSizeOz: number; tonnage: number; barrelDiameter: string; location: string; department: string; status: string; voltageValue: string; voltageType: string; fullLoadAmp: string; machineLength: string; machineWidth: string; machineHeight: string; fullDieHeightLength: string; screwType: string; screwTipType: string; screwTipInstalledDate: string; screwInstalledDate: string; barrelInstalledDate: string; barrelEndCapInstalledDate: string; barrelLength: string; screwLength: string; screwRebuildRepaired: boolean; barrelRebuildRepaired: boolean; screwConditionStatus: ConditionStatus; barrelConditionStatus: ConditionStatus; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean; screw2Type: string; screw2TipType: string; screw2RebuildRepaired: boolean; screw2ConditionStatus: ConditionStatus; screw2InstalledDate: string; screw2TipInstalledDate: string; screw2Length: string; barrel2Diameter: string; barrel2RebuildRepaired: boolean; barrel2ConditionStatus: ConditionStatus; barrel2InstalledDate: string; barrel2EndCapInstalledDate: string; barrel2Length: string; plungerType: string; plungerRebuildRepaired: boolean; plungerConditionStatus: ConditionStatus; plungerInstalledDate: string; plungerLength: string; plungerDiameter: string; plungerBarrelType: string; plungerBarrelRebuildRepaired: boolean; plungerBarrelConditionStatus: ConditionStatus; plungerBarrelInstalledDate: string; plungerBarrelEndCapInstalledDate: string; plungerBarrelLength: string; plungerBarrelDiameter: string; notes: string; criticalNotes: string; brandColorHex: string; createdAt: string; updatedAt: string;
+  id: number; assetNumber: string; assetName: string; brand: string; model: string; serialNumber: string; machineYear: string; machineType: string; powerType: string; shotSizeOz: number; tonnage: number; barrelDiameter: string; location: string; department: string; status: string; voltageValue: string; voltageType: string; fullLoadAmp: string; machineLength: string; machineWidth: string; machineHeight: string; fullDieHeightLength: string; screwType: string; screwTipType: string; screwTipInstalledDate: string; screwInstalledDate: string; barrelInstalledDate: string; barrelEndCapInstalledDate: string; barrelLength: string; screwLength: string; screwRebuildRepaired: boolean; barrelRebuildRepaired: boolean; screwConditionStatus: ConditionStatus; barrelConditionStatus: ConditionStatus; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean; screw2Type: string; screw2TipType: string; screw2RebuildRepaired: boolean; screw2ConditionStatus: ConditionStatus; screw2InstalledDate: string; screw2TipInstalledDate: string; screw2Length: string; barrel2Diameter: string; barrel2RebuildRepaired: boolean; barrel2ConditionStatus: ConditionStatus; barrel2InstalledDate: string; barrel2EndCapInstalledDate: string; barrel2Length: string; plungerType: string; plungerRebuildRepaired: boolean; plungerConditionStatus: ConditionStatus; plungerInstalledDate: string; plungerLength: string; plungerDiameter: string; plungerBarrelType: string; plungerBarrelRebuildRepaired: boolean; plungerBarrelConditionStatus: ConditionStatus; plungerBarrelInstalledDate: string; plungerBarrelEndCapInstalledDate: string; plungerBarrelLength: string; plungerBarrelDiameter: string; notes: string; criticalNotes: string; brandColorHex: string; createdAt: string; updatedAt: string; pmSummary?:MachinePmCardSummary|null; historyPreview?:HistoryRecord[];
 };
 type BrandSetting = { brandName: string; colorHex: string };
-type HistoryRecord = { id: number; action: string; entityLabel: string; userName: string; reasonNote: string; createdAt: string };
 type ImportMode = 'add_new_only' | 'upsert';
 type ImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
 type MachineImportSummary = { addedCount: number; updatedCount: number; skippedCount: number; rejectedDuplicateCount: number; errors?: string[]; rejectedDuplicates?: ImportRejectedDuplicate[]; changedAssetNumbers?: string[] };
-type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz'> & { shotSizeOz: string };
+type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz' | 'pmSummary' | 'historyPreview'> & { shotSizeOz: string };
 type ReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'barrelLength' | 'screwLength' | 'screw2Length' | 'barrel2Length' | 'plungerLength' | 'plungerDiameter' | 'plungerBarrelLength' | 'plungerBarrelDiameter';
 type StringFormKey = { [K in keyof AssetForm]: AssetForm[K] extends string ? K : never }[keyof AssetForm];
@@ -82,7 +83,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 function assetToForm(asset: MachineAsset): AssetForm {
-  const { id: _id, brandColorHex: _color, createdAt: _created, updatedAt: _updated, shotSizeOz, ...form } = asset;
+  const { id: _id, brandColorHex: _color, createdAt: _created, updatedAt: _updated, pmSummary: _pmSummary, historyPreview: _historyPreview, shotSizeOz, ...form } = asset;
   return { ...form, shotSizeOz: shotSizeOz ? String(shotSizeOz) : '' };
 }
 function formatDateTime(value?: string) {
@@ -124,6 +125,20 @@ function machineStatusVariant(status: string): MccSemanticVariant {
   if (status === 'down' || status === 'removed') return 'danger';
   if (status === 'disabled') return 'muted';
   return 'info';
+}
+function machinePmSummaryVariant(status: MachinePmCardSummary['status']): MccSemanticVariant {
+  if (status==='current') return 'success';
+  if (status==='due-soon'||status==='hold') return 'warning';
+  if (status==='overdue'||status==='due-now') return 'danger';
+  if (status==='inactive') return 'muted';
+  return 'neutral';
+}
+function historyPreviewDate(value:string) {
+  const date=new Date(value);
+  return Number.isNaN(date.getTime()) ? value || '-' : new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',year:'2-digit'}).format(date);
+}
+function historyPreviewSummary(record:HistoryRecord) {
+  return record.reasonNote || `Recorded by ${record.userName || 'System'}`;
 }
 function machineSummaryStatusClass(status: string) {
   if (status === 'active') return 'status-active';
@@ -247,7 +262,11 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   function openAdd() { setSetupDraft({hasDoubleShotInjection:false,hasPlungerInjection:false}); setShowSetup(true); }
   function continueAddFromSetup() { setEditing(null); setForm({...blankAssetForm,...setupDraft}); setShowSetup(false); setShowEditor(true); }
   function openEdit(asset: MachineAsset) { setEditing(asset); setForm(assetToForm(asset)); setShowEditor(true); }
-  function openDetail(asset: MachineAsset) { listScrollPositionRef.current=window.scrollY; setDetailAsset(asset); }
+  function openDetail(asset: MachineAsset) {
+    if (detailAsset?.id===asset.id) return;
+    listScrollPositionRef.current=window.scrollY;
+    setDetailAsset(asset);
+  }
   function closeDetail() {
     const listScrollPosition=listScrollPositionRef.current;
     setDetailAsset(null);
@@ -287,12 +306,18 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     }
   }
   async function disableAsset(asset: MachineAsset) {
-    if (!canDelete) return;
+    if (!canDelete) return false;
     const reasonNote = window.prompt(`Reason for disabling ${asset.assetNumber}?`)?.trim();
-    if (!reasonNote) return;
-    await api(`/api/machine-library/assets/${asset.id}/disable`,{method:'POST',body:JSON.stringify({reasonNote})});
-    setMessage({kind:'success',text:`${asset.assetNumber} disabled.`});
-    loadAssets();
+    if (!reasonNote) return false;
+    try {
+      await api(`/api/machine-library/assets/${asset.id}/disable`,{method:'POST',body:JSON.stringify({reasonNote})});
+      setMessage({kind:'success',text:`${asset.assetNumber} disabled.`});
+      loadAssets();
+      return true;
+    } catch (error) {
+      setMessage({kind:'error',text:(error as Error).message});
+      return false;
+    }
   }
   async function loadLogs(asset: MachineAsset) {
     try {
@@ -376,19 +401,18 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
               <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
             </div>
             <div className="machine-pill-card-age"><span>Year {asset.machineYear || 'Unknown'}</span><span aria-hidden="true">&bull;</span><strong>Age {machineYearAge(asset.machineYear)}</strong></div>
-            <div className="machine-card-actions">
-              <button className="primary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); openEdit(asset); }}>{canEdit?'View/Edit':'View'}</button>
-              <button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Record Logs</button>
-              <button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); void loadLogs(asset); }}>History</button>
-              {canDelete&&asset.status!=='disabled'&&<button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); void disableAsset(asset); }}>Disable</button>}
+            <div className="machine-card-summary-actions">
+              <button className="secondary-button compact-button machine-barrel-screw-logs-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Barrel &amp; Screw Logs</button>
+              {asset.pmSummary&&<MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill>}
             </div>
+            <MachineHistoryPreview records={asset.historyPreview ?? []} onOpen={()=>void loadLogs(asset)} />
           </MccPillCard>
         ))}
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}
         </div>
       </>}
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
-      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onRecordLogs={asset=>setRecordLogsAsset(asset)} />}
+      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
       {recordLogsAsset&&<AssetMeasurementRecordLogsModal asset={recordLogsAsset} canManageYearFolders={canManageMeasurementYearFolders} onClose={()=>setRecordLogsAsset(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
@@ -396,6 +420,17 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
       {logs&&<LogsModal logs={logs} onClose={()=>setLogs(null)} onBackToAsset={()=>{ setForm(assetToForm(logs.asset)); setEditing(logs.asset); setLogs(null); setShowEditor(true); }} />}
     </div>
   );
+}
+
+function MachineHistoryPreview({records,onOpen}:{records:HistoryRecord[];onOpen:()=>void}) {
+  const preview=records.slice(0,3);
+  return <button className="machine-history-preview" type="button" onClick={event=>{event.stopPropagation();onOpen();}} aria-label="Open full machine asset history">
+    <span className="machine-history-preview-heading"><strong>History Preview</strong><span>Open full history</span></span>
+    <span className="machine-history-preview-list">
+      {preview.map(record=><span className="machine-history-preview-row" key={record.id}><span className="machine-history-preview-meta"><time dateTime={record.createdAt}>{historyPreviewDate(record.createdAt)}</time><strong>{actionLabel(record.action)}</strong></span><small>{historyPreviewSummary(record)}</small></span>)}
+      {!preview.length&&<span className="machine-history-preview-empty">No history recorded yet.</span>}
+    </span>
+  </button>;
 }
 
 function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onRecordLogs:(asset:MachineAsset)=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
@@ -592,7 +627,7 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
   ];
 
   return <section className="mcc-card machine-modal machine-detail-modal glass-panel glass-panel--highlight glass-modal-shell mcc-detail-shell" aria-labelledby={`machine-detail-title-${currentAsset.id}`}>
-    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3 id={`machine-detail-title-${currentAsset.id}`}>{currentAsset.assetNumber}</h3><p className="machine-detail-identity-badge glass-pill" style={{'--machine-detail-brand-color':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}><span className="machine-detail-brand-dot" aria-hidden="true" /><span>{currentAsset.brand || 'Brand unknown'}</span><span>Model {currentAsset.model || '-'}</span><span>S/N {currentAsset.serialNumber || '-'}</span></p></div><div className="machine-detail-header-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>onRecordLogs(currentAsset)}>Record Logs</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onLogs}>History</button><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></div>
+    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3 id={`machine-detail-title-${currentAsset.id}`}>{currentAsset.assetNumber}</h3><p className="machine-detail-identity-badge glass-pill" style={{'--machine-detail-brand-color':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}><span className="machine-detail-brand-dot" aria-hidden="true" /><span>{currentAsset.brand || 'Brand unknown'}</span><span>Model {currentAsset.model || '-'}</span><span>S/N {currentAsset.serialNumber || '-'}</span></p></div><div className="machine-detail-header-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>onRecordLogs(currentAsset)}>Barrel &amp; Screw Logs</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onLogs}>History</button><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></div>
     <div className="machine-detail-summary-grid">
       <SummaryBadge label="Status" value={machineStatusLabel(currentAsset.status)} tone={machineSummaryStatusClass(currentAsset.status)} />
       <SummaryBadge label="Setup" value={unitLabel} tone={machineSummarySetupClass(currentAsset)} />
@@ -678,7 +713,7 @@ function MachineRecordLogActions({asset,onOpen,onUploaded}:{asset:MachineAsset;o
     <div className="machine-record-launch-actions">
       <button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={()=>fileInputRef.current?.click()} disabled={uploading}>{uploading ? 'Uploading...' : 'Upload File'}</button>
       <button className="secondary-button compact-button machine-camera-button glass-button glass-button--secondary" type="button" onClick={()=>cameraInputRef.current?.click()} disabled={uploading}>Take Photo</button>
-      <button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onOpen}>Open Record Logs</button>
+      <button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onOpen}>Barrel &amp; Screw Logs</button>
     </div>
     {message&&<small className={message === 'Upload failed.' ? 'machine-record-upload-message error' : 'machine-record-upload-message'}>{message}</small>}
     <input ref={fileInputRef} type="file" multiple hidden accept={recordLogFileAccept} onChange={event=>{ const files = Array.from(event.target.files ?? []); if(files.length===1&&files[0].type.startsWith('image/')) void stagePhoto(files[0]); else void uploadFiles(files); event.currentTarget.value = ''; }} />
@@ -711,7 +746,7 @@ function MachineRecordLogsLaunchPanel({asset,onOpen}:{asset:MachineAsset;onOpen:
     </button>
     {expanded&&<div className="machine-record-accordion-body" id={`machine-record-panel-${asset.id}`}>
       <div className="machine-record-launch-card glass-card glass-card--nested">
-        <div className="machine-record-launch-copy"><span className="measurement-asset-pill glass-pill glass-pill--cyan">{asset.assetNumber}</span><strong>Asset-specific record logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
+        <div className="machine-record-launch-copy"><span className="measurement-asset-pill glass-pill glass-pill--cyan">{asset.assetNumber}</span><strong>Asset-specific barrel &amp; screw logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
         <MachineRecordLogActions asset={asset} onOpen={onOpen} onUploaded={()=>void refresh()} />
       </div>
       {loading&&!newest?<div className="machine-record-newest-empty glass-empty-state">Loading newest record…</div>:newest?<NewestInspectionRecordPreview record={newest} onOpen={()=>setViewerRecord(newest)} />:<div className="machine-record-newest-empty glass-empty-state"><strong>No inspection records yet.</strong><span>Upload a completed record or take a maintenance photo.</span></div>}
@@ -787,7 +822,7 @@ function InspectionRecordViewer({asset,record,onClose}:{asset:MachineAsset;recor
     <div className="modal-actions inspection-record-viewer-actions glass-modal__actions">{isImage&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>setFit(current=>!current)}>{fit?'Zoom':'Fit Image'}</button>}<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={download} disabled={!url}>{isImage?'Download Image':'Download'}</button>{isImage?<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={printImage} disabled={!url}>Print / Save as PDF</button>:<><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={openOriginal} disabled={!url}>Open Original</button>{isPdf&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={openOriginal} disabled={!url}>Print</button>}</>}<button className="link-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div>
   </section></div>,document.body);
 }
-function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onReplacement,onRecordLogs}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onRecordLogs:(asset:MachineAsset)=>void}) {
+function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,canDisable,asset,onReplacement,onRecordLogs,onDisable}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;canDisable:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onRecordLogs:(asset:MachineAsset)=>void;onDisable:(asset:MachineAsset)=>void|Promise<void>}) {
   const disabled = !canEdit;
   const setupChanged = Boolean(asset && (form.hasDoubleShotInjection !== asset.hasDoubleShotInjection || form.hasPlungerInjection !== asset.hasPlungerInjection));
   return <div className="modal-backdrop glass-modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-modal machine-editor-modal glass-modal-shell mcc-wide-modal" onSubmit={onSubmit}>
@@ -801,7 +836,8 @@ function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,asset,onRepl
     {form.hasPlungerInjection&&<section className="machine-form-section"><span>Plunger Injection</span><div className="machine-screw-barrel-grid"><PlungerBox title="Plunger Box" form={form} setField={setField} disabled={disabled}/><PlungerBarrelBox title="Plunger Barrel / Cylinder Barrel Box" form={form} setField={setField} disabled={disabled}/></div></section>}
     {asset&&<RecordLogsRow asset={asset} onOpen={()=>onRecordLogs(asset)} />}
     {asset&&<ReplacementUpdatesPanel asset={asset} form={form} canEdit={canEdit} onReplacement={onReplacement} />}
-    <div className="machine-placeholder-grid"><section>Linked Inventory Parts coming next</section><section>Machine PM schedules coming next</section><section>Machine documents coming next</section><section>History preview available from Logs</section></div>
+    <div className="machine-placeholder-grid"><section>Linked Inventory Parts coming next</section><section>Machine documents coming next</section></div>
+    {asset&&canDisable&&asset.status!=='disabled'&&<section className="machine-disable-zone"><div><strong>Deactivate Machine Asset</strong><span>Removes this asset from normal active use while preserving its records, history, PM schedules, and audit trail.</span></div><button className="danger-button" type="button" onClick={()=>void onDisable(asset)}>Disable / Deactivate</button></section>}
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={!canEdit}>{asset?'Save Machine Asset':'Create Machine Asset'}</button></div>
   </form></div>;
 }
@@ -835,7 +871,7 @@ function PlungerBarrelBox({title,form,setField,disabled}:{title:string;form:Asse
   return <div className={machineComponentClass('plunger-barrel')}><h4>{title}</h4><Text label="Plunger Barrel Type" value={form.plungerBarrelType} set={v=>setField('plungerBarrelType',v)} disabled={disabled}/><Check label="Plunger Barrel Rebuild / Repaired" checked={form.plungerBarrelRebuildRepaired} set={checked=>setComponentRebuild(setField,'plungerBarrelRebuildRepaired','plungerBarrelConditionStatus',checked)} disabled={disabled}/><DateWithAge label="Plunger Barrel Installed Date" value={form.plungerBarrelInstalledDate} set={v=>setField('plungerBarrelInstalledDate',v)} disabled={disabled}/><DateWithAge label="Plunger Barrel End Cap Installed Date" value={form.plungerBarrelEndCapInstalledDate} set={v=>setField('plungerBarrelEndCapInstalledDate',v)} disabled={disabled}/><UnitDimensionField label="Plunger Barrel Length" value={form.plungerBarrelLength} set={v=>setField('plungerBarrelLength',v)} disabled={disabled}/><UnitDimensionField label="Plunger Barrel Diameter" value={form.plungerBarrelDiameter} set={v=>setField('plungerBarrelDiameter',v)} disabled={disabled}/><ConditionBadge label="Plunger Barrel condition" status={effectiveCondition(form.plungerBarrelRebuildRepaired, form.plungerBarrelConditionStatus)} /></div>;
 }
 function RecordLogsRow({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
-  return <section className="machine-form-section machine-record-logs-section"><span>Screw & Barrel Inspection Records</span><div className="measurement-inspection-row"><MachineRecordLogActions asset={asset} onOpen={onOpen} /><small>Asset-specific uploaded record files for {asset.assetNumber}.</small></div></section>;
+  return <section className="machine-form-section machine-record-logs-section"><span>Barrel &amp; Screw Logs</span><div className="measurement-inspection-row"><MachineRecordLogActions asset={asset} onOpen={onOpen} /><small>Asset-specific screw and barrel inspection records for {asset.assetNumber}.</small></div></section>;
 }
 function ReplacementUpdatesPanel({asset,form,canEdit,onReplacement}:{asset:MachineAsset;form:AssetForm;canEdit:boolean;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void}) {
   const groups = replacementGroups.filter(group=>group.enabled(form));

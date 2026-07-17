@@ -473,7 +473,7 @@ function MeasurementQuickActions() {
 export function AssetMeasurementRecordLogsModal({ asset, canManageYearFolders, onClose }: { asset: MachineRecordLogAsset; canManageYearFolders: boolean; onClose: () => void }) {
   return <div className="modal-backdrop measurement-modal-backdrop" role="dialog" aria-modal="true">
     <section className="mcc-card measurement-record-modal mcc-wide-modal">
-      <div className="modal-heading measurement-modal-heading"><div><p className="eyebrow">Screw & Barrel Inspection Records</p><h3>{assetLabel(asset)} Record Logs</h3><p>{[asset.brand, asset.model, asset.serialNumber ? `S/N ${asset.serialNumber}` : ''].filter(Boolean).join(' / ')}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
+      <div className="modal-heading measurement-modal-heading"><div><p className="eyebrow">Screw & Barrel Inspection Records</p><h3>{assetLabel(asset)} Barrel &amp; Screw Logs</h3><p>{[asset.brand, asset.model, asset.serialNumber ? `S/N ${asset.serialNumber}` : ''].filter(Boolean).join(' / ')}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
       <MeasurementRecordLogsPanel asset={asset} canManageYearFolders={canManageYearFolders} />
     </section>
   </div>;
@@ -533,7 +533,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
 
   async function uploadFiles(files: File[]) {
     if (!asset) {
-      window.alert('Open an asset Record Logs panel before uploading records.');
+      window.alert('Open an asset Barrel & Screw Logs panel before uploading records.');
       return;
     }
     if (!files.length) return;
@@ -607,7 +607,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   async function generateCombinedPdf(records: MeasurementLogEntry[], label: 'selected' | 'folder') {
     const ready = records.filter(log=>log.hasStoredFile);
     if (!ready.length) {
-      window.alert('Select one or more READY record logs to generate a combined PDF.');
+      window.alert('Select one or more READY inspection records to generate a combined PDF.');
       return;
     }
     setBusy(label);
@@ -641,7 +641,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
 
   async function openSelectedRecords() {
     if (!selectedLogs.length) {
-      window.alert('Select one or more READY record logs to open.');
+      window.alert('Select one or more READY inspection records to open.');
       return;
     }
     setBusy('open');
@@ -667,7 +667,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   async function deleteSelected() {
     const ids = Array.from(selectedIds);
     if (!ids.length) {
-      window.alert('Select one or more record logs to delete.');
+      window.alert('Select one or more inspection records to delete.');
       return;
     }
     if (!window.confirm(`Delete ${ids.length} selected record log(s)?`)) return;
@@ -781,7 +781,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
             <div className="measurement-log-row-actions"><em className={ready ? 'measurement-status-pill status-ready' : 'measurement-status-pill status-log-only'}>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log)}>Open</button></div>
           </article>;
         })}
-        {!yearLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records in this folder yet.</strong><span>{asset ? `Upload completed records for ${assetLabel(asset)}.` : 'Open an asset Record Logs panel to upload completed records.'}</span></div>}
+        {!yearLogs.length&&<div className="measurement-log-empty"><strong>No screw & barrel inspection records in this folder yet.</strong><span>{asset ? `Upload completed records for ${assetLabel(asset)}.` : 'Open an asset Barrel & Screw Logs panel to upload completed records.'}</span></div>}
       </div>
     </div>}
   </section>;

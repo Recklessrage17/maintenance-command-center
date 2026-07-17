@@ -433,8 +433,21 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-pill-card-metrics { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 6px; }
 .machine-pill-card-age { min-width: 0; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 2px 3px; color: #bcdce9; font-size: .78rem; font-weight: 850; }
 .machine-pill-card-age strong { color: #fff1b8; }
-.machine-asset-card.mcc-pill-card .machine-card-actions { padding-top: 2px; gap: 6px; }
-.machine-asset-card.mcc-pill-card .machine-card-actions .compact-button { flex: 1 1 96px; min-height: 44px; padding-inline: 9px; border-radius: 999px; }
+.machine-card-summary-actions { min-width: 0; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding-top: 2px; }
+.machine-card-summary-actions .compact-button { flex: 1 1 150px; width: auto; min-height: 44px; padding-inline: 12px; border-radius: 999px; }
+.machine-pm-summary-pill { flex: 0 1 auto; min-height: 34px; padding-inline: 11px; }
+.machine-history-preview { appearance: none; min-width: 0; width: 100%; display: grid; gap: 6px; padding: 8px 10px; border: 1px solid rgba(68,215,255,.3); border-radius: 14px; color: #eafaff; background: linear-gradient(145deg,rgba(5,42,62,.58),rgba(3,17,31,.66)); box-shadow: inset 0 1px 0 rgba(255,255,255,.09),0 0 14px rgba(68,215,255,.08); font: inherit; text-align: left; cursor: pointer; }
+.machine-history-preview:hover, .machine-history-preview:focus-visible { border-color: rgba(68,215,255,.72); outline: 2px solid rgba(68,215,255,.48); outline-offset: 2px; box-shadow: inset 0 1px 0 rgba(255,255,255,.14),0 0 20px rgba(68,215,255,.16); }
+.machine-history-preview-heading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.machine-history-preview-heading strong { color: #dff9ff; font-size: .74rem; font-weight: 1000; letter-spacing: .035em; text-transform: uppercase; }
+.machine-history-preview-heading > span { color: #86dff6; font-size: .65rem; font-weight: 900; white-space: nowrap; }
+.machine-history-preview-list { min-width: 0; display: grid; gap: 4px; }
+.machine-history-preview-row { min-width: 0; display: grid; gap: 2px; padding: 5px 7px; border: 1px solid rgba(143,205,233,.14); border-radius: 9px; background: rgba(3,14,27,.5); }
+.machine-history-preview-meta { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.machine-history-preview-meta time { flex: 0 0 auto; color: #8bdcf2; font-size: .63rem; font-weight: 900; }
+.machine-history-preview-meta strong { min-width: 0; overflow: hidden; color: #effcff; font-size: .7rem; font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.machine-history-preview-row small { min-width: 0; overflow: hidden; color: #a9cad8; font-size: .66rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.machine-history-preview-empty { padding: 5px 2px; color: #9bbdcb; font-size: .72rem; font-weight: 800; }
 .machine-empty-card { min-height: 120px; grid-column: 1 / -1; }
 .machine-modal { width: min(1120px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 14px; }
 .machine-small-modal, .machine-color-modal, .machine-logs-modal, .machine-setup-modal, .machine-import-result-modal { width: min(680px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 14px; }
@@ -443,6 +456,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .modal-heading p { margin: 0; color: #aac4d2; }
 .machine-form-section { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(85,191,236,.18); border-radius: 10px; background: rgba(4,18,34,.34); }
 .machine-form-section > span, .machine-replacement-panel > span { color: #44d7ff; font-size: .72rem; font-weight: 950; text-transform: uppercase; }
+.machine-disable-zone { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 14px; border: 1px solid rgba(255,91,116,.48); border-radius: 16px; background: linear-gradient(145deg,rgba(104,28,43,.34),rgba(28,12,21,.54)); box-shadow: inset 0 1px 0 rgba(255,255,255,.08),0 0 18px rgba(255,91,116,.1); }
+.machine-disable-zone > div { min-width: 0; display: grid; gap: 4px; }
+.machine-disable-zone strong { color: #ffd7de; font-size: .86rem; }
+.machine-disable-zone span { color: #d6aeb7; font-size: .74rem; line-height: 1.35; }
+.machine-disable-zone .danger-button { flex: 0 0 auto; min-height: 44px; border-radius: 999px; }
 .machine-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .machine-form-wide { grid-column: span 2; }
 .machine-age-label { color: #9ec7d8; font-size: .76rem; font-weight: 850; }
@@ -1127,13 +1145,13 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .vendor-website-pill { max-width: min(100%, 300px); }
 .vendor-website-pill > span:not(.vendor-favicon-fallback) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vendor-pill-card-metrics { min-width: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
-.vendor-contact-summary-button { appearance: none; width: 100%; min-width: 0; min-height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.vendor-contact-summary-button .mcc-contact-pill { width: 100%; min-height: 44px; justify-content: flex-start; flex-wrap: wrap; padding: 7px 11px; }
-.vendor-contact-summary-button .mcc-contact-pill span { flex: 0 0 auto; }
-.vendor-contact-summary-button .mcc-contact-pill strong { min-width: 0; color: #fff5ce; overflow-wrap: anywhere; }
-.vendor-contact-summary-button:hover .mcc-contact-pill,
-.vendor-contact-summary-button:focus-visible .mcc-contact-pill { border-color: rgba(255,216,114,.88); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 0 20px rgba(246,190,63,.24); }
-.vendor-contact-summary-button:focus-visible { outline: 2px solid rgba(246,190,63,.68); outline-offset: 2px; }
+.vendor-contact-summary-button { appearance: none; width: 100%; min-width: 0; min-height: 48px; display: grid; gap: 5px; padding: 7px 9px; border: 1px solid rgba(246,190,63,.5); border-radius: 16px; color: #fff2c2; background: linear-gradient(145deg,rgba(98,66,17,.34),rgba(31,24,15,.52)); box-shadow: inset 0 1px 0 rgba(255,255,255,.11),0 0 15px rgba(246,190,63,.12); font: inherit; text-align: left; cursor: pointer; }
+.vendor-primary-contact-line { min-width: 0; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.vendor-contact-summary-button .vendor-primary-contact-name { width: fit-content; min-width: 0; min-height: 32px; justify-content: flex-start; padding: 5px 10px; font-size: .8rem; }
+.vendor-primary-contact-label { min-width: 0; color: #ffe6a1; font-size: .72rem; font-weight: 900; }
+.vendor-contact-count-badge { flex: 0 0 auto; min-height: 24px; margin-left: auto; padding: 3px 8px; font-size: .64rem; }
+.vendor-primary-contact-title { min-width: 0; overflow: hidden; padding-inline: 3px; color: #b9a984; font-size: .67rem; font-weight: 750; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.vendor-contact-summary-button:hover, .vendor-contact-summary-button:focus-visible { border-color: rgba(255,216,114,.88); outline: 2px solid rgba(246,190,63,.58); outline-offset: 2px; box-shadow: inset 0 1px 0 rgba(255,255,255,.17),0 0 21px rgba(246,190,63,.2); }
 .vendor-card.mcc-pill-card .vendor-card-actions .compact-button { min-height: 44px; border-radius: 999px; }
 .vendor-modal { width: min(820px, 100%); max-height: var(--mcc-modal-available-height); min-height: 0; overflow-y: auto; display: grid; gap: 16px; border-radius: 14px; }
 .vendor-detail-modal { width: min(760px, 100%); }
@@ -1347,8 +1365,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .machine-card-grid, .vendor-card-grid { grid-template-columns: minmax(0, 1fr); }
   .machine-card-grid.single-result .machine-asset-card.mcc-pill-card { max-width: none; }
   .machine-pill-card-heading, .vendor-card-heading { align-items: flex-start; flex-wrap: wrap; }
-  .machine-asset-card.mcc-pill-card .machine-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .machine-asset-card.mcc-pill-card .machine-card-actions .compact-button { width: 100%; }
+  .machine-disable-zone { align-items: stretch; flex-direction: column; }
+  .machine-disable-zone .danger-button { width: 100%; }
   .vendor-contact-accordion-toggle { align-items: flex-start; flex-wrap: wrap; }
   .vendor-contact-name-pill { max-width: calc(100% - 38px); }
   .vendor-contact-title-summary { flex-basis: calc(100% - 52px); order: 3; padding-left: 3px; }
@@ -1360,7 +1378,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 }
 @media (max-width: 520px) {
   .machine-pill-card-metrics, .vendor-pill-card-metrics { grid-template-columns: minmax(0, 1fr); }
-  .machine-asset-card.mcc-pill-card .machine-card-actions, .vendor-card-actions { grid-template-columns: minmax(0, 1fr); }
+  .machine-card-summary-actions { align-items: stretch; flex-direction: column; }
+  .machine-card-summary-actions .compact-button, .machine-pm-summary-pill { flex: 0 0 auto; width: 100%; }
+  .vendor-card-actions { grid-template-columns: minmax(0, 1fr); }
+  .vendor-contact-count-badge { margin-left: 0; }
+  .vendor-primary-contact-title { white-space: normal; }
   .vendor-website-row .mcc-link-pill { width: 100%; max-width: 100%; }
 }
 @media (max-width: 620px) { .share-card-heading, .share-url-row { grid-template-columns: 1fr; } .share-card-heading { display: grid; } .share-url-row .compact-button, .share-card-heading .compact-button { justify-self: start; } }
