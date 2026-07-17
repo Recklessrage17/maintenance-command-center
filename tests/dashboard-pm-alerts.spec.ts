@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 type AlertOverrides=Record<string,unknown>;
 function alert(id:number,status:string,overrides:AlertOverrides={}) {
@@ -65,26 +66,55 @@ test('sorts attention PMs, opens details, excludes paused schedules, and prints 
     const style=getComputedStyle(element);
     const backdrop=element.closest('.dashboard-pm-backdrop') as HTMLElement;
     const detail=element.closest('.dashboard-pm-detail') as HTMLElement;
+    const mainHeader=element.querySelector('header')!;
+    const sectionHeader=element.querySelector('section h2')!;
+    const label=element.querySelector('.pm-work-order-grid span')!;
+    const value=element.querySelector('.pm-work-order-grid strong')!;
+    const grid=element.querySelector('.pm-work-order-grid')!;
+    const writingLine=element.querySelector('.pm-work-order-completion p')!;
     return {
       rootDisplay:getComputedStyle(document.getElementById('root')!).display,
       top:element.getBoundingClientRect().top,
       position:style.position,
       margin:style.margin,
+      opacity:style.opacity,
+      filter:style.filter,
+      mixBlendMode:style.mixBlendMode,
       transform:style.transform,
       minHeight:style.minHeight,
       height:style.height,
       breakBefore:style.breakBefore,
       pageBreakBefore:style.pageBreakBefore,
+      printColorAdjust:style.getPropertyValue('print-color-adjust'),
+      mainHeaderBackground:getComputedStyle(mainHeader).backgroundColor,
+      mainHeaderColor:getComputedStyle(mainHeader).color,
+      sectionHeaderBackground:getComputedStyle(sectionHeader).backgroundColor,
+      sectionHeaderColor:getComputedStyle(sectionHeader).color,
+      bodyColor:style.color,
+      labelColor:getComputedStyle(label).color,
+      valueColor:getComputedStyle(value).color,
+      gridBorderColor:getComputedStyle(grid).borderTopColor,
+      writingLineColor:getComputedStyle(writingLine).color,
       backdropPosition:getComputedStyle(backdrop).position,
+      backdropOpacity:getComputedStyle(backdrop).opacity,
+      backdropFilter:getComputedStyle(backdrop).filter,
       backdropMargin:getComputedStyle(backdrop).margin,
       detailPosition:getComputedStyle(detail).position,
+      detailOpacity:getComputedStyle(detail).opacity,
+      detailFilter:getComputedStyle(detail).filter,
     };
   });
-  expect(printLayout).toMatchObject({rootDisplay:'none',position:'static',margin:'0px',transform:'none',minHeight:'0px',breakBefore:'auto',pageBreakBefore:'auto',backdropPosition:'static',backdropMargin:'0px',detailPosition:'static'});
+  expect(printLayout).toMatchObject({rootDisplay:'none',position:'static',margin:'0px',opacity:'1',filter:'none',mixBlendMode:'normal',transform:'none',minHeight:'0px',breakBefore:'auto',pageBreakBefore:'auto',printColorAdjust:'exact',mainHeaderBackground:'rgb(0, 90, 156)',mainHeaderColor:'rgb(255, 255, 255)',sectionHeaderBackground:'rgb(22, 118, 184)',sectionHeaderColor:'rgb(255, 255, 255)',bodyColor:'rgb(17, 24, 39)',labelColor:'rgb(55, 65, 81)',valueColor:'rgb(17, 24, 39)',gridBorderColor:'rgb(107, 135, 155)',writingLineColor:'rgb(17, 24, 39)',backdropPosition:'static',backdropOpacity:'1',backdropFilter:'none',backdropMargin:'0px',detailPosition:'static',detailOpacity:'1',detailFilter:'none'});
   expect(printLayout.top).toBeLessThanOrEqual(1);
   expect(printLayout.height).not.toBe('100vh');
   const pdf=await page.pdf({preferCSSPageSize:true,printBackground:true});
   expect(pdfPageCount(pdf)).toBe(1);
+  await testInfo.attach('normal-pm-work-order.pdf',{body:pdf,contentType:'application/pdf'});
+  const pdfWithoutBackgroundGraphics=await page.pdf({preferCSSPageSize:true,printBackground:false});
+  expect(pdfPageCount(pdfWithoutBackgroundGraphics)).toBe(1);
+  await testInfo.attach('normal-pm-work-order-no-background-graphics.pdf',{body:pdfWithoutBackgroundGraphics,contentType:'application/pdf'});
+  const qaPdfPath=process.env.MCC_PM_QA_PDF?.replace('{project}',testInfo.project.name);
+  if(qaPdfPath){await writeFile(qaPdfPath,pdf);await writeFile(qaPdfPath.replace(/\.pdf$/,'-no-background-graphics.pdf'),pdfWithoutBackgroundGraphics);}
 });
 
 test('shows the compact empty state when no preventive maintenance needs attention',async({page})=>{

@@ -3494,22 +3494,26 @@ tr:hover td {
   html, body { width: 100% !important; min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
   body > * { display: none !important; }
   body > .dashboard-pm-backdrop { display: block !important; }
-  .dashboard-pm-backdrop { position: static !important; inset: auto !important; width: auto !important; min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; transform: none !important; break-before: auto !important; page-break-before: auto !important; background: #fff !important; backdrop-filter: none !important; }
-  .dashboard-pm-detail { position: static !important; display: block !important; width: auto !important; max-height: none !important; min-height: 0 !important; height: auto !important; margin: 0 !important; overflow: visible !important; transform: none !important; break-before: auto !important; page-break-before: auto !important; padding: 0 !important; border: 0 !important; background: #fff !important; box-shadow: none !important; }
+  .dashboard-pm-backdrop { position: static !important; inset: auto !important; width: auto !important; min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; opacity: 1 !important; filter: none !important; mix-blend-mode: normal !important; transform: none !important; break-before: auto !important; page-break-before: auto !important; background: #fff !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  .dashboard-pm-detail { position: static !important; display: block !important; width: auto !important; max-height: none !important; min-height: 0 !important; height: auto !important; margin: 0 !important; overflow: visible !important; opacity: 1 !important; filter: none !important; mix-blend-mode: normal !important; transform: none !important; break-before: auto !important; page-break-before: auto !important; padding: 0 !important; border: 0 !important; background: #fff !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  .dashboard-pm-detail::before, .dashboard-pm-detail::after { display: none !important; content: none !important; }
   .dashboard-pm-detail > :not(.pm-work-order-print) { display: none !important; }
-  .pm-work-order-print { position: static !important; display: block !important; width: 100%; min-height: 0 !important; height: auto !important; margin: 0 !important; transform: none !important; break-before: auto !important; page-break-before: auto !important; color: #102438; background: #fff; font-family: Arial,Helvetica,sans-serif; font-size: 10.5pt; }
-  .pm-work-order-print header { padding: 14px 18px; color: #fff; background: #075b9d !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .pm-work-order-print header p { margin: 0 0 4px; color: #d9efff; font-size: 8pt; font-weight: 800; letter-spacing: .14em; }
+  .pm-work-order-print, .pm-work-order-print * { opacity: 1 !important; filter: none !important; mix-blend-mode: normal !important; transform: none !important; text-shadow: none !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+  .pm-work-order-print { position: static !important; display: block !important; width: 100%; min-height: 0 !important; height: auto !important; margin: 0 !important; break-before: auto !important; page-break-before: auto !important; color: #111827 !important; background: #fff !important; font-family: Arial,Helvetica,sans-serif; font-size: 10.5pt; }
+  .pm-work-order-print header { padding: 14px 18px; border: 1px solid #005a9c; color: #fff !important; background: #005a9c !important; }
+  .pm-work-order-print header p { margin: 0 0 4px; color: #fff !important; font-size: 8pt; font-weight: 800; letter-spacing: .14em; }
   .pm-work-order-print h1 { margin: 0; font-size: 21pt; }
-  .pm-work-order-number { margin: 13px 0; padding: 11px 14px; border: 2px solid #075b9d; color: #063a68; font-size: 13pt; font-weight: 800; }
+  .pm-work-order-number { margin: 13px 0; padding: 11px 14px; border: 2px solid #005a9c; color: #111827 !important; background: #fff !important; font-size: 13pt; font-weight: 900; }
   .pm-work-order-print section { margin-top: 10px; break-inside: avoid; }
-  .pm-work-order-print section h2 { margin: 0; padding: 6px 9px; color: #fff; background: #1976b8 !important; font-size: 11pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .pm-work-order-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #9bbbd3; }
-  .pm-work-order-grid p { min-height: 42px; margin: 0; padding: 7px 9px; border-right: 1px solid #c1d5e4; border-bottom: 1px solid #c1d5e4; color: #102438; }
+  .pm-work-order-print section h2 { margin: 0; padding: 6px 9px; border: 1px solid #005a9c; color: #fff !important; background: #1676b8 !important; font-size: 11pt; }
+  .pm-work-order-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #6b879b; background: #fff !important; }
+  .pm-work-order-grid p { min-height: 42px; margin: 0; padding: 7px 9px; border-right: 1px solid #6b879b; border-bottom: 1px solid #6b879b; color: #111827 !important; background: #fff !important; }
   .pm-work-order-grid p:nth-child(even) { border-right: 0; }
-  .pm-work-order-grid span { display: block; margin: 0 0 3px; color: #296187; font-size: 7.5pt; font-weight: 800; text-transform: uppercase; }
-  .pm-work-order-grid strong { display: block; margin: 0; color: #102438; font-size: 10pt; }
-  .pm-work-order-copy { min-height: 42px; margin: 0; padding: 9px; border: 1px solid #9bbbd3; color: #102438; white-space: pre-wrap; }
-  .pm-work-order-completion p { margin: 9px 10px; color: #102438; line-height: 1.25; }
+  .pm-work-order-grid span { display: block; margin: 0 0 3px; color: #374151 !important; font-size: 7.5pt; font-weight: 900; text-transform: uppercase; }
+  .pm-work-order-grid strong { display: block; margin: 0; color: #111827 !important; font-size: 10pt; }
+  .pm-work-order-copy { min-height: 42px; margin: 0; padding: 9px; border: 1px solid #6b879b; color: #111827 !important; background: #fff !important; white-space: pre-wrap; }
+  .pm-work-order-completion { border: 1px solid #6b879b; }
+  .pm-work-order-completion h2 { margin: -1px -1px 0 !important; }
+  .pm-work-order-completion p { margin: 9px 10px; color: #111827 !important; font-weight: 700; line-height: 1.25; }
 }
 
