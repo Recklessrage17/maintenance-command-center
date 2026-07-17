@@ -4,7 +4,8 @@ import { MccPillCard, MccStatusPill } from '../../components/MccPills';
 import { PM_UPDATED_EVENT } from '../machine-library/pmEvents';
 
 type RequisitionSummary = { requestedCount:number;orderedCount:number;receivedCount:number;canceledCount:number;activeCount:number };
-type DashboardCard = { title:string;value:string;note:string };
+export type DashboardRequisitionView = 'active'|'requested'|'ordered';
+type DashboardMetric = { view:DashboardRequisitionView;label:string;value:number;note:string;accentColor:string;variant:'info'|'warning'|'brand' };
 type PmStatus = 'Due Soon'|'Due Now'|'Past Due';
 type PmAlert = {
   id:number;assetId:number;assetNumber:string;assetName:string;brand:string;model:string;serialNumber:string;
@@ -58,13 +59,23 @@ function workOrderFilename(alert:PmAlert) {
   return `${token(alert.assetNumber)}_${token(alert.title)}_PM_Work_Order_${new Date().toISOString().slice(0,10)}`;
 }
 
-export function DashboardPage() {
+export function DashboardPage({onOpenRequisitions}:{onOpenRequisitions:(view:DashboardRequisitionView)=>void}) {
   const [requisitionSummary,setRequisitionSummary]=useState<RequisitionSummary>(emptyRequisitionSummary);
   const [pmAlerts,setPmAlerts]=useState<PmAlert[]>([]);
   const [pmLoading,setPmLoading]=useState(true);
   const [pmError,setPmError]=useState('');
   const [selectedPm,setSelectedPm]=useState<PmAlert|null>(null);
   const requestSequence=useRef(0);
+  const requisitionNavigationPending=useRef(false);
+
+  const loadRequisitionSummary=useCallback(async()=>{
+    try{
+      const response=await fetch('/api/requisitions/summary',{credentials:'include'});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error('Summary unavailable');
+      setRequisitionSummary({requestedCount:Number(data.requestedCount??0),orderedCount:Number(data.orderedCount??0),receivedCount:Number(data.receivedCount??0),canceledCount:Number(data.canceledCount??0),activeCount:Number(data.activeCount??0)});
+    }catch{setRequisitionSummary(emptyRequisitionSummary);}
+  },[]);
 
   const loadPmAlerts=useCallback(async()=>{
     const sequence=++requestSequence.current;
@@ -79,12 +90,13 @@ export function DashboardPage() {
   },[]);
 
   useEffect(()=>{
-    let mounted=true;
-    fetch('/api/requisitions/summary',{credentials:'include'}).then(response=>response.ok?response.json():Promise.reject(new Error('Summary unavailable'))).then(data=>{
-      if(mounted)setRequisitionSummary({requestedCount:Number(data.requestedCount??0),orderedCount:Number(data.orderedCount??0),receivedCount:Number(data.receivedCount??0),canceledCount:Number(data.canceledCount??0),activeCount:Number(data.activeCount??0)});
-    }).catch(()=>{if(mounted)setRequisitionSummary(emptyRequisitionSummary);});
-    return()=>{mounted=false;};
-  },[]);
+    void loadRequisitionSummary();
+    const refresh=()=>void loadRequisitionSummary();
+    const refreshWhenVisible=()=>{if(document.visibilityState==='visible')refresh();};
+    window.addEventListener('focus',refresh);
+    document.addEventListener('visibilitychange',refreshWhenVisible);
+    return()=>{window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refreshWhenVisible);};
+  },[loadRequisitionSummary]);
   useEffect(()=>{
     void loadPmAlerts();
     const refresh=()=>void loadPmAlerts();
@@ -95,17 +107,20 @@ export function DashboardPage() {
     return()=>{window.removeEventListener(PM_UPDATED_EVENT,refresh);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refreshWhenVisible);};
   },[loadPmAlerts]);
 
-  const dashboardCards=useMemo(()=>{
-    const cards:DashboardCard[]=[];
-    if(requisitionSummary.activeCount>0)cards.push({title:'Active Requisitions',value:String(requisitionSummary.activeCount),note:'Requested plus ordered MCC requisitions'});
-    if(requisitionSummary.requestedCount>0)cards.push({title:'Requested',value:String(requisitionSummary.requestedCount),note:'MCC requisitions waiting for order action'});
-    if(requisitionSummary.orderedCount>0)cards.push({title:'Ordered',value:String(requisitionSummary.orderedCount),note:'MCC requisitions ordered, not yet received'});
-    return cards;
-  },[requisitionSummary]);
+  const dashboardMetrics=useMemo<DashboardMetric[]>(()=>[
+    {view:'active',label:'Active Requisitions',value:requisitionSummary.activeCount,note:'Requested + ordered',accentColor:'#36e5d0',variant:'info'},
+    {view:'requested',label:'Requested',value:requisitionSummary.requestedCount,note:'Waiting for order action',accentColor:'#f6be3f',variant:'warning'},
+    {view:'ordered',label:'Ordered',value:requisitionSummary.orderedCount,note:'Ordered, not yet received',accentColor:'#7d8cff',variant:'brand'},
+  ],[requisitionSummary]);
+  function openRequisitions(view:DashboardRequisitionView) {
+    if(requisitionNavigationPending.current)return;
+    requisitionNavigationPending.current=true;
+    onOpenRequisitions(view);
+  }
   const counts=useMemo(()=>({dueSoon:pmAlerts.filter(alert=>alert.status==='Due Soon').length,dueNow:pmAlerts.filter(alert=>alert.status==='Due Now').length,pastDue:pmAlerts.filter(alert=>alert.status==='Past Due').length}),[pmAlerts]);
 
   return <div className="page-stack dashboard-page">
-    {dashboardCards.length>0&&<div className="card-grid dashboard-card-grid">{dashboardCards.map(card=><article className="mcc-card" key={card.title}><span>{card.title}</span><strong>{card.value}</strong><p>{card.note}</p></article>)}</div>}
+    <div className="dashboard-metric-grid" aria-label="Requisition summary">{dashboardMetrics.map(metric=><DashboardMetricPill key={metric.view} metric={metric} onActivate={()=>openRequisitions(metric.view)}/>)}</div>
     <section className="mcc-card dashboard-pm-panel glass-panel glass-panel--highlight" aria-labelledby="dashboard-pm-title">
       <div className="dashboard-pm-heading"><div><p className="eyebrow">Maintenance attention</p><h2 id="dashboard-pm-title">Preventive Maintenance Due</h2></div>{pmAlerts.length>0&&<p className="dashboard-pm-counts">PM Due: {counts.dueSoon} Due Soon · {counts.dueNow} Due Now · {counts.pastDue} Past Due</p>}</div>
       {pmLoading&&<p className="dashboard-pm-state">Loading preventive maintenance…</p>}
@@ -115,6 +130,14 @@ export function DashboardPage() {
     </section>
     {selectedPm&&<PmDetailModal alert={selectedPm} onClose={()=>setSelectedPm(null)}/>}
   </div>;
+}
+
+function DashboardMetricPill({metric,onActivate}:{metric:DashboardMetric;onActivate:()=>void}) {
+  return <MccPillCard className={`dashboard-metric-pill dashboard-metric-pill--${metric.view}`} variant={metric.variant} accentColor={metric.accentColor} onActivate={onActivate} ariaLabel={`${metric.label}: ${metric.value}. Open ${metric.label.toLowerCase()} view`}>
+    <span className="dashboard-metric-label">{metric.label}</span>
+    <span className="dashboard-metric-value-row"><strong>{metric.value.toLocaleString()}</strong><span className="dashboard-metric-arrow" aria-hidden="true">&rarr;</span></span>
+    <span className="dashboard-metric-note">{metric.note}</span>
+  </MccPillCard>;
 }
 
 function PmAlertCard({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {

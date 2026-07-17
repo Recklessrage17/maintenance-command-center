@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
-type StatusFilter = 'Requisition Staging' | 'All' | RequisitionStatus;
+type StatusFilter = 'Requisition Staging' | 'Active' | 'All' | RequisitionStatus;
 type Notice = { kind: 'success' | 'error'; text: string };
 
 type RequisitionLine = {
@@ -96,8 +96,21 @@ type StagingPdfPreview = { id:number; vendorName:string; lineCount:number; total
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const deleteRoles = new Set(['Admin','Manager']);
 const batchManageRoles = new Set(['Admin','Administrator','Manager','Maintenance Tech 3','Tier 3']);
-const filters: StatusFilter[] = ['Requisition Staging','Requested','Ordered','Received','Canceled','All'];
+const filters: StatusFilter[] = ['Requisition Staging','Active','Requested','Ordered','Received','Canceled','All'];
 const emptySummary: Summary = { requestedCount: 0, orderedCount: 0, receivedCount: 0, canceledCount: 0, activeCount: 0 };
+
+function filterFromLocation():StatusFilter {
+  const view=new URLSearchParams(window.location.search).get('view')?.trim().toLowerCase();
+  const mapped:Record<string,StatusFilter>={active:'Active',requested:'Requested',ordered:'Ordered',received:'Received',canceled:'Canceled',all:'All',staging:'Requisition Staging'};
+  return view&&mapped[view]?mapped[view]:'Requisition Staging';
+}
+
+function replaceFilterLocation(filter:StatusFilter) {
+  const url=new URL(window.location.href);
+  if(filter==='Requisition Staging')url.searchParams.delete('view');
+  else url.searchParams.set('view',filter.toLowerCase());
+  window.history.replaceState(null,'',`${url.pathname}${url.search}`);
+}
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
@@ -195,7 +208,7 @@ function blankStagingReviewForm(userFullName = ''): StagingReviewForm {
 export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: string; userFullName?: string }) {
   const [requisitions,setRequisitions]=useState<Requisition[]>([]);
   const [summary,setSummary]=useState<Summary>(emptySummary);
-  const [filter,setFilter]=useState<StatusFilter>('Requisition Staging');
+  const [filter,setFilter]=useState<StatusFilter>(()=>filterFromLocation());
   const [search,setSearch]=useState('');
   const [loading,setLoading]=useState(true);
   const [notice,setNotice]=useState<Notice|null>(null);
@@ -293,9 +306,9 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     setNotice(null);
     try {
       const params = new URLSearchParams();
-      params.set('status', nextFilter === 'All' ? 'all' : nextFilter);
+      if(nextFilter!=='Active')params.set('status', nextFilter === 'All' ? 'all' : nextFilter);
       if (nextShowDeleted) params.set('includeDeleted', 'true');
-      const query = `?${params.toString()}`;
+      const query = params.size ? `?${params.toString()}` : '';
       const result = await api<ListResponse>(`/api/requisitions${query}`);
       setRequisitions(result.requisitions ?? []);
       setSummary(result.summary ?? emptySummary);
@@ -308,6 +321,16 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   useEffect(()=>{ void loadRequisitions(); void loadInventoryOptions(); },[]);
+  useEffect(()=>{
+    const syncFilterFromLocation=()=>{
+      if(window.location.pathname.replace(/\/+$/,'')!=='/requisitions')return;
+      const nextFilter=filterFromLocation();
+      setFilter(nextFilter);
+      void loadRequisitions(nextFilter,false);
+    };
+    window.addEventListener('popstate',syncFilterFromLocation);
+    return()=>window.removeEventListener('popstate',syncFilterFromLocation);
+  },[]);
   useEffect(()=>{
     if (!previewing) {
       setPreviewUrl('');
@@ -399,6 +422,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
   function setNextFilter(nextFilter: StatusFilter) {
     setFilter(nextFilter);
+    replaceFilterLocation(nextFilter);
     void loadRequisitions(nextFilter, showDeleted);
   }
 
@@ -910,7 +934,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       </div>
 
       <nav className="requisition-view-pills" aria-label="Requisition status views">
-        {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" onClick={()=>setNextFilter(option)}>{option}</button>)}
+        {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" aria-pressed={filter===option} onClick={()=>setNextFilter(option)}>{option}</button>)}
       </nav>
 
       {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
