@@ -3,8 +3,9 @@ import { type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode
 export type MccSemanticVariant = 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'info' | 'muted' | 'contact' | 'link';
 
 function interactiveDescendant(target: EventTarget | null, currentTarget: HTMLElement) {
-  if (!(target instanceof HTMLElement) || target === currentTarget) return false;
-  return Boolean(target.closest('a,button,input,select,textarea,label,summary,[role="button"],[role="link"]'));
+  if (!(target instanceof Element) || target === currentTarget) return false;
+  const interactiveElement = target.closest('a,button,input,select,textarea,label,summary,[role="button"],[role="link"],[data-mcc-card-control]');
+  return Boolean(interactiveElement && interactiveElement !== currentTarget && currentTarget.contains(interactiveElement));
 }
 
 export function MccPillCard({children,onActivate,ariaLabel,accentColor='#44D7FF',variant='neutral',className=''}:{children:ReactNode;onActivate?:()=>void;ariaLabel?:string;accentColor?:string;variant?:MccSemanticVariant;className?:string}) {
