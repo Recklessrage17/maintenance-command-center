@@ -390,7 +390,7 @@ button.glass-pill--linked:focus-visible {
 }
 
 .mcc-pill-card > * { position: relative; z-index: 1; }
-.mcc-pill-card.is-interactive { cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.mcc-pill-card.is-interactive { cursor: pointer; touch-action: manipulation; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .mcc-pill-card.is-interactive:hover,
 .mcc-pill-card.is-interactive:focus-visible {
   transform: translateY(-1px);

@@ -3052,6 +3052,7 @@ tr:hover td {
     linear-gradient(180deg, rgba(255,255,255,.1), transparent 28%),
     linear-gradient(100deg, transparent 0 8%, color-mix(in srgb, var(--brand-color) 8%, transparent) 9%, transparent 22% 72%, rgba(255,180,95,.035));
   opacity: .62;
+  pointer-events: none;
 }
 
 .machine-asset-card::after {
@@ -3083,6 +3084,25 @@ tr:hover td {
     0 22px 46px rgba(0,0,0,.32),
     0 0 0 1px rgba(54,229,170,.44) inset,
     0 0 28px rgba(54,229,170,.22);
+}
+
+.machine-pm-summary-control {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.machine-pm-summary-control:focus-visible {
+  outline: 2px solid rgba(68,215,255,.72);
+  outline-offset: 2px;
 }
 
 .machine-card-head {

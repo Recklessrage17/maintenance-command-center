@@ -243,6 +243,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const [replacement,setReplacement]=useState<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>(null);
   const fileRef = useRef<HTMLInputElement|null>(null);
   const listScrollPositionRef = useRef(0);
+  const openingAssetIdRef = useRef<number|null>(null);
   const brands = useMemo(()=>[...new Set(assets.map(asset=>asset.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[assets]);
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
@@ -263,12 +264,14 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   function continueAddFromSetup() { setEditing(null); setForm({...blankAssetForm,...setupDraft}); setShowSetup(false); setShowEditor(true); }
   function openEdit(asset: MachineAsset) { setEditing(asset); setForm(assetToForm(asset)); setShowEditor(true); }
   function openDetail(asset: MachineAsset) {
-    if (detailAsset?.id===asset.id) return;
+    if (openingAssetIdRef.current===asset.id) return;
+    openingAssetIdRef.current=asset.id;
     listScrollPositionRef.current=window.scrollY;
     setDetailAsset(asset);
   }
   function closeDetail() {
     const listScrollPosition=listScrollPositionRef.current;
+    openingAssetIdRef.current=null;
     setDetailAsset(null);
     window.requestAnimationFrame(()=>window.scrollTo({top:listScrollPosition,left:0,behavior:'auto'}));
   }
@@ -403,7 +406,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
             <div className="machine-pill-card-age"><span>Year {asset.machineYear || 'Unknown'}</span><span aria-hidden="true">&bull;</span><strong>Age {machineYearAge(asset.machineYear)}</strong></div>
             <div className="machine-card-summary-actions">
               <button className="secondary-button compact-button machine-barrel-screw-logs-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Barrel &amp; Screw Logs</button>
-              {asset.pmSummary&&<MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill>}
+              {asset.pmSummary&&<button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button>}
             </div>
             <MachineHistoryPreview records={asset.historyPreview ?? []} onOpen={()=>void loadLogs(asset)} />
           </MccPillCard>
