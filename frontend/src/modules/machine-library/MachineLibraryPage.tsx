@@ -1,6 +1,7 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
 import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, RECORD_LOGS_UPDATED_EVENT, loadMeasurementRecordLogs, measurementRecordIsImage, measurementRecordIsPdf, readMeasurementRecordFile, type MeasurementLogEntry, uploadMeasurementRecordFiles } from './MeasurementInspectionLogsTools';
 import { MachineComponentImageCard } from './MachineComponentImageCard';
 import { MaintenancePhotoReview, prepareMaintenancePhoto } from './MaintenancePhotoReview';
@@ -118,6 +119,12 @@ function machineStatusLabel(status: string) {
   const normalized = status || 'active';
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
+function machineStatusVariant(status: string): MccSemanticVariant {
+  if (status === 'active') return 'success';
+  if (status === 'down' || status === 'removed') return 'danger';
+  if (status === 'disabled') return 'muted';
+  return 'info';
+}
 function machineSummaryStatusClass(status: string) {
   if (status === 'active') return 'status-active';
   if (status === 'down') return 'status-down';
@@ -146,9 +153,6 @@ function injectionSetupLabel(asset: Pick<MachineAsset, 'hasDoubleShotInjection' 
   if (asset.hasDoubleShotInjection) return 'Double Shot';
   if (asset.hasPlungerInjection) return 'Plunger';
   return '';
-}
-function componentSummary(type: string, date: string) {
-  return `${type || '-'} / ${ageYears(date)}`;
 }
 function effectiveCondition(rebuildRepaired: boolean, status: ConditionStatus | string): ConditionStatus {
   if (rebuildRepaired) return 'rebuilt_repaired';
@@ -358,54 +362,27 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         </section>
         <div className={`machine-card-grid ${assets.length === 1 ? 'single-result' : 'multi-results'}`}>
         {assets.map(asset=>(
-          <article className={`machine-asset-card ${highlightedAssets.has(asset.assetNumber) ? 'machine-import-highlight' : ''} ${isEngelBrand(asset.brand) ? 'machine-brand-engel' : ''}`} style={{'--brand-color':safeCssHex(asset.brandColorHex)} as CSSProperties} key={asset.id} role="button" tabIndex={0} aria-label={`View details for ${asset.assetNumber}`} onClick={()=>openDetail(asset)} onKeyDown={event=>{ if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(asset); } }}>
-            <div className="machine-card-head">
-              <button className="machine-asset-number" type="button" onClick={event=>{ event.stopPropagation(); void loadLogs(asset); }}>{asset.assetNumber}</button>
-              {asset.status === 'active'
-                ? <span className="machine-status-badge status-active" title="Active" aria-label="Active"><span className="status-pulse-dot" /></span>
-                : <span className={`machine-status-badge status-${asset.status}`}>{machineStatusLabel(asset.status)}</span>}
-            </div>
-            <div className="machine-card-title">
-              <div className="machine-card-brand-row">
-                <strong className="machine-card-brand-name">{asset.brand || 'Unknown'}</strong>
-                <span className="machine-age-pill">Year {asset.machineYear || 'Unknown'} &bull; Age {machineYearAge(asset.machineYear)}</span>
+          <MccPillCard className={`machine-asset-card${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
+            <div className="machine-pill-card-heading">
+              <div className="machine-pill-card-title">
+                <span className="machine-asset-number-pill">{asset.assetNumber}</span>
+                <strong className="machine-card-brand-name">{asset.brand || 'Unknown brand'}</strong>
               </div>
-              <div className="machine-card-identity">
-                <div><span>Model:</span><strong>{asset.model || '-'}</strong></div>
-                <div><span>Serial #:</span><strong>{asset.serialNumber || '-'}</strong></div>
-              </div>
+              <MccStatusPill variant={machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.status}`}>{machineStatusLabel(asset.status)}</MccStatusPill>
             </div>
-            <dl className="machine-spec-grid">
-              <div><dt>Tonnage</dt><dd>{asset.tonnage || '-'}</dd></div><div><dt>Shot Size</dt><dd>{displayShotSize(asset.shotSizeOz)} oz</dd></div><div><dt>Barrel</dt><dd>{asset.barrelDiameter || '-'}</dd></div><div><dt>Power</dt><dd>{asset.powerType || '-'}</dd></div>
-            </dl>
-            <div className="machine-wear-grid">
-              {injectionSetupLabel(asset)&&<span className="machine-setup-badge">{injectionSetupLabel(asset)}</span>}
-              {!asset.hasDoubleShotInjection&&!asset.hasPlungerInjection&&<>
-                <ConditionBadge label="Screw" status={effectiveCondition(asset.screwRebuildRepaired, asset.screwConditionStatus)} />
-                <ConditionBadge label="Barrel" status={effectiveCondition(asset.barrelRebuildRepaired, asset.barrelConditionStatus)} />
-                <div><span>Screw</span><strong>{asset.screwInstalledDate || '-'}</strong></div>
-                <div><span>Barrel</span><strong>{asset.barrelInstalledDate || '-'}</strong></div>
-                <div><span>Tip</span><strong>{asset.screwTipInstalledDate || '-'}</strong></div>
-                <div><span>End Cap</span><strong>{asset.barrelEndCapInstalledDate || '-'}</strong></div>
-              </>}
-              {asset.hasDoubleShotInjection&&<>
-                <div><span>U1 Screw</span><strong>{componentSummary(asset.screwType, asset.screwInstalledDate)}</strong></div>
-                <div><span>U1 Barrel</span><strong>{componentSummary(asset.barrelDiameter, asset.barrelInstalledDate)}</strong></div>
-                <div><span>U2 Screw</span><strong>{componentSummary(asset.screw2Type, asset.screw2InstalledDate)}</strong></div>
-                <div><span>U2 Barrel</span><strong>{componentSummary(asset.barrel2Diameter, asset.barrel2InstalledDate)}</strong></div>
-              </>}
-              {asset.hasPlungerInjection&&<>
-                <div><span>Plunger</span><strong>{componentSummary(asset.plungerType || asset.plungerDiameter, asset.plungerInstalledDate)}</strong></div>
-                <div><span>Plunger Barrel</span><strong>{componentSummary(asset.plungerBarrelType || asset.plungerBarrelDiameter, asset.plungerBarrelInstalledDate)}</strong></div>
-              </>}
+            <div className="machine-pill-card-metrics">
+              <MccMetricPill label="Barrel Size" value={asset.barrelDiameter || '-'} variant="brand" />
+              <MccMetricPill label="Model" value={asset.model || '-'} />
+              <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
             </div>
+            <div className="machine-pill-card-age"><span>Year {asset.machineYear || 'Unknown'}</span><span aria-hidden="true">&bull;</span><strong>Age {machineYearAge(asset.machineYear)}</strong></div>
             <div className="machine-card-actions">
               <button className="primary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); openEdit(asset); }}>{canEdit?'View/Edit':'View'}</button>
               <button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Record Logs</button>
               <button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); void loadLogs(asset); }}>History</button>
               {canDelete&&asset.status!=='disabled'&&<button className="secondary-button compact-button" type="button" onClick={event=>{ event.stopPropagation(); void disableAsset(asset); }}>Disable</button>}
             </div>
-          </article>
+          </MccPillCard>
         ))}
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}
         </div>

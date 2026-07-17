@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { MccContactPill, MccLinkPill, MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
 import {
   canonicalCountryValue,
   canonicalUsStateValue,
@@ -306,14 +307,13 @@ function VendorWebsiteLink({websiteUrl,compact=false}:{websiteUrl:string;compact
   const origin = websiteOrigin(safeUrl);
   const label = origin.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
   return (
-    <a className={`vendor-website-link${compact ? ' compact' : ''}`} href={safeUrl} target="_blank" rel="noopener noreferrer" title={`Open ${label}`}>
-      {!faviconFailed&&origin ? (
+    <MccLinkPill className={`vendor-website-pill${compact ? ' compact' : ''}`} href={safeUrl} title={`Open ${label}`} ariaLabel={`Open ${label}`} leadingIcon={!faviconFailed&&origin ? (
         <img className="vendor-favicon" src={`${origin}/favicon.ico`} alt="" onError={()=>setFaviconFailed(true)} />
       ) : (
         <span className="vendor-favicon-fallback" aria-hidden="true">{label.slice(0,1).toUpperCase()}</span>
-      )}
+      )}>
       <span>{label || 'Website'}</span>
-    </a>
+    </MccLinkPill>
   );
 }
 
@@ -629,29 +629,30 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
 function VendorCard({vendor,onView,onEdit,onDelete,onContacts,onEmailCopied}:{vendor:VendorRecord;onView:()=>void;onEdit:()=>void;onDelete:()=>void;onContacts:()=>void;onEmailCopied:(email:string)=>void}) {
   const statusClass = vendor.deleted ? 'vendor-status-deleted' : vendor.isActive ? 'vendor-status-enabled' : 'vendor-status-disabled';
   const mainPhone = formatPhone(vendor.phoneType, vendor.phoneNumber, vendor.phoneExt);
-  const contactText = vendor.primaryContactName ? `${contactCountText(vendor.contactCount)} - Primary: ${vendor.primaryContactName}` : contactCountText(vendor.contactCount);
+  const primaryContact = vendor.contacts?.find(contact=>contact.isPrimary) ?? vendor.contacts?.[0];
+  const statusVariant: MccSemanticVariant = vendor.deleted ? 'danger' : vendor.isActive ? 'success' : 'warning';
   return (
-    <article className={`vendor-card${vendor.deleted ? ' deleted' : !vendor.isActive ? ' disabled' : ''}`}>
+    <MccPillCard className={`vendor-card${vendor.deleted ? ' deleted' : !vendor.isActive ? ' disabled' : ''}`} onActivate={onView} ariaLabel={`View ${vendor.companyName}`} accentColor={vendor.deleted?'#ff758a':!vendor.isActive?'#f6be3f':'#44d7ff'}>
       <div className="vendor-card-heading">
-        <button className="vendor-company-pill" type="button" onClick={onView}>{vendor.companyName}</button>
-        {(vendor.deleted||!vendor.isActive)&&<span className={`status-pill disabled ${statusClass}`}>{vendor.status}</span>}
+        <span className="vendor-pill-card-name">{vendor.companyName}</span>
+        {(vendor.deleted||!vendor.isActive)&&<MccStatusPill variant={statusVariant} className={statusClass}>{vendor.status}</MccStatusPill>}
       </div>
       {vendor.deleted&&<p className="vendor-disabled-warning deleted">Vendor record deleted.</p>}
       {!vendor.deleted&&!vendor.isActive&&<p className="vendor-disabled-warning">Company no longer uses this vendor.</p>}
-      <VendorWebsiteLink websiteUrl={vendor.websiteUrl} />
-      <div className="vendor-card-detail-grid">
-        <div><span>Main Phone</span><strong>{mainPhone || '-'}</strong></div>
-        <button className="vendor-contact-count-box" type="button" onClick={onContacts} title="Open vendor contacts"><span>Contacts</span><strong>{contactText}</strong></button>
-        <button className="vendor-email-box" type="button" onClick={()=>vendor.contactEmail&&copyText(vendor.contactEmail).then(ok=>{ if(ok) onEmailCopied(vendor.contactEmail); })} title={vendor.contactEmail ? 'Click to copy email' : 'No general email saved'}><span>General Email</span><strong>{vendor.contactEmail || '-'}</strong></button>
-        <div><span>City/State</span><strong>{cityState(vendor) || '-'}</strong></div>
-        <div><span>Country</span><strong>{vendor.country || '-'}</strong></div>
+      {vendor.websiteUrl&&<div className="vendor-card-website-row"><VendorWebsiteLink websiteUrl={vendor.websiteUrl} /></div>}
+      <div className="vendor-pill-card-metrics">
+        <MccMetricPill label="Main Phone" value={mainPhone || '-'} />
+        <MccMetricPill label="General Email" value={<EmailCopyButton email={vendor.contactEmail} compact onCopied={onEmailCopied} />} />
+        <MccMetricPill label="City / State" value={cityState(vendor) || '-'} />
+        <MccMetricPill label="Country" value={vendor.country || '-'} />
       </div>
+      <button className="vendor-contact-summary-button" type="button" onClick={onContacts} title="Open vendor contacts"><MccContactPill><span>{contactCountText(vendor.contactCount)}</span>{vendor.primaryContactName&&<strong>Primary Contact: {vendor.primaryContactName}{primaryContact?.contactTitle ? ` · ${primaryContact.contactTitle}` : ''}</strong>}</MccContactPill></button>
       <div className="vendor-card-actions">
         <button className="secondary-button compact-button" type="button" onClick={onView}>View</button>
         <button className="secondary-button compact-button" type="button" onClick={onEdit}>Edit</button>
         <button className="danger-button compact-button" type="button" onClick={onDelete} disabled={vendor.deleted}>Delete</button>
       </div>
-    </article>
+    </MccPillCard>
   );
 }
 

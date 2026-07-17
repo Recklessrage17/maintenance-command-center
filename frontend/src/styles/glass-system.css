@@ -346,6 +346,136 @@ button.glass-pill--linked:focus-visible {
   outline-offset: 2px;
 }
 
+/* Shared compact pill-card system for asset, vendor, contact, and inventory surfaces. */
+.mcc-pill-card {
+  --mcc-pill-accent: #44d7ff;
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--mcc-pill-accent) 56%, rgba(214,238,248,.24));
+  border-radius: 18px;
+  color: var(--glass-text);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.07), transparent 28%),
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--mcc-pill-accent) 10%, transparent), transparent 34%),
+    linear-gradient(145deg, rgba(23,42,56,.82), rgba(4,13,25,.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.12),
+    0 0 18px color-mix(in srgb, var(--mcc-pill-accent) 13%, transparent),
+    0 12px 26px rgba(0,0,0,.22);
+  backdrop-filter: blur(12px) saturate(115%);
+}
+
+.mcc-pill-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(112deg, transparent 0 10%, rgba(255,255,255,.055) 18%, transparent 34% 100%);
+  pointer-events: none;
+}
+
+.mcc-pill-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mcc-pill-accent) 90%, #fff 10%), color-mix(in srgb, var(--mcc-pill-accent) 34%, transparent));
+  box-shadow: 0 0 13px color-mix(in srgb, var(--mcc-pill-accent) 25%, transparent);
+  pointer-events: none;
+}
+
+.mcc-pill-card > * { position: relative; z-index: 1; }
+.mcc-pill-card.is-interactive { cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.mcc-pill-card.is-interactive:hover,
+.mcc-pill-card.is-interactive:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 78%, #fff 22%);
+  outline: 2px solid color-mix(in srgb, var(--mcc-pill-accent) 62%, rgba(255,255,255,.34));
+  outline-offset: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.16),
+    0 0 24px color-mix(in srgb, var(--mcc-pill-accent) 20%, transparent),
+    0 16px 32px rgba(0,0,0,.27);
+}
+
+.mcc-status-pill,
+.mcc-contact-pill {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid rgba(143,205,233,.42);
+  border-radius: 999px;
+  color: #e4f7ff;
+  background: rgba(7,35,51,.75);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 0 12px rgba(68,215,255,.09);
+  font-size: .74rem;
+  font-weight: 900;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.mcc-status-pill--success { color: #d9ffed; border-color: rgba(54,229,170,.68); background: rgba(18,97,71,.52); box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 0 15px rgba(54,229,170,.18); }
+.mcc-status-pill--warning,
+.mcc-status-pill--contact,
+.mcc-contact-pill { color: #fff1ba; border-color: rgba(246,190,63,.68); background: rgba(112,75,18,.46); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 0 15px rgba(246,190,63,.17); }
+.mcc-status-pill--danger { color: #ffd7de; border-color: rgba(255,91,116,.72); background: rgba(126,32,48,.52); box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 15px rgba(255,91,116,.18); }
+.mcc-status-pill--info,
+.mcc-status-pill--link { color: #dffaff; border-color: rgba(68,215,255,.7); background: rgba(5,61,86,.55); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 0 15px rgba(68,215,255,.17); }
+.mcc-status-pill--muted { color: #d5dfe4; border-color: rgba(178,194,203,.42); background: rgba(74,81,88,.5); box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 0 12px rgba(255,91,116,.08); }
+.mcc-status-pill--brand { color: color-mix(in srgb, var(--mcc-pill-accent) 74%, #fff 26%); border-color: color-mix(in srgb, var(--mcc-pill-accent) 66%, transparent); background: color-mix(in srgb, var(--mcc-pill-accent) 17%, rgba(5,23,35,.82)); box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 14px color-mix(in srgb, var(--mcc-pill-accent) 18%, transparent); }
+
+.mcc-link-pill {
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid rgba(54,229,170,.7);
+  border-radius: 999px;
+  color: #deffef;
+  background: linear-gradient(180deg, rgba(31,132,94,.58), rgba(10,58,44,.68));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 0 17px rgba(54,229,170,.2);
+  font-size: .78rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.mcc-link-pill:hover,
+.mcc-link-pill:focus-visible { color: #fff; border-color: rgba(126,255,205,.94); outline: 2px solid rgba(54,229,170,.68); outline-offset: 2px; box-shadow: inset 0 1px 0 rgba(255,255,255,.26), 0 0 23px rgba(54,229,170,.28); transform: translateY(-1px); }
+.mcc-link-pill-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.mcc-metric-pill {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid rgba(143,205,233,.24);
+  border-radius: 12px;
+  background: rgba(3,17,32,.47);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.075);
+}
+.mcc-metric-pill > span { margin: 0 !important; color: #92cce0 !important; font-size: .63rem !important; font-weight: 900 !important; line-height: 1 !important; text-transform: uppercase; }
+.mcc-metric-pill > strong { min-width: 0; color: #f0fbff; font-size: .82rem; line-height: 1.22; overflow-wrap: anywhere; }
+.mcc-metric-pill--contact { border-color: rgba(246,190,63,.43); background: rgba(91,61,16,.24); }
+.mcc-metric-pill--success { border-color: rgba(54,229,170,.34); background: rgba(18,97,71,.2); }
+
 /* Modal backdrop and shell remain separate so portals can reuse the shell. */
 .glass-modal-backdrop {
   position: fixed;
@@ -800,7 +930,9 @@ button.glass-attachment:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .glass-button,
   .glass-input,
-  .glass-attachment {
+  .glass-attachment,
+  .mcc-pill-card,
+  .mcc-link-pill {
     scroll-behavior: auto;
     transition: none;
   }
@@ -812,6 +944,11 @@ button.glass-attachment:focus-visible {
   button.glass-attachment:focus-visible {
     transform: none;
   }
+
+  .mcc-pill-card.is-interactive:hover,
+  .mcc-pill-card.is-interactive:focus-visible,
+  .mcc-link-pill:hover,
+  .mcc-link-pill:focus-visible { transform: none; }
 }
 
 @media (forced-colors: active) {
@@ -823,7 +960,12 @@ button.glass-attachment:focus-visible {
   .glass-input,
   .glass-empty-state,
   .glass-attachment,
-  .glass-file-icon {
+  .glass-file-icon,
+  .mcc-pill-card,
+  .mcc-status-pill,
+  .mcc-contact-pill,
+  .mcc-link-pill,
+  .mcc-metric-pill {
     border-color: CanvasText;
     color: CanvasText;
     background: Canvas;

@@ -421,6 +421,20 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-spec-grid dd { margin: 0; color: #f3fbff; font-size: .88rem; font-weight: 900; line-height: 1.25; overflow-wrap: normal; word-break: normal; hyphens: none; }
 .machine-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .machine-card-actions .compact-button { width: auto; }
+.machine-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+.machine-card-grid.single-result { grid-template-columns: minmax(min(300px, 100%), 430px); }
+.machine-card-grid.single-result .machine-asset-card.mcc-pill-card { max-width: 430px; }
+.machine-asset-card.mcc-pill-card { width: 100%; gap: 9px; padding: 12px; border-radius: 18px; }
+.machine-pill-card-heading { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.machine-pill-card-title { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.machine-asset-number-pill { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; min-height: 32px; padding: 5px 11px; border: 1px solid color-mix(in srgb, var(--mcc-pill-accent) 66%, rgba(255,255,255,.18)); border-radius: 999px; color: #f7fdff; background: color-mix(in srgb, var(--mcc-pill-accent) 17%, rgba(4,18,34,.76)); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 0 14px color-mix(in srgb, var(--mcc-pill-accent) 16%, transparent); font-size: .96rem; font-weight: 1000; line-height: 1.15; overflow-wrap: anywhere; }
+.machine-pill-card-title .machine-card-brand-name { color: color-mix(in srgb, var(--mcc-pill-accent) 84%, #fff 16%); font-size: .94rem; text-shadow: 0 0 10px color-mix(in srgb, var(--mcc-pill-accent) 23%, transparent); }
+.machine-card-status { flex: 0 0 auto; }
+.machine-pill-card-metrics { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 6px; }
+.machine-pill-card-age { min-width: 0; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 2px 3px; color: #bcdce9; font-size: .78rem; font-weight: 850; }
+.machine-pill-card-age strong { color: #fff1b8; }
+.machine-asset-card.mcc-pill-card .machine-card-actions { padding-top: 2px; gap: 6px; }
+.machine-asset-card.mcc-pill-card .machine-card-actions .compact-button { flex: 1 1 96px; min-height: 44px; padding-inline: 9px; border-radius: 999px; }
 .machine-empty-card { min-height: 120px; grid-column: 1 / -1; }
 .machine-modal { width: min(1120px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 14px; }
 .machine-small-modal, .machine-color-modal, .machine-logs-modal, .machine-setup-modal, .machine-import-result-modal { width: min(680px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 14px; }
@@ -1010,6 +1024,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .plain-part-number { display: inline !important; margin: 0 !important; color: #f3fbff !important; font-weight: 800 !important; }
 .part-number-stack { display: grid; justify-items: start; gap: 5px; min-width: 0; }
 .inventory-part-info-link.vendor-website-link.compact { max-width: 100%; padding: 4px 8px; }
+.part-number-stack { justify-items: center; }
+.inventory-part-info-link.mcc-link-pill { max-width: 100%; min-height: 44px; padding: 6px 11px; }
+.inventory-part-info-link.mcc-link-pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .part-number-link, .link-badge { display: inline-flex; align-items: center; gap: 7px; width: fit-content; border: 1px solid rgba(68, 215, 255, 0.42); border-radius: 999px; color: #bff3ff; background: linear-gradient(135deg, rgba(5, 61, 86, 0.72), rgba(18, 97, 71, 0.46)); font-size: .82rem; font-weight: 900; text-decoration: none; white-space: nowrap; box-shadow: 0 0 16px rgba(68, 215, 255, 0.16), inset 0 1px 0 rgba(255,255,255,0.14); }
 .part-number-link { position: relative; max-width: 132px; overflow: hidden; padding: 4px 8px; text-overflow: ellipsis; }
 .part-number-link:hover { border-color: rgba(54, 229, 170, 0.72); color: #dcfff0; box-shadow: 0 0 20px rgba(54, 229, 170, 0.2), inset 0 1px 0 rgba(255,255,255,0.18); }
@@ -1020,6 +1037,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inventory-cost-cell { color: #dff7ff; font-weight: 900; }
 .inventory-status-stack { display: flex; align-items: flex-start; gap: 5px; flex-wrap: nowrap; max-width: 100%; overflow: hidden; }
 .inventory-status-stack .status-pill { padding: 4px 7px; font-size: .68rem; line-height: 1.1; }
+.inventory-status-cell { text-align: center; }
+.inventory-status-stack { width: 100%; align-items: center; justify-content: center; overflow: visible; }
+.inventory-status-stack .mcc-status-pill { min-width: 92px; min-height: 30px; padding: 5px 9px; font-size: .68rem; white-space: nowrap; }
 .inventory-row-selected td { background: rgba(68, 215, 255, 0.075); box-shadow: inset 3px 0 0 rgba(68, 215, 255, 0.74); }
 .inventory-row-new td { background: rgba(18, 97, 71, 0.18); box-shadow: inset 3px 0 0 rgba(54, 229, 170, 0.82), inset 0 0 0 999px rgba(54, 229, 170, 0.018); }
 .inventory-row-new.inventory-row-selected td { background: rgba(18, 97, 71, 0.24); box-shadow: inset 3px 0 0 rgba(54, 229, 170, 0.9), inset 0 0 0 999px rgba(68, 215, 255, 0.03); }
@@ -1100,6 +1120,21 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .vendor-card-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .vendor-card-actions .compact-button { width: 100%; min-height: 30px; padding: 0 7px; border-radius: 8px; font-size: .72rem; }
 .vendor-card-actions .danger-button:disabled { cursor: not-allowed; opacity: .45; }
+.vendor-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+.vendor-card.mcc-pill-card { gap: 9px; padding: 12px; border-radius: 18px; }
+.vendor-pill-card-name { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; min-height: 34px; padding: 6px 11px; border: 1px solid rgba(68,215,255,.5); border-radius: 999px; color: #effcff; background: rgba(5,61,86,.54); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 0 14px rgba(68,215,255,.13); font-size: .94rem; font-weight: 1000; line-height: 1.15; overflow-wrap: anywhere; }
+.vendor-card-website-row { min-width: 0; display: flex; justify-content: center; }
+.vendor-website-pill { max-width: min(100%, 300px); }
+.vendor-website-pill > span:not(.vendor-favicon-fallback) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vendor-pill-card-metrics { min-width: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.vendor-contact-summary-button { appearance: none; width: 100%; min-width: 0; min-height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.vendor-contact-summary-button .mcc-contact-pill { width: 100%; min-height: 44px; justify-content: flex-start; flex-wrap: wrap; padding: 7px 11px; }
+.vendor-contact-summary-button .mcc-contact-pill span { flex: 0 0 auto; }
+.vendor-contact-summary-button .mcc-contact-pill strong { min-width: 0; color: #fff5ce; overflow-wrap: anywhere; }
+.vendor-contact-summary-button:hover .mcc-contact-pill,
+.vendor-contact-summary-button:focus-visible .mcc-contact-pill { border-color: rgba(255,216,114,.88); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 0 20px rgba(246,190,63,.24); }
+.vendor-contact-summary-button:focus-visible { outline: 2px solid rgba(246,190,63,.68); outline-offset: 2px; }
+.vendor-card.mcc-pill-card .vendor-card-actions .compact-button { min-height: 44px; border-radius: 999px; }
 .vendor-modal { width: min(820px, 100%); max-height: var(--mcc-modal-available-height); min-height: 0; overflow-y: auto; display: grid; gap: 16px; border-radius: 14px; }
 .vendor-detail-modal { width: min(760px, 100%); }
 .vendor-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -1309,6 +1344,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (max-width: 520px) { .mcc-main { padding: 138px 12px 12px; } .inventory-focus-shell .mcc-main { padding: 138px 10px 10px; } .mcc-card { padding: 14px; border-radius: 14px; } .card-grid, .requisition-summary-grid, .history-filter-card { grid-template-columns: 1fr; } .page-heading h2, .mcc-header h1 { font-size: 1.25rem; } .primary-button, .secondary-button, .link-button, .danger-button { width: 100%; } .header-actions { width: 100%; } .user-pill { width: 100%; } .history-table-toolbar .compact-button, .requisition-selection-toolbar .compact-button { flex: 1 1 100%; } }
 
 @media (max-width: 760px) {
+  .machine-card-grid, .vendor-card-grid { grid-template-columns: minmax(0, 1fr); }
+  .machine-card-grid.single-result .machine-asset-card.mcc-pill-card { max-width: none; }
+  .machine-pill-card-heading, .vendor-card-heading { align-items: flex-start; flex-wrap: wrap; }
+  .machine-asset-card.mcc-pill-card .machine-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .machine-asset-card.mcc-pill-card .machine-card-actions .compact-button { width: 100%; }
   .vendor-contact-accordion-toggle { align-items: flex-start; flex-wrap: wrap; }
   .vendor-contact-name-pill { max-width: calc(100% - 38px); }
   .vendor-contact-title-summary { flex-basis: calc(100% - 52px); order: 3; padding-left: 3px; }
@@ -1317,6 +1357,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .vendor-contact-expanded-actions { align-items: stretch; flex-direction: column; }
   .vendor-contact-expanded-actions .vendor-primary-toggle, .vendor-contact-expanded-actions .link-button { width: 100%; justify-content: center; }
   .searchable-combobox-menu { max-height: 220px; }
+}
+@media (max-width: 520px) {
+  .machine-pill-card-metrics, .vendor-pill-card-metrics { grid-template-columns: minmax(0, 1fr); }
+  .machine-asset-card.mcc-pill-card .machine-card-actions, .vendor-card-actions { grid-template-columns: minmax(0, 1fr); }
+  .vendor-website-row .mcc-link-pill { width: 100%; max-width: 100%; }
 }
 @media (max-width: 620px) { .share-card-heading, .share-url-row { grid-template-columns: 1fr; } .share-card-heading { display: grid; } .share-url-row .compact-button, .share-card-heading .compact-button { justify-self: start; } }
 @media (max-width: 480px) { .command-launcher { left: 8px; right: 8px; top: 8px; gap: 8px; } .command-brand { flex: 1 1 auto; min-width: 0; min-height: 54px; padding-left: 14px; } .command-brand .mcc-brand-mark > span { font-size: .56rem; } .command-launcher-button { width: 58px; min-height: 58px; border-radius: 16px; } .launcher-gear { width: 31px; height: 31px; font-size: 1.16rem; } .command-menu { top: 66px; max-height: calc(100vh - 82px); padding: 12px; border-radius: 18px; } .command-menu-heading { padding-bottom: 11px; } .command-menu-user { align-items: stretch; flex-wrap: wrap; } .command-menu-user-main { flex: 1 1 180px; } .command-menu-item { min-height: 58px; border-radius: 14px; } .mcc-page-topbar { top: 72px; left: 8px; right: 8px; } .mcc-page-tooltip { top: 124px; left: 8px; right: 8px; } .mcc-main, .inventory-focus-shell .mcc-main { padding: 132px 8px 10px; } .page-stack { gap: 12px; } .page-heading { min-height: auto; padding: 14px 14px 14px 16px; border-radius: 0 14px 14px 0; } .auth-shell { padding: 12px; } .auth-card { padding: 18px; border-radius: 20px; } .inventory-table-card, .requisitions-table-card { padding: 10px; } .modal-backdrop { padding: var(--mcc-topbar-safe-offset) 10px var(--mcc-modal-bottom-safe); } .inventory-modal, .requisition-modal { max-height: var(--mcc-modal-available-height); } }

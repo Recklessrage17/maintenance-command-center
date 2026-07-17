@@ -1,4 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { MccContactPill, MccStatusPill } from '../../components/MccPills';
 
 type ComboboxOption = {
   value: string;
@@ -259,9 +260,9 @@ export function ContactAccordion({expanded,onToggle,name,title,isPrimary,childre
   return (
     <article className={`vendor-contact-accordion${expanded ? ' is-expanded' : ''}${className ? ` ${className}` : ''}`}>
       <button className="vendor-contact-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={onToggle}>
-        <span className="vendor-contact-name-pill">{name.trim() || 'New Contact'}</span>
+        <MccContactPill className="vendor-contact-name-pill">{name.trim() || 'New Contact'}</MccContactPill>
         {title.trim()&&<span className="vendor-contact-title-summary">{title}</span>}
-        {isPrimary&&<span className="status-pill vendor-contact-primary-badge">Primary</span>}
+        {isPrimary&&<MccStatusPill variant="contact" className="vendor-contact-primary-badge">Primary</MccStatusPill>}
         <span className="vendor-contact-chevron" aria-hidden="true">⌄</span>
       </button>
       {expanded&&<div className="vendor-contact-accordion-panel" id={panelId}>{children}</div>}

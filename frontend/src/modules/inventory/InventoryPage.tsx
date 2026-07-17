@@ -1,5 +1,6 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
+import { MccLinkPill, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
 import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
@@ -252,6 +253,20 @@ function previewPdfPath(requisition: CreatedRequisition) {
 
 function isLowStock(part: InventoryPart) {
   return part.status === 'Low Stock' || part.status === 'Out of Stock';
+}
+
+function inventoryStatusVariant(status: string): MccSemanticVariant {
+  const normalized=status.trim().toLowerCase();
+  if (normalized==='in stock') return 'success';
+  if (normalized==='low stock') return 'warning';
+  if (normalized==='out of stock') return 'danger';
+  if (normalized==='on order') return 'info';
+  if (normalized==='discontinued') return 'muted';
+  return 'neutral';
+}
+
+function inventoryStatusClass(status: string) {
+  return `inventory-status-${status.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'unknown'}`;
 }
 
 function safeHttpUrl(value: string) {
@@ -1244,9 +1259,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   function renderPartNumber(part: InventoryPart) {
     const label = part.partNumber || part.itemId || '-';
     const partInfoUrl = safeHttpUrl(part.partInfoUrl || '');
-    if (partInfoUrl) return <a className="vendor-website-link compact inventory-part-info-link" href={partInfoUrl} target="_blank" rel="noopener noreferrer" title="Open part information" aria-label={`Open part information for ${label}`} onClick={event=>event.stopPropagation()}>
-        <span>{label}</span>
-      </a>;
+    if (partInfoUrl) return <MccLinkPill className="inventory-part-info-link" href={partInfoUrl} title="Open part information" ariaLabel={`Open part information for ${label}`}><span>{label}</span></MccLinkPill>;
     return <span className="plain-part-number" title={label}>{label}</span>;
   }
 
@@ -1409,7 +1422,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                     </td>
                     <td>{part.quantity}</td>
                     <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
-                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span></div></td>
+                    <td className="inventory-status-cell"><div className="inventory-status-stack"><MccStatusPill variant={inventoryStatusVariant(part.status)} className={inventoryStatusClass(part.status)}>{part.status}</MccStatusPill></div></td>
                     {showWriteActions&&(
                       <td className="inventory-actions-column">
                         <div className="inventory-row-actions">
