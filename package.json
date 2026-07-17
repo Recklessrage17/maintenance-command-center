@@ -8,7 +8,8 @@
     "build": "npm run build --prefix frontend && npm run build --prefix backend",
     "start": "npm start --prefix backend",
     "smoke": "node scripts/smoke-test.mjs",
-    "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts"
+    "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
+    "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts"
   },
   "engines": {
     "node": ">=22.0.0"

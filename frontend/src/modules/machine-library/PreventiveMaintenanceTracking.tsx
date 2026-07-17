@@ -1,6 +1,7 @@
 import { Component, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { notifyPmUpdated } from './pmEvents';
 
 type AssetIdentity={id:number;assetNumber:string;assetName:string};
 type PmIntervalType='hourly'|'days'|'bi_weekly'|'weekly'|'monthly'|'quarterly'|'bi_annual'|'annual'|'cycles';
@@ -76,7 +77,11 @@ async function requestJson<T>(url:string,init?:RequestInit) {
     if(import.meta.env.DEV)console.error('PM API returned a non-JSON success response',{endpoint:url,status:response.status,contentType});
     throw new Error('Preventive maintenance service returned an invalid response. Please try again.');
   }
-  try{return await response.json() as T;}
+  try{
+    const data=await response.json() as T;
+    if(init?.method&&init.method.toUpperCase()!=='GET')notifyPmUpdated();
+    return data;
+  }
   catch(error){
     if(import.meta.env.DEV)console.error('PM API returned invalid JSON',{endpoint:url,status:response.status,contentType,error});
     throw new Error('Preventive maintenance service returned an invalid response. Please try again.');

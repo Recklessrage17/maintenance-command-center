@@ -6717,6 +6717,36 @@ function publicPmTask(row:PmTaskRow) {
   const scheduleStatus:PmScheduleStatus=row.hold?'hold':row.active?'active':'inactive';
   return { id:row.id,assetId:row.asset_id,title:row.title,instructions:row.instructions,intervalType:row.interval_type,intervalLabel:pmIntervalLabels[row.interval_type],intervalValue:Number(row.interval_value),lastCompletedDate:row.last_completed_date,lastCompletedMeter:row.last_completed_meter,currentMeter:row.current_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,scheduleStatus,active:Boolean(row.active),notes:row.notes,status:state.status,countdown:state.countdown,historyCount,createdAt:row.created_at,updatedAt:row.updated_at };
 }
+function dashboardPmSortDistance(row:PmTaskRow) {
+  if (pmMeterIntervals.has(row.interval_type) && row.next_due_meter!==null && row.current_meter!==null) return row.next_due_meter-row.current_meter;
+  if (row.next_due_date) {
+    const today=new Date().toISOString().slice(0,10);
+    return Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+function dashboardPmAlerts() {
+  type DashboardPmRow=PmTaskRow&{asset_number:string;asset_name:string;brand:string;model:string;serial_number:string};
+  const statusRank:Record<string,number>={Overdue:0,'Due Now':1,'Due Soon':2};
+  return all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number
+    FROM pm_tasks p JOIN machine_assets a ON a.id=p.asset_id
+    WHERE a.deleted=0 ORDER BY p.id`).map(row=>({row,state:pmTaskStatus(row)}))
+    .filter(item=>item.state.status==='Overdue'||item.state.status==='Due Now'||item.state.status==='Due Soon')
+    .sort((left,right)=>statusRank[left.state.status]-statusRank[right.state.status]
+      || dashboardPmSortDistance(left.row)-dashboardPmSortDistance(right.row)
+      || left.row.asset_number.localeCompare(right.row.asset_number,undefined,{numeric:true,sensitivity:'base'})
+      || left.row.title.localeCompare(right.row.title,undefined,{sensitivity:'base'}))
+    .map(({row,state})=>({
+      ...publicPmTask(row),
+      status:state.status==='Overdue'?'Past Due':state.status,
+      relativeMessage:state.countdown,
+      assetNumber:row.asset_number,
+      assetName:row.asset_name,
+      brand:row.brand,
+      model:row.model,
+      serialNumber:row.serial_number,
+    }));
+}
 function publicPmHistory(row:PmHistoryRow) {
   return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
 }
@@ -7236,6 +7266,15 @@ app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
     const message = safeErrorMessage(error);
     res.status(/not found/i.test(message) ? 404 : /used by active|reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
+});
+app.get('/api/dashboard/preventive-maintenance-due', requireAuth, requirePermission('machine.view'), (_req,res)=>{
+  const alerts=dashboardPmAlerts();
+  const summary={
+    dueSoon:alerts.filter(alert=>alert.status==='Due Soon').length,
+    dueNow:alerts.filter(alert=>alert.status==='Due Now').length,
+    pastDue:alerts.filter(alert=>alert.status==='Past Due').length,
+  };
+  res.json({ok:true,alerts,summary});
 });
 app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   seedMachineBrandSettings();
