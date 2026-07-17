@@ -1,4 +1,15 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  canonicalCountryValue,
+  canonicalUsStateValue,
+  ContactAccordion,
+  CountrySelect,
+  formatPhoneForCountry,
+  isUnitedStatesCountry,
+  PhoneInput,
+  phoneValidationMessage,
+  StateProvinceSelect,
+} from './VendorFormControls';
 
 export type PhoneType = '' | 'Mobile' | 'Work' | 'Cell' | 'Office' | 'Main' | 'Other';
 export type VendorContactPhoneType = '' | 'Cell' | 'Mobile' | 'Work' | 'Office' | 'Other';
@@ -11,6 +22,7 @@ export type VendorContactRecord = {
   email: string;
   phoneType: VendorContactPhoneType;
   phoneNumber: string;
+  phoneNormalized?: string;
   phoneExt: string;
   notes: string;
   isPrimary: boolean;
@@ -22,6 +34,7 @@ export type VendorRecord = {
   companyName: string;
   phoneType: PhoneType;
   phoneNumber: string;
+  phoneNormalized?: string;
   phoneExt: string;
   websiteUrl: string;
   addressLine1: string;
@@ -81,7 +94,7 @@ export const blankVendorForm: VendorForm = {
   city: '',
   state: '',
   postalCode: '',
-  country: 'USA',
+  country: 'United States',
   contactName: '',
   contactTitle: '',
   contactPhoneType: '',
@@ -152,11 +165,22 @@ function cleanContact(contact: VendorContactRecord): VendorContactRecord {
   };
 }
 
-function validateContact(contact: VendorContactRecord) {
-  if (!contact.contactName.trim()) return 'Contact Name is required.';
-  if (contact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim())) return 'Contact Email must be a valid email address.';
-  if (contact.phoneExt.trim().length > 20) return 'Contact EXT # must be 20 characters or less.';
-  return '';
+type ContactField = 'contactName' | 'email' | 'phoneNumber' | 'phoneExt';
+type ContactFieldErrors = Partial<Record<ContactField,string>>;
+
+function contactValidationErrors(contact: VendorContactRecord, country: string): ContactFieldErrors {
+  const errors: ContactFieldErrors = {};
+  if (!contact.contactName.trim()) errors.contactName = 'Contact Name is required.';
+  else if (contact.contactName.trim().length > 160) errors.contactName = 'Contact Name must be 160 characters or less.';
+  if (contact.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim())) errors.email = 'Contact Email must be a valid email address.';
+  const phoneError = phoneValidationMessage(contact.phoneNumber,country,'Contact Phone Number');
+  if (phoneError) errors.phoneNumber = phoneError;
+  if (contact.phoneExt.trim().length > 20) errors.phoneExt = 'Contact EXT # must be 20 characters or less.';
+  return errors;
+}
+
+function validateContact(contact: VendorContactRecord, country: string) {
+  return Object.values(contactValidationErrors(contact,country))[0] ?? '';
 }
 
 function normalizeContactPrimary(contacts: VendorContactRecord[]) {
@@ -199,7 +223,7 @@ export function vendorFormFromVendor(vendor: VendorRecord): VendorForm {
     city: vendor.city ?? '',
     state: vendor.state ?? '',
     postalCode: vendor.postalCode ?? '',
-    country: vendor.country || 'USA',
+    country: canonicalCountryValue(vendor.country || 'USA'),
     contactName: vendor.contactName ?? '',
     contactTitle: vendor.contactTitle ?? '',
     contactPhoneType: vendor.contactPhoneType ?? '',
@@ -224,9 +248,9 @@ export function vendorPayloadFromForm(form: VendorForm) {
     addressLine1: form.addressLine1.trim(),
     addressLine2: form.addressLine2.trim(),
     city: form.city.trim(),
-    state: form.state.trim(),
+    state: isUnitedStatesCountry(form.country) ? canonicalUsStateValue(form.state) : form.state.trim(),
     postalCode: form.postalCode.trim(),
-    country: form.country.trim() || 'USA',
+    country: canonicalCountryValue(form.country) || 'United States',
     contactName: form.contactName.trim(),
     contactTitle: form.contactTitle.trim(),
     contactPhoneType: form.contactPhoneType,
@@ -241,19 +265,29 @@ export function vendorPayloadFromForm(form: VendorForm) {
 }
 
 export function validateVendorForm(form: VendorForm, requireDisableReason = !form.isActive) {
-  if (!form.companyName.trim()) return 'Company Name is required.';
-  if (form.companyName.trim().length > 120) return 'Company Name must be 120 characters or less.';
-  if (form.phoneExt.trim().length > 20 || form.contactPhoneExt.trim().length > 20) return 'EXT # must be 20 characters or less.';
-  if (form.websiteUrl.trim() && !safeWebsiteUrl(form.websiteUrl)) return 'Website URL must start with http:// or https://.';
-  if (form.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) return 'Contact Email must be a valid email address.';
-  for (const contact of form.contacts) {
+  return validateVendorFormDetails(form,requireDisableReason).message;
+}
+
+type VendorValidationResult = {message:string;field?:string;contactIndex?:number;contactField?:ContactField;contactErrors?:ContactFieldErrors};
+
+function validateVendorFormDetails(form: VendorForm, requireDisableReason = !form.isActive): VendorValidationResult {
+  if (!form.companyName.trim()) return {message:'Company Name is required.',field:'companyName'};
+  if (form.companyName.trim().length > 120) return {message:'Company Name must be 120 characters or less.',field:'companyName'};
+  const companyPhoneError = phoneValidationMessage(form.phoneNumber,form.country,'Company Phone #');
+  if (companyPhoneError) return {message:companyPhoneError,field:'phoneNumber'};
+  if (form.phoneExt.trim().length > 20 || form.contactPhoneExt.trim().length > 20) return {message:'EXT # must be 20 characters or less.',field:'phoneExt'};
+  if (form.websiteUrl.trim() && !safeWebsiteUrl(form.websiteUrl)) return {message:'Website URL must start with http:// or https://.',field:'websiteUrl'};
+  if (form.contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail.trim())) return {message:'General Email must be a valid email address.',field:'contactEmail'};
+  for (let index=0; index<form.contacts.length; index+=1) {
+    const contact = form.contacts[index];
     const hasAnyValue = Boolean(contact.contactName.trim() || contact.email.trim() || contact.phoneNumber.trim() || contact.contactTitle.trim() || contact.phoneExt.trim() || contact.notes.trim());
     if (!hasAnyValue) continue;
-    const contactError = validateContact(contact);
-    if (contactError) return contactError;
+    const errors = contactValidationErrors(contact,form.country);
+    const first = Object.entries(errors)[0] as [ContactField,string] | undefined;
+    if (first) return {message:first[1],contactIndex:index,contactField:first[0],contactErrors:errors};
   }
-  if (requireDisableReason && !form.reasonNote.trim()) return 'Reason for disabling vendor is required.';
-  return '';
+  if (requireDisableReason && !form.reasonNote.trim()) return {message:'Reason for disabling vendor is required.',field:'reasonNote'};
+  return {message:''};
 }
 
 function DetailRow({label,children}:{label:string;children:React.ReactNode}) {
@@ -302,24 +336,23 @@ function EmailCopyButton({email,onCopied,compact=false}:{email:string;onCopied:(
   );
 }
 
-function ContactEditCard({contact,index,onChange,onRemove}:{contact:VendorContactRecord;index:number;onChange:(contact:VendorContactRecord)=>void;onRemove:()=>void}) {
+function ContactEditCard({contact,index,country,expanded,onToggle,onChange,onRemove,errors={}}:{contact:VendorContactRecord;index:number;country:string;expanded:boolean;onToggle:()=>void;onChange:(contact:VendorContactRecord)=>void;onRemove:()=>void;errors?:ContactFieldErrors}) {
   return (
-    <div className="vendor-contact-edit-card">
-      <div className="vendor-contact-edit-heading">
-        <strong>Contact {index + 1}</strong>
-        <label className="vendor-primary-toggle"><input type="checkbox" checked={contact.isPrimary} onChange={event=>onChange({...contact,isPrimary:event.target.checked})} /> Primary</label>
-        <button className="link-button compact-button" type="button" onClick={onRemove}>Remove</button>
-      </div>
-      <div className="vendor-contact-edit-grid">
-        <label className="form-field"><span>Contact Name <b className="required-marker" aria-label="required">*</b></span><input value={contact.contactName} onChange={event=>onChange({...contact,contactName:event.target.value})} /></label>
+    <ContactAccordion expanded={expanded} onToggle={onToggle} name={contact.contactName || `Contact ${index + 1}`} title={contact.contactTitle} isPrimary={contact.isPrimary} className={Object.keys(errors).length ? 'has-errors' : ''}>
+      <div className="vendor-contact-edit-grid" data-contact-index={index}>
+        <label className={`form-field${errors.contactName ? ' has-error' : ''}`}><span>Contact Name <b className="required-marker" aria-label="required">*</b></span><input data-field="contactName" value={contact.contactName} onChange={event=>onChange({...contact,contactName:event.target.value})} aria-invalid={Boolean(errors.contactName)} />{errors.contactName&&<small className="field-validation-error" role="alert">{errors.contactName}</small>}</label>
         <label className="form-field"><span>Contact Title</span><input value={contact.contactTitle} onChange={event=>onChange({...contact,contactTitle:event.target.value})} /></label>
-        <label className="form-field"><span>Email</span><input value={contact.email} onChange={event=>onChange({...contact,email:event.target.value})} /></label>
-        <label className="form-field"><span>Phone Type</span><select value={contact.phoneType} onChange={event=>onChange({...contact,phoneType:event.target.value as VendorContactPhoneType,phoneExt:event.target.value === 'Office' ? contact.phoneExt : ''})}>{contactPhoneTypes.map(type=><option key={type || 'blank'} value={type}>{type || 'Select type'}</option>)}</select></label>
-        <label className="form-field"><span>Phone Number</span><input value={contact.phoneNumber} onChange={event=>onChange({...contact,phoneNumber:event.target.value})} /></label>
-        <label className={`form-field ${contact.phoneType === 'Office' ? 'office-ext-field' : 'soft-hidden-ext'}`}><span>EXT #</span><input value={contact.phoneExt} onChange={event=>onChange({...contact,phoneExt:event.target.value})} disabled={contact.phoneType !== 'Office'} /></label>
+        <label className={`form-field${errors.email ? ' has-error' : ''}`}><span>Email</span><input data-field="email" type="email" value={contact.email} onChange={event=>onChange({...contact,email:event.target.value})} aria-invalid={Boolean(errors.email)} />{errors.email&&<small className="field-validation-error" role="alert">{errors.email}</small>}</label>
+        <label className="form-field"><span>Phone Type</span><select value={contact.phoneType} onChange={event=>onChange({...contact,phoneType:event.target.value as VendorContactPhoneType})}>{contactPhoneTypes.map(type=><option key={type || 'blank'} value={type}>{type || 'Select type'}</option>)}</select></label>
+        <PhoneInput label="Phone Number" value={contact.phoneNumber} country={country} onChange={phoneNumber=>onChange({...contact,phoneNumber})} error={errors.phoneNumber} inputProps={{'data-field':'phoneNumber'}} />
+        <label className={`form-field office-ext-field${errors.phoneExt ? ' has-error' : ''}`}><span>EXT #</span><input data-field="phoneExt" value={contact.phoneExt} onChange={event=>onChange({...contact,phoneExt:event.target.value})} aria-invalid={Boolean(errors.phoneExt)} />{errors.phoneExt&&<small className="field-validation-error" role="alert">{errors.phoneExt}</small>}</label>
         <label className="form-field vendor-form-wide"><span>Notes</span><textarea value={contact.notes} onChange={event=>onChange({...contact,notes:event.target.value})} /></label>
+        <div className="vendor-contact-expanded-actions vendor-form-wide">
+          <label className="vendor-primary-toggle"><input type="checkbox" checked={contact.isPrimary} onChange={event=>onChange({...contact,isPrimary:event.target.checked})} /> Primary</label>
+          <button className="link-button compact-button" type="button" onClick={onRemove}>Remove</button>
+        </div>
       </div>
-    </div>
+    </ContactAccordion>
   );
 }
 
@@ -331,6 +364,9 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
   const [contacts,setContacts]=useState<VendorContactRecord[]>(vendor.contacts ?? []);
   const [loading,setLoading]=useState(true);
   const [editing,setEditing]=useState<VendorContactRecord|null>(null);
+  const [editingExpanded,setEditingExpanded]=useState(true);
+  const [expandedContacts,setExpandedContacts]=useState<Set<number>>(new Set());
+  const [contactErrors,setContactErrors]=useState<ContactFieldErrors>({});
   const [error,setError]=useState('');
   const [saving,setSaving]=useState(false);
 
@@ -353,9 +389,10 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
   async function saveContact(event: FormEvent) {
     event.preventDefault();
     if (!editing) return;
-    const validation = validateContact(editing);
+    const validation = validateContact(editing,vendor.country);
+    setContactErrors(contactValidationErrors(editing,vendor.country));
     setError(validation);
-    if (validation) return;
+    if (validation) { setEditingExpanded(true); return; }
     setSaving(true);
     try {
       const payload = JSON.stringify(cleanContact(editing));
@@ -365,6 +402,7 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
       });
       onVendorUpdated(data.vendor);
       setEditing(null);
+      setContactErrors({});
       await loadContacts();
     } catch (err) {
       setError((err as Error).message);
@@ -405,15 +443,10 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
         {!loading&&contacts.length===0&&<p className="vendor-inline-empty">No contacts saved for this vendor.</p>}
         {!loading&&contacts.length>0&&(
           <div className="vendor-contact-list">
-            {contacts.map(contact=>(
-              <article className="vendor-contact-card" key={contact.id ?? contact.contactName}>
-                <div className="vendor-contact-card-heading">
-                  <div>
-                    <strong>{contact.contactName}</strong>
-                    {contact.contactTitle&&<span>{contact.contactTitle}</span>}
-                  </div>
-                  {contact.isPrimary&&<span className="status-pill vendor-status-enabled">Primary</span>}
-                </div>
+            {contacts.map((contact,index)=>{
+              const contactKey = contact.id ?? index;
+              const expanded = expandedContacts.has(contactKey);
+              return <ContactAccordion key={contactKey} expanded={expanded} onToggle={()=>setExpandedContacts(current=>{const next=new Set(current);if(next.has(contactKey))next.delete(contactKey);else next.add(contactKey);return next;})} name={contact.contactName} title={contact.contactTitle} isPrimary={contact.isPrimary}>
                 <div className="vendor-contact-info-grid">
                   <div><span>Email</span><strong><EmailCopyButton email={contact.email} compact onCopied={onEmailCopied} /></strong></div>
                   <div><span>Phone</span><strong>{formatPhone(contact.phoneType, contact.phoneNumber, contact.phoneExt) || '-'}</strong></div>
@@ -421,22 +454,22 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
                 </div>
                 {(canEdit||canDelete)&&(
                   <div className="vendor-contact-actions">
-                    {canEdit&&<button className="secondary-button compact-button" type="button" onClick={()=>setEditing({...blankVendorContact,...contact})}>Edit Contact</button>}
+                    {canEdit&&<button className="secondary-button compact-button" type="button" onClick={()=>{setEditing({...blankVendorContact,...contact});setEditingExpanded(true);setContactErrors({});}}>Edit Contact</button>}
                     {canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>deleteContact(contact)}>Delete Contact</button>}
                   </div>
                 )}
-              </article>
-            ))}
+              </ContactAccordion>;
+            })}
           </div>
         )}
         {canEdit&&(
           <div className="vendor-contact-form-shell">
-            {!editing&&<button className="primary-button compact-button" type="button" onClick={()=>setEditing({...blankVendorContact,isPrimary:contacts.length === 0})}>Add Contact</button>}
+            {!editing&&<button className="primary-button compact-button" type="button" onClick={()=>{setEditing({...blankVendorContact,isPrimary:contacts.length === 0});setEditingExpanded(true);setContactErrors({});}}>Add Contact</button>}
             {editing&&(
               <form className="vendor-contact-inline-form" onSubmit={saveContact}>
-                <ContactEditCard contact={editing} index={Math.max(contacts.findIndex(contact=>contact.id === editing.id), 0)} onChange={setEditing} onRemove={()=>setEditing(null)} />
+                <ContactEditCard contact={editing} index={Math.max(contacts.findIndex(contact=>contact.id === editing.id), 0)} country={vendor.country} expanded={editingExpanded} onToggle={()=>setEditingExpanded(value=>!value)} onChange={setEditing} onRemove={()=>{setEditing(null);setContactErrors({});}} errors={contactErrors} />
                 <div className="modal-actions">
-                  <button className="secondary-button" type="button" onClick={()=>setEditing(null)} disabled={saving}>Cancel</button>
+                  <button className="secondary-button" type="button" onClick={()=>{setEditing(null);setContactErrors({});}} disabled={saving}>Cancel</button>
                   <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':'Save Contact'}</button>
                 </div>
               </form>
@@ -481,14 +514,31 @@ export function VendorDetailModal({vendor,onClose,onEdit,onEmailCopied}:{vendor:
 export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,error=''}:{mode:'add'|'edit';initial:VendorForm;onClose:()=>void;onSave:(form:VendorForm)=>void|Promise<void>;saving?:boolean;error?:string}) {
   const [form,setForm]=useState<VendorForm>(initial);
   const [localError,setLocalError]=useState('');
+  const [fieldError,setFieldError]=useState<{field?:string;message?:string}>({});
+  const [contactErrors,setContactErrors]=useState<Record<number,ContactFieldErrors>>({});
+  const [expandedContacts,setExpandedContacts]=useState<Set<number>>(new Set());
+  const formRef=useRef<HTMLFormElement>(null);
 
-  useEffect(()=>{ setForm(initial); setLocalError(''); },[initial]);
+  useEffect(()=>{ setForm(initial); setLocalError(''); setFieldError({}); setContactErrors({}); setExpandedContacts(new Set()); },[initial]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const validation = validateVendorForm(form, initial.isActive && !form.isActive);
-    setLocalError(validation);
-    if (validation) return;
+    const validation = validateVendorFormDetails(form, initial.isActive && !form.isActive);
+    setLocalError(validation.message);
+    setFieldError(validation.field ? {field:validation.field,message:validation.message} : {});
+    setContactErrors(validation.contactIndex === undefined ? {} : {[validation.contactIndex]:validation.contactErrors ?? {}});
+    if (validation.message) {
+      if (validation.contactIndex !== undefined) setExpandedContacts(current=>new Set(current).add(validation.contactIndex!));
+      queueMicrotask(()=>{
+        const selector = validation.contactIndex === undefined
+          ? `[data-field="${validation.field}"]`
+          : `[data-contact-index="${validation.contactIndex}"] [data-field="${validation.contactField}"]`;
+        const target=formRef.current?.querySelector<HTMLElement>(selector);
+        target?.scrollIntoView({block:'center',behavior:'smooth'});
+        target?.focus();
+      });
+      return;
+    }
     await onSave(form);
   }
 
@@ -497,19 +547,38 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
       ...current,
       contacts: current.contacts.map((item,itemIndex)=>itemIndex === index ? contact : contact.isPrimary ? {...item,isPrimary:false} : item),
     }));
+    setContactErrors(current=>{const next={...current};delete next[index];return next;});
   }
 
   function addContact() {
-    setForm(current=>({...current,contacts:[...current.contacts,{...blankVendorContact,isPrimary: current.contacts.length === 0}]}));
+    setForm(current=>{
+      const index=current.contacts.length;
+      setExpandedContacts(expanded=>new Set(expanded).add(index));
+      return {...current,contacts:[...current.contacts,{...blankVendorContact,isPrimary: current.contacts.length === 0}]};
+    });
   }
 
   function removeContact(index: number) {
     setForm(current=>({...current,contacts:current.contacts.filter((_,itemIndex)=>itemIndex !== index)}));
+    setExpandedContacts(current=>new Set([...current].filter(item=>item!==index).map(item=>item>index?item-1:item)));
+    setContactErrors({});
+  }
+
+  function updateCountry(country: string) {
+    const canonical=canonicalCountryValue(country) || country;
+    setForm(current=>({
+      ...current,
+      country:canonical,
+      phoneNumber:formatPhoneForCountry(current.phoneNumber,canonical),
+      contacts:current.contacts.map(contact=>({...contact,phoneNumber:formatPhoneForCountry(contact.phoneNumber,canonical)})),
+    }));
+    setFieldError({});
+    setContactErrors({});
   }
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget&&!saving) onClose(); }}>
-      <form className="mcc-card vendor-modal mcc-wide-modal" onSubmit={submit}>
+      <form ref={formRef} className="mcc-card vendor-modal mcc-wide-modal" onSubmit={submit} noValidate>
         <div className="modal-heading">
           <div>
             <p className="eyebrow">{mode === 'edit' ? 'Edit Vendor' : 'Add Vendor'}</p>
@@ -518,18 +587,18 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
           <button className="link-button compact-button" type="button" onClick={onClose} disabled={saving}>Close</button>
         </div>
         <div className="vendor-form-grid">
-          <label className="form-field vendor-form-wide"><span>Company Name <b className="required-marker" aria-label="required">*</b></span><input value={form.companyName} onChange={event=>setForm({...form,companyName:event.target.value})} /></label>
+          <label className={`form-field vendor-form-wide${fieldError.field==='companyName'?' has-error':''}`}><span>Company Name <b className="required-marker" aria-label="required">*</b></span><input data-field="companyName" value={form.companyName} onChange={event=>setForm({...form,companyName:event.target.value})} />{fieldError.field==='companyName'&&<small className="field-validation-error" role="alert">{fieldError.message}</small>}</label>
           <label className="form-field"><span>Company Phone Type</span><select value={form.phoneType} onChange={event=>setForm({...form,phoneType:event.target.value as PhoneType})}>{phoneTypes.map(type=><option key={type || 'blank'} value={type}>{type || 'Select type'}</option>)}</select></label>
-          <label className="form-field"><span>Company Phone #</span><input value={form.phoneNumber} onChange={event=>setForm({...form,phoneNumber:event.target.value})} /></label>
-          <label className="form-field"><span>Company EXT #</span><input value={form.phoneExt} onChange={event=>setForm({...form,phoneExt:event.target.value})} /></label>
-          <label className="form-field vendor-form-wide"><span>Website URL</span><input value={form.websiteUrl} onChange={event=>setForm({...form,websiteUrl:event.target.value})} placeholder="https://www.mcmaster.com/" /></label>
+          <PhoneInput label="Company Phone #" value={form.phoneNumber} country={form.country} onChange={phoneNumber=>setForm({...form,phoneNumber})} error={fieldError.field==='phoneNumber'?fieldError.message:''} inputProps={{'data-field':'phoneNumber'}} />
+          <label className={`form-field${fieldError.field==='phoneExt'?' has-error':''}`}><span>Company EXT #</span><input data-field="phoneExt" value={form.phoneExt} onChange={event=>setForm({...form,phoneExt:event.target.value})} />{fieldError.field==='phoneExt'&&<small className="field-validation-error" role="alert">{fieldError.message}</small>}</label>
+          <label className={`form-field vendor-form-wide${fieldError.field==='websiteUrl'?' has-error':''}`}><span>Website URL</span><input data-field="websiteUrl" value={form.websiteUrl} onChange={event=>setForm({...form,websiteUrl:event.target.value})} placeholder="https://www.mcmaster.com/" />{fieldError.field==='websiteUrl'&&<small className="field-validation-error" role="alert">{fieldError.message}</small>}</label>
           <label className="form-field vendor-form-wide"><span>Address Line 1</span><input value={form.addressLine1} onChange={event=>setForm({...form,addressLine1:event.target.value})} /></label>
           <label className="form-field vendor-form-wide"><span>Address Line 2</span><input value={form.addressLine2} onChange={event=>setForm({...form,addressLine2:event.target.value})} /></label>
           <label className="form-field"><span>City</span><input value={form.city} onChange={event=>setForm({...form,city:event.target.value})} /></label>
-          <label className="form-field"><span>State</span><input value={form.state} onChange={event=>setForm({...form,state:event.target.value})} /></label>
+          <StateProvinceSelect country={form.country} value={form.state} onChange={state=>setForm({...form,state})} />
           <label className="form-field"><span>Postal Code</span><input value={form.postalCode} onChange={event=>setForm({...form,postalCode:event.target.value})} /></label>
-          <label className="form-field"><span>Country</span><input value={form.country} onChange={event=>setForm({...form,country:event.target.value})} /></label>
-          <label className="form-field vendor-form-wide"><span>General Email</span><input value={form.contactEmail} onChange={event=>setForm({...form,contactEmail:event.target.value})} placeholder="sales@example.com" /></label>
+          <CountrySelect value={form.country} onChange={updateCountry} />
+          <label className={`form-field vendor-form-wide${fieldError.field==='contactEmail'?' has-error':''}`}><span>General Email</span><input data-field="contactEmail" type="email" value={form.contactEmail} onChange={event=>setForm({...form,contactEmail:event.target.value})} placeholder="sales@example.com" />{fieldError.field==='contactEmail'&&<small className="field-validation-error" role="alert">{fieldError.message}</small>}</label>
           <div className="vendor-contacts-editor vendor-form-wide">
             <div className="vendor-section-heading">
               <div>
@@ -540,11 +609,11 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
             </div>
             {form.contacts.length === 0&&<p className="vendor-inline-empty">No contacts saved for this vendor.</p>}
             {form.contacts.map((contact,index)=>(
-              <ContactEditCard key={contact.id ?? `new-${index}`} contact={contact} index={index} onChange={next=>updateContact(index,next)} onRemove={()=>removeContact(index)} />
+              <ContactEditCard key={contact.id ?? `new-${index}`} contact={contact} index={index} country={form.country} expanded={expandedContacts.has(index)} onToggle={()=>setExpandedContacts(current=>{const next=new Set(current);if(next.has(index))next.delete(index);else next.add(index);return next;})} onChange={next=>updateContact(index,next)} onRemove={()=>removeContact(index)} errors={contactErrors[index]} />
             ))}
           </div>
           <label className="form-field"><span>Vendor Status</span><select value={form.isActive ? 'enabled' : 'disabled'} onChange={event=>setForm({...form,isActive:event.target.value === 'enabled',reasonNote:event.target.value === 'enabled' ? '' : form.reasonNote})}><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
-          {!form.isActive&&<label className="form-field vendor-form-wide"><span>Reason for disabling vendor <b className="required-marker" aria-label="required">*</b></span><textarea value={form.reasonNote} onChange={event=>setForm({...form,reasonNote:event.target.value})} /></label>}
+          {!form.isActive&&<label className={`form-field vendor-form-wide${fieldError.field==='reasonNote'?' has-error':''}`}><span>Reason for disabling vendor <b className="required-marker" aria-label="required">*</b></span><textarea data-field="reasonNote" value={form.reasonNote} onChange={event=>setForm({...form,reasonNote:event.target.value})} />{fieldError.field==='reasonNote'&&<small className="field-validation-error" role="alert">{fieldError.message}</small>}</label>}
           <label className="form-field vendor-form-wide"><span>Notes</span><textarea value={form.notes} onChange={event=>setForm({...form,notes:event.target.value})} /></label>
         </div>
         {(localError||error)&&<p className="form-message error">{localError||error}</p>}
