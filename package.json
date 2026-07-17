@@ -11,6 +11,7 @@
     "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
+    "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",
     "test:background": "playwright test tests/maintenance-lab-background.spec.ts"
   },
   "engines": {

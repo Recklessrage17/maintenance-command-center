@@ -435,6 +435,9 @@ button.glass-pill--linked:focus-visible {
 .mcc-status-pill--brand { color: color-mix(in srgb, var(--mcc-pill-accent) 74%, #fff 26%); border-color: color-mix(in srgb, var(--mcc-pill-accent) 66%, transparent); background: color-mix(in srgb, var(--mcc-pill-accent) 17%, rgba(5,23,35,.82)); box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 14px color-mix(in srgb, var(--mcc-pill-accent) 18%, transparent); }
 
 .mcc-link-pill {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   min-width: 0;
   width: fit-content;
   max-width: 100%;
@@ -455,10 +458,26 @@ button.glass-pill--linked:focus-visible {
   text-align: center;
   text-decoration: none;
   cursor: pointer;
-  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+  transition: color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
+.mcc-link-pill::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 1px auto 1px -42%;
+  width: 34%;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,.24), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: skewX(-18deg);
+  transition: left .28s ease, opacity .15s ease;
+}
+.mcc-link-pill > * { position: relative; z-index: 1; }
 .mcc-link-pill:hover,
 .mcc-link-pill:focus-visible { color: #fff; border-color: rgba(126,255,205,.94); outline: 2px solid rgba(54,229,170,.68); outline-offset: 2px; box-shadow: inset 0 1px 0 rgba(255,255,255,.26), 0 0 23px rgba(54,229,170,.28); transform: translateY(-1px); }
+.mcc-link-pill:hover::before,
+.mcc-link-pill:focus-visible::before { left: 108%; opacity: 1; }
 .mcc-link-pill-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .mcc-metric-pill {
@@ -949,6 +968,8 @@ button.glass-attachment:focus-visible {
   .mcc-pill-card.is-interactive:focus-visible,
   .mcc-link-pill:hover,
   .mcc-link-pill:focus-visible { transform: none; }
+
+  .mcc-link-pill::before { display: none; }
 }
 
 @media (forced-colors: active) {
