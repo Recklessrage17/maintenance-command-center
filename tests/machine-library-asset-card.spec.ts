@@ -9,6 +9,23 @@ const historyRecord = {
   createdAt: '2026-07-16T15:30:00.000Z',
 };
 
+const olderHistoryRecord = {
+  ...historyRecord,
+  id: 899,
+  userName: 'Previous Technician',
+  reasonNote: 'Older inspection note that must not appear in the card preview.',
+  createdAt: '2026-07-14T09:00:00.000Z',
+};
+
+const newestHistoryRecord = {
+  ...historyRecord,
+  id: 902,
+  action: 'preventive_maintenance_completed',
+  userName: 'Newest Technician',
+  reasonNote: 'Newest history summary with extra text that remains compact in the preview.',
+  createdAt: '2026-07-17T14:45:00.000Z',
+};
+
 const emptyAssetFields = {
   machineType: 'Injection Molding Machine', powerType: 'Electric', shotSizeOz: 12, tonnage: 250,
   voltageValue: '480', voltageType: 'VAC', fullLoadAmp: '320', machineLength: '22 ft', machineWidth: '7 ft', machineHeight: '8 ft', fullDieHeightLength: '48 in',
@@ -27,7 +44,7 @@ const assets = [
     ...emptyAssetFields,
     id: 51, assetNumber: 'Press 51', assetName: 'North Cell Press', brand: 'Toyo', model: 'SI-250-6', serialNumber: '1694010', machineYear: '2012', barrelDiameter: '35mm', location: 'North Cell', department: 'Molding', status: 'active', brandColorHex: '#44D7FF',
     pmSummary: { total: 2, status: 'due-soon', label: 'PM: 1 Due Soon' },
-    historyPreview: [historyRecord],
+    historyPreview: [historyRecord, olderHistoryRecord, newestHistoryRecord],
   },
   {
     ...emptyAssetFields,
@@ -45,7 +62,7 @@ async function mockMachineLibrary(page: Page) {
     json: { ok: true, assets, brandSettings: [], permissions: { canEdit: true, canDelete: true } },
   }));
   await page.route(/\/api\/machine-library\/assets\/\d+\/history$/, route=>route.fulfill({
-    json: { ok: true, asset: assets[0], records: [historyRecord] },
+    json: { ok: true, asset: assets[0], records: [newestHistoryRecord, historyRecord, olderHistoryRecord] },
   }));
   await page.route(/\/api\/machine-library\/assets\/\d+\/inspection-records$/, route=>route.fulfill({ json: { ok: true, records: [] } }));
   await page.route(/\/api\/machine-library\/assets\/\d+\/preventive-maintenance$/, route=>route.fulfill({
@@ -137,6 +154,12 @@ test('asset card has no dead zones and keeps child controls independent', async 
     rootTag: 'ARTICLE', role: 'button', tabIndex: 0, pointerEvents: 'auto', cursor: 'pointer',
     beforePointerEvents: 'none', afterPointerEvents: 'none', invalidNestedButtons: 0, interceptedPoints: 0,
   });
+
+  const historyRows = cards.first().locator('.machine-history-preview-row');
+  await expect(historyRows).toHaveCount(1);
+  await expect(historyRows).toContainText('Newest history summary');
+  await expect(historyRows).toContainText('Recorded by Newest Technician');
+  await expect(historyRows).not.toContainText('Older inspection note');
 
   await activate(cards.first().locator('.machine-asset-number-pill'), mobile);
   await expectSingleDetail(page);

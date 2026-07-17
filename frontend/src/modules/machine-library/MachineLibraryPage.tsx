@@ -133,9 +133,9 @@ function machinePmSummaryVariant(status: MachinePmCardSummary['status']): MccSem
   if (status==='inactive') return 'muted';
   return 'neutral';
 }
-function historyPreviewDate(value:string) {
+function historyPreviewDateTime(value:string) {
   const date=new Date(value);
-  return Number.isNaN(date.getTime()) ? value || '-' : new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',year:'2-digit'}).format(date);
+  return Number.isNaN(date.getTime()) ? value || '-' : new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',year:'2-digit',hour:'numeric',minute:'2-digit'}).format(date);
 }
 function historyPreviewSummary(record:HistoryRecord) {
   return record.reasonNote || `Recorded by ${record.userName || 'System'}`;
@@ -426,11 +426,14 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
 }
 
 function MachineHistoryPreview({records,onOpen}:{records:HistoryRecord[];onOpen:()=>void}) {
-  const preview=records.slice(0,3);
+  const preview=[...records].sort((left,right)=>{
+    const timeDifference=new Date(right.createdAt).getTime()-new Date(left.createdAt).getTime();
+    return Number.isNaN(timeDifference)||timeDifference===0 ? right.id-left.id : timeDifference;
+  }).slice(0,1);
   return <button className="machine-history-preview" type="button" onClick={event=>{event.stopPropagation();onOpen();}} aria-label="Open full machine asset history">
     <span className="machine-history-preview-heading"><strong>History Preview</strong><span>Open full history</span></span>
     <span className="machine-history-preview-list">
-      {preview.map(record=><span className="machine-history-preview-row" key={record.id}><span className="machine-history-preview-meta"><time dateTime={record.createdAt}>{historyPreviewDate(record.createdAt)}</time><strong>{actionLabel(record.action)}</strong></span><small>{historyPreviewSummary(record)}</small></span>)}
+      {preview.map(record=><span className="machine-history-preview-row" key={record.id}><span className="machine-history-preview-meta"><time dateTime={record.createdAt}>{historyPreviewDateTime(record.createdAt)}</time><strong>{actionLabel(record.action)}</strong></span><small className="machine-history-preview-summary" title={historyPreviewSummary(record)}>{historyPreviewSummary(record)}</small>{record.userName&&<small className="machine-history-preview-user">Recorded by {record.userName}</small>}</span>)}
       {!preview.length&&<span className="machine-history-preview-empty">No history recorded yet.</span>}
     </span>
   </button>;

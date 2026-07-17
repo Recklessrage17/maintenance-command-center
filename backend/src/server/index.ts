@@ -7255,7 +7255,7 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
   const assets = assetRows.map(row=>({
     ...publicMachineAsset(row),
     pmSummary:machineAssetPmCardSummary(all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC',[row.id])),
-    historyPreview:all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 3",[String(row.id),String(row.id),row.asset_number]).map(publicHistoryRecord),
+    historyPreview:all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 1",[String(row.id),String(row.id),row.asset_number]).map(publicHistoryRecord),
   }));
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
   res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});

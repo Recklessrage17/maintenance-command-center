@@ -441,13 +441,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-history-preview-heading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .machine-history-preview-heading strong { color: #dff9ff; font-size: .74rem; font-weight: 1000; letter-spacing: .035em; text-transform: uppercase; }
 .machine-history-preview-heading > span { color: #86dff6; font-size: .65rem; font-weight: 900; white-space: nowrap; }
-.machine-history-preview-list { min-width: 0; display: grid; gap: 4px; }
-.machine-history-preview-row { min-width: 0; display: grid; gap: 2px; padding: 5px 7px; border: 1px solid rgba(143,205,233,.14); border-radius: 9px; background: rgba(3,14,27,.5); }
+.machine-history-preview-list { min-width: 0; min-height: 62px; display: grid; align-items: stretch; gap: 4px; }
+.machine-history-preview-row { min-width: 0; min-height: 62px; display: grid; align-content: center; gap: 2px; padding: 5px 7px; border: 1px solid rgba(143,205,233,.14); border-radius: 9px; background: rgba(3,14,27,.5); }
 .machine-history-preview-meta { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .machine-history-preview-meta time { flex: 0 0 auto; color: #8bdcf2; font-size: .63rem; font-weight: 900; }
 .machine-history-preview-meta strong { min-width: 0; overflow: hidden; color: #effcff; font-size: .7rem; font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
-.machine-history-preview-row small { min-width: 0; overflow: hidden; color: #a9cad8; font-size: .66rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.machine-history-preview-empty { padding: 5px 2px; color: #9bbdcb; font-size: .72rem; font-weight: 800; }
+.machine-history-preview-row small { min-width: 0; overflow: hidden; font-size: .66rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.machine-history-preview-summary { color: #a9cad8; }
+.machine-history-preview-user { color: #7fcde2; }
+.machine-history-preview-empty { min-height: 62px; display: flex; align-items: center; padding: 5px 2px; color: #9bbdcb; font-size: .72rem; font-weight: 800; }
 .machine-empty-card { min-height: 120px; grid-column: 1 / -1; }
 .machine-modal { width: min(1120px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 14px; }
 .machine-small-modal, .machine-color-modal, .machine-logs-modal, .machine-setup-modal, .machine-import-result-modal { width: min(680px, 100%); max-height: var(--mcc-modal-available-height); overflow: auto; display: grid; gap: 14px; border-radius: 14px; }
