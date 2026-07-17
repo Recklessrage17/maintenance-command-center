@@ -29,4 +29,6 @@ backend/uploads/
 output/
 tmp/
 reference/
+playwright-report/
+test-results/
 

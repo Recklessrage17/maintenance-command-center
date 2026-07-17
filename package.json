@@ -7,9 +7,13 @@
     "install:all": "npm install --prefix frontend && npm install --prefix backend",
     "build": "npm run build --prefix frontend && npm run build --prefix backend",
     "start": "npm start --prefix backend",
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }
