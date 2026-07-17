@@ -106,6 +106,12 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  useEffect(()=>()=>{ clearWarpTimer(); },[]);
 
  useEffect(()=>{
+   const targets=[document.documentElement,document.body];
+   targets.forEach(target=>target.classList.add('mcc-scrollbar-hidden'));
+   return()=>targets.forEach(target=>target.classList.remove('mcc-scrollbar-hidden'));
+ },[]);
+
+ useEffect(()=>{
    setPageEntering(true);
    const timer=window.setTimeout(()=>setPageEntering(false),PAGE_ENTER_MS);
    return ()=>window.clearTimeout(timer);
@@ -151,7 +157,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
  }
 
  return (
-   <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell':'mcc-shell command-shell'}>
+   <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell mcc-scrollbar-hidden':'mcc-shell command-shell mcc-scrollbar-hidden'}>
      <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef}>
        <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
          <div className="mcc-brand-mark">
