@@ -1259,7 +1259,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   function renderPartNumber(part: InventoryPart) {
     const label = part.partNumber || part.itemId || '-';
     const partInfoUrl = safeHttpUrl(part.partInfoUrl || '');
-    if (partInfoUrl) return <MccLinkPill className="inventory-part-info-link" href={partInfoUrl} title={label} ariaLabel={`Open part information for ${label}`} externalIconPosition="leading"><span>{label}</span></MccLinkPill>;
+    if (partInfoUrl) return <MccLinkPill className="inventory-part-info-link" href={partInfoUrl} title={label} ariaLabel={`Open part information for ${label}`} externalIconPosition="leading" appearance="technical"><span className="mcc-link-pill-label">{label}</span></MccLinkPill>;
     return <span className="plain-part-number" title={label}>{label}</span>;
   }
 

@@ -56,20 +56,38 @@ test('linked Part Numbers use one safe, polished row-isolated link pill',async({
   await expect(linked).toHaveAttribute('target','_blank');
   await expect(linked).toHaveAttribute('rel','noopener noreferrer');
   await expect(linked).toHaveAttribute('title','35MB');
+  await expect(linked).toHaveClass(/mcc-link-pill--technical/);
   await expect(linked.locator('.mcc-link-pill-icon')).toHaveCount(1);
-  expect(await linked.evaluate(element=>element.firstElementChild?.classList.contains('mcc-link-pill-icon'))).toBe(true);
+  await expect(linked.locator('.mcc-link-pill-icon-pod')).toHaveCount(1);
+  expect(await linked.evaluate(element=>element.firstElementChild?.classList.contains('mcc-link-pill-icon-pod'))).toBe(true);
   await expect(linkedRow).not.toContainText('parts.example.com');
 
   const style=await linked.evaluate(element=>({
     cursor:getComputedStyle(element).cursor,
     animation:getComputedStyle(element).animationName,
     pointerEvents:getComputedStyle(element,'::before').pointerEvents,
+    topHighlightPointerEvents:getComputedStyle(element,'::after').pointerEvents,
+    borderRadius:getComputedStyle(element).borderRadius,
+    backgroundImage:getComputedStyle(element).backgroundImage,
+    fontWeight:Number(getComputedStyle(element).fontWeight),
     minHeight:element.getBoundingClientRect().height,
   }));
   expect(style.cursor).toBe('pointer');
   expect(style.animation).toBe('none');
   expect(style.pointerEvents).toBe('none');
+  expect(style.topHighlightPointerEvents).toBe('none');
+  expect(style.borderRadius).not.toBe('999px');
+  expect(style.backgroundImage.match(/linear-gradient/g)?.length).toBeGreaterThanOrEqual(2);
+  expect(style.fontWeight).toBeGreaterThanOrEqual(900);
   expect(style.minHeight).toBeGreaterThanOrEqual(44);
+  const labelDimensions=await linked.locator('.mcc-link-pill-label').evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
+  expect(labelDimensions.scrollWidth).toBeLessThanOrEqual(labelDimensions.clientWidth);
+  const cellCentering=await linked.evaluate(element=>{
+    const linkBox=element.getBoundingClientRect();
+    const cellBox=element.closest('td')!.getBoundingClientRect();
+    return Math.abs((linkBox.left+linkBox.width/2)-(cellBox.left+cellBox.width/2));
+  });
+  expect(cellCentering).toBeLessThanOrEqual(1);
 
   if(testInfo.project.name==='mobile-chromium') {
     await openOnce(page,context,linked,()=>linked.tap(),'/35mb');
@@ -105,7 +123,7 @@ test('unlinked values stay plain and long linked values truncate without page ov
 
   const longLink=page.getByRole('link',{name:`Open part information for ${longPartNumber}`});
   await expect(longLink).toHaveAttribute('title',longPartNumber);
-  const dimensions=await longLink.locator('span').evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
+  const dimensions=await longLink.locator('.mcc-link-pill-label').evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
   expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });

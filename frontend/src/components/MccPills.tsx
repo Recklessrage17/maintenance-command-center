@@ -39,10 +39,11 @@ function ExternalLinkIcon() {
   return <svg className="mcc-link-pill-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 3.5h5v5M10 10l6.25-6.25M16 11.5v4a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" /></svg>;
 }
 
-export function MccLinkPill({href,children,className='',title,ariaLabel,external=true,leadingIcon,externalIconPosition='trailing'}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean;leadingIcon?:ReactNode;externalIconPosition?:'leading'|'trailing'}) {
+export function MccLinkPill({href,children,className='',title,ariaLabel,external=true,leadingIcon,externalIconPosition='trailing',appearance='standard'}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean;leadingIcon?:ReactNode;externalIconPosition?:'leading'|'trailing';appearance?:'standard'|'technical'}) {
   const externalIcon = external ? <ExternalLinkIcon /> : null;
+  const leadingExternalIcon = externalIconPosition==='leading'&&externalIcon;
   return <a
-    className={`mcc-link-pill${className?` ${className}`:''}`}
+    className={`mcc-link-pill mcc-link-pill--${appearance}${className?` ${className}`:''}`}
     href={href}
     target={external?'_blank':undefined}
     rel={external?'noopener noreferrer':undefined}
@@ -57,7 +58,7 @@ export function MccLinkPill({href,children,className='',title,ariaLabel,external
       event.preventDefault();
       event.currentTarget.click();
     }}
-  >{leadingIcon}{externalIconPosition==='leading'&&externalIcon}{children}{externalIconPosition==='trailing'&&externalIcon}</a>;
+  >{leadingIcon}{appearance==='technical'&&leadingExternalIcon?<span className="mcc-link-pill-icon-pod">{leadingExternalIcon}</span>:leadingExternalIcon}{children}{externalIconPosition==='trailing'&&externalIcon}</a>;
 }
 
 export function MccMetricPill({label,value,className='',variant='neutral'}:{label:string;value:ReactNode;className?:string;variant?:MccSemanticVariant}) {
