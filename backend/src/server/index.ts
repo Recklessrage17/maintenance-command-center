@@ -30,13 +30,14 @@ const mit3Url = 'http://localhost:4173';
 const mit3HealthUrl = `${mit3Url}/api/health`;
 const mit3AppDataUrl = `${mit3Url}/api/app-data`;
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
-const dataDir = path.resolve(__dirname, '../../data');
-const backupsDir = path.resolve(__dirname, '../../backups');
-const uploadsDir = path.resolve(__dirname, '../../uploads');
+const dataDir = path.resolve(process.env.MCC_DATA_DIR || path.resolve(__dirname, '../../data'));
+const backupsDir = path.resolve(process.env.MCC_BACKUPS_DIR || path.resolve(__dirname, '../../backups'));
+const uploadsDir = path.resolve(process.env.MCC_UPLOADS_DIR || path.resolve(__dirname, '../../uploads'));
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
 const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
 const machineAssetNotesDir = path.join(uploadsDir, 'machine-asset-notes');
+const machineDocumentLibraryDir = path.join(uploadsDir, 'machine-library');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -48,11 +49,13 @@ fs.mkdirSync(brandingUploadsDir, { recursive: true });
 fs.mkdirSync(machineComponentImagesDir, { recursive: true });
 fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
 fs.mkdirSync(machineAssetNotesDir, { recursive: true });
+fs.mkdirSync(machineDocumentLibraryDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
 const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
 const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
+const machineDocumentUpload = multer({ storage: multer.memoryStorage(), limits: { files: 20, fileSize: 50 * 1024 * 1024 } });
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
@@ -72,6 +75,7 @@ const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
 let db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode=WAL;');
+db.exec('PRAGMA foreign_keys=ON;');
 
 type SqlParam = string | number | bigint | Buffer | null;
 function all<T>(sql: string, params: SqlParam[] = []): T[] { return db.prepare(sql).all(...params) as T[]; }
@@ -97,6 +101,8 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS machine_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES machine_document_folders(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
@@ -124,6 +130,9 @@ CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_compone
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);
+CREATE INDEX IF NOT EXISTS idx_machine_document_folders_asset ON machine_document_folders (asset_id,name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_asset_folder ON machine_documents (asset_id,folder_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
@@ -256,6 +265,8 @@ CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTO
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS machine_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES machine_document_folders(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
@@ -265,6 +276,9 @@ CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_compone
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_machine_document_folders_asset ON machine_document_folders (asset_id,name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_asset_folder ON machine_documents (asset_id,folder_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
@@ -1793,6 +1807,7 @@ type BackupManifest = {
   includedPaths: string[];
   includedFolders: string[];
   recordCounts: Record<string, number>;
+  documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
   notes: string;
 };
@@ -1809,6 +1824,7 @@ type BackupSummary = {
   includedPaths: string[];
   includedFolders: string[];
   recordCounts: Record<string, number>;
+  documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
   notes: string;
   restorable: boolean;
@@ -1886,7 +1902,7 @@ const backupDataAreaDefinitions = [
   { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_batches','requisition_batch_requisitions','requisition_staging_items'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
-  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machines','machine_library','machine_pms'] },
+  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms'] },
   { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment','equipment_library','equipment_pms'] },
   { key: 'facilityRecords', label: 'Facility', tables: ['facility_documents','facility_info','building_prints','facility_pms'] },
   { key: 'users', label: 'Users/Roles', tables: ['users'] },
@@ -1967,11 +1983,26 @@ function masterBackupRecordCounts() {
     requisitionBatches: tableCount('requisition_batches'),
     requisitionStagingItems: tableCount('requisition_staging_items'),
     historyLogs: tableCount('history_logs'),
-    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machines','machine_library','machine_pms']),
+    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms']),
     equipmentRecords: tableGroupCount(['equipment_assets','equipment','equipment_library','equipment_pms']),
     facilityRecords: tableGroupCount(['facility_documents','facility_info','building_prints','facility_pms']),
     preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
   };
+}
+function machineDocumentLibraryBackupStats() {
+  const documentCount = tableCount('machine_documents');
+  const folderCount = tableCount('machine_document_folders');
+  let fileCount = 0;
+  function countFiles(folderPath: string) {
+    if (!fs.existsSync(folderPath)) return;
+    for (const entry of fs.readdirSync(folderPath,{withFileTypes:true})) {
+      const entryPath=path.join(folderPath,entry.name);
+      if (entry.isDirectory()) countFiles(entryPath);
+      else if (entry.isFile()) fileCount+=1;
+    }
+  }
+  countFiles(machineDocumentLibraryDir);
+  return { folderCount,documentCount,fileCount,sizeBytes:folderSizeBytes(machineDocumentLibraryDir) };
 }
 function masterBackupProtectedAreas(): ProtectedBackupArea[] {
   const counts = masterBackupRecordCounts();
@@ -2074,6 +2105,7 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     includedPaths: manifest?.includedPaths ?? (fs.existsSync(dbFile) ? ['mcc.sqlite'] : []),
     includedFolders: manifest?.includedFolders ?? (manifest?.includedPaths ?? []).filter(value=>value.endsWith('/')),
     recordCounts: manifest?.recordCounts ?? {},
+    documentLibrary: manifest?.documentLibrary,
     checksumSha256: manifest?.checksumSha256 ?? '',
     notes: manifest?.notes ?? '',
     restorable: fs.existsSync(dbFile),
@@ -2141,7 +2173,7 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
     const includedFolders: string[] = [];
     const fileTargetRoot = path.join(targetDir, 'files');
     for (const includedFolder of masterBackupFolderCandidates) {
-      const sourcePath = path.resolve(__dirname, '../../', includedFolder);
+      const sourcePath = appDataFolderPath(includedFolder);
       if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder))) {
         includedPaths.push(`${includedFolder}/`);
         includedFolders.push(`${includedFolder}/`);
@@ -2160,6 +2192,7 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
       includedPaths,
       includedFolders,
       recordCounts: masterBackupRecordCounts(),
+      documentLibrary: machineDocumentLibraryBackupStats(),
       checksumSha256: sha256File(backupDbPath),
       notes: input.notes ?? '',
     };
@@ -2219,6 +2252,7 @@ function verifyMasterBackup(id: unknown) {
 }
 function appDataFolderPath(folderName: string) {
   if (!masterBackupFolderCandidates.includes(folderName)) throw new Error('Unsafe restore folder.');
+  if (folderName === 'uploads') return uploadsDir;
   const backendRoot = path.resolve(__dirname, '../../');
   const resolved = path.resolve(backendRoot, folderName);
   if (!resolved.startsWith(`${backendRoot}${path.sep}`)) throw new Error('Unsafe restore folder.');
@@ -2242,6 +2276,7 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
   fs.mkdirSync(machineComponentImagesDir, { recursive: true });
   fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
   fs.mkdirSync(machineAssetNotesDir, { recursive: true });
+  fs.mkdirSync(machineDocumentLibraryDir, { recursive: true });
   return restoredFolders;
 }
 function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
@@ -2262,9 +2297,11 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
     fs.copyFileSync(backupDbPath, dbPath);
     db = new DatabaseSync(dbPath);
     db.exec('PRAGMA journal_mode=WAL;');
+    db.exec('PRAGMA foreign_keys=ON;');
     initDb();
     migrateDb();
     restoredFolders = restoreWhitelistedFoldersFromBackup(backupFolderPath, { removeMissing: true });
+    validateMachineDocumentStorageIntegrity();
     try { audit({ user: input.actor, ip: '', get: () => '' } as unknown as Request, 'backup restore completed', 'backup', verification.backup.id, { preRestoreBackupId: preRestoreBackup.id, category: input.category, restoredFolders }); } catch {}
     lastBackupResult = { ok: true, category: input.category, type: verification.backup.type, backupId: verification.backup.id, createdAt: now(), message: `Restored ${verification.backup.name}.` };
     return { restoredBackup: verification.backup, preRestoreBackup, restoredFolders };
@@ -2276,9 +2313,10 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
       }
       if (fs.existsSync(preRestoreDbPath)) fs.copyFileSync(preRestoreDbPath, dbPath);
       if (fs.existsSync(dbPath)) {
-        db = new DatabaseSync(dbPath);
-        db.exec('PRAGMA journal_mode=WAL;');
-        initDb();
+      db = new DatabaseSync(dbPath);
+      db.exec('PRAGMA journal_mode=WAL;');
+      db.exec('PRAGMA foreign_keys=ON;');
+      initDb();
         migrateDb();
       }
       restoreWhitelistedFoldersFromBackup(preRestoreFolderPath, { removeMissing: true });
@@ -5453,7 +5491,7 @@ const resetSections = new Set<ResetSection>([
   'preventive_maintenance',
 ]);
 const resetTableAllowlists: Record<'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance', string[]> = {
-  machine_library: ['machine_assets','machine_brand_settings','machines','machine_library','machine_pms'],
+  machine_library: ['machine_documents','machine_document_folders','machine_assets','machine_brand_settings','machines','machine_library','machine_pms'],
   equipment_library: ['equipment_assets','equipment','equipment_library','equipment_pms'],
   facility_info: ['facility_documents','facility_info','building_prints','facility_pms'],
   preventive_maintenance: ['pm_tasks','pm_history','preventive_maintenance'],
@@ -6163,6 +6201,8 @@ type MachineComponentImageRow = { id:number; asset_id:number; component_type:Mac
 type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
 type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; created_by_name?:string };
 type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string };
+type MachineDocumentFolderRow = { id:number; asset_id:number; name:string; description:string; created_at:string; updated_at:string; created_by_user_id:number|null; updated_by_user_id:number|null; document_count?:number; library_updated_at?:string };
+type MachineDocumentRow = { id:number; asset_id:number; folder_id:number; original_filename:string; display_filename:string; stored_filename:string; extension:string; mime_type:string; size_bytes:number; description:string; revision:string; uploaded_at:string; updated_at:string; uploaded_by_user_id:number|null; updated_by_user_id:number|null; uploaded_by_name?:string; folder_name?:string };
 type PmIntervalType = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | 'quarterly' | 'bi_annual' | 'annual' | 'cycles';
 type PmScheduleStatus = 'active' | 'hold' | 'inactive';
 type PmTaskRow = { id:number; asset_id:number; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; hold:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
@@ -6604,6 +6644,116 @@ function receiveMachineInspectionRecord(req: Request,res:Response,next:NextFunct
 }
 function machineAssetById(id: number, includeDeleted = false) {
   return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
+}
+const machineDocumentTypes = new Map([
+  ['.pdf','application/pdf'],['.doc','application/msword'],['.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['.xls','application/vnd.ms-excel'],['.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],['.txt','text/plain'],
+]);
+const maxMachineDocumentBytes = 50 * 1024 * 1024;
+function validateMachineDocumentFolderName(value: unknown) {
+  const name=String(value ?? '').trim().replace(/\s+/g,' ');
+  if (!name) throw new Error('Folder Name is required.');
+  if (name.length>120) throw new Error('Folder Name must be 120 characters or fewer.');
+  if (name==='.'||name==='..'||/[\x00-\x1f\x7f<>:"/\\|?*]/.test(name)) throw new Error('Folder Name contains unsafe characters.');
+  return name;
+}
+function validateMachineDocumentDescription(value: unknown) { return String(value ?? '').replace(/\r/g,'').trim().slice(0,2000); }
+function validateMachineDocumentRevision(value: unknown) { return String(value ?? '').replace(/[\x00-\x1f\x7f]/g,'').trim().slice(0,80); }
+function safeMachineDocumentDisplayName(value: unknown, requiredExtension?: string) {
+  const input=String(value ?? '').trim();
+  if (!input || input!==path.basename(input) || /[\x00-\x1f\x7f<>:"/\\|?*]/.test(input)) throw new Error('Document filename is invalid.');
+  const suppliedExtension=path.extname(input).toLowerCase();
+  const extension=requiredExtension ?? suppliedExtension;
+  if (!machineDocumentTypes.has(extension)) throw new Error('Documents must be PDF, Word, Excel, or TXT files.');
+  if (requiredExtension && suppliedExtension && suppliedExtension!==requiredExtension) throw new Error('Renaming must preserve the original file extension.');
+  const base=path.basename(input,suppliedExtension).trim();
+  if (!base) throw new Error('Document filename is required.');
+  const maxBaseLength=Math.max(1,180-extension.length);
+  return `${base.slice(0,maxBaseLength)}${extension}`;
+}
+function validatedMachineDocument(file: Express.Multer.File) {
+  if (file.size>maxMachineDocumentBytes) throw new Error('Each document must be 50 MB or smaller.');
+  const displayFilename=safeMachineDocumentDisplayName(path.basename(file.originalname));
+  const extension=path.extname(displayFilename).toLowerCase();
+  const mimeType=machineDocumentTypes.get(extension)!;
+  const bytes=file.buffer;
+  const ole=bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]));
+  const zip=bytes.length>=4&&bytes[0]===0x50&&bytes[1]===0x4b&&bytes[2]===0x03&&bytes[3]===0x04;
+  let matches=false;
+  if (extension==='.pdf') matches=bytes.subarray(0,5).toString('ascii')==='%PDF-';
+  else if (extension==='.docx'||extension==='.xlsx') matches=zip;
+  else if (extension==='.doc'||extension==='.xls') matches=ole;
+  else if (extension==='.txt') matches=!bytes.includes(0);
+  if (!matches) throw new Error(`${displayFilename} does not match its file type.`);
+  const suppliedMime=String(file.mimetype ?? '').toLowerCase();
+  if (suppliedMime&&suppliedMime!=='application/octet-stream'&&suppliedMime!==mimeType) throw new Error(`${displayFilename} has a mismatched content type.`);
+  return {displayFilename,extension,mimeType};
+}
+function receiveMachineDocuments(req: Request,res:Response,next:NextFunction) {
+  machineDocumentUpload.array('documents',20)(req,res,error=>{
+    if (!error) return next();
+    const message=error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE'?'Each document must be 50 MB or smaller.':safeErrorMessage(error,[],'Document upload failed.');
+    res.status(400).json({ok:false,error:message});
+  });
+}
+function machineDocumentFolderById(assetId:number,folderId:number) {
+  return one<MachineDocumentFolderRow>('SELECT * FROM machine_document_folders WHERE id=? AND asset_id=?',[folderId,assetId]);
+}
+function machineDocumentById(assetId:number,documentId:number) {
+  return one<MachineDocumentRow>(`SELECT d.*,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name,f.name AS folder_name FROM machine_documents d JOIN machine_document_folders f ON f.id=d.folder_id AND f.asset_id=d.asset_id LEFT JOIN users u ON u.id=d.uploaded_by_user_id WHERE d.id=? AND d.asset_id=?`,[documentId,assetId]);
+}
+function machineDocumentAssetDirectory(assetId:number) {
+  if (!Number.isInteger(assetId)||assetId<=0) throw new Error('Machine asset is invalid.');
+  const root=path.resolve(machineDocumentLibraryDir);
+  const resolved=path.resolve(root,`asset-${assetId}`,'documents');
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Machine document path is invalid.');
+  return resolved;
+}
+function machineDocumentFilePath(assetId:number,storedFilename:string) {
+  const extension=path.extname(storedFilename).toLowerCase();
+  const id=path.basename(storedFilename,extension);
+  if (!machineDocumentTypes.has(extension)||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)||storedFilename!==path.basename(storedFilename)) throw new Error('Machine document file reference is invalid.');
+  const root=machineDocumentAssetDirectory(assetId);
+  const resolved=path.resolve(root,storedFilename);
+  if (path.dirname(resolved)!==root) throw new Error('Machine document file reference is invalid.');
+  return resolved;
+}
+function validateMachineDocumentStorageIntegrity() {
+  const missing:string[]=[];
+  for (const row of all<Pick<MachineDocumentRow,'id'|'asset_id'|'stored_filename'|'size_bytes'>>('SELECT id,asset_id,stored_filename,size_bytes FROM machine_documents')) {
+    try { const filePath=machineDocumentFilePath(row.asset_id,row.stored_filename); if (!fs.existsSync(filePath)||!fs.statSync(filePath).isFile()||fs.statSync(filePath).size!==Number(row.size_bytes)) missing.push(String(row.id)); }
+    catch { missing.push(String(row.id)); }
+  }
+  if (missing.length) throw new Error(`Backup restore is missing ${missing.length} machine document file${missing.length===1?'':'s'}.`);
+}
+function publicMachineDocumentFolder(row:MachineDocumentFolderRow) {
+  return {id:row.id,assetId:row.asset_id,name:row.name,description:row.description,documentCount:Number(row.document_count??0),createdAt:row.created_at,updatedAt:row.library_updated_at??row.updated_at};
+}
+function publicMachineDocument(row:MachineDocumentRow) {
+  const base=`/api/machine-library/assets/${row.asset_id}/documents/${row.id}`;
+  return {id:row.id,assetId:row.asset_id,folderId:row.folder_id,folderName:row.folder_name??'',originalFilename:row.original_filename,displayFilename:row.display_filename,extension:row.extension,mimeType:row.mime_type,sizeBytes:Number(row.size_bytes),description:row.description,revision:row.revision,uploadedAt:row.uploaded_at,updatedAt:row.updated_at,uploadedBy:row.uploaded_by_name??'Unknown user',openUrl:`${base}/open`,downloadUrl:`${base}/download`,canPrint:row.extension==='.pdf'};
+}
+function machineDocumentFolders(assetId:number) {
+  return all<MachineDocumentFolderRow>(`SELECT f.*,COUNT(d.id) AS document_count,CASE WHEN MAX(d.updated_at)>f.updated_at THEN MAX(d.updated_at) ELSE f.updated_at END AS library_updated_at FROM machine_document_folders f LEFT JOIN machine_documents d ON d.folder_id=f.id AND d.asset_id=f.asset_id WHERE f.asset_id=? GROUP BY f.id ORDER BY f.name COLLATE NOCASE`,[assetId]);
+}
+function machineDocuments(assetId:number,search:string,sort:string) {
+  const params:SqlParam[]=[assetId];
+  let where='d.asset_id=?';
+  if (search) { const like=`%${escapeLike(search)}%`; where+=` AND (d.display_filename LIKE ? ESCAPE '\\' COLLATE NOCASE OR d.description LIKE ? ESCAPE '\\' COLLATE NOCASE OR d.revision LIKE ? ESCAPE '\\' COLLATE NOCASE OR COALESCE(u.full_name,'') LIKE ? ESCAPE '\\' COLLATE NOCASE)`; params.push(like,like,like,like); }
+  const order=sort==='newest'?'d.uploaded_at DESC,d.id DESC':sort==='oldest'?'d.uploaded_at ASC,d.id ASC':sort==='file_type'?'d.extension COLLATE NOCASE,d.display_filename COLLATE NOCASE':'d.display_filename COLLATE NOCASE,d.id';
+  return all<MachineDocumentRow>(`SELECT d.*,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name,f.name AS folder_name FROM machine_documents d JOIN machine_document_folders f ON f.id=d.folder_id AND f.asset_id=d.asset_id LEFT JOIN users u ON u.id=d.uploaded_by_user_id WHERE ${where} ORDER BY ${order}`,params);
+}
+function duplicateMachineDocument(assetId:number,folderId:number,displayFilename:string,excludeId?:number) {
+  return one<MachineDocumentRow>(`SELECT * FROM machine_documents WHERE asset_id=? AND folder_id=? AND lower(display_filename)=lower(?) ${excludeId?'AND id<>?':''} ORDER BY id LIMIT 1`,excludeId?[assetId,folderId,displayFilename,excludeId]:[assetId,folderId,displayFilename]);
+}
+function uniqueMachineDocumentName(assetId:number,folderId:number,displayFilename:string,excludeId?:number) {
+  if (!duplicateMachineDocument(assetId,folderId,displayFilename,excludeId)) return displayFilename;
+  const extension=path.extname(displayFilename);const base=path.basename(displayFilename,extension);
+  for (let number=2;number<10000;number+=1) { const candidate=`${base} (${number})${extension}`; if (!duplicateMachineDocument(assetId,folderId,candidate,excludeId)) return candidate; }
+  throw new Error('A unique document filename could not be created.');
+}
+function recordMachineDocumentHistory(action:string,actor:User,asset:MachineAssetRow,details:Record<string,unknown>,reasonNote='') {
+  recordMachineAssetHistory({action,actor,row:asset,newValue:details,reasonNote});
 }
 const pmIntervalLabels: Record<PmIntervalType,string> = { hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles' };
 const pmIntervalTypes = Object.keys(pmIntervalLabels) as PmIntervalType[];
@@ -7481,6 +7631,123 @@ app.get('/api/machine-library/preventive-maintenance/:pmId/history', requireAuth
   if (!task || !machineAssetById(task.asset_id)) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
   const history=all<PmHistoryRow>('SELECT * FROM pm_history WHERE pm_task_id=? ORDER BY completion_date DESC,id DESC',[task.id]).map(publicPmHistory);
   res.json({ok:true,task:publicPmTask(task),history});
+});
+app.get('/api/machine-library/assets/:assetId/document-folders', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const folders=machineDocumentFolders(asset.id).map(publicMachineDocumentFolder);
+  const documentCount=one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=?',[asset.id])?.count??0;
+  res.json({ok:true,assetId:asset.id,folders,summary:{folderCount:folders.length,documentCount}});
+});
+app.post('/api/machine-library/assets/:assetId/document-folders', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const name=validateMachineDocumentFolderName(isRecord(req.body)?req.body.name:'');
+    const description=validateMachineDocumentDescription(isRecord(req.body)?req.body.description:'');
+    if(one('SELECT id FROM machine_document_folders WHERE asset_id=? AND lower(name)=lower(?)',[asset.id,name]))return res.status(409).json({ok:false,code:'DUPLICATE_FOLDER',error:'A folder with this name already exists.'});
+    const timestamp=now();const result=run('INSERT INTO machine_document_folders (asset_id,name,description,created_at,updated_at,created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?)',[asset.id,name,description,timestamp,timestamp,req.user!.id,req.user!.id]);
+    const folder=machineDocumentFolderById(asset.id,Number(result.lastInsertRowid))!;
+    recordMachineDocumentHistory('document_folder_created',req.user!,asset,{folderId:folder.id,folderName:name,description});
+    scheduleAutoBackup('machine document folder created',req.user!);
+    res.status(201).json({ok:true,folder:publicMachineDocumentFolder(folder)});
+  } catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be created.')});}
+});
+app.patch('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
+    const body=isRecord(req.body)?req.body:{};const name=body.name===undefined?folder.name:validateMachineDocumentFolderName(body.name);const description=body.description===undefined?folder.description:validateMachineDocumentDescription(body.description);
+    if(one('SELECT id FROM machine_document_folders WHERE asset_id=? AND lower(name)=lower(?) AND id<>?',[asset.id,name,folder.id]))return res.status(409).json({ok:false,code:'DUPLICATE_FOLDER',error:'A folder with this name already exists.'});
+    const timestamp=now();run('UPDATE machine_document_folders SET name=?,description=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[name,description,timestamp,req.user!.id,folder.id,asset.id]);
+    if(name!==folder.name)recordMachineDocumentHistory('document_folder_renamed',req.user!,asset,{folderId:folder.id,previousName:folder.name,folderName:name});
+    if(description!==folder.description)recordMachineDocumentHistory('document_folder_description_edited',req.user!,asset,{folderId:folder.id,folderName:name,description});
+    scheduleAutoBackup('machine document folder updated',req.user!);
+    res.json({ok:true,folder:publicMachineDocumentFolder(machineDocumentFolderById(asset.id,folder.id)!)});
+  } catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be updated.')});}
+});
+app.delete('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
+  const count=one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=? AND folder_id=?',[asset.id,folder.id])?.count??0;
+  if(count)return res.status(409).json({ok:false,code:'FOLDER_NOT_EMPTY',error:'This folder contains documents. Move or delete them before deleting the folder.'});
+  run('DELETE FROM machine_document_folders WHERE id=? AND asset_id=?',[folder.id,asset.id]);
+  recordMachineDocumentHistory('document_folder_deleted',req.user!,asset,{folderId:folder.id,folderName:folder.name});scheduleAutoBackup('machine document folder deleted',req.user!);
+  res.json({ok:true});
+});
+app.get('/api/machine-library/assets/:assetId/documents', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const search=String(req.query.search??'').trim().slice(0,180);const sort=String(req.query.sort??'name').trim().toLowerCase();
+  res.json({ok:true,documents:machineDocuments(asset.id,search,sort).map(publicMachineDocument)});
+});
+app.post('/api/machine-library/assets/:assetId/document-folders/:folderId/documents', requireAuth, requirePermission('machine.write'), receiveMachineDocuments, (req:AuthRequest,res)=>{
+  const newFiles:string[]=[];const replacedFiles:string[]=[];
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
+    const files=(req.files as Express.Multer.File[]|undefined)??[];if(!files.length)return res.status(400).json({ok:false,error:'Select at least one document to upload.'});
+    const validated=files.map(file=>({file,...validatedMachineDocument(file)}));const duplicateAction=String(req.body?.duplicateAction??'').trim().toLowerCase();const selectedNames=new Set<string>();
+    const duplicates=validated.filter(item=>{const key=item.displayFilename.toLowerCase();const duplicate=selectedNames.has(key)||Boolean(duplicateMachineDocument(asset.id,folder.id,item.displayFilename));selectedNames.add(key);return duplicate;}).map(item=>item.displayFilename);
+    if(duplicates.length&&!['replace','keep_both'].includes(duplicateAction))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.',duplicates:[...new Set(duplicates)]});
+    const description=validateMachineDocumentDescription(req.body?.description);const revision=validateMachineDocumentRevision(req.body?.revision);const timestamp=now();const createdIds:number[]=[];const historyEvents:Array<{action:string;details:Record<string,unknown>}>=[];
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const targetDir=machineDocumentAssetDirectory(asset.id);fs.mkdirSync(targetDir,{recursive:true});
+      for(const item of validated){
+        let displayFilename=item.displayFilename;let existing=duplicateMachineDocument(asset.id,folder.id,displayFilename);
+        if(existing&&duplicateAction==='keep_both'){displayFilename=uniqueMachineDocumentName(asset.id,folder.id,displayFilename);existing=undefined;}
+        const storedFilename=`${crypto.randomUUID()}${item.extension}`;const storedPath=machineDocumentFilePath(asset.id,storedFilename);fs.writeFileSync(storedPath,item.file.buffer,{flag:'wx'});newFiles.push(storedPath);
+        if(existing&&duplicateAction==='replace'){
+          const previousPath=machineDocumentFilePath(asset.id,existing.stored_filename);replacedFiles.push(previousPath);
+          run('UPDATE machine_documents SET original_filename=?,display_filename=?,stored_filename=?,extension=?,mime_type=?,size_bytes=?,description=?,revision=?,uploaded_at=?,updated_at=?,uploaded_by_user_id=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,description,revision,timestamp,timestamp,req.user!.id,req.user!.id,existing.id,asset.id]);
+          createdIds.push(existing.id);historyEvents.push({action:'document_replaced',details:{documentId:existing.id,folderId:folder.id,folderName:folder.name,displayFilename}});
+        }else{
+          const result=run('INSERT INTO machine_documents (asset_id,folder_id,original_filename,display_filename,stored_filename,extension,mime_type,size_bytes,description,revision,uploaded_at,updated_at,uploaded_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[asset.id,folder.id,item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,description,revision,timestamp,timestamp,req.user!.id,req.user!.id]);
+          const id=Number(result.lastInsertRowid);createdIds.push(id);historyEvents.push({action:'document_uploaded',details:{documentId:id,folderId:folder.id,folderName:folder.name,displayFilename}});
+        }
+      }
+      run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,folder.id]);
+      for(const event of historyEvents)recordMachineDocumentHistory(event.action,req.user!,asset,event.details);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+    for(const oldPath of replacedFiles)if(!newFiles.includes(oldPath)&&fs.existsSync(oldPath))fs.rmSync(oldPath,{force:true});
+    scheduleAutoBackup('machine documents uploaded',req.user!);
+    res.status(201).json({ok:true,documents:createdIds.map(id=>publicMachineDocument(machineDocumentById(asset.id,id)!))});
+  }catch(error){for(const filePath of newFiles)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Documents could not be uploaded.')});}
+});
+for(const mode of ['open','download'] as const)app.get(`/api/machine-library/assets/:assetId/documents/:documentId/${mode}`,requireAuth,requirePermission('machine.view'),(req:AuthRequest,res)=>{
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
+    const filePath=machineDocumentFilePath(asset.id,document.stored_filename);if(!fs.existsSync(filePath))return res.status(404).json({ok:false,error:'Stored document file is missing.'});
+    const disposition=mode==='download'||document.extension!=='.pdf'?'attachment':'inline';const safeName=document.display_filename.replace(/[^\x20-\x7e]|["\\]/g,'_');
+    res.setHeader('Content-Type',document.mime_type);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`${disposition}; filename="${safeName}"`);res.sendFile(filePath);
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be opened.')});}
+});
+app.patch('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.write'),(req:AuthRequest,res)=>{
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
+    const body=isRecord(req.body)?req.body:{};const displayFilename=body.displayFilename===undefined?document.display_filename:safeMachineDocumentDisplayName(body.displayFilename,document.extension);const description=body.description===undefined?document.description:validateMachineDocumentDescription(body.description);const revision=body.revision===undefined?document.revision:validateMachineDocumentRevision(body.revision);
+    if(duplicateMachineDocument(asset.id,document.folder_id,displayFilename,document.id))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.'});
+    const timestamp=now();run('UPDATE machine_documents SET display_filename=?,description=?,revision=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[displayFilename,description,revision,timestamp,req.user!.id,document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,document.folder_id]);
+    if(displayFilename!==document.display_filename)recordMachineDocumentHistory('document_renamed',req.user!,asset,{documentId:document.id,previousFilename:document.display_filename,displayFilename,folderId:document.folder_id});
+    if(description!==document.description||revision!==document.revision)recordMachineDocumentHistory('document_metadata_edited',req.user!,asset,{documentId:document.id,displayFilename,description,revision,folderId:document.folder_id});
+    scheduleAutoBackup('machine document updated',req.user!);res.json({ok:true,document:publicMachineDocument(machineDocumentById(asset.id,document.id)!)});
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be updated.')});}
+});
+app.post('/api/machine-library/assets/:assetId/documents/:documentId/move',requireAuth,requirePermission('machine.write'),(req:AuthRequest,res)=>{
+  let replacedPath='';
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
+    const destination=machineDocumentFolderById(asset.id,Number(isRecord(req.body)?req.body.folderId:0));if(!destination)return res.status(404).json({ok:false,error:'Destination folder not found.'});if(destination.id===document.folder_id)return res.status(400).json({ok:false,error:'Choose a different destination folder.'});
+    const action=String(isRecord(req.body)?req.body.duplicateAction??'':'').toLowerCase();let displayFilename=document.display_filename;const duplicate=duplicateMachineDocument(asset.id,destination.id,displayFilename,document.id);
+    if(duplicate&&!['replace','keep_both'].includes(action))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.',duplicates:[displayFilename]});
+    if(duplicate&&action==='keep_both')displayFilename=uniqueMachineDocumentName(asset.id,destination.id,displayFilename,document.id);
+    const timestamp=now();db.exec('BEGIN IMMEDIATE');try{if(duplicate&&action==='replace'){replacedPath=machineDocumentFilePath(asset.id,duplicate.stored_filename);run('DELETE FROM machine_documents WHERE id=? AND asset_id=?',[duplicate.id,asset.id]);recordMachineDocumentHistory('document_replaced',req.user!,asset,{documentId:document.id,replacedDocumentId:duplicate.id,displayFilename,folderId:destination.id,folderName:destination.name});}run('UPDATE machine_documents SET folder_id=?,display_filename=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[destination.id,displayFilename,timestamp,req.user!.id,document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id IN (?,?)',[timestamp,req.user!.id,document.folder_id,destination.id]);recordMachineDocumentHistory('document_moved',req.user!,asset,{documentId:document.id,displayFilename,fromFolderId:document.folder_id,toFolderId:destination.id,toFolderName:destination.name});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+    if(replacedPath&&fs.existsSync(replacedPath))fs.rmSync(replacedPath,{force:true});scheduleAutoBackup('machine document moved',req.user!);res.json({ok:true,document:publicMachineDocument(machineDocumentById(asset.id,document.id)!)});
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be moved.')});}
+});
+app.delete('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.write'),(req:AuthRequest,res)=>{
+  try{const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const filePath=machineDocumentFilePath(asset.id,document.stored_filename);run('DELETE FROM machine_documents WHERE id=? AND asset_id=?',[document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[now(),req.user!.id,document.folder_id]);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});recordMachineDocumentHistory('document_deleted',req.user!,asset,{documentId:document.id,displayFilename:document.display_filename,folderId:document.folder_id,folderName:document.folder_name});scheduleAutoBackup('machine document deleted',req.user!);res.json({ok:true});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be deleted.')});}
 });
 app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.id));

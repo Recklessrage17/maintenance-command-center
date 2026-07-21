@@ -70,6 +70,8 @@ async function mockMachineLibrary(page: Page) {
   }));
   await page.route(/\/api\/machine-library\/assets\/\d+\/notes$/, route=>route.fulfill({ json: { ok: true, notes: [] } }));
   await page.route(/\/api\/machine-library\/assets\/\d+\/component-images$/, route=>route.fulfill({ json: { ok: true, images: [] } }));
+  await page.route(/\/api\/machine-library\/assets\/\d+\/document-folders$/, route=>route.fulfill({ json: { ok: true, folders: [], summary: { folderCount: 0, documentCount: 0 } } }));
+  await page.route(/\/api\/machine-library\/assets\/\d+\/documents$/, route=>route.fulfill({ json: { ok: true, documents: [] } }));
 }
 
 async function activate(locator: Locator, mobile: boolean, options?: { position?: { x: number; y: number } }) {
