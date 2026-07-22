@@ -58,6 +58,7 @@ test('linked Part Numbers use one safe compact row-isolated text link',async({pa
   await expect(linked).toHaveAttribute('title','35MB');
   expect(await linked.evaluate(element=>element.tagName)).toBe('A');
   await expect(linked).toHaveClass(/mcc-text-link/);
+  await expect(linked).toHaveClass(/mcc-text-link--gold/);
   await expect(linked).not.toHaveClass(/mcc-link-pill/);
   await expect(linked.locator('svg')).toHaveCount(0);
   await expect(linkedRow).not.toContainText('parts.example.com');
@@ -83,12 +84,14 @@ test('linked Part Numbers use one safe compact row-isolated text link',async({pa
   expect(style.fontWeight).toBeGreaterThanOrEqual(700);
   expect(style.height).toBeLessThanOrEqual(30);
   const labelStyle=await linked.locator('.mcc-text-link__label').evaluate(element=>({
+    color:getComputedStyle(element).color,
     backgroundImage:getComputedStyle(element).backgroundImage,
     textOverflow:getComputedStyle(element).textOverflow,
     textShadow:getComputedStyle(element).textShadow,
     clientWidth:element.clientWidth,
     scrollWidth:element.scrollWidth,
   }));
+  expect(labelStyle.color).toBe('rgb(255, 216, 106)');
   expect(labelStyle.backgroundImage).toContain('linear-gradient');
   expect(labelStyle.textOverflow).toBe('ellipsis');
   expect(labelStyle.textShadow).not.toBe('none');
@@ -127,7 +130,7 @@ test('linked Part Numbers use one safe compact row-isolated text link',async({pa
   await linked.focus();
   expect(await linked.evaluate(element=>element.matches(':focus-visible'))).toBe(true);
   expect(await linked.evaluate(element=>getComputedStyle(element).outlineStyle)).not.toBe('none');
-  expect(Number(await linked.evaluate(element=>getComputedStyle(element,'::after').opacity))).toBeGreaterThan(0);
+  await expect.poll(()=>linked.evaluate(element=>Number(getComputedStyle(element,'::after').opacity))).toBeGreaterThan(0);
   await openOnce(page,context,linked,()=>linked.press('Space'),'/35mb');
   expect(await page.evaluate(()=>(window as typeof window & {__inventoryParentClicks?:number}).__inventoryParentClicks)).toBe(0);
   await expect(linkedRow.getByRole('button',{name:'Select'})).toBeVisible();

@@ -60,9 +60,9 @@ export function MccLinkPill({href,children,className='',title,ariaLabel,external
   >{leadingIcon}{children}{externalIcon}</a>;
 }
 
-export function MccTextLink({href,children,className='',title,ariaLabel,external=true}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean}) {
+export function MccTextLink({href,children,className='',title,ariaLabel,external=true,tone='standard'}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean;tone?:'standard'|'gold'}) {
   return <a
-    className={`mcc-text-link${className?` ${className}`:''}`}
+    className={`mcc-text-link mcc-text-link--${tone}${className?` ${className}`:''}`}
     href={href}
     target={external?'_blank':undefined}
     rel={external?'noopener noreferrer':undefined}

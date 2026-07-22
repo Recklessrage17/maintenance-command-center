@@ -481,6 +481,14 @@ button.glass-pill--linked:focus-visible {
 .mcc-link-pill-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .mcc-text-link {
+  --mcc-text-link-color: #63e9e1;
+  --mcc-text-link-highlight: #a9fff0;
+  --mcc-text-link-dark: #35bfa9;
+  --mcc-text-link-gradient: linear-gradient(105deg,#75eaff 0%,#55ded9 46%,#49eaa8 100%);
+  --mcc-text-link-underline: linear-gradient(90deg,#5ee6ff,#43efac);
+  --mcc-text-link-glow: rgba(68,215,255,.18);
+  --mcc-text-link-hover-glow: rgba(68,215,255,.28);
+  --mcc-text-link-focus: rgba(92,231,255,.74);
   position: relative;
   min-width: 0;
   max-width: 100%;
@@ -490,7 +498,7 @@ button.glass-pill--linked:focus-visible {
   padding: 2px 0;
   border: 0;
   border-radius: 2px;
-  color: #63e9e1;
+  color: var(--mcc-text-link-color);
   background: none;
   box-shadow: none;
   font: inherit;
@@ -507,32 +515,32 @@ button.glass-pill--linked:focus-visible {
   bottom: 2px;
   left: 0;
   height: 1px;
-  background: linear-gradient(90deg, #5ee6ff, #43efac);
+  background: var(--mcc-text-link-underline);
   opacity: 0;
   pointer-events: none;
   transform: scaleX(.2);
   transform-origin: left;
   transition: opacity .16s ease, transform .2s ease;
 }
-.mcc-text-link__label {
+.mcc-text-link .mcc-text-link__label {
   min-width: 0;
   overflow: hidden;
-  color: #63e9e1;
-  background: linear-gradient(105deg, #75eaff 0%, #55ded9 46%, #49eaa8 100%);
+  color: var(--mcc-text-link-color);
+  background: var(--mcc-text-link-gradient);
   background-clip: text;
   -webkit-background-clip: text;
   background-position: 0 50%;
   background-size: 170% 100%;
   -webkit-text-fill-color: transparent;
   text-overflow: ellipsis;
-  text-shadow: 0 0 5px rgba(68,215,255,.18);
+  text-shadow: 0 0 5px var(--mcc-text-link-glow);
   white-space: nowrap;
   transition: background-position .24s ease, filter .16s ease, text-shadow .16s ease;
 }
 .mcc-text-link:hover,
 .mcc-text-link:focus-visible {
-  color: #a9fff0;
-  outline: 1px solid rgba(92,231,255,.74);
+  color: var(--mcc-text-link-highlight);
+  outline: 1px solid var(--mcc-text-link-focus);
   outline-offset: 2px;
 }
 .mcc-text-link:hover::after,
@@ -541,10 +549,20 @@ button.glass-pill--linked:focus-visible {
 .mcc-text-link:focus-visible .mcc-text-link__label {
   background-position: 100% 50%;
   filter: brightness(1.16);
-  text-shadow: 0 0 7px rgba(68,215,255,.28);
+  text-shadow: 0 0 7px var(--mcc-text-link-hover-glow);
 }
-.mcc-text-link:active { opacity: .78; outline-color: rgba(54,229,170,.52); }
-.mcc-text-link:active .mcc-text-link__label { filter: brightness(.88); text-shadow: 0 0 3px rgba(54,229,170,.12); }
+.mcc-text-link:active { color: var(--mcc-text-link-dark); opacity: .78; outline-color: var(--mcc-text-link-dark); }
+.mcc-text-link:active .mcc-text-link__label { filter: brightness(.88); text-shadow: 0 0 3px var(--mcc-text-link-glow); }
+.mcc-text-link--gold {
+  --mcc-text-link-color: #ffd86a;
+  --mcc-text-link-highlight: #fff1a6;
+  --mcc-text-link-dark: #d9a928;
+  --mcc-text-link-gradient: linear-gradient(105deg,#fff1a6 0%,#ffd86a 48%,#d9a928 100%);
+  --mcc-text-link-underline: linear-gradient(90deg,#fff1a6,#d9a928);
+  --mcc-text-link-glow: rgba(255,193,63,.18);
+  --mcc-text-link-hover-glow: rgba(255,216,106,.3);
+  --mcc-text-link-focus: rgba(255,216,106,.78);
+}
 
 .mcc-metric-pill {
   min-width: 0;
@@ -797,6 +815,44 @@ button.glass-attachment:focus-visible {
   background: linear-gradient(145deg, #3ea879, #17583d);
 }
 
+/* Reusable compact file/folder glyphs. These are icons, never tiles. */
+.mcc-file-type-icon.mcc-file-type-icon {
+  --mcc-file-accent: #79b8cb;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  color: var(--mcc-file-accent);
+  background: none;
+  box-shadow: none;
+  line-height: 1;
+  transition: filter .15s ease, color .15s ease;
+}
+.mcc-file-type-icon svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; }
+.mcc-file-type-icon__page { fill: rgba(231,242,246,.96); stroke: color-mix(in srgb,var(--mcc-file-accent) 62%,#354d59); stroke-width: 1.15; stroke-linejoin: round; }
+.mcc-file-type-icon__fold { fill: color-mix(in srgb,var(--mcc-file-accent) 18%,#eef8fa); stroke: color-mix(in srgb,var(--mcc-file-accent) 62%,#354d59); stroke-width: 1.05; stroke-linejoin: round; }
+.mcc-file-type-icon__band { fill: var(--mcc-file-accent); }
+.mcc-file-type-icon__label { fill: #fff; font-family: inherit; font-size: 5.4px; font-weight: 900; letter-spacing: .18px; }
+.mcc-file-type-icon__grid,.mcc-file-type-icon__lines { fill: none; stroke: var(--mcc-file-accent); stroke-width: 1.15; stroke-linecap: round; }
+.mcc-file-type-icon--pdf { --mcc-file-accent: #c74355; }
+.mcc-file-type-icon--word { --mcc-file-accent: #357cc8; }
+.mcc-file-type-icon--excel { --mcc-file-accent: #31875d; }
+.mcc-file-type-icon--text { --mcc-file-accent: #6c9fac; }
+.mcc-file-type-icon.mcc-file-type-icon--folder { width: 26px; height: 24px; color: #66b9d4; }
+.mcc-file-type-icon--folder .mcc-file-type-icon__folder-back { fill: rgba(54,151,188,.1); stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
+.mcc-file-type-icon--folder .mcc-file-type-icon__folder-front { fill: rgba(54,151,188,.08); stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
+.mcc-file-type-icon--folder.is-open { color: #7bdaef; }
+.machine-document-folder-header .mcc-resource-row__content:hover .mcc-file-type-icon--folder,
+.machine-document-folder-header .mcc-resource-row__content:focus-visible .mcc-file-type-icon--folder { color: #91eaff; }
+.machine-document-row:hover .mcc-file-type-icon,
+.machine-document-row:focus-within .mcc-file-type-icon { filter: brightness(1.08); }
+
 /*
  * Machine Library showcase composition
  * These selectors outrank the older component surfaces while retaining their
@@ -1020,7 +1076,8 @@ button.glass-attachment:focus-visible {
   .mcc-link-pill,
   .mcc-text-link,
   .mcc-text-link::after,
-  .mcc-text-link__label {
+  .mcc-text-link__label,
+  .mcc-file-type-icon {
     scroll-behavior: auto;
     transition: none;
   }

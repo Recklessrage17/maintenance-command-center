@@ -15,6 +15,8 @@ async function mockApp(page:Page) {
   await page.route(/\/api\/machine-library\/assets\/\d+\/preventive-maintenance$/,route=>route.fulfill({json:{ok:true,tasks:[],summary:{total:0,current:0,dueSoon:0,dueNow:0,overdue:0,hold:0,inactive:0,incomplete:0,nextDueDate:null,nextDueMeter:null}}}));
   await page.route(/\/api\/machine-library\/assets\/\d+\/notes$/,route=>route.fulfill({json:{ok:true,notes:[]}}));
   await page.route(/\/api\/machine-library\/assets\/\d+\/component-images$/,route=>route.fulfill({json:{ok:true,images:[]}}));
+  await page.route(/\/api\/machine-library\/assets\/\d+\/document-folders$/,route=>route.fulfill({json:{ok:true,folders:[],summary:{folderCount:0,documentCount:0}}}));
+  await page.route(/\/api\/machine-library\/assets\/\d+\/documents$/,route=>route.fulfill({json:{ok:true,documents:[]}}));
 }
 
 async function swipePageUp(page:Page) {
