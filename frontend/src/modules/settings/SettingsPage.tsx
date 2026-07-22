@@ -761,7 +761,10 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
               <strong>Tiered MCC data protection</strong>
               <p>Daily change backups, Friday weekly backups, and monthly master backups are separated by role and folder.</p>
             </div>
-            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
+            <div className="backup-row-actions">
+              {backupPermissions.canViewWeekly&&<a className="secondary-button compact-button" href="/api/machine-library/documents/recovery-export" download>Export Document Recovery ZIP</a>}
+              <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
+            </div>
           </div>
 
           {manualBackupProgress.state!=='idle'&&(
