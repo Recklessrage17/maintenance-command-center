@@ -1,7 +1,9 @@
 import { defineConfig } from '@playwright/test';
+import { resolve } from 'node:path';
 
 const testPort = process.env.MCC_PLAYWRIGHT_PORT ?? '4273';
 const baseURL = `http://localhost:${testPort}`;
+const testStorageRoot = resolve('tmp', `playwright-${process.pid}`);
 
 export default defineConfig({
   testDir: './tests',
@@ -17,7 +19,13 @@ export default defineConfig({
   webServer: {
     command: testPort === '4273' ? 'npm start' : `npm run preview --prefix frontend -- --host 127.0.0.1 --port ${testPort}`,
     url: testPort === '4273' ? `${baseURL}/api/health` : baseURL,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
+    env: {
+      NODE_ENV: 'test',
+      MCC_DATA_DIR: resolve(testStorageRoot, 'data'),
+      MCC_UPLOADS_DIR: resolve(testStorageRoot, 'uploads'),
+      MCC_BACKUPS_DIR: resolve(testStorageRoot, 'backups'),
+    },
     timeout: 30_000,
   },
   projects: [
