@@ -6,6 +6,7 @@ import { AssetMeasurementRecordLogsModal, MachineLibraryToolsDropdown, RECORD_LO
 import { MachineComponentImageCard } from './MachineComponentImageCard';
 import { MaintenancePhotoReview, prepareMaintenancePhoto } from './MaintenancePhotoReview';
 import { AssetNotesAttachments } from './AssetNotesAttachments';
+import { AssetDocumentLibrary } from './AssetDocumentLibrary';
 import { PreventiveMaintenanceTracking } from './PreventiveMaintenanceTracking';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
@@ -651,6 +652,7 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
         return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
       <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canEdit} />
+      <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} />
       <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} />
     </div>
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>

@@ -9,6 +9,8 @@
     "start": "npm start --prefix backend",
     "smoke": "node scripts/smoke-test.mjs",
     "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
+    "test:machine-documents": "playwright test tests/machine-asset-document-library.spec.ts",
+    "test:machine-documents-api": "node tests/machine-asset-document-library-api.mjs",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
     "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",
