@@ -481,18 +481,18 @@ button.glass-pill--linked:focus-visible {
 .mcc-link-pill-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .mcc-link-pill--technical {
-  gap: 0;
-  padding: 4px 11px 4px 4px;
+  gap: 8px;
+  padding: 7px 12px;
   border: 1px solid transparent;
-  border-radius: 9px 14px 9px 14px;
+  border-radius: 16px 13px 16px 13px;
   color: #f1fffb;
   background:
-    linear-gradient(180deg, rgba(12,48,61,.96) 0%, rgba(5,36,47,.98) 48%, rgba(8,65,53,.98) 100%) padding-box,
-    linear-gradient(135deg, #65eaff 0%, rgba(75,220,246,.64) 38%, rgba(50,224,166,.66) 68%, #36e5aa 100%) border-box;
+    linear-gradient(180deg, rgba(11,46,60,.97) 0%, rgba(5,32,44,.98) 50%, rgba(7,61,50,.98) 100%) padding-box,
+    linear-gradient(135deg, #67eaff 0%, rgba(77,220,244,.72) 38%, rgba(49,218,165,.7) 69%, #35e2a8 100%) border-box;
   box-shadow:
-    inset 0 1px 0 rgba(218,252,255,.24),
-    inset 0 -7px 13px rgba(0,12,20,.34),
-    0 8px 12px -10px rgba(54,229,170,.92);
+    inset 0 1px 0 rgba(218,252,255,.22),
+    inset 0 -6px 11px rgba(0,12,20,.32),
+    0 7px 11px -9px rgba(54,229,170,.78);
   font-size: .9rem;
   font-weight: 950;
   letter-spacing: .015em;
@@ -520,28 +520,15 @@ button.glass-pill--linked:focus-visible {
   transform: skewX(-16deg);
   transition: none;
 }
-.mcc-link-pill--technical .mcc-link-pill-icon-pod {
-  align-self: stretch;
-  flex: 0 0 34px;
-  width: 34px;
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 9px;
-  border: 1px solid transparent;
-  border-radius: 7px 10px 7px 10px;
-  color: #9df5ff;
-  background:
-    linear-gradient(145deg, rgba(7,50,66,.96), rgba(8,78,62,.94)) padding-box,
-    linear-gradient(135deg, rgba(116,239,255,.94), rgba(48,229,166,.86)) border-box;
-  box-shadow:
-    inset 0 1px 0 rgba(221,253,255,.22),
-    inset 0 -5px 8px rgba(0,15,24,.38),
-    1px 0 0 rgba(1,17,27,.72);
-  transition: color .15s ease, filter .15s ease, box-shadow .15s ease;
+.mcc-link-pill--technical .mcc-link-pill-icon {
+  flex-basis: 14px;
+  width: 14px;
+  height: 14px;
+  color: #8cebf5;
+  opacity: .84;
+  filter: drop-shadow(0 0 2px rgba(68,215,255,.18));
+  transition: color .15s ease, opacity .15s ease, filter .15s ease;
 }
-.mcc-link-pill--technical .mcc-link-pill-icon { width: 17px; height: 17px; filter: drop-shadow(0 0 3px rgba(68,215,255,.2)); }
 .mcc-link-pill--technical:hover,
 .mcc-link-pill--technical:focus-visible {
   color: #fff;
@@ -554,8 +541,8 @@ button.glass-pill--linked:focus-visible {
   box-shadow:
     inset 0 1px 0 rgba(231,254,255,.34),
     inset 0 -7px 13px rgba(0,12,20,.28),
-    0 9px 14px -10px rgba(54,229,170,1);
-  transform: translateY(-2px);
+    0 8px 12px -9px rgba(54,229,170,.9);
+  transform: translateY(-1px);
 }
 .mcc-link-pill--technical:hover::before,
 .mcc-link-pill--technical:focus-visible::before {
@@ -563,11 +550,11 @@ button.glass-pill--linked:focus-visible {
   opacity: 0;
   animation: mcc-technical-link-shine .48s ease-out 1;
 }
-.mcc-link-pill--technical:hover .mcc-link-pill-icon-pod,
-.mcc-link-pill--technical:focus-visible .mcc-link-pill-icon-pod {
+.mcc-link-pill--technical:hover .mcc-link-pill-icon,
+.mcc-link-pill--technical:focus-visible .mcc-link-pill-icon {
   color: #e7fdff;
-  filter: brightness(1.12);
-  box-shadow: inset 0 1px 0 rgba(239,255,255,.34), inset 0 -4px 8px rgba(0,15,24,.3), 1px 0 0 rgba(1,17,27,.72), 0 0 8px rgba(68,215,255,.14);
+  opacity: 1;
+  filter: drop-shadow(0 0 3px rgba(68,215,255,.32));
 }
 .mcc-link-pill--technical:active {
   transform: translateY(0);

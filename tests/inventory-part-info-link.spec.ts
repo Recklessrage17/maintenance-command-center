@@ -57,9 +57,10 @@ test('linked Part Numbers use one safe, polished row-isolated link pill',async({
   await expect(linked).toHaveAttribute('rel','noopener noreferrer');
   await expect(linked).toHaveAttribute('title','35MB');
   await expect(linked).toHaveClass(/mcc-link-pill--technical/);
-  await expect(linked.locator('.mcc-link-pill-icon')).toHaveCount(1);
-  await expect(linked.locator('.mcc-link-pill-icon-pod')).toHaveCount(1);
-  expect(await linked.evaluate(element=>element.firstElementChild?.classList.contains('mcc-link-pill-icon-pod'))).toBe(true);
+  const icon=linked.locator('.mcc-link-pill-icon');
+  await expect(icon).toHaveCount(1);
+  await expect(linked.locator('.mcc-link-pill-icon-pod')).toHaveCount(0);
+  expect(await icon.evaluate(element=>element.parentElement?.classList.contains('inventory-part-info-link'))).toBe(true);
   await expect(linkedRow).not.toContainText('parts.example.com');
 
   const style=await linked.evaluate(element=>({
@@ -69,7 +70,9 @@ test('linked Part Numbers use one safe, polished row-isolated link pill',async({
     topHighlightPointerEvents:getComputedStyle(element,'::after').pointerEvents,
     borderRadius:getComputedStyle(element).borderRadius,
     backgroundImage:getComputedStyle(element).backgroundImage,
+    borderWidth:getComputedStyle(element).borderWidth,
     fontWeight:Number(getComputedStyle(element).fontWeight),
+    fontSize:Number.parseFloat(getComputedStyle(element).fontSize),
     minHeight:element.getBoundingClientRect().height,
   }));
   expect(style.cursor).toBe('pointer');
@@ -78,8 +81,17 @@ test('linked Part Numbers use one safe, polished row-isolated link pill',async({
   expect(style.topHighlightPointerEvents).toBe('none');
   expect(style.borderRadius).not.toBe('999px');
   expect(style.backgroundImage.match(/linear-gradient/g)?.length).toBeGreaterThanOrEqual(2);
+  expect(style.borderWidth).toBe('1px');
   expect(style.fontWeight).toBeGreaterThanOrEqual(900);
   expect(style.minHeight).toBeGreaterThanOrEqual(44);
+  const iconStyle=await icon.evaluate(element=>({
+    backgroundImage:getComputedStyle(element).backgroundImage,
+    borderStyle:getComputedStyle(element).borderStyle,
+    width:element.getBoundingClientRect().width,
+  }));
+  expect(iconStyle.backgroundImage).toBe('none');
+  expect(iconStyle.borderStyle).toBe('none');
+  expect(iconStyle.width).toBeLessThan(style.fontSize);
   const labelDimensions=await linked.locator('.mcc-link-pill-label').evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
   expect(labelDimensions.scrollWidth).toBeLessThanOrEqual(labelDimensions.clientWidth);
   const cellCentering=await linked.evaluate(element=>{

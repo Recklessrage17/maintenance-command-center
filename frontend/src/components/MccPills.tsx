@@ -41,7 +41,6 @@ function ExternalLinkIcon() {
 
 export function MccLinkPill({href,children,className='',title,ariaLabel,external=true,leadingIcon,externalIconPosition='trailing',appearance='standard'}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean;leadingIcon?:ReactNode;externalIconPosition?:'leading'|'trailing';appearance?:'standard'|'technical'}) {
   const externalIcon = external ? <ExternalLinkIcon /> : null;
-  const leadingExternalIcon = externalIconPosition==='leading'&&externalIcon;
   return <a
     className={`mcc-link-pill mcc-link-pill--${appearance}${className?` ${className}`:''}`}
     href={href}
@@ -58,7 +57,7 @@ export function MccLinkPill({href,children,className='',title,ariaLabel,external
       event.preventDefault();
       event.currentTarget.click();
     }}
-  >{leadingIcon}{appearance==='technical'&&leadingExternalIcon?<span className="mcc-link-pill-icon-pod">{leadingExternalIcon}</span>:leadingExternalIcon}{children}{externalIconPosition==='trailing'&&externalIcon}</a>;
+  >{leadingIcon}{externalIconPosition==='leading'&&externalIcon}{children}{externalIconPosition==='trailing'&&externalIcon}</a>;
 }
 
 export function MccMetricPill({label,value,className='',variant='neutral'}:{label:string;value:ReactNode;className?:string;variant?:MccSemanticVariant}) {
