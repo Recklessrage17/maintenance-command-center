@@ -1,6 +1,6 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
-import { MccLinkPill, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
+import { MccStatusPill, MccTextLink, type MccSemanticVariant } from '../../components/MccPills';
 import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
@@ -1259,7 +1259,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   function renderPartNumber(part: InventoryPart) {
     const label = part.partNumber || part.itemId || '-';
     const partInfoUrl = safeHttpUrl(part.partInfoUrl || '');
-    if (partInfoUrl) return <MccLinkPill className="inventory-part-info-link" href={partInfoUrl} title={label} ariaLabel={`Open part information for ${label}`} externalIconPosition="leading" appearance="technical"><span className="mcc-link-pill-label">{label}</span></MccLinkPill>;
+    if (partInfoUrl) return <MccTextLink className="inventory-part-info-link" href={partInfoUrl} title={label} ariaLabel={`Open part information for ${label}`}>{label}</MccTextLink>;
     return <span className="plain-part-number" title={label}>{label}</span>;
   }
 

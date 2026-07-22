@@ -39,10 +39,10 @@ function ExternalLinkIcon() {
   return <svg className="mcc-link-pill-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 3.5h5v5M10 10l6.25-6.25M16 11.5v4a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" /></svg>;
 }
 
-export function MccLinkPill({href,children,className='',title,ariaLabel,external=true,leadingIcon,externalIconPosition='trailing',appearance='standard'}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean;leadingIcon?:ReactNode;externalIconPosition?:'leading'|'trailing';appearance?:'standard'|'technical'}) {
+export function MccLinkPill({href,children,className='',title,ariaLabel,external=true,leadingIcon}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean;leadingIcon?:ReactNode}) {
   const externalIcon = external ? <ExternalLinkIcon /> : null;
   return <a
-    className={`mcc-link-pill mcc-link-pill--${appearance}${className?` ${className}`:''}`}
+    className={`mcc-link-pill${className?` ${className}`:''}`}
     href={href}
     target={external?'_blank':undefined}
     rel={external?'noopener noreferrer':undefined}
@@ -57,7 +57,27 @@ export function MccLinkPill({href,children,className='',title,ariaLabel,external
       event.preventDefault();
       event.currentTarget.click();
     }}
-  >{leadingIcon}{externalIconPosition==='leading'&&externalIcon}{children}{externalIconPosition==='trailing'&&externalIcon}</a>;
+  >{leadingIcon}{children}{externalIcon}</a>;
+}
+
+export function MccTextLink({href,children,className='',title,ariaLabel,external=true}:{href:string;children:ReactNode;className?:string;title?:string;ariaLabel?:string;external?:boolean}) {
+  return <a
+    className={`mcc-text-link${className?` ${className}`:''}`}
+    href={href}
+    target={external?'_blank':undefined}
+    rel={external?'noopener noreferrer':undefined}
+    title={title}
+    aria-label={ariaLabel}
+    onPointerDown={event=>event.stopPropagation()}
+    onClick={event=>event.stopPropagation()}
+    onAuxClick={event=>event.stopPropagation()}
+    onKeyDown={event=>{
+      event.stopPropagation();
+      if (event.key !== ' ') return;
+      event.preventDefault();
+      event.currentTarget.click();
+    }}
+  ><span className="mcc-text-link__label">{children}</span></a>;
 }
 
 export function MccMetricPill({label,value,className='',variant='neutral'}:{label:string;value:ReactNode;className?:string;variant?:MccSemanticVariant}) {
