@@ -133,6 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_as
 CREATE INDEX IF NOT EXISTS idx_machine_document_folders_asset ON machine_document_folders (asset_id,name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_documents_asset_folder ON machine_documents (asset_id,folder_id,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_documents_unique_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
@@ -278,7 +279,8 @@ CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_n
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_machine_document_folders_asset ON machine_document_folders (asset_id,name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_documents_asset_folder ON machine_documents (asset_id,folder_id,updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);`);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_documents_unique_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
