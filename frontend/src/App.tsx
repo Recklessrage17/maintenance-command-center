@@ -1,21 +1,40 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { MccLayout, type MccSection } from './layout/MccLayout';
-import { DashboardPage, type DashboardRequisitionView } from './modules/dashboard/DashboardPage';
-import { InventoryPage } from './modules/inventory/InventoryPage';
-import { MachineLibraryPage } from './modules/machine-library/MachineLibraryPage';
-import { EquipmentLibraryPage } from './modules/equipment-library/EquipmentLibraryPage';
-import { FacilityInfoPage } from './modules/facility-info/FacilityInfoPage';
-import { HistoryPage, historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/HistoryPage';
-import { RequisitionsPage } from './modules/requisitions/RequisitionsPage';
-import { SettingsPage } from './modules/settings/SettingsPage';
-import { UsersPage } from './modules/users/UsersPage';
-import { VendorsPage } from './modules/vendors/VendorsPage';
+import { historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/historyRouting';
+
+type DashboardRequisitionView = 'active'|'requested'|'ordered';
+function cachedImport<T>(loader:()=>Promise<T>){let promise:Promise<T>|undefined;return()=>promise??=loader();}
+const loadDashboard=cachedImport(()=>import('./modules/dashboard/DashboardPage'));
+const loadInventory=cachedImport(()=>import('./modules/inventory/InventoryPage'));
+const loadVendors=cachedImport(()=>import('./modules/vendors/VendorsPage'));
+const loadRequisitions=cachedImport(()=>import('./modules/requisitions/RequisitionsPage'));
+const loadMachineLibrary=cachedImport(()=>import('./modules/machine-library/MachineLibraryPage'));
+const loadEquipmentLibrary=cachedImport(()=>import('./modules/equipment-library/EquipmentLibraryPage'));
+const loadFacilityInfo=cachedImport(()=>import('./modules/facility-info/FacilityInfoPage'));
+const loadHistory=cachedImport(()=>import('./modules/history/HistoryPage'));
+const loadUsers=cachedImport(()=>import('./modules/users/UsersPage'));
+const loadSettings=cachedImport(()=>import('./modules/settings/SettingsPage'));
+const DashboardPage=lazy(()=>loadDashboard().then(module=>({default:module.DashboardPage})));
+const InventoryPage=lazy(()=>loadInventory().then(module=>({default:module.InventoryPage})));
+const VendorsPage=lazy(()=>loadVendors().then(module=>({default:module.VendorsPage})));
+const RequisitionsPage=lazy(()=>loadRequisitions().then(module=>({default:module.RequisitionsPage})));
+const MachineLibraryPage=lazy(()=>loadMachineLibrary().then(module=>({default:module.MachineLibraryPage})));
+const EquipmentLibraryPage=lazy(()=>loadEquipmentLibrary().then(module=>({default:module.EquipmentLibraryPage})));
+const FacilityInfoPage=lazy(()=>loadFacilityInfo().then(module=>({default:module.FacilityInfoPage})));
+const HistoryPage=lazy(()=>loadHistory().then(module=>({default:module.HistoryPage})));
+const UsersPage=lazy(()=>loadUsers().then(module=>({default:module.UsersPage})));
+const SettingsPage=lazy(()=>loadSettings().then(module=>({default:module.SettingsPage})));
+const routeLoaders:Record<MccSection,()=>Promise<unknown>>={dashboard:loadDashboard,inventory:loadInventory,vendors:loadVendors,requisitions:loadRequisitions,history:loadHistory,'machine-library':loadMachineLibrary,'equipment-library':loadEquipmentLibrary,'facility-info':loadFacilityInfo,users:loadUsers,settings:loadSettings};
+function prefetchSection(section:MccSection){void routeLoaders[section]().catch(()=>undefined);}
+
+function RouteLoadingState(){return <div className="mcc-route-state" role="status" aria-live="polite"><span className="mcc-route-loader" aria-hidden="true" /><div><strong>Loading workspace</strong><span>Preparing this MCC module...</span></div></div>;}
+class RouteModuleBoundary extends Component<{resetKey:MccSection;children:ReactNode},{failed:boolean}>{state={failed:false};static getDerivedStateFromError(){return{failed:true};}componentDidCatch(error:Error,info:ErrorInfo){console.error('MCC route module failed to load.',error,info);}componentDidUpdate(previous:{resetKey:MccSection}){if(previous.resetKey!==this.props.resetKey&&this.state.failed)this.setState({failed:false});}render(){if(this.state.failed)return <div className="mcc-route-state mcc-route-state--error" role="alert"><div><strong>Workspace could not load</strong><span>The module download was interrupted. Reload MCC to try again.</span></div><button className="primary-button compact-button" type="button" onClick={()=>window.location.reload()}>Reload MCC</button></div>;return this.props.children;}}
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; forcePasswordChange:boolean };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
 const LOGIN_SUCCESS_WARP_MS = 280;
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
-function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:React.ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
+function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
 function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }
 function routeFromPath(pathname: string): { section: MccSection; historySection: HistorySection | null } {
   const clean = pathname.replace(/^\/+|\/+$/g, '');
@@ -60,7 +79,7 @@ function App() {
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;
   if(mode==='forgot') return <Forgot onBack={()=>setMode('login')} />;
   if(mode==='change') return <Change onDone={refresh} />;
-  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}>{page}</MccLayout>;
+  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} onPrefetchSection={prefetchSection} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}><RouteModuleBoundary resetKey={activeSection}><Suspense fallback={<RouteLoadingState />}>{page}</Suspense></RouteModuleBoundary></MccLayout>;
 }
 function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{await api('/api/auth/setup-first-admin',{method:'POST',body:JSON.stringify({fullName,email,password,confirmPassword})});setMsg('First Admin created. Please log in.'); setTimeout(onDone,800);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="First Admin Setup" eyebrow="MCC security foundation"><form onSubmit={submit} className="auth-form"><Field label="Full name" value={fullName} onChange={setFullName}/><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword}/><Field label="Confirm password" type="password" value={confirmPassword} onChange={setConfirm}/><p className="form-help">Minimum 10 characters with uppercase, lowercase, number, and special character.</p><button className="primary-button">Create First Admin</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) {

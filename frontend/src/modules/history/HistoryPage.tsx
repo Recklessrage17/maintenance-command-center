@@ -1,7 +1,8 @@
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 import { MccDateInput } from '../../components/MccDateInput';
+import { type HistorySection } from './historyRouting';
 
-export type HistorySection = 'inventory' | 'vendors' | 'requisitions' | 'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance' | 'settings';
+export type { HistorySection } from './historyRouting';
 
 type HistorySummary = {
   section: HistorySection;
@@ -66,15 +67,6 @@ const sectionCards: Array<{ section: HistorySection; label: string; description:
 
 const emptyFilters: HistoryFilters = { q: '', action: '', user: '', startDate: '', endDate: '', workOrderNumber: '', partNumber: '', requisitionNumber: '', assetId: '' };
 const exportRoles = new Set(['Admin','Manager']);
-
-export function historySectionSlug(section: HistorySection) {
-  return section.replace(/_/g, '-');
-}
-
-export function historySectionFromPath(value: string): HistorySection | null {
-  const normalized = value.replace(/^\/+|\/+$/g, '').split('/').pop()?.replace(/-/g, '_') ?? '';
-  return sectionCards.some(card=>card.section===normalized) ? normalized as HistorySection : null;
-}
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});

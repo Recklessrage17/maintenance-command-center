@@ -56,7 +56,7 @@ function scrubJbtBrandText(value: unknown, fallback = '') {
   return text;
 }
 
-export function MccLayout({activeSection,children,onSectionChange,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
+export function MccLayout({activeSection,children,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory));
  const currentPage=mccPageMetadata[activeSection];
  const pageTooltipId=`mcc-page-tooltip-${activeSection}`;
@@ -189,7 +189,7 @@ export function MccLayout({activeSection,children,onSectionChange,user,canManage
          </div>
          <div className="command-menu-list" role="menu">
            {navItems.map(item=>(
-             <button className={`${item.id===activeSection?'command-menu-item active':'command-menu-item'} mcc-bubble-transition mcc-menu-item-warp${warpingSection===item.id?' is-warping':''}`} key={item.id} onClick={()=>selectSection(item.id)} type="button" role="menuitem" aria-busy={warpingSection===item.id}>
+             <button className={`${item.id===activeSection?'command-menu-item active':'command-menu-item'} mcc-bubble-transition mcc-menu-item-warp${warpingSection===item.id?' is-warping':''}`} key={item.id} onClick={()=>selectSection(item.id)} onPointerEnter={()=>onPrefetchSection?.(item.id)} onFocus={()=>onPrefetchSection?.(item.id)} type="button" role="menuitem" aria-busy={warpingSection===item.id}>
                <span className="command-menu-icon-wrap" aria-hidden="true"><ModuleIcon section={item.id} /></span>
                <span className="command-menu-item-copy">
                  <span className="command-menu-item-label">{item.label}</span>

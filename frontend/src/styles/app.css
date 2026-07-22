@@ -125,6 +125,13 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .mcc-content { min-height: calc(100vh - 110px); }
 .page-stack, .mcc-page { width: 100%; min-width: 0; max-width: none; min-height: calc(100vh - 110px); display: grid; align-content: start; gap: 20px; }
 .page-stack > * { min-width: 0; max-width: 100%; }
+.mcc-route-state { width: min(520px, 100%); min-height: 118px; margin: 5vh auto 0; padding: 22px 24px; display: flex; align-items: center; justify-content: center; gap: 16px; border: 1px solid rgba(68, 215, 255, .3); border-radius: 18px; background: linear-gradient(145deg, rgba(8, 31, 52, .88), rgba(4, 51, 50, .72)); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 14px 34px rgba(0, 12, 24, .24); color: #e9faff; }
+.mcc-route-state > div { min-width: 0; display: grid; gap: 4px; }
+.mcc-route-state strong { font-size: 1rem; letter-spacing: .02em; }
+.mcc-route-state span { color: #9fcbd8; font-size: .82rem; }
+.mcc-route-loader { flex: 0 0 auto; width: 30px; height: 30px; border: 3px solid rgba(68, 215, 255, .2); border-top-color: #54e0ff; border-right-color: #4be2b5; border-radius: 50%; animation: backup-spin .75s linear infinite; }
+.mcc-route-state--error { flex-wrap: wrap; justify-content: space-between; border-color: rgba(255, 184, 85, .46); background: linear-gradient(145deg, rgba(49, 27, 20, .9), rgba(33, 36, 39, .82)); }
+@media (prefers-reduced-motion: reduce) { .mcc-route-loader { animation: none; border-color: rgba(68, 215, 255,.45); } }
 .page-heading, .mcc-page-header { position: relative; width: 100%; max-width: none; min-height: 116px; display: grid; align-content: center; gap: 6px; padding: 18px 22px 18px 24px; border-left: 4px solid rgba(68, 215, 255, 0.78); border-radius: 0 18px 18px 0; background: linear-gradient(90deg, rgba(5, 22, 40, 0.88), rgba(7, 34, 58, 0.58) 58%, rgba(7, 25, 45, 0)); box-shadow: 0 1px 0 rgba(68, 215, 255, 0.16) inset; }
 .page-heading::after { content: ""; position: absolute; left: 0; right: 18%; bottom: 0; height: 1px; background: linear-gradient(90deg, rgba(68, 215, 255, 0.4), rgba(68, 215, 255, 0)); }
 .page-heading h2 { font-size: 1.52rem; line-height: 1.18; }
