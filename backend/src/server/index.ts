@@ -15,6 +15,7 @@ import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf
 import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
+import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -6744,10 +6745,7 @@ function receiveMachineInspectionRecord(req: Request,res:Response,next:NextFunct
 function machineAssetById(id: number, includeDeleted = false) {
   return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
 }
-const machineDocumentTypes = new Map([
-  ['.pdf','application/pdf'],['.doc','application/msword'],['.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-  ['.xls','application/vnd.ms-excel'],['.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],['.txt','text/plain'],
-]);
+const machineDocumentTypes = sharedDocumentMimeTypes;
 const maxMachineDocumentBytes = 50 * 1024 * 1024;
 function validateMachineDocumentFolderName(value: unknown) {
   const name=String(value ?? '').trim().replace(/\s+/g,' ');
@@ -6759,34 +6757,10 @@ function validateMachineDocumentFolderName(value: unknown) {
 function validateMachineDocumentDescription(value: unknown) { return String(value ?? '').replace(/\r/g,'').trim().slice(0,2000); }
 function validateMachineDocumentRevision(value: unknown) { return String(value ?? '').replace(/[\x00-\x1f\x7f]/g,'').trim().slice(0,80); }
 function safeMachineDocumentDisplayName(value: unknown, requiredExtension?: string) {
-  const input=String(value ?? '').trim();
-  if (!input || input!==path.basename(input) || /[\x00-\x1f\x7f<>:"/\\|?*]/.test(input)) throw new Error('Document filename is invalid.');
-  const suppliedExtension=path.extname(input).toLowerCase();
-  const extension=requiredExtension ?? suppliedExtension;
-  if (!machineDocumentTypes.has(extension)) throw new Error('Documents must be PDF, Word, Excel, or TXT files.');
-  if (requiredExtension && suppliedExtension && suppliedExtension!==requiredExtension) throw new Error('Renaming must preserve the original file extension.');
-  const base=path.basename(input,suppliedExtension).trim();
-  if (!base) throw new Error('Document filename is required.');
-  const maxBaseLength=Math.max(1,180-extension.length);
-  return `${base.slice(0,maxBaseLength)}${extension}`;
+  return safeDocumentDisplayName(value,requiredExtension);
 }
 function validatedMachineDocument(file: Express.Multer.File) {
-  if (file.size>maxMachineDocumentBytes) throw new Error('Each document must be 50 MB or smaller.');
-  const displayFilename=safeMachineDocumentDisplayName(path.basename(file.originalname));
-  const extension=path.extname(displayFilename).toLowerCase();
-  const mimeType=machineDocumentTypes.get(extension)!;
-  const bytes=file.buffer;
-  const ole=bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]));
-  const zip=bytes.length>=4&&bytes[0]===0x50&&bytes[1]===0x4b&&bytes[2]===0x03&&bytes[3]===0x04;
-  let matches=false;
-  if (extension==='.pdf') matches=bytes.subarray(0,5).toString('ascii')==='%PDF-';
-  else if (extension==='.docx'||extension==='.xlsx') matches=zip;
-  else if (extension==='.doc'||extension==='.xls') matches=ole;
-  else if (extension==='.txt') matches=!bytes.includes(0);
-  if (!matches) throw new Error(`${displayFilename} does not match its file type.`);
-  const suppliedMime=String(file.mimetype ?? '').toLowerCase();
-  if (suppliedMime&&suppliedMime!=='application/octet-stream'&&suppliedMime!==mimeType) throw new Error(`${displayFilename} has a mismatched content type.`);
-  return {displayFilename,extension,mimeType};
+  return validateDocumentFile({originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size,bytes:file.buffer,maxBytes:maxMachineDocumentBytes,maxMb:50});
 }
 function receiveMachineDocuments(req: Request,res:Response,next:NextFunction) {
   machineDocumentUpload.array('documents',20)(req,res,error=>{

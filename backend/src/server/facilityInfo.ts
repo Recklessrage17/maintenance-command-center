@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import multer from 'multer';
 import { ZipArchive, type Archiver } from 'archiver';
+import { sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
 
 type SqlParam = string | number | bigint | Buffer | null;
 type FacilityUser = { id:number; full_name:string; email:string; role:string; is_owner_admin:number };
@@ -59,12 +60,7 @@ export function createFacilityInfoService(deps:{
   };
   fs.mkdirSync(incoming,{recursive:true});
 
-  const documentTypes=new Map<string,string>([
-    ['.pdf','application/pdf'],['.doc','application/msword'],
-    ['.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-    ['.xls','application/vnd.ms-excel'],['.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-    ['.txt','text/plain'],
-  ]);
+  const documentTypes=sharedDocumentMimeTypes;
   const pictureTypes=new Map<string,string>([['.jpg','image/jpeg'],['.jpeg','image/jpeg'],['.png','image/png'],['.webp','image/webp']]);
   const videoTypes=new Map<string,string>([['.mp4','video/mp4'],['.webm','video/webm']]);
   const upload=multer({
@@ -230,18 +226,16 @@ export function createFacilityInfoService(deps:{
     const extension=path.extname(displayFilename).toLowerCase();
     const type=typeForExtension(extension);
     if(file.size>type.maxBytes)throw new Error(`${displayFilename} must be ${type.maxMb} MB or smaller.`);
+    if(type.mediaType==='document'){
+      const document=validateDocumentFile({originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size,bytes:fs.readFileSync(file.path),maxBytes:type.maxBytes,maxMb:type.maxMb});
+      return {...document,mediaType:type.mediaType,maxBytes:type.maxBytes,maxMb:type.maxMb};
+    }
     const supplied=String(file.mimetype??'').toLowerCase();
     const acceptedMime=extension==='.jpg'||extension==='.jpeg'?new Set(['image/jpeg','image/jpg']):new Set([type.mimeType]);
     if(supplied&&supplied!=='application/octet-stream'&&!acceptedMime.has(supplied))throw new Error(`${displayFilename} has a mismatched content type.`);
     const bytes=readHeader(file.path);
-    const ole=bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]));
-    const zip=bytes.length>=4&&bytes[0]===0x50&&bytes[1]===0x4b&&bytes[2]===0x03&&bytes[3]===0x04;
     let matches=false;
-    if(extension==='.pdf')matches=bytes.subarray(0,5).toString('ascii')==='%PDF-';
-    else if(extension==='.docx'||extension==='.xlsx')matches=zip;
-    else if(extension==='.doc'||extension==='.xls')matches=ole;
-    else if(extension==='.txt')matches=!bytes.includes(0);
-    else if(extension==='.jpg'||extension==='.jpeg')matches=bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
+    if(extension==='.jpg'||extension==='.jpeg')matches=bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
     else if(extension==='.png')matches=bytes.subarray(0,8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]));
     else if(extension==='.webp')matches=bytes.subarray(0,4).toString('ascii')==='RIFF'&&bytes.subarray(8,12).toString('ascii')==='WEBP';
     else if(extension==='.mp4')matches=bytes.subarray(4,8).toString('ascii')==='ftyp';
