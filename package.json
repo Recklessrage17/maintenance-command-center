@@ -11,6 +11,8 @@
     "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
     "test:machine-documents": "playwright test tests/machine-asset-document-library.spec.ts",
     "test:machine-documents-api": "node tests/machine-asset-document-library-api.mjs",
+    "test:machine-asset-spec": "playwright test tests/machine-asset-specification.spec.ts",
+    "test:machine-asset-spec-api": "node tests/machine-asset-specification-api.mjs",
     "test:machine-setup-type": "node tests/machine-setup-type-api.mjs",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",

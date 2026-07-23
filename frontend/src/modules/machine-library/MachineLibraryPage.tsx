@@ -11,6 +11,8 @@ import { MaintenancePhotoReview, prepareMaintenancePhoto } from './MaintenancePh
 import { AssetNotesAttachments } from './AssetNotesAttachments';
 import { AssetDocumentLibrary } from './AssetDocumentLibrary';
 import { PreventiveMaintenanceTracking } from './PreventiveMaintenanceTracking';
+import { MachineAssetSpecPreview } from './MccAssetSpecSheet';
+import { downloadAssetSpecPdf } from './assetSpecHelpers';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type HistoryRecord = { id: number; action: string; entityLabel: string; userName: string; reasonNote: string; createdAt: string };
@@ -491,6 +493,8 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
   const [editingSection,setEditingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [savingSection,setSavingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [sectionErrors,setSectionErrors]=useState<Partial<Record<MachineDetailEditableSectionKey,string>>>({});
+  const [showAssetSpec,setShowAssetSpec]=useState(false);
+  const [assetSpecError,setAssetSpecError]=useState('');
   const unitLabel = currentAsset.setupType || derivedSetupType(currentAsset);
   const screwCondition = effectiveCondition(currentAsset.screwRebuildRepaired, currentAsset.screwConditionStatus);
   const barrelCondition = effectiveCondition(currentAsset.barrelRebuildRepaired, currentAsset.barrelConditionStatus);
@@ -505,6 +509,8 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
     setOpenSection(null);
     setEditingSection(null);
     setSectionErrors({});
+    setShowAssetSpec(false);
+    setAssetSpecError('');
     window.scrollTo({top:0,left:0,behavior:'auto'});
   },[asset.id]);
   useEffect(()=>{
@@ -560,6 +566,11 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
     } finally {
       setSavingSection(null);
     }
+  }
+  async function downloadAssetSpec() {
+    setAssetSpecError('');
+    try { await downloadAssetSpecPdf(currentAsset.id,currentAsset.assetNumber); }
+    catch (error) { setAssetSpecError((error as Error).message || 'Machine asset specification PDF could not be downloaded.'); }
   }
 
   const sections: Array<{key:MachineDetailSectionKey;editableKey?:MachineDetailEditableSectionKey;title:string;summary:string;status?:ReactNode;actionLabel?:string;onAction?:()=>void;view:ReactNode;edit?:ReactNode;image?:ReactNode}> = [
@@ -681,8 +692,8 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
     ] : []),
   ];
 
-  return <section className="mcc-card machine-modal machine-detail-modal glass-panel glass-panel--highlight glass-modal-shell mcc-detail-shell" aria-labelledby={`machine-detail-title-${currentAsset.id}`}>
-    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3 id={`machine-detail-title-${currentAsset.id}`}>{currentAsset.assetNumber}</h3><p className="machine-detail-identity-badge glass-pill" style={{'--machine-detail-brand-color':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}><span className="machine-detail-brand-dot" aria-hidden="true" /><span>{currentAsset.brand || 'Brand unknown'}</span><span>Model {currentAsset.model || '-'}</span><span>S/N {currentAsset.serialNumber || '-'}</span></p></div><div className="machine-detail-header-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>onRecordLogs(currentAsset)}>Barrel &amp; Screw Logs</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onLogs}>History</button><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></div>
+  return <><section className="mcc-card machine-modal machine-detail-modal glass-panel glass-panel--highlight glass-modal-shell mcc-detail-shell" aria-labelledby={`machine-detail-title-${currentAsset.id}`}>
+    <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3 id={`machine-detail-title-${currentAsset.id}`}>{currentAsset.assetNumber}</h3><p className="machine-detail-identity-badge glass-pill" style={{'--machine-detail-brand-color':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}><span className="machine-detail-brand-dot" aria-hidden="true" /><span>{currentAsset.brand || 'Brand unknown'}</span><span>Model {currentAsset.model || '-'}</span><span>S/N {currentAsset.serialNumber || '-'}</span></p>{assetSpecError&&<p className="form-message error" role="alert">{assetSpecError}</p>}</div><div className="machine-detail-header-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>setShowAssetSpec(true)}>Print Asset Spec</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>void downloadAssetSpec()}>Download Spec PDF</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>onRecordLogs(currentAsset)}>Barrel &amp; Screw Logs</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onLogs}>History</button><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></div>
     <div className="machine-detail-summary-grid">
       <SummaryBadge label="Status" value={machineStatusLabel(currentAsset.status)} tone={machineSummaryStatusClass(currentAsset.status)} />
       <SummaryBadge label="Setup" value={unitLabel} tone={machineSummarySetupClass(currentAsset)} />
@@ -704,7 +715,7 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
       <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} />
     </div>
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
-  </section>;
+  </section>{showAssetSpec&&<MachineAssetSpecPreview asset={currentAsset} onClose={()=>setShowAssetSpec(false)} />}</>;
 }
 function MachineDetailAccordionSection({sectionKey,accent,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,error,aside,children}:{sectionKey:MachineDetailSectionKey;accent:MccCategoryAccent;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;aside?:ReactNode;children:ReactNode}) {
   const panelId = `machine-detail-panel-${sectionKey}`;

@@ -13,6 +13,7 @@ import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import XlsxPopulate from 'xlsx-populate';
+import { buildMachineAssetSpecPdf, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -7608,6 +7609,26 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
   }));
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
   res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});
+});
+app.get('/api/machine-library/assets/:id/specification.pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
+  try {
+    const asset = machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const generatedAt = new Date();
+    const tasks = all<PmTaskRow>('SELECT * FROM pm_tasks WHERE asset_id=? AND active=1 ORDER BY hold ASC,COALESCE(next_due_date,\'9999-12-31\'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE',[asset.id]).map(publicPmTask);
+    const buffer = await buildMachineAssetSpecPdf(publicMachineAsset(asset),tasks,generatedAt);
+    const fileName = machineAssetSpecPdfFilename(asset.asset_number,generatedAt);
+    const download = ['1','true','yes'].includes(String(req.query.download ?? '').toLowerCase());
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Length',String(buffer.length));
+    res.setHeader('Content-Disposition',`${download ? 'attachment' : 'inline'}; filename="${fileName}"`);
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.send(buffer);
+  } catch (error) {
+    console.error('Machine asset specification PDF generation failed',error);
+    res.status(500).json({ok:false,error:'Machine asset specification PDF generation failed.'});
+  }
 });
 app.get('/api/machine-library/inspection-records', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const assetId = Number(req.query.assetId);
