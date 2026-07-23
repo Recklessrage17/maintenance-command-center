@@ -17,6 +17,8 @@
     "test:equipment-api": "node tests/equipment-library-api.mjs",
     "test:equipment": "playwright test tests/equipment-library.spec.ts",
     "test:equipment-spec": "node tests/equipment-library-api.mjs",
+    "test:facility-api": "node tests/facility-info-api.mjs",
+    "test:facility": "playwright test tests/facility-info.spec.ts",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
     "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",

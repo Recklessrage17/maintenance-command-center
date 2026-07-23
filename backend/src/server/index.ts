@@ -14,6 +14,7 @@ import nodemailer from 'nodemailer';
 import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
+import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,6 +81,7 @@ const now = () => new Date().toISOString();
 const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
 let db = new DatabaseSync(dbPath);
+let facilityInfoService: FacilityInfoService | null = null;
 db.exec('PRAGMA journal_mode=WAL;');
 db.exec('PRAGMA foreign_keys=ON;');
 
@@ -1937,7 +1939,7 @@ const backupDataAreaDefinitions = [
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
   { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms'] },
   { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment_asset_notes','equipment_asset_note_attachments','equipment_document_folders','equipment_documents','equipment','equipment_library','equipment_pms'] },
-  { key: 'facilityRecords', label: 'Facility', tables: ['facility_documents','facility_info','building_prints','facility_pms'] },
+  { key: 'facilityRecords', label: 'Facility', tables: ['facility_areas','facility_folders','facility_items','facility_documents','facility_info','building_prints','facility_pms'] },
   { key: 'users', label: 'Users/Roles', tables: ['users'] },
   { key: 'settingsBranding', label: 'Settings/Branding', tables: ['app_settings'] },
 ] as const;
@@ -2030,7 +2032,7 @@ function masterBackupRecordCounts() {
     historyLogs: tableCount('history_logs'),
     machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms']),
     equipmentRecords: tableGroupCount(['equipment_assets','equipment_asset_notes','equipment_asset_note_attachments','equipment_document_folders','equipment_documents','equipment','equipment_library','equipment_pms']),
-    facilityRecords: tableGroupCount(['facility_documents','facility_info','building_prints','facility_pms']),
+    facilityRecords: tableGroupCount(['facility_areas','facility_folders','facility_items','facility_documents','facility_info','building_prints','facility_pms']),
     preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
   };
 }
@@ -2207,6 +2209,7 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
   const type = input.type ?? defaultManualBackupType(category);
   try {
     refreshMachineDocumentRecoveryMetadata();
+    facilityInfoService?.refreshRecoveryMetadata();
     ensureBackupCategoryDir(category);
     const createdAt = now();
     const folderName = `${backupPrefix(category)}${safeFolderStamp()}_${type}`;
@@ -2330,6 +2333,7 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
   fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
   fs.mkdirSync(machineAssetNotesDir, { recursive: true });
   fs.mkdirSync(machineDocumentLibraryDir, { recursive: true });
+  facilityInfoService?.ensureSchema();
   return restoredFolders;
 }
 function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
@@ -2356,6 +2360,8 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
     restoredFolders = restoreWhitelistedFoldersFromBackup(backupFolderPath, { removeMissing: true });
     validateMachineDocumentStorageIntegrity();
     refreshMachineDocumentRecoveryMetadata();
+    facilityInfoService?.validateStorage();
+    facilityInfoService?.refreshRecoveryMetadata();
     try { audit({ user: input.actor, ip: '', get: () => '' } as unknown as Request, 'backup restore completed', 'backup', verification.backup.id, { preRestoreBackupId: preRestoreBackup.id, category: input.category, restoredFolders }); } catch {}
     lastBackupResult = { ok: true, category: input.category, type: verification.backup.type, backupId: verification.backup.id, createdAt: now(), message: `Restored ${verification.backup.name}.` };
     return { restoredBackup: verification.backup, preRestoreBackup, restoredFolders };
@@ -2375,6 +2381,8 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
       }
       restoreWhitelistedFoldersFromBackup(preRestoreFolderPath, { removeMissing: true });
       refreshMachineDocumentRecoveryMetadata();
+      facilityInfoService?.ensureSchema();
+      facilityInfoService?.refreshRecoveryMetadata();
     } catch (rollbackError) {
       console.log(`MCC pre-restore rollback failed: ${safeErrorMessage(rollbackError)}`);
     }
@@ -5548,7 +5556,7 @@ const resetSections = new Set<ResetSection>([
 const resetTableAllowlists: Record<'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance', string[]> = {
   machine_library: ['machine_documents','machine_document_folders','machine_assets','machine_brand_settings','machines','machine_library','machine_pms'],
   equipment_library: ['equipment_asset_note_attachments','equipment_asset_notes','equipment_documents','equipment_document_folders','equipment_assets','equipment','equipment_library','equipment_pms'],
-  facility_info: ['facility_documents','facility_info','building_prints','facility_pms'],
+  facility_info: ['facility_items','facility_folders','facility_areas','facility_documents','facility_info','building_prints','facility_pms'],
   preventive_maintenance: ['pm_tasks','pm_history','preventive_maintenance'],
 };
 const resetHistorySectionByReset: Partial<Record<ResetSection, HistorySection>> = {
@@ -7414,7 +7422,21 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view','equipment.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='requisition-batch.manage'&&canManageRequisitionBatches(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || ((permission==='equipment.write'||permission==='equipment.delete')&&canMachineWrite(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view','equipment.view','facility.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='requisition-batch.manage'&&canManageRequisitionBatches(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || ((permission==='equipment.write'||permission==='equipment.delete'||permission==='facility.write')&&canMachineWrite(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+
+facilityInfoService=createFacilityInfoService({
+  app,
+  uploadsDir,
+  requireAuth,
+  requireWrite:requirePermission('facility.write'),
+  all,
+  one,
+  run,
+  exec:sql=>db.exec(sql),
+  recordHistory:input=>recordHistoryLog(input as HistoryLogInput),
+  scheduleBackup:(reason,actor)=>scheduleAutoBackup(reason,actor as User|null|undefined),
+  now,
+});
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
@@ -9952,8 +9974,10 @@ app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermi
 try {
   validateMachineDocumentStorageIntegrity();
   refreshMachineDocumentRecoveryMetadata();
+  facilityInfoService?.validateStorage();
+  facilityInfoService?.refreshRecoveryMetadata();
 } catch (error) {
-  console.log(`MCC machine document recovery metadata repair needs attention: ${safeErrorMessage(error)}`);
+  console.log(`MCC document recovery metadata repair needs attention: ${safeErrorMessage(error)}`);
 }
 app.use('/api', (_req,res)=>res.status(404).json({ok:false,error:'API route not found.'}));
 app.use(express.static(frontendDistPath));
