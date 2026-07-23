@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { MccAccordionHeader, MccCategoryAccordion } from '../../components/MccCategoryAccordion';
 import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { MccActionGroup, MccOverflowMenu, MccResourceRow } from '../../components/MccResourceRow';
+import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 
 type AssetIdentity = { id:number; assetNumber:string; assetName:string; brand:string; model:string; serialNumber:string };
 type AssetNoteAttachment = { id:number; noteId:number; filename:string; mimeType:string; fileSize:number; createdAt:string; contentUrl:string; downloadUrl:string };
@@ -79,7 +80,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
   useEffect(()=>{ setExpanded(false); setAdding(false); setEditing(null); setPendingAttachments([]); void loadNotes(); },[asset.id]);
 
   const attachmentCount=useMemo(()=>notes.reduce((count,note)=>count+note.attachments.length,0),[notes]);
-  const summary=loading?'Loading notes...':`${notes[0]?.title || 'No notes'} · ${notes.length} note${notes.length===1?'':'s'} · ${attachmentCount} attachment${attachmentCount===1?'':'s'}`;
+  const summary=loading?'Loading notes...':<MccSummaryTokenGroup><MccSummaryToken tone="note">{notes.length} note{notes.length===1?'':'s'}</MccSummaryToken><MccSummaryToken tone="attachment">{attachmentCount} attachment{attachmentCount===1?'':'s'}</MccSummaryToken></MccSummaryTokenGroup>;
 
   function beginAdd() {
     setEditing(null);

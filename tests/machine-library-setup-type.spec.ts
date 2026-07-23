@@ -57,8 +57,8 @@ test('shared category accents and searchable Setup Type remain responsive and pe
   await expect(sectionByTitle(detail,'Preventive Maintenance Tracking')).toHaveAttribute('data-category-accent','pm');
   const library = sectionByTitle(detail,'Asset Document Library');
   await expect(library).toHaveAttribute('data-category-accent','library');
-  await expect(library.locator('.machine-library-count-token.is-folder')).toHaveText('1 folder');
-  await expect(library.locator('.machine-library-count-token.is-document')).toHaveText('1 document');
+  await expect(library.locator('.mcc-summary-token--folder')).toHaveText('1 folder');
+  await expect(library.locator('.mcc-summary-token--document')).toHaveText('1 document');
   await expect(sectionByTitle(detail,'Asset Notes & Attachments')).toHaveAttribute('data-category-accent','notes');
   await expect(detail.locator('[data-category-accent="inspection"]')).toHaveCount(1);
 

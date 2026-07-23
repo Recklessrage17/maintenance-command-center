@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, formatDateDisplay, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 
 type MachineImportMode = 'add_new_only' | 'upsert';
 type MachineToolCategory = 'measurement' | 'brand' | 'doc';
@@ -726,8 +727,8 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
   }
 
   const folderSummary = isAssetPanel || isGlobalFolderView
-    ? `${activeYear} folder / ${yearLogs.length} record(s)`
-    : `${years.length} year folder(s) / ${scopedLogs.length} record(s)`;
+    ? <MccSummaryTokenGroup><MccSummaryToken tone="folder">{activeYear} folder</MccSummaryToken><MccSummaryToken tone="record">{yearLogs.length} record{yearLogs.length===1?'':'s'}</MccSummaryToken></MccSummaryTokenGroup>
+    : <MccSummaryTokenGroup><MccSummaryToken tone="folder">{years.length} year folder{years.length===1?'':'s'}</MccSummaryToken><MccSummaryToken tone="record">{scopedLogs.length} record{scopedLogs.length===1?'':'s'}</MccSummaryToken></MccSummaryTokenGroup>;
 
   return <section className="measurement-tools-panel measurement-records-panel">
     <div className="measurement-tools-heading">

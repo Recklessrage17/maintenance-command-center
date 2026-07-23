@@ -62,8 +62,10 @@ export function MccAccordionHeader({
 }) {
   const content = (
     <>
-      <span className="machine-detail-section-title">{title}</span>
-      {summary !== undefined && <span className="machine-detail-section-summary">{summary}</span>}
+      <span className="mcc-accordion-header-main">
+        <span className="machine-detail-section-title">{title}</span>
+        {summary !== undefined && <span className="machine-detail-section-summary">{summary}</span>}
+      </span>
       {status}
       {onToggle && <span className="machine-accordion-chevron" aria-hidden="true">v</span>}
     </>

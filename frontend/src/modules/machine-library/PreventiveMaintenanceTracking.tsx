@@ -2,6 +2,7 @@ import { Component, type FormEvent, type ReactNode, useEffect, useMemo, useRef, 
 import { createPortal } from 'react-dom';
 import { MccAccordionHeader, MccCategoryAccordion } from '../../components/MccCategoryAccordion';
 import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 import { notifyPmUpdated } from './pmEvents';
 
 type AssetIdentity={id:number;assetNumber:string;assetName:string};
@@ -192,12 +193,12 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
     finally{setLoading(false);}
   }
   useEffect(()=>{setExpanded(false);setFormTask(undefined);setViewTask(null);setCompleteTask(null);setHistoryTask(null);void load();},[asset.id]);
-  const summaryText=useMemo(()=>{
+  const summaryContent=useMemo(()=>{
     if(loading)return 'Loading tracking...';
     const safeSummary=summary??emptySummary;
-    if(!safeSummary.total)return error?'PM tracking unavailable':'No PM tracking configured';
+    if(error)return 'PM tracking unavailable';
     const next=safeSummary.nextDueDate?`Next ${formatDate(safeSummary.nextDueDate)}`:safeSummary.nextDueMeter!==null?`Next meter ${formatMeter(safeSummary.nextDueMeter)}`:'Next due not set';
-    return `${safeSummary.total} total · ${safeSummary.dueSoon} due soon · ${safeSummary.overdue} overdue · ${next}`;
+    return <MccSummaryTokenGroup><MccSummaryToken tone="success">{safeSummary.total} schedule{safeSummary.total===1?'':'s'}</MccSummaryToken><MccSummaryToken tone="warning">{safeSummary.dueSoon} due soon</MccSummaryToken><MccSummaryToken tone="danger">{safeSummary.overdue} overdue</MccSummaryToken><MccSummaryToken>{next}</MccSummaryToken></MccSummaryTokenGroup>;
   },[error,loading,summary]);
   const safeTasks=Array.isArray(tasks)?tasks:[];
   async function deactivate(task:PmTask) {
@@ -207,7 +208,7 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
   }
   return <>
     <MccCategoryAccordion accent="pm" expanded={expanded} className="pm-tracking-card glass-panel glass-panel--nested">
-      <MccAccordionHeader title="Preventive Maintenance Tracking" summary={summaryText} expanded={expanded} controls={`pm-tracking-panel-${asset.id}`} onToggle={()=>setExpanded(current=>!current)} />
+      <MccAccordionHeader title="Preventive Maintenance Tracking" summary={summaryContent} expanded={expanded} controls={`pm-tracking-panel-${asset.id}`} onToggle={()=>setExpanded(current=>!current)} />
       <div className="machine-detail-accordion-panel" id={`pm-tracking-panel-${asset.id}`} aria-hidden={!expanded}>
         <div className="pm-panel-toolbar glass-toolbar"><div><strong>PM schedules</strong><small>Track calendar, hour-meter, and cycle-based maintenance.</small></div>{canEdit&&<button className="primary-button glass-button glass-button--primary" type="button" onClick={()=>setFormTask(null)}>Add Preventive Maintenance Tracking</button>}</div>
         {error&&<p className="form-message error">{error}</p>}
