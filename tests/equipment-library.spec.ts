@@ -1,0 +1,40 @@
+import {expect,type Locator,type Page,test} from '@playwright/test';
+
+const asset={
+  id:301,assetNumber:'EQ-301',equipmentName:'Central Resin Dryer',assetName:'Central Resin Dryer',category:'Dryer',equipmentType:'Desiccant Dryer',manufacturer:'Matsui',brand:'Matsui',model:'MJ5-i',serialNumber:'DRY-301',equipmentYear:'2020',year:'2020',location:'Molding Bay 2',department:'Molding',status:'active',criticality:'high',
+  powerType:'Electric',voltage:'480 VAC',phase:'3 phase',amperage:'42 A',airRequirement:'90 PSI',waterRequirement:'',capacityRating:'500 lb hopper',dimensions:'48 x 36 x 84 in',weight:'825 lb',specificationNotes:'Keep desiccant filters clean.',createdAt:'2026-07-20T12:00:00Z',updatedAt:'2026-07-23T12:00:00Z',
+  pmSummary:{total:1,status:'due-soon',label:'PM: 1 Due Soon'},latestHistory:{id:11,action:'equipment_edited',entityLabel:'EQ-301',reasonNote:'Updated capacity.',userName:'Equipment Tester',createdAt:'2026-07-23T12:00:00Z'},
+};
+const categories=['Dryer','Chiller','Air Compressor','Other / Custom'];
+async function mockEquipment(page:Page){
+  await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Equipment Tester',email:'equipment@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false}}}));
+  await page.route(/\/api\/equipment-library\/assets(?:\?.*)?$/,async route=>{
+    if(route.request().method()==='POST')return route.fulfill({status:201,json:{ok:true,asset:{...asset,id:302,assetNumber:'EQ-302',equipmentName:'Laser Marker',category:'Laser Marker'}}});
+    return route.fulfill({json:{ok:true,assets:[asset],categories,permissions:{canEdit:true,canDelete:true}}});
+  });
+  await page.route(/\/api\/equipment-library\/assets\/301\/history$/,route=>route.fulfill({json:{ok:true,asset,records:[asset.latestHistory,{...asset.latestHistory,id:10,action:'equipment_created',createdAt:'2026-07-20T12:00:00Z'}]}}));
+  await page.route(/\/api\/equipment-library\/assets\/301\/preventive-maintenance$/,route=>route.fulfill({json:{ok:true,tasks:[],summary:{total:0,dueSoon:0,overdue:0,nextDueDate:null,nextDueMeter:null}}}));
+  await page.route(/\/api\/equipment-library\/assets\/301\/document-folders$/,route=>route.fulfill({json:{ok:true,folders:[],summary:{folderCount:0,documentCount:0}}}));
+  await page.route(/\/api\/equipment-library\/assets\/301\/documents$/,route=>route.fulfill({json:{ok:true,documents:[]}}));
+  await page.route(/\/api\/equipment-library\/assets\/301\/notes$/,route=>route.fulfill({json:{ok:true,notes:[]}}));
+}
+async function activate(locator:Locator,mobile:boolean){if(mobile)await locator.tap();else await locator.click();}
+async function focusCard(page:Page){for(let index=0;index<40;index+=1){await page.keyboard.press('Tab');if(await page.evaluate(()=>document.activeElement?.classList.contains('equipment-asset-card')))return;}throw new Error('Equipment card was not keyboard reachable.');}
+
+test('Equipment cards and detail reuse shared asset systems accessibly',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';await mockEquipment(page);await page.goto('/equipment-library');
+  const card=page.locator('.equipment-asset-card');await expect(card).toHaveCount(1);await expect(card).toContainText('EQ-301');await expect(card).toContainText('Central Resin Dryer');await expect(card).toContainText('Matsui');await expect(card).toContainText('DRY-301');await expect(card).toContainText('2020 / 6 yrs');await expect(card.locator('.equipment-card-history')).toContainText('Equipment Edited');
+  const audit=await card.evaluate(element=>({tag:element.tagName,role:element.getAttribute('role'),tabIndex:(element as HTMLElement).tabIndex,cursor:getComputedStyle(element).cursor,before:getComputedStyle(element,'::before').pointerEvents,after:getComputedStyle(element,'::after').pointerEvents}));
+  expect(audit).toEqual({tag:'ARTICLE',role:'button',tabIndex:0,cursor:'pointer',before:'none',after:'none'});
+  await activate(card,mobile);await expect(page.locator('.equipment-detail-page')).toBeVisible();await expect(page.getByRole('heading',{name:'Central Resin Dryer'})).toBeVisible();await expect(page.getByText('Electrical / Utility Requirements')).toBeVisible();await expect(page.getByText('Capacity / Dimensions')).toBeVisible();await expect(page.getByRole('button',{name:/Preventive Maintenance Tracking/})).toBeVisible();await expect(page.getByRole('button',{name:/Asset Document Library/})).toBeVisible();await expect(page.getByRole('button',{name:/Asset Notes & Attachments/})).toBeVisible();await expect(page.getByText('History Preview')).toBeVisible();await expect(page.getByText(/^Screw$/)).toHaveCount(0);await expect(page.getByText(/^Barrel$/)).toHaveCount(0);await expect(page.getByText(/Inspection Records/)).toHaveCount(0);
+  await expect(page.getByRole('link',{name:'Equipment Specification PDF'})).toHaveAttribute('href','/api/equipment-library/assets/301/specification.pdf?download=true');
+  const bodyWidth=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));expect(bodyWidth.scroll).toBeLessThanOrEqual(bodyWidth.client);
+  await page.getByRole('button',{name:/Asset Document Library/}).click();await expect(page.getByRole('link',{name:'Export Asset Documents'})).toHaveAttribute('href','/api/equipment-library/assets/301/documents/export');
+  await page.getByRole('button',{name:'← Equipment Library'}).click();await expect(card).toBeVisible();
+  await page.evaluate(()=>{(document.activeElement as HTMLElement|null)?.blur();});await focusCard(page);await page.keyboard.press('Enter');await expect(page.locator('.equipment-detail-page')).toBeVisible();await page.getByRole('button',{name:'← Equipment Library'}).click();
+  await page.evaluate(()=>{(document.activeElement as HTMLElement|null)?.blur();});await focusCard(page);await page.keyboard.press('Space');await expect(page.locator('.equipment-detail-page')).toBeVisible();
+});
+
+test('Equipment create form requires and persists custom category input',async({page})=>{
+  await mockEquipment(page);await page.goto('/equipment-library');await page.getByRole('button',{name:'Add Equipment'}).click();const modal=page.locator('.equipment-form-modal');await modal.getByLabel('Equipment Name *').fill('Laser Marker');await modal.getByLabel('Equipment Asset # *').fill('EQ-302');const combo=modal.getByRole('combobox',{name:'Category *'});await combo.click();await combo.fill('Other');await modal.getByRole('option',{name:'Other / Custom'}).click();await expect(modal.getByLabel('Custom Category *')).toBeVisible();await modal.getByLabel('Custom Category *').fill('Laser Marker');const requestPromise=page.waitForRequest(request=>request.url().endsWith('/api/equipment-library/assets')&&request.method()==='POST');await modal.getByRole('button',{name:'Create Equipment'}).click();const request=await requestPromise;expect(request.postDataJSON()).toMatchObject({assetNumber:'EQ-302',equipmentName:'Laser Marker',category:'Other / Custom',customCategory:'Laser Marker'});
+});

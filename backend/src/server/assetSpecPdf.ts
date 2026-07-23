@@ -113,6 +113,10 @@ export function machineAssetSpecPdfFilename(assetNumber: string, generatedAt = n
   return `${prefix}_Machine_Asset_Specification_${generatedAt.toISOString().slice(0,10)}.pdf`;
 }
 
+export function equipmentAssetSpecPdfFilename(assetNumber: string, generatedAt = new Date()) {
+  return `${safeToken(assetNumber).replace(/^Equipment[_-]?/i,'') || 'Equipment_Asset'}_Equipment_Specification_${generatedAt.toISOString().slice(0,10)}.pdf`;
+}
+
 function dateFromIso(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!match) return null;
@@ -413,5 +417,49 @@ export async function buildMachineAssetSpecPdf(asset: AssetSpecMachine, tasks: A
     const pageLabel = `Page ${index + 1} of ${pages.length}`;
     item.drawText(pageLabel,{x:pageWidth - margin - regular.widthOfTextAtSize(pageLabel,6.5),y:18,size:6.5,font:regular,color:muted});
   });
+  return Buffer.from(await pdf.save());
+}
+
+export type EquipmentAssetSpecInput = {
+  id:number;assetNumber:string;equipmentName:string;category:string;equipmentType:string;manufacturer:string;model:string;serialNumber:string;equipmentYear:string;location:string;department:string;status:string;criticality:string;
+  powerType:string;voltage:string;phase:string;amperage:string;airRequirement:string;waterRequirement:string;capacityRating:string;dimensions:string;weight:string;specificationNotes:string;
+};
+
+export async function buildEquipmentAssetSpecPdf(asset:EquipmentAssetSpecInput,tasks:AssetSpecPmTask[],generatedAt=new Date()) {
+  const pdf=await PDFDocument.create();
+  const regular=await pdf.embedFont(StandardFonts.Helvetica);
+  const bold=await pdf.embedFont(StandardFonts.HelveticaBold);
+  let page!:PDFPage;let y=0;let pageNumber=0;
+  const addPage=()=>{
+    page=pdf.addPage([pageWidth,pageHeight]);pageNumber+=1;
+    page.drawRectangle({x:0,y:pageHeight-55,width:pageWidth,height:55,color:rgb(0.90,0.96,0.98)});
+    page.drawRectangle({x:0,y:pageHeight-55,width:7,height:55,color:sectionColors.blue});
+    page.drawText('EQUIPMENT ASSET SPECIFICATION',{x:margin,y:pageHeight-27,size:16,font:bold,color:dark});
+    page.drawText(`${clean(asset.equipmentName,asset.assetNumber)}  |  Asset ${clean(asset.assetNumber)}`,{x:margin,y:pageHeight-43,size:8,font:regular,color:muted});
+    if(pageNumber>1)page.drawText('Continued',{x:pageWidth-margin-43,y:pageHeight-31,size:8,font:bold,color:sectionColors.blue});
+    y=pageHeight-67;return page;
+  };
+  const ensure=(height:number)=>{if(y-height<footerTop+12)addPage();};
+  const header=(title:string,color:PdfColors,continued=false)=>{ensure(24);page.drawRectangle({x:margin,y:y-17,width:contentWidth,height:17,color});page.drawText(`${title}${continued?' (continued)':''}`,{x:margin+7,y:y-12,size:8.2,font:bold,color:white});y-=20;};
+  const grid=(title:string,color:PdfColors,entries:PdfEntry[],columns:number)=>{
+    header(title,color);const cellWidth=contentWidth/columns;
+    for(let index=0;index<entries.length;index+=columns){const row=entries.slice(index,index+columns);const lines=row.map(entry=>wrap(entry.value,regular,7.2,cellWidth-12));const rowHeight=Math.max(25,...lines.map(value=>16+value.length*8));if(y-rowHeight<footerTop+12){addPage();header(title,color,true);}row.forEach((entry,column)=>{const x=margin+column*cellWidth;page.drawRectangle({x,y:y-rowHeight,width:cellWidth,height:rowHeight,borderColor:border,borderWidth:.45,color:pale});page.drawText(entry.label.toUpperCase(),{x:x+6,y:y-9,size:5.8,font:bold,color:muted});lines[column].forEach((line,lineIndex)=>page.drawText(line,{x:x+6,y:y-19-lineIndex*8,size:7.2,font:regular,color:dark}));});for(let column=row.length;column<columns;column+=1){page.drawRectangle({x:margin+column*cellWidth,y:y-rowHeight,width:cellWidth,height:rowHeight,borderColor:border,borderWidth:.45,color:pale});}y-=rowHeight;}y-=6;
+  };
+  const activeTasks=tasks.filter(task=>task.scheduleStatus!=='inactive'&&task.active!==false);
+  const drawPm=()=>{header('Preventive Maintenance',sectionColors.green);if(!activeTasks.length){ensure(23);page.drawRectangle({x:margin,y:y-23,width:contentWidth,height:23,borderColor:border,borderWidth:.45,color:pale});page.drawText('No active preventive maintenance schedules.',{x:margin+6,y:y-15,size:7.2,font:regular,color:muted});y-=29;return;}const widths=[225,112,116,105];const headings=['Schedule','Interval','Next Due','Status'];const tableHeader=(continued=false)=>{if(continued)header('Preventive Maintenance',sectionColors.green,true);let x=margin;headings.forEach((heading,index)=>{page.drawRectangle({x,y:y-16,width:widths[index],height:16,color:rgb(0.21,0.34,0.39)});page.drawText(heading.toUpperCase(),{x:x+5,y:y-11,size:5.8,font:bold,color:white});x+=widths[index];});y-=16;};tableHeader();for(const task of activeTasks){const values=[clean(task.title,'Untitled PM'),pmInterval(task),pmNextDue(task),clean(task.status,'Current')];const lineSets=values.map((value,index)=>wrap(value,regular,6.8,widths[index]-10));const height=Math.max(22,...lineSets.map(lines=>8+lines.length*8));if(y-height<footerTop+12){addPage();tableHeader(true);}let x=margin;lineSets.forEach((lines,index)=>{page.drawRectangle({x,y:y-height,width:widths[index],height,borderColor:border,borderWidth:.4,color:pale});lines.forEach((line,lineIndex)=>page.drawText(line,{x:x+5,y:y-14-lineIndex*8,size:6.8,font:index===0?bold:regular,color:dark}));x+=widths[index];});y-=height;}y-=6;};
+  addPage();page.drawText('WO# / Reference:',{x:margin,y:y-12,size:7,font:bold,color:muted});page.drawLine({start:{x:margin+82,y:y-13},end:{x:pageWidth-margin,y:y-13},thickness:.7,color:dark});y-=25;
+  const year=clean(asset.equipmentYear,'Not Set');const age=/^\d{4}$/.test(asset.equipmentYear.trim())&&generatedAt.getUTCFullYear()>=Number(asset.equipmentYear)?`${generatedAt.getUTCFullYear()-Number(asset.equipmentYear)} yrs`:'Not Set';
+  grid('Basic Information',sectionColors.blue,[
+    {label:'Equipment Name',value:clean(asset.equipmentName,'Not Set')},{label:'Equipment Asset Number',value:clean(asset.assetNumber,'Not Set')},{label:'Category',value:clean(asset.category,'Not Set')},{label:'Equipment Type',value:clean(asset.equipmentType,'Not Set')},{label:'Manufacturer / Brand',value:clean(asset.manufacturer,'Not Set')},{label:'Model',value:clean(asset.model,'Not Set')},{label:'Serial Number',value:clean(asset.serialNumber,'Not Set')},{label:'Year / Age',value:`${year} / ${age}`},{label:'Location',value:clean(asset.location,'Not Set')},{label:'Department / Area',value:clean(asset.department,'Not Set')},{label:'Status',value:statusLabel(asset.status)},{label:'Criticality',value:statusLabel(asset.criticality||'Not Set')},
+  ],3);
+  grid('Electrical / Utilities',sectionColors.gold,[
+    {label:'Power Type',value:clean(asset.powerType,'Not Set')},{label:'Voltage',value:clean(asset.voltage,'Not Set')},{label:'Phase',value:clean(asset.phase,'Not Set')},{label:'Amperage',value:clean(asset.amperage,'Not Set')},{label:'Air Requirement',value:clean(asset.airRequirement,'Not Set')},{label:'Water Requirement',value:clean(asset.waterRequirement,'Not Set')},
+  ],3);
+  grid('Capacity / Dimensions',sectionColors.violet,[
+    {label:'Capacity / Rating',value:clean(asset.capacityRating,'Not Set')},{label:'Dimensions',value:clean(asset.dimensions,'Not Set')},{label:'Weight',value:clean(asset.weight,'Not Set')},{label:'Equipment-Specific Notes',value:clean(asset.specificationNotes,'Not Set')},
+  ],2);
+  drawPm();
+  ensure(66);const notesHeight=Math.max(48,Math.min(82,y-footerTop-18));page.drawRectangle({x:margin,y:y-notesHeight,width:contentWidth*.58,height:notesHeight,borderColor:border,borderWidth:.55});page.drawText('TECHNICIAN NOTES',{x:margin+6,y:y-10,size:5.8,font:bold,color:muted});for(let lineY=y-25;lineY>y-notesHeight+7;lineY-=13)page.drawLine({start:{x:margin+6,y:lineY},end:{x:margin+contentWidth*.58-6,y:lineY},thickness:.35,color:border});const signatureX=margin+contentWidth*.58+7;const signatureWidth=contentWidth*.42-7;page.drawRectangle({x:signatureX,y:y-notesHeight,width:signatureWidth,height:notesHeight,borderColor:border,borderWidth:.55});page.drawText('TECHNICIAN SIGNATURE',{x:signatureX+6,y:y-10,size:5.8,font:bold,color:muted});page.drawLine({start:{x:signatureX+6,y:y-30},end:{x:signatureX+signatureWidth-6,y:y-30},thickness:.5,color:dark});page.drawText('DATE',{x:signatureX+6,y:y-46,size:5.8,font:bold,color:muted});page.drawLine({start:{x:signatureX+34,y:y-47},end:{x:signatureX+signatureWidth-6,y:y-47},thickness:.5,color:dark});
+  const pages=pdf.getPages();pages.forEach((item,index)=>{item.drawLine({start:{x:margin,y:footerTop},end:{x:pageWidth-margin,y:footerTop},thickness:.45,color:border});item.drawText(`Generated ${generatedAt.toLocaleString('en-US')}`,{x:margin,y:18,size:6.5,font:regular,color:muted});const label=`Page ${index+1} of ${pages.length}`;item.drawText(label,{x:pageWidth-margin-regular.widthOfTextAtSize(label,6.5),y:18,size:6.5,font:regular,color:muted});});
   return Buffer.from(await pdf.save());
 }

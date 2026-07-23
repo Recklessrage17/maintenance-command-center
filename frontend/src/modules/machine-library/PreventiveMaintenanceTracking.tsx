@@ -6,6 +6,7 @@ import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSumma
 import { notifyPmUpdated } from './pmEvents';
 
 type AssetIdentity={id:number;assetNumber:string;assetName:string};
+export type AssetLibraryScope='machine'|'equipment';
 type PmIntervalType='hourly'|'days'|'bi_weekly'|'weekly'|'monthly'|'quarterly'|'bi_annual'|'annual'|'cycles';
 type PmStatus='Current'|'Due Soon'|'Due Now'|'Overdue'|'Hold'|'Inactive'|'Setup incomplete';
 type PmScheduleStatus='active'|'hold'|'inactive';
@@ -170,12 +171,13 @@ class PmPanelErrorBoundary extends Component<{children:ReactNode},{failed:boolea
   render(){return this.state.failed?<PmUnavailablePanel />:this.props.children;}
 }
 
-export function PreventiveMaintenanceTracking({asset,canEdit}:{asset:AssetIdentity|null|undefined;canEdit:boolean|undefined}) {
+export function PreventiveMaintenanceTracking({asset,canEdit,library='machine'}:{asset:AssetIdentity|null|undefined;canEdit:boolean|undefined;library?:AssetLibraryScope}) {
   if(!asset||!Number.isFinite(asset.id))return <PmUnavailablePanel message="This asset is missing the information needed to load PM tracking." />;
-  return <PmPanelErrorBoundary key={asset.id}><PreventiveMaintenanceTrackingContent asset={asset} canEdit={Boolean(canEdit)} /></PmPanelErrorBoundary>;
+  return <PmPanelErrorBoundary key={`${library}-${asset.id}`}><PreventiveMaintenanceTrackingContent asset={asset} canEdit={Boolean(canEdit)} library={library} /></PmPanelErrorBoundary>;
 }
 
-function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdentity;canEdit:boolean}) {
+function PreventiveMaintenanceTrackingContent({asset,canEdit,library}:{asset:AssetIdentity;canEdit:boolean;library:AssetLibraryScope}) {
+  const apiBase=`/api/${library}-library`;
   const [expanded,setExpanded]=useState(false);
   const [tasks,setTasks]=useState<PmTask[]>([]);
   const [summary,setSummary]=useState<PmSummary>(emptySummary);
@@ -188,7 +190,7 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
 
   async function load() {
     setLoading(true);setError('');
-    try{const data=await requestJson<unknown>(`/api/machine-library/assets/${asset.id}/preventive-maintenance`);const safeTasks=Array.isArray(data)?normalizePmTasks(data):isRecord(data)?normalizePmTasks(data.tasks):null;if(safeTasks===null)throw new Error('Preventive maintenance data is temporarily unavailable.');setTasks(safeTasks);setSummary(normalizePmSummary(isRecord(data)?data.summary:null,safeTasks));}
+    try{const data=await requestJson<unknown>(`${apiBase}/assets/${asset.id}/preventive-maintenance`);const safeTasks=Array.isArray(data)?normalizePmTasks(data):isRecord(data)?normalizePmTasks(data.tasks):null;if(safeTasks===null)throw new Error('Preventive maintenance data is temporarily unavailable.');setTasks(safeTasks);setSummary(normalizePmSummary(isRecord(data)?data.summary:null,safeTasks));}
     catch(value){setTasks([]);setSummary(emptySummary);setError((value as Error).message||'Preventive maintenance tracking could not be loaded.');}
     finally{setLoading(false);}
   }
@@ -203,7 +205,7 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
   const safeTasks=Array.isArray(tasks)?tasks:[];
   async function deactivate(task:PmTask) {
     if(!window.confirm(`Deactivate “${task.title}”? Its completion history will be preserved.`))return;
-    try{await requestJson(`/api/machine-library/preventive-maintenance/${task.id}/deactivate`,{method:'POST',body:'{}'});await load();}
+    try{await requestJson(`${apiBase}/preventive-maintenance/${task.id}/deactivate`,{method:'POST',body:'{}'});await load();}
     catch(value){setError((value as Error).message||'PM tracking could not be deactivated.');}
   }
   return <>
@@ -218,10 +220,10 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
         {!loading&&safeTasks.length>0&&<div className="pm-task-grid">{safeTasks.map(task=><PmTaskCard key={task.id} task={task} canEdit={canEdit} onView={()=>setViewTask(task)} onEdit={()=>setFormTask(task)} onComplete={()=>setCompleteTask(task)} onDeactivate={()=>void deactivate(task)} onHistory={()=>setHistoryTask(task)} />)}</div>}
       </div>
     </MccCategoryAccordion>
-    {formTask!==undefined&&<PmFormModal asset={asset} task={formTask} onClose={()=>setFormTask(undefined)} onSaved={async()=>{setFormTask(undefined);await load();}} />}
+    {formTask!==undefined&&<PmFormModal asset={asset} task={formTask} apiBase={apiBase} onClose={()=>setFormTask(undefined)} onSaved={async()=>{setFormTask(undefined);await load();}} />}
     {viewTask&&<PmViewModal asset={asset} task={viewTask} onClose={()=>setViewTask(null)} />}
-    {completeTask&&<PmCompleteModal task={completeTask} onClose={()=>setCompleteTask(null)} onSaved={async()=>{setCompleteTask(null);await load();}} />}
-    {historyTask&&<PmHistoryModal task={historyTask} onClose={()=>setHistoryTask(null)} />}
+    {completeTask&&<PmCompleteModal task={completeTask} apiBase={apiBase} onClose={()=>setCompleteTask(null)} onSaved={async()=>{setCompleteTask(null);await load();}} />}
+    {historyTask&&<PmHistoryModal task={historyTask} apiBase={apiBase} onClose={()=>setHistoryTask(null)} />}
   </>;
 }
 
@@ -253,14 +255,14 @@ function pmDraftErrors(draft:PmDraft){
   return errors;
 }
 
-function PmFormModal({asset,task,onClose,onSaved}:{asset:AssetIdentity;task:PmTask|null;onClose:()=>void;onSaved:()=>void|Promise<void>}) {
+function PmFormModal({asset,task,apiBase,onClose,onSaved}:{asset:AssetIdentity;task:PmTask|null;apiBase:string;onClose:()=>void;onSaved:()=>void|Promise<void>}) {
   const [draft,setDraft]=useState<PmDraft>(()=>task?taskToDraft(task):blankDraft);
   const [saving,setSaving]=useState(false);const [error,setError]=useState('');const [submitted,setSubmitted]=useState(false);const formRef=useRef<HTMLFormElement>(null);const createRequestId=useRef(crypto.randomUUID());
   const meter=meterIntervals.has(draft.intervalType);const fixed=fixedIntervals.has(draft.intervalType);
   const fixedCadence=draft.intervalType?fixedCadences[draft.intervalType]:undefined;const validation=pmDraftErrors(draft);const preview=pmDuePreview(draft);
   const intervalPlaceholder=draft.intervalType?intervalGuidance[draft.intervalType]??'': '';const meterUnit=draft.intervalType==='hourly'?'Hours':'Cycles';
   function field<K extends keyof PmDraft>(key:K,value:PmDraft[K]){setDraft(current=>({...current,[key]:value}));if(key==='title')setError('');}
-  async function submit(event:FormEvent){event.preventDefault();setSubmitted(true);const firstInvalid=(['title','intervalType','interval','date','lastMeter','currentMeter'] as PmDraftErrorKey[]).find(key=>validation[key]);if(firstInvalid){setError('');requestAnimationFrame(()=>{const container=formRef.current?.querySelector<HTMLElement>(`[data-pm-field="${firstInvalid}"]`);const target=container?.matches('input,select,textarea,button,[tabindex]')?container:container?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]');container?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});target?.focus({preventScroll:true});});return;}setSaving(true);setError('');try{const payload={title:draft.title.replace(/\s+/g,' ').trim(),instructions:draft.instructions,intervalType:draft.intervalType,intervalValue:fixedCadence?.value??Number(draft.intervalValue),lastCompletedDate:meter?null:(draft.lastCompletedDate||null),lastCompletedMeter:meter?Number(draft.lastCompletedMeter):null,currentMeter:meter&&draft.currentMeter!==''?Number(draft.currentMeter):null,scheduleStatus:draft.scheduleStatus,notes:draft.notes};await requestJson(task?`/api/machine-library/preventive-maintenance/${task.id}`:`/api/machine-library/assets/${asset.id}/preventive-maintenance`,{method:task?'PUT':'POST',body:JSON.stringify(payload),headers:task?undefined:{'Idempotency-Key':createRequestId.current}});await onSaved();}catch(value){setError((value as Error).message||'PM tracking could not be saved.');}finally{setSaving(false);}}
+  async function submit(event:FormEvent){event.preventDefault();setSubmitted(true);const firstInvalid=(['title','intervalType','interval','date','lastMeter','currentMeter'] as PmDraftErrorKey[]).find(key=>validation[key]);if(firstInvalid){setError('');requestAnimationFrame(()=>{const container=formRef.current?.querySelector<HTMLElement>(`[data-pm-field="${firstInvalid}"]`);const target=container?.matches('input,select,textarea,button,[tabindex]')?container:container?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]');container?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});target?.focus({preventScroll:true});});return;}setSaving(true);setError('');try{const payload={title:draft.title.replace(/\s+/g,' ').trim(),instructions:draft.instructions,intervalType:draft.intervalType,intervalValue:fixedCadence?.value??Number(draft.intervalValue),lastCompletedDate:meter?null:(draft.lastCompletedDate||null),lastCompletedMeter:meter?Number(draft.lastCompletedMeter):null,currentMeter:meter&&draft.currentMeter!==''?Number(draft.currentMeter):null,scheduleStatus:draft.scheduleStatus,notes:draft.notes};await requestJson(task?`${apiBase}/preventive-maintenance/${task.id}`:`${apiBase}/assets/${asset.id}/preventive-maintenance`,{method:task?'PUT':'POST',body:JSON.stringify(payload),headers:task?undefined:{'Idempotency-Key':createRequestId.current}});await onSaved();}catch(value){setError((value as Error).message||'PM tracking could not be saved.');}finally{setSaving(false);}}
   return createPortal(<div className="modal-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!saving)onClose();}}><section className="mcc-card glass-modal-shell pm-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-labelledby="pm-form-title"><form ref={formRef} onSubmit={submit} noValidate>
     <div className="modal-heading"><div><p className="eyebrow">{safeString(asset.assetNumber,'Machine asset')} · {safeString(asset.assetName,'Machine asset')}</p><h3 id="pm-form-title">{task?'Edit':'Add'} Preventive Maintenance Tracking</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={saving}>Close</button></div>
     <div className="pm-form-grid"><label className="form-field pm-form-wide"><span>PM Title *</span><input className="glass-input" data-pm-field="title" value={draft.title} maxLength={180} onChange={e=>field('title',e.target.value)} aria-invalid={submitted&&Boolean(validation.title)} required />{submitted&&validation.title&&<small className="pm-inline-error">{validation.title}</small>}</label><label className="form-field pm-form-wide"><span>Instructions</span><textarea className="glass-input" rows={4} maxLength={12000} value={draft.instructions} onChange={e=>field('instructions',e.target.value)} /></label>
@@ -307,15 +309,15 @@ function PmViewModal({asset,task,onClose}:{asset:AssetIdentity;task:PmTask;onClo
 }
 function PmValue({label,value}:{label:string;value:string}){return <div className="pm-value glass-card glass-card--nested"><span>{label}</span><strong>{value}</strong></div>;}
 
-function PmCompleteModal({task,onClose,onSaved}:{task:PmTask;onClose:()=>void;onSaved:()=>void}) {
+function PmCompleteModal({task,apiBase,onClose,onSaved}:{task:PmTask;apiBase:string;onClose:()=>void;onSaved:()=>void}) {
   const meter=meterIntervals.has(task.intervalType);const [date,setDate]=useState(localIsoDate(new Date()));const [completedMeter,setCompletedMeter]=useState(task.currentMeter===null?'':String(task.currentMeter));const [notes,setNotes]=useState('');const [saving,setSaving]=useState(false);const [error,setError]=useState('');
-  async function submit(event:FormEvent){event.preventDefault();setSaving(true);setError('');try{await requestJson(`/api/machine-library/preventive-maintenance/${task.id}/complete`,{method:'POST',body:JSON.stringify({completionDate:date,completedMeter:completedMeter===''?null:Number(completedMeter),completionNotes:notes})});onSaved();}catch(value){setError((value as Error).message||'PM completion could not be saved.');}finally{setSaving(false);}}
+  async function submit(event:FormEvent){event.preventDefault();setSaving(true);setError('');try{await requestJson(`${apiBase}/preventive-maintenance/${task.id}/complete`,{method:'POST',body:JSON.stringify({completionDate:date,completedMeter:completedMeter===''?null:Number(completedMeter),completionNotes:notes})});onSaved();}catch(value){setError((value as Error).message||'PM completion could not be saved.');}finally{setSaving(false);}}
   return createPortal(<div className="modal-backdrop glass-modal-backdrop" role="presentation"><section className="mcc-card glass-modal-shell pm-modal pm-complete-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-labelledby="pm-complete-title"><form onSubmit={submit}><div className="modal-heading"><div><p className="eyebrow">Immutable completion history</p><h3 id="pm-complete-title">Mark {task.title} Complete</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={saving}>Close</button></div><div className="pm-form-grid"><MccDateInput label="Completion Date *" value={date} onChange={setDate} required />{meter&&<label className="form-field"><span>Completed Meter *</span><input className="glass-input" type="number" min="0" step="0.01" value={completedMeter} onChange={e=>setCompletedMeter(e.target.value)} required /></label>}<label className="form-field pm-form-wide"><span>Completion Notes</span><textarea className="glass-input" rows={4} maxLength={12000} value={notes} onChange={e=>setNotes(e.target.value)} /></label></div><p className="pm-history-notice">Saving creates a permanent completion record and advances the next due value.</p>{error&&<p className="form-message error">{error}</p>}<div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button glass-button glass-button--success" type="submit" disabled={saving}>{saving?'Saving completion...':'Mark Complete'}</button></div></form></section></div>,document.body);
 }
 
-function PmHistoryModal({task,onClose}:{task:PmTask;onClose:()=>void}) {
+function PmHistoryModal({task,apiBase,onClose}:{task:PmTask;apiBase:string;onClose:()=>void}) {
   const [history,setHistory]=useState<PmHistory[]>([]);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
-  useEffect(()=>{void requestJson<Record<string,unknown>>(`/api/machine-library/preventive-maintenance/${task.id}/history`).then(data=>{if(!isRecord(data))throw new Error('PM history data is temporarily unavailable.');setHistory(normalizePmHistory(data.history));}).catch(value=>{setHistory([]);setError((value as Error).message||'History could not be loaded.');}).finally(()=>setLoading(false));},[task.id]);
+  useEffect(()=>{void requestJson<Record<string,unknown>>(`${apiBase}/preventive-maintenance/${task.id}/history`).then(data=>{if(!isRecord(data))throw new Error('PM history data is temporarily unavailable.');setHistory(normalizePmHistory(data.history));}).catch(value=>{setHistory([]);setError((value as Error).message||'History could not be loaded.');}).finally(()=>setLoading(false));},[apiBase,task.id]);
   const safeHistory=Array.isArray(history)?history:[];
   return createPortal(<div className="modal-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card glass-modal-shell pm-modal pm-history-modal mcc-wide-modal" role="dialog" aria-modal="true" aria-labelledby="pm-history-title"><div className="modal-heading"><div><p className="eyebrow">Immutable completion history</p><h3 id="pm-history-title">{safeString(task.title,'Untitled PM task')}</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div>{error&&<p className="form-message error">{error}</p>}{loading&&<div className="glass-empty-state">Loading completion history...</div>}{!loading&&!safeHistory.length&&<div className="glass-empty-state">No completions have been recorded.</div>}{safeHistory.length>0&&<div className="pm-history-list glass-card--dense">{safeHistory.map(item=><article className="pm-history-entry" key={item.id}><div><strong>{formatDate(item.completionDate)}</strong><span>Performed by {safeString(item.performedBy,'Unknown user')}</span></div><div className="pm-history-due"><span>Meter: {formatMeter(item.completedMeter)}</span><span>Previous due: {item.previousDueDate?formatDate(item.previousDueDate):formatMeter(item.previousDueMeter)}</span><span>Next due: {item.nextDueDate?formatDate(item.nextDueDate):formatMeter(item.nextDueMeter)}</span></div>{item.completionNotes&&<p>{item.completionNotes}</p>}</article>)}</div>}<div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></section></div>,document.body);
 }

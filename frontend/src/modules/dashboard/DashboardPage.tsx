@@ -9,6 +9,7 @@ type DashboardMetric = { view:DashboardRequisitionView;label:string;value:number
 type PmStatus = 'Due Soon'|'Due Now'|'Past Due';
 type PmAlert = {
   id:number;assetId:number;assetNumber:string;assetName:string;brand:string;model:string;serialNumber:string;
+  assetLibrary?:'machine'|'equipment';
   title:string;instructions:string;notes:string;intervalType:string;intervalLabel:string;intervalValue:number;
   status:PmStatus;relativeMessage:string;countdown:string;scheduleStatus:'active'|'hold'|'inactive';
   lastCompletedDate:string|null;lastCompletedMeter:number|null;currentMeter:number|null;nextDueDate:string|null;nextDueMeter:number|null;
@@ -153,7 +154,7 @@ function PmDetailModal({alert,onClose}:{alert:PmAlert;onClose:()=>void}) {
   const [history,setHistory]=useState<PmHistory[]|null>(null);
   const [historyError,setHistoryError]=useState('');
   useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onClose();};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close);},[onClose]);
-  async function loadHistory(){setHistoryError('');try{const response=await fetch(`/api/machine-library/preventive-maintenance/${alert.id}/history`,{credentials:'include'});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'PM history is unavailable.');setHistory(Array.isArray(data.history)?data.history:[]);}catch(error){setHistoryError((error as Error).message);}}
+  async function loadHistory(){setHistoryError('');try{const response=await fetch(`/api/${alert.assetLibrary==='equipment'?'equipment':'machine'}-library/preventive-maintenance/${alert.id}/history`,{credentials:'include'});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'PM history is unavailable.');setHistory(Array.isArray(data.history)?data.history:[]);}catch(error){setHistoryError((error as Error).message);}}
   function printWorkOrder(){const previous=document.title;const next=workOrderFilename(alert);const restore=()=>{document.title=previous;};document.title=next;window.addEventListener('afterprint',restore,{once:true});window.print();window.setTimeout(restore,1000);}
   return createPortal(<div className="modal-backdrop glass-modal-backdrop dashboard-pm-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
     <section className="mcc-card dashboard-pm-detail glass-modal-shell" role="dialog" aria-modal="true" aria-labelledby={`dashboard-pm-detail-${alert.id}`}>

@@ -54,7 +54,8 @@ function triggerDownload(url:string,filename:string) {
 }
 function escapePrintHtml(value:string) { return value.replace(/[&<>'"]/g,character=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[character] ?? character); }
 
-export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEdit:boolean}) {
+export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:AssetIdentity;canEdit:boolean;library?:'machine'|'equipment'}) {
+  const apiBase=`/api/${library}-library`;
   const [expanded,setExpanded]=useState(false);
   const [notes,setNotes]=useState<AssetNote[]>([]);
   const [loading,setLoading]=useState(true);
@@ -71,7 +72,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
     setLoading(true);
     setError('');
     try {
-      const data=await responseJson<{ok:boolean;notes:AssetNote[]}>(await fetch(`/api/machine-library/assets/${asset.id}/notes`,{credentials:'include'}));
+      const data=await responseJson<{ok:boolean;notes:AssetNote[]}>(await fetch(`${apiBase}/assets/${asset.id}/notes`,{credentials:'include'}));
       setNotes(data.notes);
     } catch(loadError) {
       setError((loadError as Error).message || 'Asset notes could not be loaded.');
@@ -123,7 +124,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
       formData.append('noteDate',draft.noteDate);
       formData.append('body',body);
       pendingAttachments.forEach(file=>formData.append('attachments',file,file.name));
-      const url=editing?`/api/machine-library/asset-notes/${editing.id}`:`/api/machine-library/assets/${asset.id}/notes`;
+      const url=editing?`${apiBase}/asset-notes/${editing.id}`:`${apiBase}/assets/${asset.id}/notes`;
       await responseJson(await fetch(url,{method:editing?'PUT':'POST',credentials:'include',body:formData}));
       cancelForm();
       await loadNotes();
@@ -135,7 +136,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
     if(!window.confirm(`Delete asset note “${note.title}” and all of its attachments?`)) return;
     setError('');
     try {
-      await responseJson(await fetch(`/api/machine-library/asset-notes/${note.id}`,{method:'DELETE',credentials:'include'}));
+      await responseJson(await fetch(`${apiBase}/asset-notes/${note.id}`,{method:'DELETE',credentials:'include'}));
       if(editing?.id===note.id) cancelForm();
       await loadNotes();
     } catch(deleteError) { setError((deleteError as Error).message || 'Asset note could not be deleted.'); }
@@ -144,7 +145,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
     if(!window.confirm(`Delete attachment “${attachment.filename}” from ${note.title}?`)) return;
     setError('');
     try {
-      await responseJson(await fetch(`/api/machine-library/asset-note-attachments/${attachment.id}`,{method:'DELETE',credentials:'include'}));
+      await responseJson(await fetch(`${apiBase}/asset-note-attachments/${attachment.id}`,{method:'DELETE',credentials:'include'}));
       await loadNotes();
     } catch(deleteError) { setError((deleteError as Error).message || 'Attachment could not be deleted.'); }
   }
