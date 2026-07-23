@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { MccAccordionHeader, MccCategoryAccordion } from '../../components/MccCategoryAccordion';
 import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { MccActionGroup, MccOverflowMenu, MccResourceRow } from '../../components/MccResourceRow';
 
@@ -152,14 +153,8 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
     setViewer({filename:attachment.filename,mimeType:attachment.mimeType,contentUrl:attachment.contentUrl,downloadUrl:attachment.downloadUrl,label:`${asset.assetNumber} attachment`});
   }
 
-  return <article className={`machine-detail-accordion-card asset-notes-card glass-panel glass-panel--nested${expanded?' is-open':''}`}>
-    <div className="machine-detail-accordion-header">
-      <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={`asset-notes-panel-${asset.id}`} onClick={()=>setExpanded(current=>!current)}>
-        <span className="machine-detail-section-title">Asset Notes &amp; Attachments</span>
-        <span className="machine-detail-section-summary">{summary}</span>
-        <span className="machine-accordion-chevron" aria-hidden="true">v</span>
-      </button>
-    </div>
+  return <MccCategoryAccordion accent="notes" expanded={expanded} className="asset-notes-card glass-panel glass-panel--nested">
+    <MccAccordionHeader title={<>Asset Notes &amp; Attachments</>} summary={summary} expanded={expanded} controls={`asset-notes-panel-${asset.id}`} onToggle={()=>setExpanded(current=>!current)} />
     <div className="machine-detail-accordion-panel asset-notes-panel" id={`asset-notes-panel-${asset.id}`} aria-hidden={!expanded}>
       <div className="asset-notes-toolbar glass-toolbar"><div><strong>Working asset notes</strong><small>Saved notes automatically create a maintenance-style PDF.</small></div>{canEdit&&<button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={beginAdd}>Add Note</button>}</div>
       {error&&<p className="form-message error">{error}</p>}
@@ -180,7 +175,7 @@ export function AssetNotesAttachments({asset,canEdit}:{asset:AssetIdentity;canEd
       </section>)}</div>}
     </div>
     {viewer&&<AssetFileViewer asset={asset} file={viewer} onClose={()=>setViewer(null)} />}
-  </article>;
+  </MccCategoryAccordion>;
 }
 
 function PendingAttachmentChip({file,onRemove}:{file:File;onRemove:()=>void}) {

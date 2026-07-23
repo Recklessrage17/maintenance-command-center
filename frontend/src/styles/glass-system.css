@@ -817,7 +817,9 @@ button.glass-attachment:focus-visible {
 
 /* Reusable compact file/folder glyphs. These are icons, never tiles. */
 .mcc-file-type-icon.mcc-file-type-icon {
-  --mcc-file-accent: #79b8cb;
+  --mcc-file-highlight: #86d7ff;
+  --mcc-file-accent: #3a5368;
+  --mcc-file-deep: #203646;
   flex: 0 0 auto;
   width: 30px;
   height: 36px;
@@ -835,23 +837,28 @@ button.glass-attachment:focus-visible {
   transition: filter .15s ease, color .15s ease;
 }
 .mcc-file-type-icon svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; }
-.mcc-file-type-icon__page { fill: rgba(231,242,246,.96); stroke: color-mix(in srgb,var(--mcc-file-accent) 62%,#354d59); stroke-width: 1.15; stroke-linejoin: round; }
-.mcc-file-type-icon__fold { fill: color-mix(in srgb,var(--mcc-file-accent) 18%,#eef8fa); stroke: color-mix(in srgb,var(--mcc-file-accent) 62%,#354d59); stroke-width: 1.05; stroke-linejoin: round; }
-.mcc-file-type-icon__band { fill: var(--mcc-file-accent); }
-.mcc-file-type-icon__label { fill: #fff; font-family: inherit; font-size: 5.4px; font-weight: 900; letter-spacing: .18px; }
-.mcc-file-type-icon__grid,.mcc-file-type-icon__lines { fill: none; stroke: var(--mcc-file-accent); stroke-width: 1.15; stroke-linecap: round; }
-.mcc-file-type-icon--pdf { --mcc-file-accent: #c74355; }
-.mcc-file-type-icon--word { --mcc-file-accent: #357cc8; }
-.mcc-file-type-icon--excel { --mcc-file-accent: #31875d; }
-.mcc-file-type-icon--text { --mcc-file-accent: #6c9fac; }
-.mcc-file-type-icon.mcc-file-type-icon--folder { width: 26px; height: 24px; color: #66b9d4; }
-.mcc-file-type-icon--folder .mcc-file-type-icon__folder-back { fill: rgba(54,151,188,.1); stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
-.mcc-file-type-icon--folder .mcc-file-type-icon__folder-front { fill: rgba(54,151,188,.08); stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
-.mcc-file-type-icon--folder.is-open { color: #7bdaef; }
+.mcc-file-type-icon svg * { pointer-events: none; }
+.mcc-file-type-icon__page { stroke: color-mix(in srgb,var(--mcc-file-highlight) 36%,var(--mcc-file-deep)); stroke-width: 1.05; stroke-linejoin: round; filter: drop-shadow(0 1.5px 1.5px rgba(0,0,0,.28)); }
+.mcc-file-type-icon__page-highlight { fill: none; stroke: rgba(255,255,255,.42); stroke-width: .72; stroke-linecap: round; }
+.mcc-file-type-icon__fold { fill: color-mix(in srgb,var(--mcc-file-highlight) 56%,#f5fbff); stroke: color-mix(in srgb,var(--mcc-file-highlight) 42%,var(--mcc-file-deep)); stroke-width: 1; stroke-linejoin: round; }
+.mcc-file-type-icon__band { stroke: color-mix(in srgb,var(--mcc-file-deep) 82%,#02070a); stroke-width: .65; }
+.mcc-file-type-icon__band-highlight { fill: none; stroke: rgba(255,255,255,.28); stroke-width: .55; stroke-linecap: round; }
+.mcc-file-type-icon__label { fill: #fff; font-family: inherit; font-size: 5.35px; font-weight: 1000; letter-spacing: .16px; paint-order: stroke; stroke: rgba(0,0,0,.14); stroke-width: .25px; }
+.mcc-file-type-icon__grid,.mcc-file-type-icon__lines,.mcc-file-type-icon__pdf-detail { fill: none; stroke: rgba(255,255,255,.82); stroke-width: .92; stroke-linecap: round; stroke-linejoin: round; }
+.mcc-file-type-icon--pdf { --mcc-file-highlight: #ff4d5f; --mcc-file-accent: #c91f3a; --mcc-file-deep: #7a1024; }
+.mcc-file-type-icon--word { --mcc-file-highlight: #2b7fff; --mcc-file-accent: #185abd; --mcc-file-deep: #103f91; }
+.mcc-file-type-icon--excel { --mcc-file-highlight: #21a366; --mcc-file-accent: #107c41; --mcc-file-deep: #0b5e31; }
+.mcc-file-type-icon--text { --mcc-file-highlight: #86d7ff; --mcc-file-accent: #6b7f91; --mcc-file-deep: #3a5368; }
+.mcc-file-type-icon.mcc-file-type-icon--folder { width: 22px; height: 22px; color: #f3b72f; }
+.mcc-file-type-icon--folder .mcc-file-type-icon__folder-back { stroke: rgba(122,74,8,.66); stroke-width: .82; stroke-linejoin: round; filter: drop-shadow(0 1.2px 1px rgba(0,0,0,.28)); }
+.mcc-file-type-icon--folder .mcc-file-type-icon__folder-front { stroke: rgba(122,74,8,.72); stroke-width: .82; stroke-linejoin: round; }
+.mcc-file-type-icon__folder-tab-highlight,.mcc-file-type-icon__folder-top-highlight { fill: none; stroke: rgba(255,248,204,.65); stroke-width: .72; stroke-linecap: round; }
+.mcc-file-type-icon__folder-reflection { fill: none; stroke: #8be9ff; stroke-width: .62; stroke-linecap: round; opacity: .72; }
+.mcc-file-type-icon--folder.is-open { color: #ffd76a; filter: brightness(1.04); }
 .machine-document-folder-header .mcc-resource-row__content:hover .mcc-file-type-icon--folder,
-.machine-document-folder-header .mcc-resource-row__content:focus-visible .mcc-file-type-icon--folder { color: #91eaff; }
+.machine-document-folder-header .mcc-resource-row__content:focus-visible .mcc-file-type-icon--folder { color: #ffd76a; filter: brightness(1.1); }
 .machine-document-row:hover .mcc-file-type-icon,
-.machine-document-row:focus-within .mcc-file-type-icon { filter: brightness(1.08); }
+.machine-document-row:focus-within .mcc-file-type-icon { filter: brightness(1.09) translateY(-1px); }
 
 /*
  * Machine Library showcase composition
@@ -1707,6 +1714,24 @@ button.mcc-resource-row__content { cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   .pm-due-now-text { animation: none; }
+}
+
+/* Shared category accents intentionally remain library-agnostic for future equipment accordions. */
+.mcc-category-accent.machine-detail-accordion-card.glass-panel,
+.mcc-category-accent.machine-detail-accordion-card {
+  border-color: rgba(var(--mcc-category-rgb),.25);
+  border-left-color: rgba(var(--mcc-category-rgb),.72);
+  box-shadow: inset 3px 0 0 rgba(var(--mcc-category-rgb),.62), inset 0 1px 0 rgba(255,255,255,.07), 0 12px 28px rgba(0,0,0,.18);
+}
+.mcc-category-accent.machine-detail-accordion-card.is-open,
+.mcc-category-accent.machine-detail-accordion-card:focus-within {
+  border-color: rgba(var(--mcc-category-rgb),.5);
+  box-shadow: inset 3px 0 0 rgba(var(--mcc-category-rgb),.9), inset 0 1px 0 rgba(255,255,255,.1), 0 16px 34px rgba(0,0,0,.2), 0 0 18px rgba(var(--mcc-category-rgb),.07);
+}
+.mcc-category-accent.machine-record-accordion.glass-panel {
+  border-color: rgba(var(--mcc-category-rgb),.3);
+  border-left-color: rgba(var(--mcc-category-rgb),.75);
+  background: linear-gradient(90deg,rgba(var(--mcc-category-rgb),.1),rgba(4,18,34,.62) 38%);
 }
 
 .pm-view-modal,

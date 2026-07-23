@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY A
 CREATE TABLE IF NOT EXISTS requisition_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Open', is_general INTEGER NOT NULL DEFAULT 0, created_by_user_id INTEGER, updated_by_user_id INTEGER, converted_at TEXT, closed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requisition_batch_requisitions (batch_id INTEGER NOT NULL, requisition_id INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (batch_id,requisition_id));
 CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', setup_type TEXT NOT NULL DEFAULT 'Standard Injection', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -261,7 +261,7 @@ CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition
   }
   run('UPDATE requisition_staging_items SET batch_id=? WHERE batch_id IS NULL', [generalBatch.id]);
 
-  db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+  db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', setup_type TEXT NOT NULL DEFAULT 'Standard Injection', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
@@ -298,6 +298,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
   if (!machineAssetColumns.has('screw_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN screw_condition_status TEXT NOT NULL DEFAULT 'new'");
   if (!machineAssetColumns.has('barrel_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN barrel_condition_status TEXT NOT NULL DEFAULT 'new'");
   const machineInjectionColumns: Array<{ name: string; definition: string }> = [
+    { name: 'setup_type', definition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'has_double_shot_injection', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'has_plunger_injection', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'screw2_type', definition: "TEXT NOT NULL DEFAULT ''" },
@@ -340,6 +341,13 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
   for (const column of ['screw2_condition_status','barrel2_condition_status','plunger_condition_status','plunger_barrel_condition_status']) {
     run(`UPDATE machine_assets SET ${column}='new' WHERE ${column} IS NULL OR ${column}='' OR ${column} NOT IN ('new','used','worn','rebuilt_repaired')`);
   }
+  run(`UPDATE machine_assets
+    SET setup_type=CASE
+      WHEN has_double_shot_injection=1 THEN 'Two-Shot / 2K Injection'
+      WHEN has_plunger_injection=1 THEN 'Plunger Injection'
+      ELSE 'Standard Injection'
+    END
+    WHERE setup_type IS NULL OR trim(setup_type)='' OR setup_type='Other / Custom'`);
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -6234,11 +6242,31 @@ type PmScheduleStatus = 'active' | 'hold' | 'inactive';
 type PmTaskRow = { id:number; asset_id:number; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; hold:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
 type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; completion_notes:string; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
 type MachineAssetRow = {
-  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
+  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; setup_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
 const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
 const machineComponentImageTypes: MachineComponentImageType[] = ['screw','screw-tip','barrel','barrel-end-cap','screw-2','screw-2-tip','barrel-2','barrel-2-end-cap','plunger','plunger-barrel','plunger-barrel-end-cap'];
+const machineSetupTypes = [
+  'Standard Injection',
+  'Two-Shot / 2K Injection',
+  'Multi-Component / Multi-Material',
+  'Insert Molding / Overmolding',
+  'Vertical Insert Molding',
+  'Rotary Table / Shuttle Insert Molding',
+  'Plunger Injection',
+  'Liquid Silicone Rubber (LSR)',
+  'Thermoset Injection',
+  'Micro Injection Molding',
+  'Gas-Assist Injection',
+  'Water-Assist Injection',
+  'Structural Foam / Low-Pressure Injection',
+  'Co-Injection / Sandwich Molding',
+  'Injection Compression Molding',
+  'Metal Injection Molding (MIM)',
+  'Ceramic Injection Molding (CIM)',
+  'Other / Custom',
+] as const;
 const voltageTypes = new Set(['AC','DC','']);
 const machineRequiredDefaultBrandColors: Record<string, string> = { Toyo: '#1E6BFF', Engel: '#FFFFFF' };
 const machineDefaultBrandColors: Record<string, string> = { ...machineRequiredDefaultBrandColors, Arburg: '#38D7B3', Husky: '#FFD45A', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
@@ -6253,7 +6281,7 @@ const machineRequiredImportHeaderGroups = [
   ['Model #','Model','Model Number'],
   ['Equip Serial #','Serial Number','Equip Serial Number'],
 ] as const;
-const machineImportHeaders = ['Asset Number','Brand','Model','Serial Number','Shot Size (oz)','Tonnage','Power Type','Barrel/Screw Diameter','Machine Year','Machine Type','Screw Type','Screw Tip Type','Screw Rebuild / Repaired','Screw Condition Status','Screw Installed Date','Screw Tip Installed Date','Screw Length','Barrel Rebuild / Repaired','Barrel Condition Status','Barrel Installed Date','Barrel End Cap Installed Date','Barrel Length','Machine Length','Machine Width','Machine Height','Full Die Height Length / Range','Notes','Critical Notes','Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
+const machineImportHeaders = ['Asset Number','Brand','Model','Serial Number','Shot Size (oz)','Tonnage','Power Type','Setup Type','Barrel/Screw Diameter','Machine Year','Machine Type','Screw Type','Screw Tip Type','Screw Rebuild / Repaired','Screw Condition Status','Screw Installed Date','Screw Tip Installed Date','Screw Length','Barrel Rebuild / Repaired','Barrel Condition Status','Barrel Installed Date','Barrel End Cap Installed Date','Barrel Length','Machine Length','Machine Width','Machine Height','Full Die Height Length / Range','Notes','Critical Notes','Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
 type MachineAssetInput = ReturnType<typeof validateMachineAssetInput>;
 function canMachineWrite(actor: User) { return roleRank(actor.role) >= roleRank('Maintenance Tech 3'); }
 function canMachineDelete(actor: User) { return roleRank(actor.role) >= roleRank('Manager'); }
@@ -6320,10 +6348,20 @@ function machineConditionInput(input: Record<string, unknown>, keys: string[], r
 function normalizeMachinePowerType(value: string) {
   const clean = value.trim();
   const lower = clean.toLowerCase();
+  if (/servo[\s-]*hyd/.test(lower)) return 'Servo Hydraulic';
   if (/hyb/.test(lower)) return 'Hybrid';
   if (/elec/.test(lower)) return 'Electric';
   if (/hyd/.test(lower)) return 'Hydraulic';
   return clean ? 'Other' : '';
+}
+function normalizeMachineSetupType(value: string, hasDoubleShotInjection: boolean, hasPlungerInjection: boolean) {
+  const fallback = hasDoubleShotInjection ? 'Two-Shot / 2K Injection' : hasPlungerInjection ? 'Plunger Injection' : 'Standard Injection';
+  if (!value.trim()) return fallback;
+  if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error('Setup Type contains unsafe characters.');
+  const clean = value.trim().replace(/\s+/g, ' ');
+  if (clean.length > 160) throw new Error('Setup Type must be 160 characters or fewer.');
+  if (clean === 'Other / Custom') throw new Error('Custom Setup Type is required when Other / Custom is selected.');
+  return machineSetupTypes.find(option => option !== 'Other / Custom' && option.toLowerCase() === clean.toLowerCase()) ?? clean;
 }
 function validateMachineAssetInput(body: unknown) {
   const input = isRecord(body) ? body : {};
@@ -6341,6 +6379,7 @@ function validateMachineAssetInput(body: unknown) {
   const barrelConditionStatus = machineConditionInput(input, ['barrelConditionStatus','barrel_condition_status'], barrelRebuildRepaired);
   const hasDoubleShotInjection = machineBooleanInput(input, ['hasDoubleShotInjection','has_double_shot_injection','doubleShotInjection','Double Shot Injection']);
   const hasPlungerInjection = machineBooleanInput(input, ['hasPlungerInjection','has_plunger_injection','plungerInjection','Plunger Injection']);
+  const setupType = normalizeMachineSetupType(machineText(input, ['setupType','setup_type','Setup Type'], 200), hasDoubleShotInjection, hasPlungerInjection);
   const screw2RebuildRepaired = machineBooleanInput(input, ['screw2RebuildRepaired','screw2_rebuild_repaired','Screw 2 Rebuild / Repaired']);
   const barrel2RebuildRepaired = machineBooleanInput(input, ['barrel2RebuildRepaired','barrel2_rebuild_repaired','Barrel 2 Rebuild / Repaired']);
   const plungerRebuildRepaired = machineBooleanInput(input, ['plungerRebuildRepaired','plunger_rebuild_repaired','Plunger Rebuild / Repaired']);
@@ -6353,7 +6392,7 @@ function validateMachineAssetInput(body: unknown) {
     assetNumber, assetName: machineText(input, ['assetName','asset_name','name'], 160, assetNumber), brand,
     model: machineText(input, ['model','modelNumber','model_number'], 160), serialNumber: machineText(input, ['serialNumber','serial_number','equipSerialNumber'], 160),
     machineYear: machineText(input, ['machineYear','machine_year','year'], 40), machineType: machineText(input, ['machineType','machine_type'], 120, 'Injection Molding Machine') || 'Injection Molding Machine',
-    powerType: normalizeMachinePowerType(machineText(input, ['powerType','power_type','he'])), shotSizeOz: machineNumericInput(input, ['shotSizeOz','shot_size_oz','shot'], 'Shot Size', 0), tonnage: machineNumericInput(input, ['tonnage','ton'], 'Tonnage', 0),
+    powerType: normalizeMachinePowerType(machineText(input, ['powerType','power_type','he'])), setupType, shotSizeOz: machineNumericInput(input, ['shotSizeOz','shot_size_oz','shot'], 'Shot Size', 0), tonnage: machineNumericInput(input, ['tonnage','ton'], 'Tonnage', 0),
     barrelDiameter: machineText(input, ['barrelDiameter','barrel_diameter','barrel'], 120), location: machineText(input, ['location'], 120), department: machineText(input, ['department'], 120), status,
     voltageValue: machineText(input, ['voltageValue','voltage_value','voltage'], 80), voltageType, fullLoadAmp: machineText(input, ['fullLoadAmp','full_load_amp'], 80),
     machineLength: machineText(input, ['machineLength','machine_length'], 80), machineWidth: machineText(input, ['machineWidth','machine_width'], 80), machineHeight: machineText(input, ['machineHeight','machine_height'], 80), fullDieHeightLength: machineText(input, ['fullDieHeightLength','full_die_height_length'], 120),
@@ -6370,7 +6409,7 @@ function validateMachineAssetInput(body: unknown) {
 }
 function publicMachineAsset(row: MachineAssetRow) {
   return {
-    id: row.id, assetNumber: row.asset_number, assetName: row.asset_name, brand: row.brand, model: row.model, serialNumber: row.serial_number, machineYear: row.machine_year, machineType: row.machine_type, powerType: row.power_type,
+    id: row.id, assetNumber: row.asset_number, assetName: row.asset_name, brand: row.brand, model: row.model, serialNumber: row.serial_number, machineYear: row.machine_year, machineType: row.machine_type, powerType: row.power_type, setupType: row.setup_type || (row.has_double_shot_injection ? 'Two-Shot / 2K Injection' : row.has_plunger_injection ? 'Plunger Injection' : 'Standard Injection'),
     shotSizeOz: Number(row.shot_size_oz ?? 0), tonnage: Number(row.tonnage ?? 0), barrelDiameter: row.barrel_diameter, location: row.location, department: row.department, status: row.status, voltageValue: row.voltage_value, voltageType: row.voltage_type, fullLoadAmp: row.full_load_amp,
     machineLength: row.machine_length, machineWidth: row.machine_width, machineHeight: row.machine_height, fullDieHeightLength: row.full_die_height_length, screwType: row.screw_type, screwTipType: row.screw_tip_type, screwTipInstalledDate: row.screw_tip_installed_date, screwInstalledDate: row.screw_installed_date,
     barrelInstalledDate: row.barrel_installed_date, barrelEndCapInstalledDate: row.barrel_end_cap_installed_date, barrelLength: row.barrel_length, screwLength: row.screw_length,
@@ -7069,7 +7108,7 @@ function recordMachineAssetHistory(input: { action: string; actor: User; row: Ma
 }
 function machineAssetDbValues(input: MachineAssetInput) {
   return {
-    asset_number: input.assetNumber, asset_name: input.assetName, brand: input.brand, model: input.model, serial_number: input.serialNumber, machine_year: input.machineYear, machine_type: input.machineType, power_type: input.powerType, shot_size_oz: input.shotSizeOz, tonnage: input.tonnage,
+    asset_number: input.assetNumber, asset_name: input.assetName, brand: input.brand, model: input.model, serial_number: input.serialNumber, machine_year: input.machineYear, machine_type: input.machineType, power_type: input.powerType, setup_type: input.setupType, shot_size_oz: input.shotSizeOz, tonnage: input.tonnage,
     barrel_diameter: input.barrelDiameter, location: input.location, department: input.department, status: input.status, voltage_value: input.voltageValue, voltage_type: input.voltageType, full_load_amp: input.fullLoadAmp, machine_length: input.machineLength, machine_width: input.machineWidth, machine_height: input.machineHeight, full_die_height_length: input.fullDieHeightLength,
     screw_type: input.screwType, screw_tip_type: input.screwTipType, screw_tip_installed_date: input.screwTipInstalledDate, screw_installed_date: input.screwInstalledDate, barrel_installed_date: input.barrelInstalledDate, barrel_end_cap_installed_date: input.barrelEndCapInstalledDate, barrel_length: input.barrelLength, screw_length: input.screwLength,
     screw_rebuild_repaired: input.screwRebuildRepaired ? 1 : 0, barrel_rebuild_repaired: input.barrelRebuildRepaired ? 1 : 0, screw_condition_status: input.screwConditionStatus, barrel_condition_status: input.barrelConditionStatus, has_double_shot_injection: input.hasDoubleShotInjection ? 1 : 0, has_plunger_injection: input.hasPlungerInjection ? 1 : 0,
@@ -7117,7 +7156,7 @@ function machineImportRecordFromRow(record: Record<string, string>, rowNumber: n
   };
   const press = value('Press','Asset Number','Asset Number / Press Number');
   return {
-    rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz','Shot Size (oz)'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter','Barrel Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number'), machineType: value('Machine Type'),
+    rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz','Shot Size (oz)'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), setupType: value('Setup Type','Injection Setup'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter','Barrel Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number'), machineType: value('Machine Type'),
     screwType: value('Screw Type'), screwTipType: value('Screw Tip Type'), screwRebuildRepaired: value('Screw Rebuild / Repaired'), screwConditionStatus: value('Screw Condition Status'), screwInstalledDate: value('Screw Installed Date'), screwTipInstalledDate: value('Screw Tip Installed Date'), screwLength: value('Screw Length'),
     barrelRebuildRepaired: value('Barrel Rebuild / Repaired'), barrelConditionStatus: value('Barrel Condition Status'), barrelInstalledDate: value('Barrel Installed Date'), barrelEndCapInstalledDate: value('Barrel End Cap Installed Date'), barrelLength: value('Barrel Length'),
     machineLength: value('Machine Length'), machineWidth: value('Machine Width'), machineHeight: value('Machine Height'), fullDieHeightLength: value('Full Die Height Length / Range'), notes: value('Notes'), criticalNotes: value('Critical Notes'),
@@ -7158,8 +7197,8 @@ async function parseMachineImportFile(file: Express.Multer.File | undefined) {
   }
   throw new Error('Machine import file must be CSV or .xlsx Excel format.');
 }
-function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>) {
-  return validateMachineAssetInput({ ...row, assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
+function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>, existing?: MachineAssetRow) {
+  return validateMachineAssetInput({ ...row, setupType: row.setupType || existing?.setup_type || '', assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
 }
 type MachineImportMode = 'add_new_only' | 'upsert';
 type MachineImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
@@ -7194,7 +7233,6 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
       }
       const dbMatches = dbAssetsByKey.get(key) ?? [];
       try {
-        const input = machineInputFromImport(row);
         seen.add(key);
         if (dbMatches.length > 1) {
           rejectDuplicate(row.rowNumber, assetNumber, 'Duplicate Asset Number already exists in MCC. Clean existing records first.');
@@ -7205,6 +7243,7 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
           continue;
         }
         const existing = mode === 'upsert' && dbMatches.length === 1 ? dbMatches[0] : undefined;
+        const input = machineInputFromImport(row, existing);
         if (existing) {
           const oldValue = machineAssetHistoryValue(existing);
           updateMachineAsset(existing.id, input, actor, timestamp);
@@ -8138,7 +8177,7 @@ app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.
     }
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/required|numeric|Voltage Type|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/required|numeric|Voltage Type|Setup Type|unsafe characters|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
@@ -8161,7 +8200,7 @@ app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machi
     res.json({ok:true,asset:publicMachineAsset(updated)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /required|numeric|Voltage Type|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /required|numeric|Voltage Type|Setup Type|unsafe characters|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 for (const action of ['disable','enable'] as const) app.post(`/api/machine-library/assets/:id/${action}`, requireAuth, requirePermission('machine.delete'), (req:AuthRequest,res)=>{

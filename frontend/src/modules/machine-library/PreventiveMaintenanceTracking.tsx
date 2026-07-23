@@ -1,5 +1,6 @@
 import { Component, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { MccAccordionHeader, MccCategoryAccordion } from '../../components/MccCategoryAccordion';
 import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { notifyPmUpdated } from './pmEvents';
 
@@ -160,7 +161,7 @@ function pmDuePreview(draft:PmDraft):PmDuePreview {
   return {label:'Next PM Due Date',value:formatDate(nextDate),legend:`Current - due in ${days} days.`,tone:'current'};
 }
 function PmUnavailablePanel({message='Preventive maintenance tracking is temporarily unavailable. The rest of this asset record is still available.'}:{message?:string}){
-  return <article className="machine-detail-accordion-card pm-tracking-card glass-panel glass-panel--nested is-open"><div className="machine-detail-accordion-header"><div className="machine-detail-accordion-toggle pm-unavailable-heading"><span className="machine-detail-section-title">Preventive Maintenance Tracking</span><span className="machine-detail-section-summary">Setup incomplete</span></div></div><div className="machine-detail-accordion-panel" aria-hidden="false"><div className="glass-empty-state"><strong>PM tracking unavailable</strong><span>{message}</span></div></div></article>;
+  return <MccCategoryAccordion accent="pm" expanded className="pm-tracking-card glass-panel glass-panel--nested"><MccAccordionHeader title="Preventive Maintenance Tracking" summary="Setup incomplete" expanded className="pm-unavailable-heading" /><div className="machine-detail-accordion-panel" aria-hidden="false"><div className="glass-empty-state"><strong>PM tracking unavailable</strong><span>{message}</span></div></div></MccCategoryAccordion>;
 }
 class PmPanelErrorBoundary extends Component<{children:ReactNode},{failed:boolean}>{
   state={failed:false};
@@ -205,12 +206,8 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
     catch(value){setError((value as Error).message||'PM tracking could not be deactivated.');}
   }
   return <>
-    <article className={`machine-detail-accordion-card pm-tracking-card glass-panel glass-panel--nested${expanded?' is-open':''}`}>
-      <div className="machine-detail-accordion-header">
-        <button className="machine-detail-accordion-toggle" type="button" aria-expanded={expanded} aria-controls={`pm-tracking-panel-${asset.id}`} onClick={()=>setExpanded(current=>!current)}>
-          <span className="machine-detail-section-title">Preventive Maintenance Tracking</span><span className="machine-detail-section-summary">{summaryText}</span><span className="machine-accordion-chevron" aria-hidden="true">v</span>
-        </button>
-      </div>
+    <MccCategoryAccordion accent="pm" expanded={expanded} className="pm-tracking-card glass-panel glass-panel--nested">
+      <MccAccordionHeader title="Preventive Maintenance Tracking" summary={summaryText} expanded={expanded} controls={`pm-tracking-panel-${asset.id}`} onToggle={()=>setExpanded(current=>!current)} />
       <div className="machine-detail-accordion-panel" id={`pm-tracking-panel-${asset.id}`} aria-hidden={!expanded}>
         <div className="pm-panel-toolbar glass-toolbar"><div><strong>PM schedules</strong><small>Track calendar, hour-meter, and cycle-based maintenance.</small></div>{canEdit&&<button className="primary-button glass-button glass-button--primary" type="button" onClick={()=>setFormTask(null)}>Add Preventive Maintenance Tracking</button>}</div>
         {error&&<p className="form-message error">{error}</p>}
@@ -219,7 +216,7 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit}:{asset:AssetIdenti
         {!loading&&error&&<div className="glass-empty-state"><strong>PM tracking unavailable</strong><span>The asset detail remains available. Try loading PM tracking again later.</span></div>}
         {!loading&&safeTasks.length>0&&<div className="pm-task-grid">{safeTasks.map(task=><PmTaskCard key={task.id} task={task} canEdit={canEdit} onView={()=>setViewTask(task)} onEdit={()=>setFormTask(task)} onComplete={()=>setCompleteTask(task)} onDeactivate={()=>void deactivate(task)} onHistory={()=>setHistoryTask(task)} />)}</div>}
       </div>
-    </article>
+    </MccCategoryAccordion>
     {formTask!==undefined&&<PmFormModal asset={asset} task={formTask} onClose={()=>setFormTask(undefined)} onSaved={async()=>{setFormTask(undefined);await load();}} />}
     {viewTask&&<PmViewModal asset={asset} task={viewTask} onClose={()=>setViewTask(null)} />}
     {completeTask&&<PmCompleteModal task={completeTask} onClose={()=>setCompleteTask(null)} onSaved={async()=>{setCompleteTask(null);await load();}} />}
