@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const fixedNow = '2026-07-24T14:00:00.000Z';
-const artifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-49');
+const artifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-52');
 const fullPermissions = [
   'inventory.view', 'inventory.create', 'inventory.edit', 'inventory.delete', 'inventory.import', 'inventory.export', 'inventory.requisition_stage',
   'requisitions.view', 'requisitions.create', 'requisitions.edit', 'requisitions.mark_ordered', 'requisitions.mark_received', 'requisitions.cancel', 'requisitions.delete', 'requisitions.manage_batches', 'requisitions.print_download',
@@ -312,6 +312,20 @@ test('canonical industrial tokens, smoke-glass surfaces, and keyboard focus are 
     expect(family.names.length, `${family.prefix} token declarations`).toBeGreaterThan(0);
     expect(family.resolved.length, `${family.prefix} resolved root tokens`).toBeGreaterThan(0);
   }
+  const issue52Tokens = await page.evaluate(() => {
+    const style=getComputedStyle(document.documentElement);
+    return Object.fromEntries([
+      '--mcc-bg-smoke-light',
+      '--mcc-bg-cleanroom-ambient',
+      '--mcc-texture-opacity',
+      '--mcc-workspace-fade-strength',
+      '--mcc-shadow-workspace-outer',
+      '--mcc-glass-blur',
+      '--mcc-glass-saturation',
+    ].map(name=>[name,style.getPropertyValue(name).trim()]));
+  });
+  for(const [name,value] of Object.entries(issue52Tokens))expect(value,`${name} must resolve`).not.toBe('');
+  expect(Number(issue52Tokens['--mcc-texture-opacity'])).toBeLessThanOrEqual(.3);
 
   const surface = page.locator('.glass-panel:visible, .mcc-industrial-panel:visible, .mcc-card:visible').first();
   await expect(surface).toBeVisible();
@@ -369,14 +383,64 @@ test('captures deterministic visual evidence for every representative MCC worksp
   await expect(page.locator('.machine-asset-card')).toHaveCount(2);
   await capture(page, 'machine-library-home.png');
   await page.getByRole('button', { name: 'View details for Press 51' }).click();
-  await expect(page.locator('.machine-detail-modal')).toBeVisible();
+  const machineDetail=page.locator('.machine-detail-modal');
+  await expect(machineDetail).toBeVisible();
+  const machinePageWorkspace=await page.locator('.machine-library-page.mcc-glass-page.is-detail-view').evaluate(element=>{
+    const style=getComputedStyle(element);
+    return {
+      background:style.backgroundImage,
+      backgroundColor:style.backgroundColor,
+      beforeDisplay:getComputedStyle(element,'::before').display,
+      afterDisplay:getComputedStyle(element,'::after').display,
+    };
+  });
+  const machineWorkspace=await machineDetail.evaluate(element=>{
+    const style=getComputedStyle(element);
+    const ambient=getComputedStyle(element,'::before');
+    const header=getComputedStyle(element.querySelector('.machine-detail-heading')!);
+    return {
+      borderLeft:style.borderLeftWidth,
+      borderRight:style.borderRightWidth,
+      background:style.backgroundImage,
+      shadow:style.boxShadow,
+      ambientBackground:ambient.backgroundImage,
+      ambientBorder:ambient.borderLeftWidth,
+      ambientMask:ambient.maskImage||ambient.webkitMaskImage,
+      headerBorder:header.borderLeftWidth,
+      headerBackground:header.backgroundImage,
+    };
+  });
+  expect(machinePageWorkspace).toEqual({background:'none',backgroundColor:'rgba(0, 0, 0, 0)',beforeDisplay:'none',afterDisplay:'none'});
+  expect(machineWorkspace).toMatchObject({borderLeft:'0px',borderRight:'0px',background:'none',shadow:'none',ambientBorder:'0px',headerBorder:'1px'});
+  expect(machineWorkspace.ambientBackground).toContain('gradient');
+  expect(machineWorkspace.ambientMask).not.toBe('none');
+  expect(machineWorkspace.headerBackground).toContain('gradient');
   await capture(page, 'machine-library-detail.png');
 
   await goTo(page, '/equipment-library', 'Equipment Library');
   await expect(page.locator('.equipment-asset-card')).toHaveCount(1);
   await capture(page, 'equipment-library-home.png');
   await page.getByRole('button', { name: /Open Equipment EQ-301/ }).click();
-  await expect(page.locator('.equipment-detail-page')).toBeVisible();
+  const equipmentDetail=page.locator('.equipment-detail-page');
+  await expect(equipmentDetail).toBeVisible();
+  const equipmentWorkspace=await equipmentDetail.evaluate(element=>{
+    const style=getComputedStyle(element);
+    const ambient=getComputedStyle(element,'::before');
+    const header=getComputedStyle(element.querySelector('.equipment-detail-header')!);
+    return {
+      borderLeft:style.borderLeftWidth,
+      borderRight:style.borderRightWidth,
+      background:style.backgroundImage,
+      shadow:style.boxShadow,
+      ambientBackground:ambient.backgroundImage,
+      ambientBorder:ambient.borderLeftWidth,
+      headerBorder:header.borderLeftWidth,
+      headerBackground:header.backgroundImage,
+    };
+  });
+  expect(equipmentWorkspace).toMatchObject({borderLeft:'0px',borderRight:'0px',background:'none',shadow:'none',ambientBorder:'0px',headerBorder:'1px'});
+  expect(equipmentWorkspace.ambientBackground).toContain('gradient');
+  expect(equipmentWorkspace.headerBackground).toContain('gradient');
   await capture(page, 'equipment-library-detail.png');
 
   await goTo(page, '/facility-info', 'Facility Info');
@@ -406,6 +470,10 @@ test('captures deterministic visual evidence for every representative MCC worksp
 test('390px mobile keeps tables local, the document contained, and focus visible', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile-chromium', 'This case requires the touch/mobile browser context.');
   const unhandled = await mockIndustrialSuite(page);
+  await goTo(page, '/', 'Dashboard');
+  await expectNoDocumentOverflow(page);
+  await capture(page, 'responsive-mobile-390-dashboard.png');
+
   await goTo(page, '/inventory', 'Inventory');
   expect(await page.evaluate(() => innerWidth)).toBe(390);
   await expect(page.locator('.mobile-inventory-controls')).toBeVisible();

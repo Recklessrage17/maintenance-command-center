@@ -67,7 +67,12 @@
 /* Application shell and workspace                                            */
 /* -------------------------------------------------------------------------- */
 
-.mcc-shell {
+body {
+  background: var(--mcc-bg-deep);
+}
+
+.mcc-shell,
+.auth-shell {
   color: var(--mcc-text-primary);
   background: var(--mcc-bg-industrial);
   color-scheme: dark;
@@ -75,15 +80,25 @@
   scrollbar-width: thin;
 }
 
-.mcc-shell::before {
+.mcc-shell::before,
+.auth-shell::before {
   background-color: transparent;
   background-image: var(--mcc-texture-hex), var(--mcc-texture-grid);
-  opacity: 0.58;
+  background-position: 0 0, 0 0;
+  background-size: 160px 96px, auto;
+  opacity: var(--mcc-texture-opacity);
+  filter: none;
 }
 
-.mcc-shell::after {
-  background: var(--mcc-bg-ambient), var(--mcc-bg-reflection);
-  opacity: 0.72;
+.mcc-shell::after,
+.auth-shell::after {
+  background:
+    var(--mcc-bg-smoke-light),
+    var(--mcc-bg-cleanroom-ambient),
+    var(--mcc-bg-ambient),
+    var(--mcc-bg-reflection);
+  opacity: 1;
+  mix-blend-mode: normal;
 }
 
 .mcc-shell > * {
@@ -147,6 +162,27 @@
 
 .mcc-content {
   isolation: isolate;
+}
+
+.dashboard-page {
+  position: relative;
+  isolation: isolate;
+}
+
+.dashboard-page::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 22% -2vw -10vh;
+  min-height: 68vh;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 38%, rgba(189, 201, 204, 0.05), transparent 58%),
+    radial-gradient(ellipse at 58% 74%, rgba(70, 137, 134, 0.052), transparent 48%),
+    repeating-linear-gradient(90deg, rgba(175, 192, 195, 0.009) 0 1px, transparent 1px 72px),
+    repeating-linear-gradient(0deg, rgba(175, 192, 195, 0.008) 0 1px, transparent 1px 64px);
+  mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 76%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 76%, transparent);
 }
 
 .page-stack,
@@ -2297,6 +2333,80 @@
 }
 
 /* -------------------------------------------------------------------------- */
+/* Shared large-detail workspace blending                                     */
+/* -------------------------------------------------------------------------- */
+
+.mcc-card.mcc-detail-workspace,
+.equipment-detail-page.mcc-detail-workspace {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.machine-library-page.mcc-glass-page.is-detail-view {
+  border-radius: 0;
+  background: transparent;
+}
+
+.machine-library-page.mcc-glass-page.is-detail-view::before,
+.machine-library-page.mcc-glass-page.is-detail-view::after {
+  display: none;
+}
+
+.mcc-detail-workspace::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset:
+    calc(var(--mcc-space-8) * -1)
+    -10vw
+    calc(var(--mcc-space-10) * -1);
+  pointer-events: none;
+  border: 0;
+  border-radius: clamp(24px, 3vw, 48px);
+  background:
+    radial-gradient(ellipse at 50% 14%, rgba(197, 208, 211, 0.075), rgba(25, 33, 36, 0.14) 38%, transparent 76%),
+    radial-gradient(ellipse at 68% 32%, rgba(74, 139, 136, 0.052), transparent 54%);
+  box-shadow: none;
+  opacity: var(--mcc-workspace-fade-strength);
+  mask-image: radial-gradient(ellipse at 50% 32%, #000 0 48%, rgba(0, 0, 0, 0.7) 64%, transparent 84%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 32%, #000 0 48%, rgba(0, 0, 0, 0.7) 64%, transparent 84%);
+}
+
+.machine-detail-modal.mcc-detail-workspace > .machine-detail-heading,
+.equipment-detail-page.mcc-detail-workspace > .equipment-detail-header {
+  border: 1px solid var(--mcc-border-strong);
+  border-top-color: rgba(211, 229, 232, 0.34);
+  border-radius: var(--mcc-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent var(--mcc-space-2)),
+    var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-workspace-outer), var(--mcc-shadow-panel), var(--mcc-shadow-inset);
+}
+
+.machine-detail-modal.mcc-detail-workspace > .machine-detail-heading {
+  padding: var(--mcc-space-6);
+}
+
+@media (max-width: 720px) {
+  .mcc-detail-workspace::before {
+    inset:
+      calc(var(--mcc-space-5) * -1)
+      -8vw
+      calc(var(--mcc-space-6) * -1);
+    border-radius: var(--mcc-radius-xl);
+    opacity: 0.5;
+    mask-image: radial-gradient(ellipse at 50% 26%, #000 0 54%, rgba(0, 0, 0, 0.65) 72%, transparent 92%);
+    -webkit-mask-image: radial-gradient(ellipse at 50% 26%, #000 0 54%, rgba(0, 0, 0, 0.65) 72%, transparent 92%);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Responsive, zoom, and narrow viewport safety                               */
 /* -------------------------------------------------------------------------- */
 
@@ -2941,7 +3051,11 @@
   }
 
   .mcc-shell::before,
-  .mcc-shell::after {
+  .mcc-shell::after,
+  .auth-shell::before,
+  .auth-shell::after,
+  .dashboard-page::after,
+  .mcc-detail-workspace::before {
     display: none !important;
   }
 

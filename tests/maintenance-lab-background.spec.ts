@@ -38,6 +38,11 @@ test('shared maintenance-lab background fills a short Dashboard without intercep
     return {
       shellBackground:getComputedStyle(element).backgroundImage,
       beforeBackground:getComputedStyle(element,'::before').backgroundImage,
+      beforePosition:getComputedStyle(element,'::before').position,
+      beforeOpacity:getComputedStyle(element,'::before').opacity,
+      afterPosition:getComputedStyle(element,'::after').position,
+      afterBackground:getComputedStyle(element,'::after').backgroundImage,
+      afterBlend:getComputedStyle(element,'::after').mixBlendMode,
       beforePointerEvents:getComputedStyle(element,'::before').pointerEvents,
       afterPointerEvents:getComputedStyle(element,'::after').pointerEvents,
       htmlScrollbar:getComputedStyle(document.documentElement).scrollbarWidth,
@@ -50,6 +55,11 @@ test('shared maintenance-lab background fills a short Dashboard without intercep
   });
   expect(audit.shellBackground).not.toBe('none');
   expect(audit.beforeBackground).toContain('data:image/svg+xml');
+  expect(audit.beforePosition).toBe('fixed');
+  expect(Number(audit.beforeOpacity)).toBeLessThanOrEqual(.3);
+  expect(audit.afterPosition).toBe('fixed');
+  expect(audit.afterBackground).toContain('radial-gradient');
+  expect(audit.afterBlend).toBe('normal');
   expect(audit.beforePointerEvents).toBe('none');
   expect(audit.afterPointerEvents).toBe('none');
   expect(audit.htmlScrollbar).toBe('none');
@@ -58,6 +68,58 @@ test('shared maintenance-lab background fills a short Dashboard without intercep
   expect(audit.intercepted).toBe(false);
   expect(audit.horizontalOverflow).toBeLessThanOrEqual(1);
   expect(audit.verticalOverflow).toBeLessThanOrEqual(1);
+});
+
+test('Machine detail feathers only the outer workspace while keeping the primary header crisp',async({page})=>{
+  await mockApp(page);
+  await page.goto('/machine-library');
+  await page.locator('.machine-asset-card').first().locator('.machine-asset-number-pill').click();
+  const detail=page.locator('.machine-detail-modal');
+  const pageWorkspace=page.locator('.machine-library-page.mcc-glass-page.is-detail-view');
+  await expect(detail).toBeVisible();
+  const pageAudit=await pageWorkspace.evaluate(element=>{
+    const shell=getComputedStyle(element);
+    return {
+      background:shell.backgroundImage,
+      backgroundColor:shell.backgroundColor,
+      beforeDisplay:getComputedStyle(element,'::before').display,
+      afterDisplay:getComputedStyle(element,'::after').display,
+    };
+  });
+  const audit=await detail.evaluate(element=>{
+    const shell=getComputedStyle(element);
+    const fade=getComputedStyle(element,'::before');
+    const header=getComputedStyle(element.querySelector('.machine-detail-heading')!);
+    const box=element.getBoundingClientRect();
+    return {
+      borderLeft:shell.borderLeftWidth,
+      borderRight:shell.borderRightWidth,
+      background:shell.backgroundImage,
+      shadow:shell.boxShadow,
+      fadeBackground:fade.backgroundImage,
+      fadePointerEvents:fade.pointerEvents,
+      fadeMask:fade.maskImage||fade.webkitMaskImage,
+      headerBorder:header.borderTopWidth,
+      headerBackground:header.backgroundImage,
+      left:box.left,
+      right:box.right,
+      viewportWidth:document.documentElement.clientWidth,
+      overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+    };
+  });
+  expect(pageAudit).toEqual({background:'none',backgroundColor:'rgba(0, 0, 0, 0)',beforeDisplay:'none',afterDisplay:'none'});
+  expect(audit.borderLeft).toBe('0px');
+  expect(audit.borderRight).toBe('0px');
+  expect(audit.background).toBe('none');
+  expect(audit.shadow).toBe('none');
+  expect(audit.fadeBackground).toContain('gradient');
+  expect(audit.fadePointerEvents).toBe('none');
+  expect(audit.fadeMask).not.toBe('none');
+  expect(audit.headerBorder).toBe('1px');
+  expect(audit.headerBackground).toContain('gradient');
+  expect(audit.left).toBeGreaterThanOrEqual(0);
+  expect(audit.right).toBeLessThanOrEqual(audit.viewportWidth);
+  expect(audit.overflow).toBeLessThanOrEqual(1);
 });
 
 test('long Machine Library pages and true modals keep document, keyboard, pointer, and touch scrolling',async({page},testInfo)=>{

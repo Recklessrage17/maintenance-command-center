@@ -9,36 +9,41 @@
 :root {
   color-scheme: dark;
 
-  /* Graphite / navy-black environment */
-  --mcc-bg-deep: #02070f;
-  --mcc-bg-canvas: #06101c;
-  --mcc-bg-raised: #0b1724;
-  --mcc-bg-overlay: rgba(1, 8, 17, 0.9);
+  /* Neutral graphite cleanroom environment */
+  --mcc-bg-deep: #050708;
+  --mcc-bg-canvas: #0a0e10;
+  --mcc-bg-raised: #12191c;
+  --mcc-bg-overlay: rgba(5, 9, 11, 0.92);
   --mcc-bg-industrial:
-    radial-gradient(ellipse at 16% 10%, rgba(35, 131, 164, 0.13), transparent 34%),
-    radial-gradient(ellipse at 82% 24%, rgba(32, 152, 130, 0.09), transparent 30%),
-    radial-gradient(ellipse at 92% 86%, rgba(216, 139, 52, 0.045), transparent 24%),
-    linear-gradient(145deg, #020b13 0%, #061620 46%, #07141d 72%, #020911 100%);
+    radial-gradient(ellipse at 18% 8%, rgba(194, 207, 211, 0.075), transparent 38%),
+    radial-gradient(ellipse at 76% 24%, rgba(88, 145, 143, 0.065), transparent 35%),
+    radial-gradient(ellipse at 48% 104%, rgba(147, 160, 165, 0.055), transparent 44%),
+    linear-gradient(148deg, #050708 0%, #0b1012 44%, #101619 69%, #06090a 100%);
   --mcc-bg-ambient:
-    radial-gradient(circle at 16% 8%, rgba(68, 215, 255, 0.26), transparent 27%),
-    radial-gradient(circle at 78% 14%, rgba(54, 229, 170, 0.16), transparent 29%),
-    radial-gradient(circle at 96% 74%, rgba(255, 151, 70, 0.18), transparent 26%),
-    radial-gradient(circle at 42% 108%, rgba(30, 107, 255, 0.21), transparent 35%),
-    linear-gradient(150deg, #01050a 0%, #07111d 33%, #111a25 61%, #030a13 100%);
+    radial-gradient(ellipse at 16% 10%, rgba(126, 153, 158, 0.11), transparent 32%),
+    radial-gradient(ellipse at 72% 18%, rgba(73, 147, 143, 0.085), transparent 31%),
+    radial-gradient(ellipse at 88% 78%, rgba(121, 139, 143, 0.065), transparent 34%),
+    radial-gradient(ellipse at 44% 108%, rgba(76, 119, 123, 0.07), transparent 40%);
   --mcc-bg-reflection:
-    linear-gradient(112deg, rgba(255, 255, 255, 0.11), rgba(68, 215, 255, 0.045) 18%, transparent 34%),
-    linear-gradient(22deg, transparent 0 46%, rgba(255, 180, 95, 0.07) 47%, transparent 62%),
-    radial-gradient(ellipse at 34% 12%, rgba(203, 248, 255, 0.14), transparent 36%),
-    radial-gradient(ellipse at 88% 42%, rgba(54, 229, 170, 0.08), transparent 30%);
+    linear-gradient(112deg, rgba(255, 255, 255, 0.055), rgba(151, 188, 190, 0.025) 20%, transparent 38%),
+    linear-gradient(22deg, transparent 0 50%, rgba(196, 207, 210, 0.018) 51%, transparent 67%),
+    radial-gradient(ellipse at 34% 8%, rgba(211, 222, 224, 0.05), transparent 38%);
   --mcc-bg-sheen:
-    linear-gradient(164deg, transparent 0 18%, rgba(255, 255, 255, 0.035) 19%, rgba(68, 215, 255, 0.024) 30%, transparent 42% 58%, rgba(255, 180, 95, 0.028) 59%, transparent 74%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 54px),
-    repeating-linear-gradient(0deg, rgba(68, 215, 255, 0.01) 0 1px, transparent 1px 48px);
-  --mcc-texture-hex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='112' height='64' viewBox='0 0 112 64'%3E%3Cpath d='M16 1h32l16 27-16 27H16L0 28ZM72 33h32l16 27-16 27H72L56 60Z' fill='none' stroke='%2344d7ff' stroke-opacity='.075' stroke-width='1'/%3E%3Cpath d='M16 1h32' stroke='%2336e5aa' stroke-opacity='.055' stroke-width='1'/%3E%3C/svg%3E");
+    linear-gradient(164deg, transparent 0 20%, rgba(255, 255, 255, 0.022) 21%, rgba(137, 174, 176, 0.014) 31%, transparent 43% 64%, rgba(255, 255, 255, 0.012) 65%, transparent 78%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.009) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(0deg, rgba(151, 174, 176, 0.008) 0 1px, transparent 1px 56px);
+  --mcc-texture-hex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='96' viewBox='0 0 160 96'%3E%3Cpath d='M0 24h46v1H0zm114 48h46v1h-46zM79 0h1v18h-1zm0 78h1v18h-1z' fill='%23c8d3d6' fill-opacity='.035'/%3E%3Ccircle cx='80' cy='48' r='1' fill='%236da7a4' fill-opacity='.09'/%3E%3Cpath d='M80 18v20m0 20v20M46 24h18m32 48h18' fill='none' stroke='%2393aaad' stroke-opacity='.035' stroke-width='1'/%3E%3C/svg%3E");
   --mcc-texture-grid:
-    repeating-linear-gradient(0deg, rgba(91, 176, 210, 0.027) 0 1px, transparent 1px 32px),
-    repeating-linear-gradient(90deg, rgba(91, 176, 210, 0.024) 0 1px, transparent 1px 32px),
-    linear-gradient(115deg, transparent 0 36%, rgba(68, 215, 255, 0.026) 36.1% 36.25%, transparent 36.35% 100%);
+    repeating-linear-gradient(0deg, rgba(167, 188, 192, 0.018) 0 1px, transparent 1px 36px),
+    repeating-linear-gradient(90deg, rgba(167, 188, 192, 0.016) 0 1px, transparent 1px 36px);
+  --mcc-bg-smoke-light:
+    radial-gradient(ellipse at 50% 0%, rgba(211, 220, 222, 0.075), transparent 58%),
+    radial-gradient(ellipse at 50% 100%, rgba(134, 146, 150, 0.05), transparent 52%);
+  --mcc-bg-cleanroom-ambient:
+    radial-gradient(ellipse at 64% 20%, rgba(75, 149, 145, 0.08), transparent 40%),
+    radial-gradient(ellipse at 28% 74%, rgba(84, 128, 130, 0.055), transparent 43%);
+  --mcc-texture-opacity: 0.28;
+  --mcc-workspace-fade-strength: 0.72;
 
   /* Smoke-glass depth levels */
   --mcc-surface-panel: linear-gradient(145deg, rgba(29, 43, 55, 0.76), rgba(4, 12, 22, 0.91));
@@ -127,6 +132,9 @@
   --mcc-shadow-card: 0 14px 34px rgba(0, 0, 0, 0.29), var(--mcc-shadow-inset);
   --mcc-shadow-panel: 0 22px 58px rgba(0, 0, 0, 0.4), 0 0 34px rgba(68, 215, 255, 0.06), var(--mcc-shadow-inset);
   --mcc-shadow-modal: 0 30px 90px rgba(0, 0, 0, 0.58), 0 0 44px rgba(68, 215, 255, 0.08), var(--mcc-shadow-inset);
+  --mcc-shadow-workspace-outer:
+    0 30px 80px rgba(0, 0, 0, 0.22),
+    0 0 58px rgba(88, 145, 143, 0.035);
 
   /* Action fills */
   --mcc-action-neutral: linear-gradient(180deg, rgba(45, 61, 73, 0.96), rgba(15, 27, 38, 0.98));
@@ -164,6 +172,8 @@
   --mcc-blur-card: 12px;
   --mcc-blur-panel: 16px;
   --mcc-blur-modal: 20px;
+  --mcc-glass-blur: 14px;
+  --mcc-glass-saturation: 104%;
 
   /* Restrained technical motion */
   --mcc-motion-fast: 120ms;
