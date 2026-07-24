@@ -77,7 +77,9 @@ type Role = 'Admin' | 'Manager' | 'Maintenance Tech 3' | 'Maintenance Tech 2' | 
 const roles: Role[] = ['Maintenance Tech 1', 'Maintenance Tech 2', 'Maintenance Tech 3', 'Manager', 'Admin'];
 const roleRank = (role: Role) => roles.indexOf(role);
 const canManageRole = (actor: Role, target: Role) => roleRank(actor) >= roleRank(target);
-const passwordOk = (p: string) => p.length >= 10 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[^A-Za-z0-9]/.test(p);
+const passwordRequirements = { minLength:10, uppercase:true, lowercase:true, number:true, symbol:true } as const;
+const passwordComplexityError = 'Temporary password must be at least 10 characters and include an uppercase letter, lowercase letter, number, and symbol.';
+const passwordOk = (p: unknown): p is string => typeof p === 'string' && p.length >= passwordRequirements.minLength && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[^A-Za-z0-9]/.test(p);
 const now = () => new Date().toISOString();
 const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
@@ -624,7 +626,7 @@ function safeBrandingFileName(originalName: string, extension: string) {
   const base = path.basename(originalName, path.extname(originalName)).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || 'company-logo';
   return `${base}-${crypto.randomBytes(8).toString('hex')}${extension}`;
 }
-function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
+function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,temp_password_expires_at,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.force?tempExpiry():null,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
 function canUserManage(actor: User) { return actor.role !== 'Maintenance Tech 1'; }
@@ -7450,7 +7452,20 @@ app.post('/api/auth/forgot-password', async (req,res)=>{
 });
 app.post('/api/auth/change-password', requireAuth, (req:AuthRequest,res)=>{ const {currentPassword,newPassword,confirmPassword}=req.body; const u=req.user!; if(!verifyPassword(currentPassword??'',u.password_hash)) return res.status(400).json({error:'Current password is incorrect.'}); if(newPassword!==confirmPassword||!passwordOk(newPassword)) return res.status(400).json({error:'New password must match and meet complexity rules.'}); if(verifyPassword(newPassword,u.password_hash)) return res.status(400).json({error:'New password cannot match the temporary/current password.'}); run('UPDATE users SET password_hash=?, force_password_change=0, temp_password_expires_at=NULL, updated_at=? WHERE id=?', [hashPassword(newPassword),now(),u.id]); audit(req,'password change','user',u.id); res.json({ok:true}); });
 app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{ const max=roleRank(req.user!.role); const manageableRoles = roles.slice(0,max+1); const placeholders = manageableRoles.map(() => '?').join(','); res.json({users: all<User>(`SELECT * FROM users WHERE deleted=0 AND (?=4 OR role IN (${placeholders})) ORDER BY is_owner_admin DESC, full_name`, [max,...manageableRoles]).map(user => publicUserForActor(user, req.user!))}); });
-app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{ const role=req.body.role as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot create that role.'}); if(!passwordOk(req.body.temporaryPassword??'')) return res.status(400).json({error:'Temporary password must meet complexity rules.'}); const id=createUser({fullName:req.body.fullName,email:req.body.email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id}); audit(req,'user create','user',id,{role}); res.status(201).json({user:publicUser(findUserById(id)!)}); });
+app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{
+  const fullName=String(req.body.fullName??'').trim();
+  const email=String(req.body.email??'').trim();
+  const role=req.body.role as Role;
+  if(!fullName) return res.status(400).json({error:'Full name is required.',code:'FULL_NAME_REQUIRED',field:'fullName'});
+  if(!email) return res.status(400).json({error:'Email is required.',code:'EMAIL_REQUIRED',field:'email'});
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({error:'Enter a valid email address.',code:'EMAIL_INVALID',field:'email'});
+  if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot create that role.',code:'ROLE_NOT_ALLOWED',field:'role'});
+  if(!passwordOk(req.body.temporaryPassword)) return res.status(400).json({error:passwordComplexityError,code:'PASSWORD_COMPLEXITY',field:'temporaryPassword',requirements:passwordRequirements});
+  if(one<{id:number}>('SELECT id FROM users WHERE lower(email)=lower(?)',[email])) return res.status(409).json({error:'A user with this email already exists.',code:'EMAIL_EXISTS',field:'email'});
+  const id=createUser({fullName,email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id});
+  audit(req,'user create','user',id,{role});
+  res.status(201).json({user:publicUser(findUserById(id)!)});
+});
 app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canEditTarget(req.user!,target)) return res.status(403).json({error:'Cannot edit that user.'}); const role=(req.body.role??target.role) as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'}); run('UPDATE users SET full_name=?, email=?, role=?, updated_at=? WHERE id=?', [req.body.fullName??target.full_name,req.body.email??target.email,role,now(),target.id]); audit(req,'user update','user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
