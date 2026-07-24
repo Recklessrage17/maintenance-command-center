@@ -1228,9 +1228,6 @@ button.glass-attachment:focus-visible {
   pointer-events: none;
 }
 
-.mcc-resource-row:has(.mcc-overflow-menu.is-open) { z-index: 110; }
-.machine-document-folder-card:has(.mcc-overflow-menu.is-open) { position: relative; z-index: 105; }
-
 .mcc-resource-row__content {
   appearance: none;
   min-width: 0;
@@ -1281,16 +1278,16 @@ button.mcc-resource-row__content { cursor: pointer; }
 }
 
 .mcc-overflow-menu { position: relative; z-index: 20; flex: 0 0 auto; }
-.mcc-overflow-menu.is-open { z-index: 90; }
 .mcc-overflow-menu__trigger { display: inline-flex; gap: 6px; align-items: center; justify-content: center; }
 .mcc-overflow-menu__panel {
-  position: absolute;
-  z-index: 100;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  z-index: 65;
   width: max-content;
   min-width: 170px;
-  max-width: min(240px, calc(100vw - 32px));
+  max-width: min(240px, calc(100vw - 20px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
   gap: 3px;
   padding: 6px;
@@ -1298,7 +1295,7 @@ button.mcc-resource-row__content { cursor: pointer; }
   border-radius: 10px;
   background: linear-gradient(155deg, rgba(8, 39, 56, .98), rgba(3, 18, 30, .99));
   box-shadow: 0 16px 34px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .1);
-  scroll-margin-block: 160px 24px;
+  scrollbar-gutter: stable;
 }
 
 .mcc-overflow-menu__item {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccPillCard, MccStatusPill } from '../../components/MccPills';
+import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 import { PM_UPDATED_EVENT } from '../machine-library/pmEvents';
 
 type RequisitionSummary = { requestedCount:number;orderedCount:number;receivedCount:number;canceledCount:number;activeCount:number };
@@ -123,7 +124,7 @@ export function DashboardPage({onOpenRequisitions}:{onOpenRequisitions:(view:Das
   return <div className="page-stack dashboard-page">
     <div className="dashboard-metric-grid" aria-label="Requisition summary">{dashboardMetrics.map(metric=><DashboardMetricPill key={metric.view} metric={metric} onActivate={()=>openRequisitions(metric.view)}/>)}</div>
     <section className="mcc-card dashboard-pm-panel glass-panel glass-panel--highlight" aria-labelledby="dashboard-pm-title">
-      <div className="dashboard-pm-heading"><div><p className="eyebrow">Maintenance attention</p><h2 id="dashboard-pm-title">Preventive Maintenance Due</h2></div>{pmAlerts.length>0&&<p className="dashboard-pm-counts">PM Due: {counts.dueSoon} Due Soon · {counts.dueNow} Due Now · {counts.pastDue} Past Due</p>}</div>
+      <div className="dashboard-pm-heading"><div><p className="eyebrow">Maintenance attention</p><h2 id="dashboard-pm-title">Preventive Maintenance Due</h2></div>{pmAlerts.length>0&&<MccSummaryTokenGroup className="dashboard-pm-counts"><MccSummaryToken tone="warning">{counts.dueSoon} Due Soon</MccSummaryToken><MccSummaryToken tone="urgent">{counts.dueNow} Due Now</MccSummaryToken><MccSummaryToken tone="danger">{counts.pastDue} Past Due</MccSummaryToken></MccSummaryTokenGroup>}</div>
       {pmLoading&&<p className="dashboard-pm-state">Loading preventive maintenance…</p>}
       {!pmLoading&&pmError&&<div className="dashboard-pm-state error"><span>{pmError}</span><button className="secondary-button compact-button" type="button" onClick={()=>void loadPmAlerts()}>Retry</button></div>}
       {!pmLoading&&!pmError&&!pmAlerts.length&&<p className="dashboard-pm-state success">No preventive maintenance is currently due.</p>}
@@ -143,10 +144,11 @@ function DashboardMetricPill({metric,onActivate}:{metric:DashboardMetric;onActiv
 
 function PmAlertCard({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   const tone=alert.status==='Due Soon'?'warning':'danger';
-  return <MccPillCard className={`dashboard-pm-alert status-${alert.status.toLowerCase().replace(/\s+/g,'-')}`} variant={tone} accentColor={alert.status==='Due Soon'?'#F6BE3F':'#FF5C78'} onActivate={onOpen} ariaLabel={`Open ${alert.title} preventive maintenance details for ${alert.assetNumber}`}>
-    <div className="dashboard-pm-asset"><strong>{alert.assetNumber}</strong><span>{alert.brand||'Brand unknown'}</span></div>
+  const accent=alert.status==='Due Soon'?'#F6BE3F':alert.status==='Due Now'?'#FF8A4C':'#FF4968';
+  return <MccPillCard className={`dashboard-pm-alert status-${alert.status.toLowerCase().replace(/\s+/g,'-')}`} variant={tone} accentColor={accent} onActivate={onOpen} ariaLabel={`Open ${alert.title} preventive maintenance details for ${alert.assetNumber}`}>
+    <div className="dashboard-pm-top"><div className="dashboard-pm-asset"><strong>{alert.assetNumber}</strong><span>{alert.brand||'Brand unknown'}</span></div><MccStatusPill variant={tone} className="dashboard-pm-status">{alert.status}</MccStatusPill></div>
     <div className="dashboard-pm-task"><strong>{alert.title}</strong><span>{intervalSummary(alert)}</span></div>
-    <div className="dashboard-pm-due"><MccStatusPill variant={tone} className="dashboard-pm-status">{alert.status}</MccStatusPill><span>{dueInformation(alert)}</span><strong>{alert.relativeMessage||alert.countdown}</strong></div>
+    <div className="dashboard-pm-due"><span>{dueInformation(alert)}</span><i aria-hidden="true">·</i><strong>{alert.relativeMessage||alert.countdown}</strong><span className="dashboard-pm-open" aria-hidden="true" title="Open details">&rarr;</span></div>
   </MccPillCard>;
 }
 

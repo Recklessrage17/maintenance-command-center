@@ -249,6 +249,10 @@ AND NOT EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=v.id)`, [vendo
   }
 
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
+  if (!requisitionColumns.has('requested_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN requested_at TEXT');
+  if (!requisitionColumns.has('ordered_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN ordered_at TEXT');
+  if (!requisitionColumns.has('received_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN received_at TEXT');
+  if (!requisitionColumns.has('canceled_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN canceled_at TEXT');
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
   if (!requisitionColumns.has('po_initiator')) run("ALTER TABLE inventory_requisitions ADD COLUMN po_initiator TEXT NOT NULL DEFAULT ''");
   if (!requisitionColumns.has('requisitioned_by_name')) run("ALTER TABLE inventory_requisitions ADD COLUMN requisitioned_by_name TEXT NOT NULL DEFAULT ''");
@@ -262,6 +266,32 @@ AND NOT EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=v.id)`, [vendo
   run("UPDATE inventory_requisitions SET tax_exempt='No' WHERE tax_exempt IS NULL OR tax_exempt=''");
   run("UPDATE inventory_requisitions SET material_cert='No' WHERE material_cert IS NULL OR material_cert=''");
   run("UPDATE inventory_requisitions SET fob='Destination' WHERE fob IS NULL OR fob=''");
+  // Older databases use the earliest reliable matching history event. Creation time is
+  // the conservative final fallback: it can overstate an age, but never invents a newer clock.
+  run(`UPDATE inventory_requisitions AS requisition SET requested_at=COALESCE(
+    NULLIF(requested_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('requested','requested_from_staging','passed','requisition active create') OR new_value_json LIKE '%"status":"Requested"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE requested_at IS NULL OR requested_at=''`);
+  run(`UPDATE inventory_requisitions AS requisition SET ordered_at=COALESCE(
+    NULLIF(ordered_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('ordered','requisition ordered') OR new_value_json LIKE '%"status":"Ordered"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE status IN ('Ordered','Received') AND (ordered_at IS NULL OR ordered_at='')`);
+  run(`UPDATE inventory_requisitions AS requisition SET received_at=COALESCE(
+    NULLIF(received_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('received','requisition received') OR new_value_json LIKE '%"status":"Received"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE status='Received' AND (received_at IS NULL OR received_at='')`);
+  run(`UPDATE inventory_requisitions AS requisition SET canceled_at=COALESCE(
+    NULLIF(canceled_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('canceled','requisition canceled') OR new_value_json LIKE '%"status":"Canceled"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE status='Canceled' AND (canceled_at IS NULL OR canceled_at='')`);
   db.exec(`CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);

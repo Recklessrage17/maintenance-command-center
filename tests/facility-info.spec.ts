@@ -11,15 +11,88 @@ const items=[
 ];
 const pixel=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 
-async function mockFacility(page:Page){
+async function mockFacility(page:Page,areas=[area,secondArea]){
   await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Facility Tester',email:'facility@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false}}}));
   await page.route(/\/api\/facility-info\/permissions$/,route=>route.fulfill({json:{ok:true,canWrite:true,canRecoveryExport:true}}));
-  await page.route(/\/api\/facility-info$/,route=>route.fulfill({json:{ok:true,areas:[area,secondArea],limits:{documentsMb:50,picturesMb:50,videosMb:500}}}));
+  await page.route(/\/api\/facility-info$/,route=>route.fulfill({json:{ok:true,areas,limits:{documentsMb:50,picturesMb:50,videosMb:500}}}));
   await page.route(/\/api\/facility-info\/areas\/21$/,route=>route.fulfill({json:{ok:true,area,folders,items}}));
   await page.route(/\/api\/facility-info\/search(?:\?.*)?$/,route=>route.fulfill({json:{ok:true,query:'panel',count:items.length,items}}));
   await page.route(/\/api\/facility-info\/items\/42\/content$/,route=>route.fulfill({contentType:'image/png',body:pixel}));
   await page.route(/\/api\/facility-info\/items\/43\/content$/,route=>route.fulfill({status:206,headers:{'Accept-Ranges':'bytes','Content-Range':'bytes 0-23/24','Content-Type':'video/mp4'},body:Buffer.from([0,0,0,20,0x66,0x74,0x79,0x70,0x69,0x73,0x6f,0x6d,0,0,0,0,0,0,0,0,0,0,0,0])}));
 }
+
+test('shared More menu portals above Facility cards, stays in the viewport, and isolates card activation',async({page},testInfo)=>{
+  const areas=[
+    {...area,id:61,name:'Basement',description:'Basement utilities',summary:{folderCount:0,documentCount:0,pictureCount:0,videoCount:0}},
+    {...area,id:62,name:'Clean Room',description:'Clean room references',summary:{folderCount:0,documentCount:0,pictureCount:0,videoCount:0}},
+    {...area,id:63,name:'Engineering',description:'Engineering references',summary:{folderCount:0,documentCount:0,pictureCount:0,videoCount:0}},
+  ];
+  let deleted=false;
+  await mockFacility(page,areas);
+  await page.route(/\/api\/facility-info\/areas\/63$/,async route=>{
+    if(route.request().method()==='DELETE'){deleted=true;await route.fulfill({json:{ok:true}});return;}
+    await route.fulfill({json:{ok:true,area:areas[2],folders:[],items:[]}});
+  });
+  await page.goto('/facility-info');
+
+  for(const name of ['Basement','Clean Room','Engineering']){
+    const trigger=page.getByRole('button',{name:`Manage ${name}`});
+    await trigger.click();
+    const menu=page.getByRole('menu',{name:`Manage ${name}`});
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem',{name:'Edit Facility Area'})).toBeVisible();
+    await expect(menu.getByRole('menuitem',{name:'Delete Facility Area'})).toBeVisible();
+    const geometry=await menu.evaluate(element=>{
+      const rect=element.getBoundingClientRect();
+      const topElement=document.elementFromPoint(rect.left+Math.min(20,rect.width/2),rect.top+Math.min(20,rect.height/2));
+      const style=getComputedStyle(element);
+      return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight,position:style.position,zIndex:Number(style.zIndex),topClass:topElement?.className??''};
+    });
+    expect(geometry.position).toBe('fixed');
+    expect(geometry.zIndex).toBeGreaterThan(30);
+    expect(geometry.left).toBeGreaterThanOrEqual(8);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.width-8);
+    expect(geometry.top).toBeGreaterThanOrEqual(8);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.height-8);
+    expect(String(geometry.topClass)).toContain('mcc-overflow-menu__');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  }
+
+  if(testInfo.project.name==='desktop-chromium'){
+    for(const viewport of [{width:1152,height:720},{width:960,height:600}]){
+      await page.setViewportSize(viewport);
+      await page.getByRole('button',{name:'Manage Engineering'}).click();
+      const zoomMenu=page.getByRole('menu',{name:'Manage Engineering'});
+      const box=await zoomMenu.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x+box!.width).toBeLessThanOrEqual(viewport.width-8);
+      await page.keyboard.press('Escape');
+    }
+  }
+  await page.evaluate(()=>{const grid=document.querySelector<HTMLElement>('.facility-card-grid');if(grid)grid.style.marginTop='760px';});
+  await page.evaluate(()=>window.scrollTo(0,620));
+  const engineeringTrigger=page.getByRole('button',{name:'Manage Engineering'});
+  await engineeringTrigger.scrollIntoViewIfNeeded();
+  await engineeringTrigger.click();
+  const engineeringMenu=page.getByRole('menu',{name:'Manage Engineering'});
+  const scrolledGeometry=await engineeringMenu.boundingBox();
+  expect(scrolledGeometry).not.toBeNull();
+  expect(scrolledGeometry!.x).toBeGreaterThanOrEqual(8);
+  const viewportWidth=await page.evaluate(()=>innerWidth);
+  expect(scrolledGeometry!.x+scrolledGeometry!.width).toBeLessThanOrEqual(viewportWidth-8);
+  await engineeringMenu.getByRole('menuitem',{name:'Edit Facility Area'}).click();
+  await expect(page.getByRole('dialog',{name:'Edit Facility Area'})).toBeVisible();
+  await page.getByRole('dialog',{name:'Edit Facility Area'}).getByRole('button',{name:'Close'}).click();
+  await engineeringTrigger.click();
+  page.once('dialog',dialog=>dialog.accept());
+  await page.getByRole('menu',{name:'Manage Engineering'}).getByRole('menuitem',{name:'Delete Facility Area'}).click();
+  await expect.poll(()=>deleted).toBeTruthy();
+  await expect(page.locator('.facility-area-heading h2',{hasText:'Engineering'})).toHaveCount(0);
+  const dimensions=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));
+  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client);
+});
 
 test('Facility cards are fully clickable, keyboard reachable, and keep summary tokens content-sized',async({page},testInfo)=>{
   await mockFacility(page);await page.goto('/facility-info');

@@ -1,5 +1,8 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
+import { MccStatusAge } from '../../components/MccStatusAge';
+import { MccSuccessBurst } from '../../components/MccSuccessBurst';
+import { RequisitionItemsPopover } from './RequisitionItemsPopover';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
 type StatusFilter = 'Requisition Staging' | 'Active' | 'All' | RequisitionStatus;
@@ -42,6 +45,9 @@ type Requisition = {
   status: RequisitionStatus;
   requestedByName: string;
   requestedAt: string;
+  orderedAt: string | null;
+  receivedAt: string | null;
+  canceledAt: string | null;
   workOrderNumber: string;
   notes: string;
   cancelReason: string;
@@ -185,6 +191,10 @@ function statusClass(status: RequisitionStatus) {
   return `requisition-status status-${status.toLowerCase()}`;
 }
 
+function workflowClass(option:StatusFilter,active:boolean) {
+  return `mcc-industrial-button mcc-workflow-tab workflow-${option.toLowerCase().replace(/[^a-z]+/g,'-')}${active?' active':''}`;
+}
+
 function editFormFromRequisition(requisition: Requisition): EditForm {
   return {
     quantityRequested: String(requisition.quantityRequested),
@@ -258,6 +268,9 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [stagingPreviewUrl,setStagingPreviewUrl]=useState('');
   const [stagingPreviewLoading,setStagingPreviewLoading]=useState(false);
   const [createdFromStaging,setCreatedFromStaging]=useState<StagingCreateResult[]>([]);
+  const [receivedSuccessId,setReceivedSuccessId]=useState<number|null>(null);
+  const [reducedMotion,setReducedMotion]=useState(()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const receiveFeedbackTimerRef=useRef<number|null>(null);
 
   const canWrite = writeRoles.has(userRole);
   const canDelete = deleteRoles.has(userRole);
@@ -321,6 +334,13 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   useEffect(()=>{ void loadRequisitions(); void loadInventoryOptions(); },[]);
+  useEffect(()=>{
+    const query=window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update=()=>setReducedMotion(query.matches);
+    query.addEventListener('change',update);
+    return()=>query.removeEventListener('change',update);
+  },[]);
+  useEffect(()=>()=>{if(receiveFeedbackTimerRef.current!==null)window.clearTimeout(receiveFeedbackTimerRef.current);},[]);
   useEffect(()=>{
     const syncFilterFromLocation=()=>{
       if(window.location.pathname.replace(/\/+$/,'')!=='/requisitions')return;
@@ -861,8 +881,19 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
         method: 'PATCH',
         body: JSON.stringify({status}),
       });
+      if(status==='Received'){
+        setReceivedSuccessId(requisition.id);
+        setNotice({kind:'success',text:`${requisition.requisitionNumber} marked Received.`});
+        await new Promise<void>(resolve=>{
+          receiveFeedbackTimerRef.current=window.setTimeout(()=>{
+            receiveFeedbackTimerRef.current=null;
+            resolve();
+          },reducedMotion?500:850);
+        });
+        setReceivedSuccessId(null);
+      }
       await loadRequisitions(filter, showDeleted);
-      setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
+      if(status!=='Received')setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -934,7 +965,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       </div>
 
       <nav className="requisition-view-pills" aria-label="Requisition status views">
-        {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" aria-pressed={filter===option} onClick={()=>setNextFilter(option)}>{option}</button>)}
+        {filters.map(option=><button className={workflowClass(option,filter===option)} key={option} type="button" aria-pressed={filter===option} onClick={()=>setNextFilter(option)}>{option}</button>)}
       </nav>
 
       {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
@@ -1063,8 +1094,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                     <input className="table-checkbox" type="checkbox" checked={selectedIds.has(requisition.id)} onChange={()=>toggleRequisitionSelection(requisition.id)} disabled={requisition.deleted} aria-label={`Select ${requisition.requisitionNumber}`} />
                   </td>
                   <td><strong className="req-number">{requisition.requisitionNumber}</strong></td>
-                  <td><span className={statusClass(requisition.status)}>{requisition.status}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
-                  <td>{partNumberSummary(requisition)}</td>
+                  <td><span className="requisition-status-stack"><span className={statusClass(requisition.status)}>{requisition.status}</span>{(requisition.status==='Requested'||requisition.status==='Ordered')&&<MccStatusAge status={requisition.status} timestamp={requisition.status==='Requested'?requisition.requestedAt:requisition.orderedAt}/>}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
+                  <td>{requisitionLineCount(requisition)>1&&requisition.lines?.length?<RequisitionItemsPopover lines={requisition.lines} label={partNumberSummary(requisition)}/>:partNumberSummary(requisition)}</td>
                   <td className="inventory-description-cell"><span className="inventory-description-text" title={(requisition.descriptions ?? [requisition.description]).filter(Boolean).join(' / ') || undefined}>{descriptionSummary(requisition)}</span></td>
                   <td>{formatQuantity(Number(requisition.totalQuantity ?? requisition.quantityRequested ?? 0))}</td>
                   <td>{requisition.vendorSummary || requisition.vendorName || '-'}</td>
@@ -1074,13 +1105,13 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                   <td>{formatDateTime(requisition.requestedAt)}</td>
                   <td>
                     <div className="requisition-row-actions">
-                      <button className="secondary-button compact-button" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>
-                      <button className="secondary-button compact-button" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
-                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id}>Mark Received</button>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
-                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
-                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button" type="button" onClick={()=>deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
+                      <button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>
+                      <button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
+                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-ordered" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
+                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<span className="requisition-receive-action"><button className={`secondary-button compact-button mcc-industrial-button requisition-action-received${receivedSuccessId===requisition.id?' is-success':''}`} type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id} aria-live="polite">{receivedSuccessId===requisition.id?'Received ✓':'Mark Received'}</button><MccSuccessBurst active={receivedSuccessId===requisition.id}/></span>}
+                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button mcc-industrial-button requisition-action-cancel" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
+                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button mcc-industrial-button requisition-action-edit" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
+                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button mcc-industrial-button requisition-action-delete" type="button" onClick={()=>deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
                     </div>
                   </td>
                 </tr>

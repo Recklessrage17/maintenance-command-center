@@ -24,6 +24,8 @@
     "test:auth-password-change": "node tests/authentication-password-change-regression.mjs",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
+    "test:requisitions": "playwright test tests/requisitions-lifecycle.spec.ts",
+    "test:requisitions-api": "node tests/requisition-status-api.mjs",
     "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",
     "test:background": "playwright test tests/maintenance-lab-background.spec.ts"
   },

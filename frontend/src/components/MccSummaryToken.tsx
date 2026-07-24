@@ -8,6 +8,7 @@ export type MccSummaryTokenTone =
   | 'attachment'
   | 'success'
   | 'warning'
+  | 'urgent'
   | 'danger'
   | 'history'
   | 'record';

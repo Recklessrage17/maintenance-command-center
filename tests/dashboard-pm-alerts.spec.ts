@@ -37,7 +37,9 @@ test('sorts attention PMs, opens details, excludes paused schedules, and prints 
   await page.goto('/');
   const cards=page.locator('.dashboard-pm-alert');
   await expect(cards).toHaveCount(4);
-  await expect(page.getByText('PM Due: 1 Due Soon · 1 Due Now · 2 Past Due')).toBeVisible();
+  await expect(page.getByText('1 Due Soon',{exact:true})).toBeVisible();
+  await expect(page.getByText('1 Due Now',{exact:true})).toBeVisible();
+  await expect(page.getByText('2 Past Due',{exact:true})).toBeVisible();
   await expect(page.getByText('Held PM must be excluded')).toHaveCount(0);
   await expect(page.getByText('Inactive PM must be excluded')).toHaveCount(0);
   await expect(cards.nth(0)).toContainText('Press 51');
@@ -123,4 +125,53 @@ test('shows the compact empty state when no preventive maintenance needs attenti
   await expect(page.getByRole('heading',{name:'Preventive Maintenance Due'})).toBeVisible();
   await expect(page.getByText('No preventive maintenance is currently due.')).toBeVisible();
   await expect(page.locator('.dashboard-pm-alert')).toHaveCount(0);
+});
+
+test('keeps 1, 2, 3, 5, and 10 PM alerts compact, content-sized, wrapping, and mobile-safe',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
+  const dynamicAlerts=[alert(1,'Past Due')];
+  await mockDashboard(page,dynamicAlerts);
+  await page.goto('/');
+
+  for(const count of [1,2,3,5,10]){
+    dynamicAlerts.splice(0,dynamicAlerts.length,...Array.from({length:count},(_,index)=>alert(index+1,index%3===0?'Past Due':index%3===1?'Due Now':'Due Soon',index===0?{
+      assetNumber:'PRESS-ENGINEERING-LONG-ASSET-0001',
+      brand:'',
+      title:'Exceptionally long preventive maintenance task title that must wrap safely inside the technical alert module',
+      relativeMessage:'Past due by 2 hours after the scheduled production maintenance window',
+    }:{})));
+    await page.reload();
+    const cards=page.locator('.dashboard-pm-alert');
+    await expect(cards).toHaveCount(count);
+    const layout=await page.evaluate(()=>{
+      const panel=document.querySelector<HTMLElement>('.dashboard-pm-panel')!;
+      const grid=document.querySelector<HTMLElement>('.dashboard-pm-grid')!;
+      const cards=[...document.querySelectorAll<HTMLElement>('.dashboard-pm-alert')];
+      const tokens=[...document.querySelectorAll<HTMLElement>('.dashboard-pm-counts .mcc-summary-token')];
+      return {
+        panelWidth:panel.getBoundingClientRect().width,
+        gridWidth:grid.getBoundingClientRect().width,
+        gridLeft:grid.getBoundingClientRect().left,
+        documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+        cards:cards.map(card=>({left:card.getBoundingClientRect().left,top:card.getBoundingClientRect().top,width:card.getBoundingClientRect().width,scrollWidth:card.scrollWidth,clientWidth:card.clientWidth,flexGrow:getComputedStyle(card).flexGrow})),
+        tokenWidths:tokens.map(token=>token.getBoundingClientRect().width),
+      };
+    });
+    expect(layout.documentOverflow).toBeLessThanOrEqual(0);
+    expect(layout.cards.every(card=>card.flexGrow==='0'&&card.width<=441&&card.scrollWidth<=card.clientWidth+1)).toBeTruthy();
+    expect(Math.abs(layout.cards[0].left-layout.gridLeft)).toBeLessThanOrEqual(2);
+    expect(layout.tokenWidths.every(width=>width<150)).toBeTruthy();
+    if(mobile)expect(layout.cards.every(card=>card.width>=layout.gridWidth-2)).toBeTruthy();
+    else {
+      expect(layout.cards[0].width).toBeLessThan(layout.panelWidth*.6);
+      if(count===10)expect(new Set(layout.cards.map(card=>Math.round(card.top))).size).toBeGreaterThan(1);
+    }
+  }
+
+  const title=page.locator('.dashboard-pm-task strong').first();
+  const titleLayout=await title.evaluate(element=>({height:element.getBoundingClientRect().height,lineHeight:Number.parseFloat(getComputedStyle(element).lineHeight),scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));
+  expect(titleLayout.height).toBeGreaterThan(titleLayout.lineHeight);
+  expect(titleLayout.scrollWidth).toBeLessThanOrEqual(titleLayout.clientWidth+1);
+  await activate(page.locator('.dashboard-pm-alert').first(),mobile);
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
