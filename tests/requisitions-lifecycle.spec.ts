@@ -84,6 +84,23 @@ async function openGroupedItems(page:Page,mobile:boolean){
   await expect(panel.getByRole('columnheader',{name:'Qty'})).toBeVisible();
   await expect(panel.getByRole('columnheader',{name:'Description'})).toBeVisible();
   await expect(panel.locator('tbody tr')).toHaveCount(4);
+  const layout=await panel.evaluate(element=>{
+    const box=element.getBoundingClientRect();
+    const cells=[...element.querySelectorAll<HTMLElement>('tbody tr:first-child td')];
+    return {
+      width:box.width,
+      right:box.right,
+      viewportWidth:document.documentElement.clientWidth,
+      documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+      columns:cells.map(cell=>cell.getBoundingClientRect().width),
+    };
+  });
+  expect(layout.width).toBeGreaterThanOrEqual(mobile?350:358);
+  expect(layout.width).toBeLessThanOrEqual(mobile?390:400);
+  expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth-9);
+  expect(layout.documentOverflow).toBeLessThanOrEqual(0);
+  expect(layout.columns[1]).toBeLessThan(layout.columns[0]);
+  expect(layout.columns[2]).toBeGreaterThan(layout.columns[0]);
   return {trigger,panel};
 }
 
@@ -122,6 +139,36 @@ test('shows lifecycle ages and grouped-item hover, keyboard, tap, and view cover
   await expect(page.getByRole('dialog',{name:'Multiple items (4) details'})).toHaveCount(0);
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('wraps long item descriptions without widening or clipping the viewport',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
+  const fixture=await mockRequisitions(page);
+  fixture.rows[0].lines[0].description='Long maintenance description with fit details, installation notes, handling requirements, and repeated service context that must wrap inside the flexible description column instead of making the preview span the screen.';
+  await page.goto('/requisitions?view=active');
+  const trigger=page.getByRole('button',{name:'Multiple items (4)'}).first();
+  if(mobile)await trigger.tap();else await trigger.hover();
+  const panel=page.getByRole('dialog',{name:'Multiple items (4) details'});
+  await expect(panel).toBeVisible();
+  const layout=await panel.evaluate(element=>{
+    const panelBox=element.getBoundingClientRect();
+    const description=element.querySelector<HTMLElement>('tbody tr:first-child td:nth-child(3)')!;
+    const descriptionBox=description.getBoundingClientRect();
+    return {
+      panelWidth:panelBox.width,
+      panelRight:panelBox.right,
+      viewportWidth:document.documentElement.clientWidth,
+      descriptionHeight:descriptionBox.height,
+      lineHeight:Number.parseFloat(getComputedStyle(description).lineHeight),
+      descriptionOverflow:description.scrollWidth-description.clientWidth,
+      documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+    };
+  });
+  expect(layout.panelWidth).toBeLessThanOrEqual(mobile?366:720);
+  expect(layout.panelRight).toBeLessThanOrEqual(layout.viewportWidth-9);
+  expect(layout.descriptionHeight).toBeGreaterThan(layout.lineHeight*2);
+  expect(layout.descriptionOverflow).toBeLessThanOrEqual(0);
+  expect(layout.documentOverflow).toBeLessThanOrEqual(0);
 });
 
 test('preserves requested time through edit, resets Ordered age, celebrates successful receive once, and removes waiting age from Received',async({page})=>{

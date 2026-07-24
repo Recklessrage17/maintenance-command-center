@@ -131,22 +131,16 @@ test('permission-controlled module visibility remains authoritative',async({page
   await expect(deck.getByRole('button',{name:/History Logs/})).toHaveCount(0);
 });
 
-test('user console actions stay content-sized and preserve password and logout flows',async({page})=>{
+test('user console removes the duplicate password action while keeping compact logout',async({page})=>{
   const fixture=await mockLauncher(page);
   await page.goto('/');
-  let deck=await openDeck(page);
+  const deck=await openDeck(page);
   const actions=deck.locator('.mcc-user-console-actions');
   await expect(actions).toHaveCSS('flex-direction','row');
-  const update=deck.getByRole('button',{name:'Update Password'});
+  await expect(deck.getByRole('button',{name:'Update Password'})).toHaveCount(0);
   const logout=deck.getByRole('button',{name:'Logout'});
-  const actionWidths=await Promise.all([update,logout].map(async button=>(await button.boundingBox())!.width));
-  expect(actionWidths.every(width=>width<160)).toBe(true);
-  await update.click();
-  await expect(page.getByRole('heading',{name:'Update Password'})).toBeVisible();
-
-  await page.reload();
-  deck=await openDeck(page);
-  await deck.getByRole('button',{name:'Logout'}).click();
+  expect((await logout.boundingBox())!.width).toBeLessThan(160);
+  await logout.click();
   await expect(page.getByRole('heading',{name:'MCC Login'})).toBeVisible();
   expect(fixture.logoutCalls()).toBe(1);
 });

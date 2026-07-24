@@ -65,7 +65,7 @@ test('Teams control opens a safe live roster with shared permission and rank pro
     await expect(page.locator('[data-maintenance-team-backdrop]')).toHaveCount(0);
   }
   await expect(teams).toHaveText(/Teams\s*1/);
-  await expect(page.getByRole('button',{name:'Update Password'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Update Password'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Logout'})).toBeVisible();
   await expect(dialog.getByText('4 users')).toBeVisible();
   const rows=dialog.locator('.maintenance-team-row');
@@ -204,7 +204,7 @@ test('390px Teams drawer wraps account controls, traps focus, supports touch, an
   const controlBox=await controls.boundingBox();
   expect(controlBox).not.toBeNull();
   expect(controlBox!.x+controlBox!.width).toBeLessThanOrEqual(390);
-  await expect(page.getByRole('button',{name:'Update Password'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Update Password'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Logout'})).toBeVisible();
 
   const alex=dialog.locator('.maintenance-team-row').filter({hasText:'Alex Rivera'});

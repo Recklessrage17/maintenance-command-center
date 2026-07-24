@@ -4478,6 +4478,21 @@ function officialShiftUnder100TitleRight(sheet: XlsxSheet, type: RequisitionTemp
   }
 }
 
+function officialUseCompactQuantityHeader(sheet: XlsxSheet, type: RequisitionTemplateKind) {
+  const headerCell = sheet.cell(type === 'under-100' ? 'A20' : 'B21');
+  if (typeof headerCell.formula === 'function') headerCell.formula(undefined);
+  headerCell.value('QTY');
+  try {
+    headerCell.style?.({
+      horizontalAlignment: 'center',
+      verticalAlignment: 'center',
+      wrapText: false,
+    });
+  } catch {
+    // Keep template styling if style update is not supported.
+  }
+}
+
 async function officialWorkbookBuffer(input: { header: Record<string, unknown>; items: RequisitionPdfItem[]; notes: string; requestedBy: string; total: number; type: RequisitionTemplateKind; vendor: string }) {
   const map = officialTemplateMaps[input.type];
   if (!fs.existsSync(map.templatePath)) throw new Error(`Official requisition workbook template is missing: ${path.basename(map.templatePath)}`);
@@ -4492,6 +4507,7 @@ async function officialWorkbookBuffer(input: { header: Record<string, unknown>; 
   officialWriteGrandTotal(sheet, map.grandTotal, input.total);
   officialSetPrintArea(sheet, map);
   officialShiftUnder100TitleRight(sheet, input.type);
+  officialUseCompactQuantityHeader(sheet, input.type);
   return workbookOutputToBuffer(await workbook.outputAsync());
 }
 

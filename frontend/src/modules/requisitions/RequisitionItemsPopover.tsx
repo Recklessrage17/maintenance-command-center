@@ -38,7 +38,7 @@ export function RequisitionItemsPopover({lines,label}:{lines:RequisitionPopoverL
     const trigger=triggerRef.current;
     const panel=panelRef.current;
     if(!trigger||!panel)return;
-    const margin=10;
+    const margin=12;
     const gap=7;
     const viewportWidth=window.visualViewport?.width??window.innerWidth;
     const viewportHeight=window.visualViewport?.height??window.innerHeight;

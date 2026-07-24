@@ -75,7 +75,6 @@ export function MccUserCommandConsole({
       <div className="mcc-user-console-actions command-menu-user-actions">
         <RoleBadge role={user.role} isOwnerAdmin={user.isOwnerAdmin} compact />
         <MaintenanceTeamControl onOpenChange={onTeamsOpenChange} />
-        <MccIndustrialActionButton tone="password" onClick={onUpdatePassword}>Update Password</MccIndustrialActionButton>
         <MccIndustrialActionButton tone="logout" onClick={onLogout}>Logout</MccIndustrialActionButton>
       </div>
     </section>

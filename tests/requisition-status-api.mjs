@@ -3,6 +3,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
 import pdfLib from '../backend/node_modules/pdf-lib/cjs/index.js';
@@ -18,6 +19,19 @@ let server;
 let assertions=0;
 function check(actual,expected,message){assertions+=1;assert.equal(actual,expected,message);}
 function ok(value,message){assertions+=1;assert.ok(value,message);}
+function inflatedPdfStreams(bytes){
+  const streams=[];
+  for(let index=0;index<bytes.length-8;index+=1){
+    if(bytes[index]!==0x78)continue;
+    for(const inflate of [zlib.inflateSync,zlib.inflateRawSync]){
+      try{
+        const value=inflate(bytes.subarray(index)).toString('latin1');
+        if(/\bT[Jj]\b/.test(value))streams.push(value);
+      }catch{}
+    }
+  }
+  return streams.join('\n');
+}
 function writePdfQaArtifact(filename,bytes){
   if(!process.env.MCC_PDF_QA_DIR)return;
   const outputDir=path.resolve(process.env.MCC_PDF_QA_DIR);
@@ -88,8 +102,22 @@ async function run(){
   const requisitionPdf=await fetch(`${base}/api/requisitions/1/pdf`,{headers:{Cookie:cookie}});
   check(requisitionPdf.status,200,'Representative requisition PDF must be generated.');
   ok(/application\/pdf/.test(requisitionPdf.headers.get('content-type')||''),'Requisition PDF must use the application/pdf content type.');
+  ok(/^attachment;/i.test(requisitionPdf.headers.get('content-disposition')||''),'Downloaded requisition PDF must use attachment disposition.');
   const requisitionPdfBytes=Buffer.from(await requisitionPdf.arrayBuffer());const requisitionDocument=await PDFDocument.load(requisitionPdfBytes);
   check(requisitionDocument.getPageCount(),1,'Representative single-line requisition must be exactly one page.');
+  const requisitionPageSize=requisitionDocument.getPage(0).getSize();
+  ok(requisitionPageSize.width>requisitionPageSize.height,'Representative requisition PDF must remain landscape.');
+  const requisitionPdfText=inflatedPdfStreams(requisitionPdfBytes);
+  ok(/\[\(QT\).*?\(Y\)\]\s*TJ/s.test(requisitionPdfText),'Requisition PDF quantity header must render as centered QTY.');
+  ok(!/\(Quantity\)/.test(requisitionPdfText),'Requisition PDF must not retain the cramped Quantity header.');
+  const inlinePdf=await fetch(`${base}/api/requisitions/1/pdf?preview=true`,{headers:{Cookie:cookie}});
+  check(inlinePdf.status,200,'Inline requisition PDF preview must be generated.');
+  ok(/^inline;/i.test(inlinePdf.headers.get('content-disposition')||''),'Inline requisition PDF preview must use inline disposition.');
+  const inlinePdfBytes=Buffer.from(await inlinePdf.arrayBuffer());const inlineDocument=await PDFDocument.load(inlinePdfBytes);
+  check(inlineDocument.getPageCount(),1,'Inline requisition PDF preview must remain exactly one page.');
+  const inlinePageSize=inlineDocument.getPage(0).getSize();
+  ok(inlinePageSize.width>inlinePageSize.height,'Inline requisition PDF preview must remain landscape.');
+  ok(/\[\(QT\).*?\(Y\)\]\s*TJ/s.test(inflatedPdfStreams(inlinePdfBytes)),'Inline requisition PDF preview must render the centered QTY header.');
   writePdfQaArtifact('requisition.pdf',requisitionPdfBytes);
 
   console.log(`Requisition API/status-transition tests passed: ${assertions} assertions with isolated legacy migration, conservative fallbacks, edit preservation, Requested → Ordered → Received/Canceled lifecycle, and representative PDF=1 page.`);
