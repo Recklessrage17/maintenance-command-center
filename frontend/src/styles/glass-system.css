@@ -8,45 +8,67 @@
  */
 
 :root {
-  --glass-surface-panel: linear-gradient(
-    180deg,
-    rgba(18, 48, 67, 0.64),
-    rgba(6, 22, 35, 0.7)
-  );
-  --glass-surface-card: linear-gradient(
-    180deg,
-    rgba(12, 36, 51, 0.58),
-    rgba(4, 18, 29, 0.68)
-  );
-  --glass-surface-card-nested: linear-gradient(
-    180deg,
-    rgba(10, 35, 50, 0.48),
-    rgba(4, 17, 28, 0.58)
-  );
-  --glass-surface-dense: rgba(5, 18, 29, 0.95);
-  --glass-surface-control: rgba(5, 20, 31, 0.72);
-  --glass-border: rgba(90, 210, 255, 0.24);
-  --glass-border-strong: rgba(110, 225, 255, 0.48);
-  --glass-inner-highlight: rgba(255, 255, 255, 0.1);
-  --glass-text: #eefaff;
-  --glass-text-muted: #add0df;
-  --glass-placeholder: #7fa8ba;
-  --glass-cyan: #44d7ff;
-  --glass-teal: #36e5aa;
-  --glass-success: #54dfa2;
-  --glass-warning: #ffc466;
-  --glass-danger: #ff758a;
-  --glass-panel-radius: 16px;
-  --glass-card-radius: 14px;
-  --glass-control-radius: 12px;
-  --glass-shadow-panel: 0 22px 55px rgba(0, 0, 0, 0.4),
-    0 0 28px rgba(68, 215, 255, 0.05),
-    inset 0 1px 0 var(--glass-inner-highlight);
-  --glass-shadow-card: 0 12px 30px rgba(0, 0, 0, 0.28),
-    0 0 20px rgba(68, 215, 255, 0.035),
-    inset 0 1px 0 rgba(255, 255, 255, 0.075);
-  --glass-focus-ring: 0 0 0 3px rgba(54, 220, 255, 0.16);
-  --glass-transition: 160ms ease;
+  --glass-surface-panel: var(--mcc-surface-panel);
+  --glass-surface-card: var(--mcc-surface-card);
+  --glass-surface-card-nested: var(--mcc-surface-card-nested);
+  --glass-surface-dense: var(--mcc-surface-dense);
+  --glass-surface-control: var(--mcc-surface-control);
+  --glass-border: var(--mcc-border-default);
+  --glass-border-strong: var(--mcc-border-strong);
+  --glass-inner-highlight: var(--mcc-border-inner-highlight);
+  --glass-text: var(--mcc-text-primary);
+  --glass-text-muted: var(--mcc-text-muted);
+  --glass-placeholder: var(--mcc-text-placeholder);
+  --glass-cyan: var(--mcc-accent-info);
+  --glass-teal: var(--mcc-accent-maintenance);
+  --glass-success: var(--mcc-status-success);
+  --glass-warning: var(--mcc-status-warning);
+  --glass-danger: var(--mcc-status-danger);
+  --glass-panel-radius: var(--mcc-radius-xl);
+  --glass-card-radius: var(--mcc-radius-lg);
+  --glass-control-radius: var(--mcc-radius-md);
+  --glass-shadow-panel: var(--mcc-shadow-panel);
+  --glass-shadow-card: var(--mcc-shadow-card);
+  --glass-focus-ring: var(--mcc-focus-ring-shadow);
+  --glass-transition: var(--mcc-motion-standard) var(--mcc-motion-ease);
+
+  /* Keep legacy MCC consumers on the canonical token layer. */
+  --mcc-graphite-950: var(--mcc-bg-deep);
+  --mcc-graphite-900: var(--mcc-bg-canvas);
+  --mcc-graphite-800: var(--mcc-bg-raised);
+  --mcc-steel-700: var(--mcc-bg-raised);
+  --mcc-steel-500: var(--mcc-status-neutral);
+  --mcc-graphite: var(--mcc-bg-canvas);
+  --mcc-graphite-deep: var(--mcc-bg-deep);
+  --mcc-steel: var(--mcc-status-neutral);
+  --mcc-cyan: var(--mcc-accent-info);
+  --mcc-blue: var(--mcc-accent-info-strong);
+  --mcc-teal: var(--mcc-accent-maintenance);
+  --mcc-amber: var(--mcc-accent-workflow);
+  --mcc-red: var(--mcc-status-danger);
+  --mcc-good: var(--mcc-status-success);
+  --mcc-warning: var(--mcc-status-warning);
+  --mcc-danger: var(--mcc-status-danger);
+  --mcc-readable: var(--mcc-text-primary);
+  --mcc-muted: var(--mcc-text-muted);
+  --mcc-glass-fill: var(--mcc-surface-panel);
+  --mcc-glass-fill-strong: var(--mcc-surface-panel-strong);
+  --mcc-glass-border: var(--mcc-border-default);
+  --mcc-glass-border-strong: var(--mcc-border-strong);
+  --mcc-glass-highlight: var(--mcc-border-inner-highlight);
+  --mcc-control-shadow: var(--mcc-shadow-control);
+  --mcc-panel-shadow: var(--mcc-shadow-panel);
+  --mcc-panel-shadow-soft: var(--mcc-shadow-card);
+  --mcc-liquid-background: var(--mcc-bg-ambient);
+  --mcc-liquid-reflection: var(--mcc-bg-reflection);
+  --mcc-liquid-sheen: var(--mcc-bg-sheen);
+  --mcc-lab-base: var(--mcc-bg-industrial);
+  --mcc-lab-hexagons: var(--mcc-texture-hex);
+  --mcc-lab-blueprint: var(--mcc-texture-grid);
+  --mcc-modal-glass-backdrop: var(--mcc-surface-backdrop);
+  --text-muted: var(--mcc-text-muted);
+  --border-color: var(--mcc-border-default);
+  --panel-bg: var(--mcc-surface-panel);
 }
 
 /* Level 1: an ambient field that gives translucent surfaces light to catch. */

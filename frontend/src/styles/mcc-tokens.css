@@ -1,0 +1,274 @@
+/*
+ * MCC industrial design tokens
+ *
+ * This is the canonical source for suite colors, surfaces, depth, spacing,
+ * shape, motion, and stacking. Component and module styles should consume
+ * these variables instead of introducing new raw theme values.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Graphite / navy-black environment */
+  --mcc-bg-deep: #02070f;
+  --mcc-bg-canvas: #06101c;
+  --mcc-bg-raised: #0b1724;
+  --mcc-bg-overlay: rgba(1, 8, 17, 0.9);
+  --mcc-bg-industrial:
+    radial-gradient(ellipse at 16% 10%, rgba(35, 131, 164, 0.13), transparent 34%),
+    radial-gradient(ellipse at 82% 24%, rgba(32, 152, 130, 0.09), transparent 30%),
+    radial-gradient(ellipse at 92% 86%, rgba(216, 139, 52, 0.045), transparent 24%),
+    linear-gradient(145deg, #020b13 0%, #061620 46%, #07141d 72%, #020911 100%);
+  --mcc-bg-ambient:
+    radial-gradient(circle at 16% 8%, rgba(68, 215, 255, 0.26), transparent 27%),
+    radial-gradient(circle at 78% 14%, rgba(54, 229, 170, 0.16), transparent 29%),
+    radial-gradient(circle at 96% 74%, rgba(255, 151, 70, 0.18), transparent 26%),
+    radial-gradient(circle at 42% 108%, rgba(30, 107, 255, 0.21), transparent 35%),
+    linear-gradient(150deg, #01050a 0%, #07111d 33%, #111a25 61%, #030a13 100%);
+  --mcc-bg-reflection:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.11), rgba(68, 215, 255, 0.045) 18%, transparent 34%),
+    linear-gradient(22deg, transparent 0 46%, rgba(255, 180, 95, 0.07) 47%, transparent 62%),
+    radial-gradient(ellipse at 34% 12%, rgba(203, 248, 255, 0.14), transparent 36%),
+    radial-gradient(ellipse at 88% 42%, rgba(54, 229, 170, 0.08), transparent 30%);
+  --mcc-bg-sheen:
+    linear-gradient(164deg, transparent 0 18%, rgba(255, 255, 255, 0.035) 19%, rgba(68, 215, 255, 0.024) 30%, transparent 42% 58%, rgba(255, 180, 95, 0.028) 59%, transparent 74%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 54px),
+    repeating-linear-gradient(0deg, rgba(68, 215, 255, 0.01) 0 1px, transparent 1px 48px);
+  --mcc-texture-hex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='112' height='64' viewBox='0 0 112 64'%3E%3Cpath d='M16 1h32l16 27-16 27H16L0 28ZM72 33h32l16 27-16 27H72L56 60Z' fill='none' stroke='%2344d7ff' stroke-opacity='.075' stroke-width='1'/%3E%3Cpath d='M16 1h32' stroke='%2336e5aa' stroke-opacity='.055' stroke-width='1'/%3E%3C/svg%3E");
+  --mcc-texture-grid:
+    repeating-linear-gradient(0deg, rgba(91, 176, 210, 0.027) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(90deg, rgba(91, 176, 210, 0.024) 0 1px, transparent 1px 32px),
+    linear-gradient(115deg, transparent 0 36%, rgba(68, 215, 255, 0.026) 36.1% 36.25%, transparent 36.35% 100%);
+
+  /* Smoke-glass depth levels */
+  --mcc-surface-panel: linear-gradient(145deg, rgba(29, 43, 55, 0.76), rgba(4, 12, 22, 0.91));
+  --mcc-surface-panel-strong: linear-gradient(145deg, rgba(35, 52, 65, 0.86), rgba(4, 12, 22, 0.96));
+  --mcc-surface-card: linear-gradient(180deg, rgba(18, 39, 53, 0.7), rgba(5, 18, 29, 0.82));
+  --mcc-surface-card-nested: linear-gradient(180deg, rgba(15, 34, 47, 0.58), rgba(4, 17, 28, 0.68));
+  --mcc-surface-dense: rgba(5, 18, 29, 0.96);
+  --mcc-surface-control: linear-gradient(180deg, rgba(39, 57, 70, 0.9), rgba(13, 25, 37, 0.94));
+  --mcc-surface-control-hover: linear-gradient(180deg, rgba(50, 70, 83, 0.94), rgba(16, 31, 44, 0.98));
+  --mcc-surface-table-header: linear-gradient(180deg, rgba(19, 34, 47, 0.98), rgba(7, 18, 29, 0.99));
+  --mcc-surface-backdrop:
+    radial-gradient(circle at 20% 12%, rgba(68, 215, 255, 0.15), transparent 34%),
+    radial-gradient(circle at 96% 76%, rgba(255, 153, 64, 0.1), transparent 28%),
+    linear-gradient(135deg, rgba(1, 8, 17, 0.9), rgba(2, 14, 28, 0.78));
+
+  /* Steel edges and highlights */
+  --mcc-border-subtle: rgba(156, 195, 213, 0.14);
+  --mcc-border-default: rgba(210, 235, 255, 0.2);
+  --mcc-border-strong: rgba(158, 199, 216, 0.42);
+  --mcc-border-interactive: rgba(110, 220, 255, 0.58);
+  --mcc-border-inner-highlight: rgba(255, 255, 255, 0.11);
+
+  /* Readable type hierarchy */
+  --mcc-text-primary: #f3fbff;
+  --mcc-text-secondary: #c5dce7;
+  --mcc-text-muted: #a9c5d6;
+  --mcc-text-placeholder: #7899aa;
+  --mcc-text-inverse: #031018;
+  --mcc-text-link: #7ee7ff;
+
+  /* Keyboard focus */
+  --mcc-focus-color: #80ecff;
+  --mcc-focus-ring: 2px solid var(--mcc-focus-color);
+  --mcc-focus-ring-shadow: 0 0 0 4px rgba(54, 220, 255, 0.18);
+
+  /* Maintenance, workflow, and information accents */
+  --mcc-accent-maintenance: #36e5aa;
+  --mcc-accent-maintenance-strong: #54dfa2;
+  --mcc-accent-maintenance-rgb: 54, 229, 170;
+  --mcc-accent-workflow: #ffb45f;
+  --mcc-accent-workflow-strong: #ffd36f;
+  --mcc-accent-workflow-rgb: 255, 180, 95;
+  --mcc-accent-info: #44d7ff;
+  --mcc-accent-info-strong: #1e6bff;
+  --mcc-accent-info-rgb: 68, 215, 255;
+
+  /* Status semantics */
+  --mcc-status-success: #54dfa2;
+  --mcc-status-success-rgb: 84, 223, 162;
+  --mcc-status-warning: #ffc466;
+  --mcc-status-warning-rgb: 255, 196, 102;
+  --mcc-status-danger: #ff758a;
+  --mcc-status-danger-rgb: 255, 117, 138;
+  --mcc-status-info: #44d7ff;
+  --mcc-status-info-rgb: 68, 215, 255;
+  --mcc-status-neutral: #9ec7d8;
+  --mcc-status-neutral-rgb: 158, 199, 216;
+
+  /* Approved Command Deck route accents */
+  --mcc-accent-module-dashboard: #44d7ff;
+  --mcc-accent-module-dashboard-rgb: 68, 215, 255;
+  --mcc-accent-module-inventory: #36c8ff;
+  --mcc-accent-module-inventory-rgb: 54, 200, 255;
+  --mcc-accent-module-vendors: #8fb8d6;
+  --mcc-accent-module-vendors-rgb: 143, 184, 214;
+  --mcc-accent-module-requisitions: #f0b354;
+  --mcc-accent-module-requisitions-rgb: 240, 179, 84;
+  --mcc-accent-module-history: #9b90c9;
+  --mcc-accent-module-history-rgb: 155, 144, 201;
+  --mcc-accent-module-machine-library: #a879ff;
+  --mcc-accent-module-machine-library-rgb: 168, 121, 255;
+  --mcc-accent-module-equipment-library: #36d9a4;
+  --mcc-accent-module-equipment-library-rgb: 54, 217, 164;
+  --mcc-accent-module-facility-info: #db8752;
+  --mcc-accent-module-facility-info-rgb: 219, 135, 82;
+  --mcc-accent-module-users: #d56ab7;
+  --mcc-accent-module-users-rgb: 213, 106, 183;
+  --mcc-accent-module-settings: #c8e2ed;
+  --mcc-accent-module-settings-rgb: 200, 226, 237;
+  --mcc-module-accent: var(--mcc-accent-module-dashboard);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-dashboard-rgb);
+
+  /* Depth */
+  --mcc-shadow-inset: inset 0 1px 0 var(--mcc-border-inner-highlight);
+  --mcc-shadow-control: 0 8px 20px rgba(0, 0, 0, 0.25), var(--mcc-shadow-inset);
+  --mcc-shadow-card: 0 14px 34px rgba(0, 0, 0, 0.29), var(--mcc-shadow-inset);
+  --mcc-shadow-panel: 0 22px 58px rgba(0, 0, 0, 0.4), 0 0 34px rgba(68, 215, 255, 0.06), var(--mcc-shadow-inset);
+  --mcc-shadow-modal: 0 30px 90px rgba(0, 0, 0, 0.58), 0 0 44px rgba(68, 215, 255, 0.08), var(--mcc-shadow-inset);
+
+  /* Action fills */
+  --mcc-action-neutral: linear-gradient(180deg, rgba(45, 61, 73, 0.96), rgba(15, 27, 38, 0.98));
+  --mcc-action-neutral-hover: linear-gradient(180deg, rgba(57, 76, 89, 0.98), rgba(19, 34, 47, 1));
+  --mcc-action-maintenance: linear-gradient(135deg, #36e5aa, #20b987);
+  --mcc-action-maintenance-hover: linear-gradient(135deg, #5aefbd, #2dcc98);
+  --mcc-action-workflow: linear-gradient(135deg, #ffd36f, #d99532);
+  --mcc-action-workflow-hover: linear-gradient(135deg, #ffe19a, #e9a844);
+  --mcc-action-danger: linear-gradient(135deg, #ff758a, #bd4059);
+  --mcc-action-danger-hover: linear-gradient(135deg, #ff91a2, #d65069);
+  --mcc-action-info: linear-gradient(135deg, #58ddff, #278fbd);
+  --mcc-action-info-hover: linear-gradient(135deg, #7ce6ff, #36a3d2);
+
+  /* Spacing scale */
+  --mcc-space-1: 2px;
+  --mcc-space-2: 4px;
+  --mcc-space-3: 6px;
+  --mcc-space-4: 8px;
+  --mcc-space-5: 12px;
+  --mcc-space-6: 16px;
+  --mcc-space-7: 20px;
+  --mcc-space-8: 24px;
+  --mcc-space-9: 32px;
+  --mcc-space-10: 40px;
+
+  /* Shape and component sizing */
+  --mcc-radius-xs: 4px;
+  --mcc-radius-sm: 6px;
+  --mcc-radius-md: 10px;
+  --mcc-radius-lg: 14px;
+  --mcc-radius-xl: 18px;
+  --mcc-radius-pill: 999px;
+  --mcc-control-height: 42px;
+  --mcc-control-height-compact: 34px;
+  --mcc-blur-card: 12px;
+  --mcc-blur-panel: 16px;
+  --mcc-blur-modal: 20px;
+
+  /* Restrained technical motion */
+  --mcc-motion-fast: 120ms;
+  --mcc-motion-standard: 160ms;
+  --mcc-motion-slow: 240ms;
+  --mcc-motion-ease: ease;
+  --mcc-motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Shared stacking contract */
+  --mcc-layer-base: 0;
+  --mcc-layer-content: 1;
+  --mcc-layer-sticky: 10;
+  --mcc-layer-topbar: 22;
+  --mcc-layer-command: 30;
+  --mcc-layer-tooltip: 40;
+  --mcc-layer-combobox: 45;
+  --mcc-layer-roster: 60;
+  --mcc-layer-overflow: 65;
+  --mcc-layer-roster-popover: 68;
+  --mcc-layer-dialog-base: 70;
+  --mcc-layer-combobox-raised: 95;
+  --mcc-layer-dialog-user: 120;
+  --mcc-layer-date-picker: 140;
+  --mcc-layer-confirmation: 150;
+  --mcc-layer-image-viewer: 180;
+  --mcc-layer-record-viewer: 190;
+  --mcc-layer-photo-review: 210;
+  --mcc-layer-permission-popover: 250;
+  --mcc-layer-dropdown: 100;
+  --mcc-layer-popover: 300;
+  --mcc-layer-overlay: 800;
+  --mcc-layer-modal: 1000;
+  --mcc-layer-toast: 1200;
+  --mcc-layer-document-preview: 2600;
+  --mcc-layer-media-viewer: 10000;
+
+  /* Print-safe primitives */
+  --mcc-print-background: #ffffff;
+  --mcc-print-surface: #ffffff;
+  --mcc-print-border: #9aa3aa;
+  --mcc-print-text: #111820;
+
+  /*
+   * Compatibility bridge. New work should use the canonical names above;
+   * these aliases keep the existing app and opt-in glass utilities connected
+   * to the same theme while modules migrate incrementally.
+   */
+  --mcc-graphite-950: var(--mcc-bg-deep);
+  --mcc-graphite-900: var(--mcc-bg-canvas);
+  --mcc-graphite-800: var(--mcc-bg-raised);
+  --mcc-steel-700: var(--mcc-bg-raised);
+  --mcc-steel-500: var(--mcc-status-neutral);
+  --mcc-graphite: var(--mcc-bg-canvas);
+  --mcc-graphite-deep: var(--mcc-bg-deep);
+  --mcc-steel: var(--mcc-status-neutral);
+  --mcc-cyan: var(--mcc-accent-info);
+  --mcc-blue: var(--mcc-accent-info-strong);
+  --mcc-teal: var(--mcc-accent-maintenance);
+  --mcc-amber: var(--mcc-accent-workflow);
+  --mcc-red: var(--mcc-status-danger);
+  --mcc-good: var(--mcc-status-success);
+  --mcc-warning: var(--mcc-status-warning);
+  --mcc-danger: var(--mcc-status-danger);
+  --mcc-readable: var(--mcc-text-primary);
+  --mcc-muted: var(--mcc-text-muted);
+  --mcc-glass-fill: var(--mcc-surface-panel);
+  --mcc-glass-fill-strong: var(--mcc-surface-panel-strong);
+  --mcc-glass-border: var(--mcc-border-default);
+  --mcc-glass-border-strong: var(--mcc-border-strong);
+  --mcc-glass-highlight: var(--mcc-border-inner-highlight);
+  --mcc-control-shadow: var(--mcc-shadow-control);
+  --mcc-panel-shadow: var(--mcc-shadow-panel);
+  --mcc-panel-shadow-soft: var(--mcc-shadow-card);
+  --mcc-liquid-background: var(--mcc-bg-ambient);
+  --mcc-liquid-reflection: var(--mcc-bg-reflection);
+  --mcc-liquid-sheen: var(--mcc-bg-sheen);
+  --mcc-lab-base: var(--mcc-bg-industrial);
+  --mcc-lab-hexagons: var(--mcc-texture-hex);
+  --mcc-lab-blueprint: var(--mcc-texture-grid);
+  --mcc-modal-glass-backdrop: var(--mcc-surface-backdrop);
+  --text-muted: var(--mcc-text-muted);
+  --border-color: var(--mcc-border-default);
+  --panel-bg: var(--mcc-surface-panel);
+
+  --glass-surface-panel: var(--mcc-surface-panel);
+  --glass-surface-card: var(--mcc-surface-card);
+  --glass-surface-card-nested: var(--mcc-surface-card-nested);
+  --glass-surface-dense: var(--mcc-surface-dense);
+  --glass-surface-control: var(--mcc-surface-control);
+  --glass-border: var(--mcc-border-default);
+  --glass-border-strong: var(--mcc-border-strong);
+  --glass-inner-highlight: var(--mcc-border-inner-highlight);
+  --glass-text: var(--mcc-text-primary);
+  --glass-text-muted: var(--mcc-text-muted);
+  --glass-placeholder: var(--mcc-text-placeholder);
+  --glass-cyan: var(--mcc-accent-info);
+  --glass-teal: var(--mcc-accent-maintenance);
+  --glass-success: var(--mcc-status-success);
+  --glass-warning: var(--mcc-status-warning);
+  --glass-danger: var(--mcc-status-danger);
+  --glass-panel-radius: var(--mcc-radius-xl);
+  --glass-card-radius: var(--mcc-radius-lg);
+  --glass-control-radius: var(--mcc-radius-md);
+  --glass-shadow-panel: var(--mcc-shadow-panel);
+  --glass-shadow-card: var(--mcc-shadow-card);
+  --glass-focus-ring: var(--mcc-focus-ring-shadow);
+  --glass-transition: var(--mcc-motion-standard) var(--mcc-motion-ease);
+}

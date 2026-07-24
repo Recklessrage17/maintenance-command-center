@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { MccCommandDeck } from '../components/MccCommandDeck';
 import { mccPageMetadata, type MccSection } from './pageMetadata';
 
@@ -43,6 +43,10 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
  const [pageEntering,setPageEntering]=useState(false);
  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
  const [teamsOpen,setTeamsOpen]=useState(false);
+ const routeAccentStyle={
+   '--mcc-module-accent':`var(--mcc-accent-module-${activeSection})`,
+   '--mcc-module-accent-rgb':`var(--mcc-accent-module-${activeSection}-rgb)`,
+ } as CSSProperties;
  const launcherRef=useRef<HTMLDivElement>(null);
  const warpTimerRef=useRef<number>();
  const inventoryFocus=activeSection==='inventory';
@@ -139,7 +143,7 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
  }
 
  return (
-   <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell mcc-scrollbar-hidden':'mcc-shell command-shell mcc-scrollbar-hidden'}>
+   <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell mcc-scrollbar-hidden':'mcc-shell command-shell mcc-scrollbar-hidden'} data-mcc-module={activeSection} style={routeAccentStyle}>
      <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef}>
        <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
          <div className="mcc-brand-mark">
