@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { MaintenanceTeamControl } from '../components/MaintenanceTeamRoster';
-import { RoleBadge } from '../components/RoleBadge';
+import { MccCommandDeck } from '../components/MccCommandDeck';
 import { mccPageMetadata, type MccSection } from './pageMetadata';
 
 export type { MccSection };
@@ -27,28 +26,6 @@ const baseNav: Array<{ id: MccSection; label: string; microLabel: string; manage
   { id: 'users', label: 'Admin / Users', microLabel: 'Security', management: true },
   { id: 'settings', label: 'Settings', microLabel: 'System' },
 ];
-
-const moduleIconPaths: Record<MccSection, string[]> = {
-  dashboard: ['M4 13a8 8 0 0 1 16 0', 'M12 13l4-4', 'M5 19h14'],
-  inventory: ['M4 8l8-4 8 4-8 4-8-4z', 'M4 8v8l8 4 8-4V8', 'M12 12v8'],
-  vendors: ['M5 8h6v11H5z', 'M13 5h6v14h-6z', 'M7 11h2', 'M15 9h2', 'M15 13h2'],
-  requisitions: ['M7 3h7l4 4v14H7z', 'M14 3v5h5', 'M9 14l2 2 4-5'],
-  history: ['M12 4a8 8 0 1 0 0 16a8 8 0 0 0 0-16z', 'M12 8v5l3 2'],
-  'machine-library': ['M5 16h14', 'M7 16V9h10v7', 'M9 9V6h6v3', 'M9 12h2', 'M13 12h2'],
-  'equipment-library': ['M5 9h14v9H5z', 'M9 9V7h6v2', 'M8 13h8'],
-  'facility-info': ['M5 19V7l7-3 7 3v12', 'M9 19v-5h6v5', 'M8 10h1', 'M15 10h1'],
-  users: ['M12 4l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V7z', 'M12 10a2 2 0 1 0 0-4a2 2 0 0 0 0 4z', 'M8.5 15a3.5 3.5 0 0 1 7 0'],
-  settings: ['M12 8a4 4 0 1 0 0 8a4 4 0 0 0 0-8z', 'M12 3v3', 'M12 18v3', 'M3 12h3', 'M18 12h3', 'M5.6 5.6l2.1 2.1', 'M16.3 16.3l2.1 2.1', 'M18.4 5.6l-2.1 2.1', 'M7.7 16.3l-2.1 2.1'],
-};
-
-function ModuleIcon({ section }: { section: MccSection }) {
-  return (
-    <svg className="command-menu-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      {moduleIconPaths[section].map(path=><path d={path} key={path} />)}
-    </svg>
-  );
-}
-
 
 function scrubJbtBrandText(value: unknown, fallback = '') {
   const text = String(value ?? '').trim();
@@ -178,36 +155,18 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
          <span className="launcher-gear" aria-hidden="true">⚙</span>
          <span>Menu</span>
        </button>
-       <nav className="command-menu" id="command-launcher-menu" aria-label="MCC navigation">
-         <div className="command-menu-heading">
-           <div className="command-menu-title">
-             <span>Command modules</span>
-             <strong>Navigate MCC</strong>
-           </div>
-           <div className="command-menu-user">
-             <div className="command-menu-user-main">
-               <strong>{user.fullName}</strong>
-               <RoleBadge role={user.role} isOwnerAdmin={user.isOwnerAdmin} compact />
-             </div>
-             <div className="command-menu-user-actions">
-               <MaintenanceTeamControl onOpenChange={setTeamsOpen} />
-               <button className="secondary-button compact-button" type="button" onClick={()=>{ closeLauncher(); onUpdatePassword(); }}>Update Password</button>
-               <button className="secondary-button compact-button" type="button" onClick={()=>{ closeLauncher(); onLogout(); }}>Logout</button>
-             </div>
-           </div>
-         </div>
-         <div className="command-menu-list" role="menu">
-           {navItems.map(item=>(
-             <button className={`${item.id===activeSection?'command-menu-item active':'command-menu-item'} mcc-bubble-transition mcc-menu-item-warp${warpingSection===item.id?' is-warping':''}`} key={item.id} onClick={()=>selectSection(item.id)} onPointerEnter={()=>onPrefetchSection?.(item.id)} onFocus={()=>onPrefetchSection?.(item.id)} type="button" role="menuitem" aria-busy={warpingSection===item.id}>
-               <span className="command-menu-icon-wrap" aria-hidden="true"><ModuleIcon section={item.id} /></span>
-               <span className="command-menu-item-copy">
-                 <span className="command-menu-item-label">{item.label}</span>
-                 <span className="command-menu-item-meta">{item.microLabel}</span>
-               </span>
-             </button>
-           ))}
-         </div>
-       </nav>
+        <MccCommandDeck
+          id="command-launcher-menu"
+          modules={navItems}
+          activeSection={activeSection}
+          warpingSection={warpingSection}
+          user={user}
+          onTeamsOpenChange={setTeamsOpen}
+          onUpdatePassword={()=>{ closeLauncher(); onUpdatePassword(); }}
+          onLogout={()=>{ closeLauncher(); onLogout(); }}
+          onSelect={selectSection}
+          onPrefetch={onPrefetchSection}
+        />
      </div>
      <header className="mcc-page-topbar" aria-label="Current page">
        <div className="mcc-current-page">

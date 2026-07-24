@@ -102,7 +102,7 @@ test('roster Escape, outside click, and nested popovers preserve command-menu fo
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(teams).toBeFocused();
-  await expect(page.getByText('Navigate MCC')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Maintenance Command Center'})).toBeVisible();
 
   await teams.click();
   dialog=page.getByRole('dialog',{name:'Maintenance Team'});
@@ -118,7 +118,7 @@ test('roster Escape, outside click, and nested popovers preserve command-menu fo
   await page.locator('.command-menu-title').click({force:true});
   await expect(dialog).toHaveCount(0);
   await expect(teams).toBeFocused();
-  await expect(page.getByText('Navigate MCC')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Maintenance Command Center'})).toBeVisible();
 });
 
 test('390px Teams drawer wraps account controls, traps focus, supports touch, and respects reduced motion',async({page})=>{
