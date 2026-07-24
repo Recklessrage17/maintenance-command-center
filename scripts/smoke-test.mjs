@@ -66,7 +66,7 @@ async function assertSourceWiring() {
   assert(inventory.includes('InventoryPage'), 'Inventory page module did not load for smoke inspection.');
   assert(vendors.includes('VendorsPage'), 'Vendors page module did not load for smoke inspection.');
   assert(layout.includes("i.id !== 'history' || canViewHistory"), 'History Logs navigation is not gated by role.');
-  assert(app.includes('canViewHistory') && app.includes("user.role === 'Admin' || user.role === 'Manager'"), 'History Logs route is not limited to Admin/Manager users.');
+  assert(app.includes('canViewHistory') && app.includes("'history.view'"), 'History Logs route is not gated by the centralized effective-permission set.');
   assert(history.includes('History Logs'), 'History Logs page module did not load for smoke inspection.');
   assert(pm.includes('MachineLibraryPage'), 'Machine Library page module did not load for smoke inspection.');
   assert(assets.includes('EquipmentLibraryPage'), 'Equipment Library page module did not load for smoke inspection.');

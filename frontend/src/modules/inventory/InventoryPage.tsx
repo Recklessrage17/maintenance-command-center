@@ -1,6 +1,7 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusPill, MccTextLink, type MccSemanticVariant } from '../../components/MccPills';
+import { hasPermission } from '../../permissions';
 import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
@@ -450,7 +451,7 @@ function vendorNameKey(value: string) {
   return value.trim().toLowerCase();
 }
 
-export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
+export function InventoryPage({ userRole, effectivePermissions, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; effectivePermissions?:string[]; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [parts,setParts]=useState<InventoryPart[]>([]);
   const [search,setSearch]=useState('');
@@ -509,8 +510,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const noticeIdRef = useRef(0);
   const lastRefreshStartedAtRef = useRef<Date|null>(null);
 
-  const canWrite = writeRoles.has(userRole);
-  const canUseInventoryTools = canWrite;
+  const canWrite = hasPermission(effectivePermissions,'inventory.create',writeRoles.has(userRole))||hasPermission(effectivePermissions,'inventory.edit',writeRoles.has(userRole));
+  const canUseInventoryTools = hasPermission(effectivePermissions,'inventory.import',canWrite)||hasPermission(effectivePermissions,'inventory.export',canWrite);
 
   function showNotice(kind: Notice['kind'], text: string, options: { autoHide?: boolean } = {}) {
     const autoHide = options.autoHide ?? kind !== 'error';

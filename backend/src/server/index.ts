@@ -16,6 +16,16 @@ import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
+import {
+  inheritedPermissions,
+  isPermissionKey,
+  permissionByKey,
+  permissionCatalog,
+  permissionModules,
+  roleBasePermissions,
+  type PermissionKey,
+  type PermissionRole,
+} from './permissions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,7 +83,7 @@ app.use('/uploads/branding', express.static(brandingUploadsDir, {
   },
 }));
 
-type Role = 'Admin' | 'Manager' | 'Maintenance Tech 3' | 'Maintenance Tech 2' | 'Maintenance Tech 1';
+type Role = PermissionRole;
 const roles: Role[] = ['Maintenance Tech 1', 'Maintenance Tech 2', 'Maintenance Tech 3', 'Manager', 'Admin'];
 const roleRank = (role: Role) => roles.indexOf(role);
 const canManageRole = (actor: Role, target: Role) => roleRank(actor) >= roleRank(target);
@@ -96,6 +106,7 @@ function initDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, is_owner_admin INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_normalized TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', website_url TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_normalized TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_normalized TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
@@ -171,9 +182,14 @@ CREATE INDEX IF NOT EXISTS idx_history_logs_part_number ON history_logs (part_nu
 CREATE INDEX IF NOT EXISTS idx_history_logs_requisition_number ON history_logs (requisition_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_history_logs_asset_id ON history_logs (asset_id COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_history_logs_entity_label ON history_logs (entity_label COLLATE NOCASE);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
 }
 initDb();
 function migrateDb() {
+  db.exec(`CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
+CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
   const userColumns = new Set(all<{ name: string }>('PRAGMA table_info(users)').map(column => column.name));
   if (!userColumns.has('is_owner_admin')) run('ALTER TABLE users ADD COLUMN is_owner_admin INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.has('deleted')) run('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
@@ -418,8 +434,65 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
 migrateDb();
 
 interface User { id:number; full_name:string; email:string; role:Role; password_hash:string; force_password_change:number; disabled:number; is_owner_admin:number; deleted:number; deleted_at?:string; deleted_by_user_id?:number; temp_password_expires_at?:string; created_by_user_id?:number; created_at:string; updated_at:string; last_login_at?:string }
+interface PermissionGrantRow {
+  id:number;
+  user_id:number;
+  permission_key:string;
+  granted_by_user_id:number;
+  granted_by_name:string;
+  granted_at:string;
+  expires_at:string|null;
+  revoked_at:string|null;
+  revoked_by_user_id:number|null;
+  reason:string|null;
+}
 interface AuthRequest extends Request { user?: User; sessionId?: string }
-const publicUser = (u: User) => ({ id:u.id, fullName:u.full_name, email:u.email, role:u.role, isOwnerAdmin:!!u.is_owner_admin, forcePasswordChange:!!u.force_password_change, disabled:!!u.disabled, createdByUserId:u.created_by_user_id ?? null, createdAt:u.created_at, updatedAt:u.updated_at, lastLoginAt:u.last_login_at ?? null });
+function activeSpecialGrants(userId:number) {
+  return all<PermissionGrantRow>(`SELECT g.*,COALESCE(grantor.full_name,'Unknown user') AS granted_by_name
+    FROM user_permission_grants g
+    LEFT JOIN users grantor ON grantor.id=g.granted_by_user_id
+    WHERE g.user_id=? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>?)
+    ORDER BY g.permission_key,g.granted_at`,[userId,now()])
+    .filter(grant=>isPermissionKey(grant.permission_key));
+}
+function publicPermissionGrant(grant:PermissionGrantRow) {
+  const definition=permissionByKey.get(grant.permission_key as PermissionKey)!;
+  return {
+    id:grant.id,
+    permissionKey:grant.permission_key as PermissionKey,
+    label:definition.label,
+    module:definition.module,
+    moduleLabel:definition.moduleLabel,
+    moduleShortLabel:definition.moduleShortLabel,
+    grantedByUserId:grant.granted_by_user_id,
+    grantedBy:grant.granted_by_name,
+    grantedAt:grant.granted_at,
+    expiresAt:grant.expires_at,
+    reason:grant.reason,
+  };
+}
+function getEffectivePermissions(user:User) {
+  const permissions=new Set<PermissionKey>(roleBasePermissions[user.role]);
+  for(const grant of activeSpecialGrants(user.id)) permissions.add(grant.permission_key as PermissionKey);
+  return permissions;
+}
+function hasPermission(user:User,permission:PermissionKey) {
+  return getEffectivePermissions(user).has(permission);
+}
+const publicUser = (u: User) => ({
+  id:u.id,
+  fullName:u.full_name,
+  email:u.email,
+  role:u.role,
+  isOwnerAdmin:!!u.is_owner_admin,
+  forcePasswordChange:!!u.force_password_change,
+  disabled:!!u.disabled,
+  createdByUserId:u.created_by_user_id ?? null,
+  createdAt:u.created_at,
+  updatedAt:u.updated_at,
+  lastLoginAt:u.last_login_at ?? null,
+  effectivePermissions:[...getEffectivePermissions(u)],
+});
 const userCount = () => one<{count:number}>('SELECT COUNT(*) as count FROM users WHERE deleted=0')?.count ?? 0;
 const findUserByEmail = (email: string) => one<User>('SELECT * FROM users WHERE deleted=0 AND lower(email)=lower(?)', [email.trim()]);
 const findUserById = (id: number) => one<User>('SELECT * FROM users WHERE deleted=0 AND id=?', [Number(id)]);
@@ -663,12 +736,30 @@ function canUserManage(actor: User) { return actor.role !== 'Maintenance Tech 1'
 function canEditTarget(actor: User, target: User) { return canUserManage(actor) && !target.is_owner_admin && !target.deleted && canManageRole(actor.role, target.role); }
 function canToggleDisabledTarget(actor: User, target: User) { return canEditTarget(actor, target) && actor.id !== target.id; }
 function canDeleteTarget(actor: User, target: User) { return canEditTarget(actor, target) && actor.id !== target.id; }
+function canResetPasswordTarget(actor:User,target:User) {
+  if(target.deleted||actor.id===target.id) return false;
+  if(!['Manager','Admin'].includes(actor.role)&&!actor.is_owner_admin) return false;
+  if(target.is_owner_admin) return Boolean(actor.is_owner_admin)&&actor.id!==target.id;
+  return actor.is_owner_admin||roleRank(actor.role)>roleRank(target.role);
+}
+function canDelegatePermissions(actor:User) {
+  return actor.is_owner_admin||roleRank(actor.role)>=roleRank('Maintenance Tech 3');
+}
+function canManagePermissionTarget(actor:User,target:User) {
+  if(!canDelegatePermissions(actor)||target.deleted||target.is_owner_admin||actor.id===target.id) return false;
+  if(actor.is_owner_admin) return true;
+  if(actor.role==='Maintenance Tech 3') return ['Maintenance Tech 1','Maintenance Tech 2'].includes(target.role);
+  return roleRank(actor.role)>roleRank(target.role);
+}
 function publicUserForActor(u: User, actor: User) {
   return {
     ...publicUser(u),
     canEdit: canEditTarget(actor, u),
     canDisable: canToggleDisabledTarget(actor, u),
     canDelete: canDeleteTarget(actor, u),
+    canResetPassword: canResetPasswordTarget(actor,u),
+    canManagePermissions: canManagePermissionTarget(actor,u),
+    specialPermissionGrants: activeSpecialGrants(u.id).map(publicPermissionGrant),
   };
 }
 function safeErrorMessage(error: unknown, extraSecrets: string[] = [], fallback = 'Unknown error.') {
@@ -5462,7 +5553,7 @@ function sendRequisitionError(req: Request, res: Response, operation: string, ta
   res.status(status).json({ok:false,error:message,activeRequisitionExists:/already exists/i.test(message)});
 }
 function canDeleteRequisitions(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager';
+  return hasPermission(actor,'requisitions.delete');
 }
 async function writeMit3AppData(data: Record<string, unknown>) {
   const response = await fetch(mit3AppDataUrl, {
@@ -5479,19 +5570,19 @@ async function writeMit3AppData(data: Record<string, unknown>) {
   return response.json().catch(() => ({}));
 }
 function canInventoryWrite(actor: User) {
-  return roleRank(actor.role) >= roleRank('Maintenance Tech 2');
+  return ['inventory.create','inventory.edit','inventory.requisition_stage','requisitions.create','requisitions.edit'].some(permission=>hasPermission(actor,permission as PermissionKey));
 }
 function canManageRequisitionBatches(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager' || actor.role === 'Maintenance Tech 3';
+  return hasPermission(actor,'requisitions.manage_batches');
 }
 function canInventoryImport(actor: User) {
-  return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+  return hasPermission(actor,'inventory.import');
 }
 function canViewHistory(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager';
+  return hasPermission(actor,'history.view');
 }
 function canExportHistory(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager';
+  return hasPermission(actor,'history.export');
 }
 function isOwnerAdmin(actor: User) {
   return Boolean(actor.is_owner_admin);
@@ -6350,8 +6441,8 @@ const machineRequiredImportHeaderGroups = [
 ] as const;
 const machineImportHeaders = ['Asset Number','Brand','Model','Serial Number','Shot Size (oz)','Tonnage','Power Type','Setup Type','Barrel/Screw Diameter','Machine Year','Machine Type','Screw Type','Screw Tip Type','Screw Rebuild / Repaired','Screw Condition Status','Screw Installed Date','Screw Tip Installed Date','Screw Length','Barrel Rebuild / Repaired','Barrel Condition Status','Barrel Installed Date','Barrel End Cap Installed Date','Barrel Length','Machine Length','Machine Width','Machine Height','Full Die Height Length / Range','Notes','Critical Notes','Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
 type MachineAssetInput = ReturnType<typeof validateMachineAssetInput>;
-function canMachineWrite(actor: User) { return roleRank(actor.role) >= roleRank('Maintenance Tech 3'); }
-function canMachineDelete(actor: User) { return roleRank(actor.role) >= roleRank('Manager'); }
+function canMachineWrite(actor: User) { return ['machine.create','machine.edit','machine.pm_manage','machine.documents_upload','machine.documents_manage','machine.notes_manage','machine.import_export'].some(permission=>hasPermission(actor,permission as PermissionKey)); }
+function canMachineDelete(actor: User) { return hasPermission(actor,'machine.delete'); }
 function safeHexColor(value: unknown, fallback = '#44D7FF') {
   const clean = String(value ?? '').trim();
   return /^#[0-9A-Fa-f]{6}$/.test(clean) ? clean.toUpperCase() : fallback;
@@ -7428,13 +7519,52 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view','equipment.view','facility.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='requisition-batch.manage'&&canManageRequisitionBatches(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || ((permission==='equipment.write'||permission==='equipment.delete'||permission==='facility.write')&&canMachineWrite(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function permissionAliasAllowed(user:User,permission:string) {
+  if(isPermissionKey(permission)) return hasPermission(user,permission);
+  if(['dashboard.view','settings.view'].includes(permission)) return true;
+  if(permission==='inventory.write') return canInventoryWrite(user);
+  if(permission==='requisition-batch.manage') return hasPermission(user,'requisitions.manage_batches');
+  if(permission==='machine.write') return canMachineWrite(user);
+  if(permission==='equipment.write') return ['equipment.create','equipment.edit','equipment.pm_manage','equipment.documents_upload','equipment.documents_manage','equipment.notes_manage','equipment.import_export'].some(key=>hasPermission(user,key as PermissionKey));
+  if(permission==='equipment.delete') return hasPermission(user,'equipment.delete');
+  if(permission==='facility.write') return ['facility.create','facility.edit','facility.delete','facility.folders_manage','facility.upload','facility.rename_move','facility.content_delete'].some(key=>hasPermission(user,key as PermissionKey));
+  if(permission==='users.view') return canUserManage(user);
+  if(['users.create','users.edit','users.disable','users.delete'].includes(permission)) return canUserManage(user);
+  if(permission==='users.resetPassword') return user.is_owner_admin||['Manager','Admin'].includes(user.role);
+  if(permission==='users.permissions') return canDelegatePermissions(user);
+  if(permission==='audit.view') return ['Admin','Manager'].includes(user.role);
+  return false;
+}
+function resolvePermissionForRequest(permission:string,req:AuthRequest):string {
+  if(permission!=='equipment.write') return permission;
+  const route=req.path;
+  if(route.includes('/preventive-maintenance')) return 'equipment.pm_manage';
+  if(route.includes('/asset-notes')||route.endsWith('/notes')) return 'equipment.notes_manage';
+  if(route.includes('/document-folders')||route.includes('/documents/')) {
+    return req.method==='POST'&&route.endsWith('/documents')?'equipment.documents_upload':'equipment.documents_manage';
+  }
+  if(route.includes('/import')||route.includes('/export')) return 'equipment.import_export';
+  return req.method==='POST'?'equipment.create':'equipment.edit';
+}
+function requirePermission(permission:string) {
+  return (req:AuthRequest,res:Response,next:NextFunction)=>{
+    const resolved=resolvePermissionForRequest(permission,req);
+    if(permissionAliasAllowed(req.user!,resolved)) return next();
+    const definition=isPermissionKey(resolved)?permissionByKey.get(resolved):undefined;
+    return res.status(403).json({
+      error:definition?`You do not have permission to ${definition.label.toLowerCase()}.`:'Permission denied.',
+      code:'PERMISSION_REQUIRED',
+      permission:resolved,
+    });
+  };
+}
 
 facilityInfoService=createFacilityInfoService({
   app,
   uploadsDir,
   requireAuth,
-  requireWrite:requirePermission('facility.write'),
+  requirePermission,
+  hasPermission:(user,permission)=>isPermissionKey(permission)&&hasPermission(user as User,permission),
   all,
   one,
   run,
@@ -7496,11 +7626,105 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), (req:Auth
   audit(req,'user create','user',id,{role});
   res.status(201).json({user:publicUser(findUserById(id)!)});
 });
+app.post('/api/users/:id/reset-password',requireAuth,requirePermission('users.resetPassword'),(req:AuthRequest,res)=>{
+  const targetId=Number(req.params.id);
+  const target=Number.isInteger(targetId)&&targetId>0?one<User>('SELECT * FROM users WHERE id=?',[targetId]):undefined;
+  if(!target||target.deleted) return res.status(404).json({error:'User not found.',code:'USER_NOT_FOUND'});
+  if(!canResetPasswordTarget(req.user!,target)) return res.status(403).json({error:'You cannot reset that user password.',code:'PASSWORD_RESET_NOT_ALLOWED'});
+  const temporaryPassword=req.body.temporaryPassword;
+  const confirmTemporaryPassword=req.body.confirmTemporaryPassword;
+  if(temporaryPassword!==confirmTemporaryPassword) return res.status(400).json({error:'Temporary password confirmation does not match.',code:'PASSWORD_CONFIRMATION_MISMATCH',field:'confirmTemporaryPassword'});
+  if(!passwordOk(temporaryPassword)) return res.status(400).json({error:passwordComplexityError,code:'PASSWORD_COMPLEXITY',field:'temporaryPassword',requirements:passwordRequirements});
+  const expiresAt=tempExpiry();
+  const timestamp=now();
+  run('UPDATE users SET password_hash=?,force_password_change=1,temp_password_expires_at=?,updated_at=? WHERE id=?',[hashPassword(temporaryPassword),expiresAt,timestamp,target.id]);
+  const invalidated=Number(run('DELETE FROM sessions WHERE user_id=?',[target.id]).changes);
+  audit(req,'password reset performed','user',target.id,{targetUser:target.full_name,targetEmail:target.email,administrator:req.user!.email,forcedPasswordChangeEnabled:true,tempPasswordExpiresAt:expiresAt,sessionsInvalidated:invalidated});
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,message:'Temporary password created successfully',temporaryPassword,tempPasswordExpiresAt:expiresAt,forcePasswordChange:true,sessionsInvalidated:invalidated});
+});
+function permissionDetailsForUser(target:User,actor:User) {
+  const inherited=new Set(inheritedPermissions(target.role));
+  const grants=activeSpecialGrants(target.id).map(publicPermissionGrant);
+  const grantedKeys=new Set(grants.map(grant=>grant.permissionKey));
+  return {
+    user:publicUserForActor(target,actor),
+    catalog:permissionModules.map(module=>({
+      key:module.key,
+      label:module.label,
+      shortLabel:module.shortLabel,
+      permissions:module.permissions.map(([key,label])=>({
+        key,
+        label,
+        state:inherited.has(key)?'inherited':grantedKeys.has(key)?'granted':'not_allowed',
+        inherited:inherited.has(key),
+        speciallyGranted:grantedKeys.has(key),
+        grant:grants.find(grant=>grant.permissionKey===key)??null,
+      })),
+    })),
+    inheritedPermissions:[...inherited],
+    specialPermissionGrants:grants,
+    effectivePermissions:[...getEffectivePermissions(target)],
+    canManage:canManagePermissionTarget(actor,target),
+  };
+}
+app.get('/api/permissions/catalog',requireAuth,(_req,res)=>res.json({modules:permissionModules,permissions:permissionCatalog}));
+app.get('/api/users/:id/permissions',requireAuth,requirePermission('users.permissions'),(req:AuthRequest,res)=>{
+  const target=findUserById(Number(req.params.id));
+  if(!target) return res.status(404).json({error:'User not found.',code:'USER_NOT_FOUND'});
+  if(!canManagePermissionTarget(req.user!,target)) return res.status(403).json({error:'You cannot manage permissions for that user.',code:'PERMISSION_DELEGATION_NOT_ALLOWED'});
+  res.json(permissionDetailsForUser(target,req.user!));
+});
+app.put('/api/users/:id/permissions',requireAuth,requirePermission('users.permissions'),(req:AuthRequest,res)=>{
+  const target=findUserById(Number(req.params.id));
+  if(!target) return res.status(404).json({error:'User not found.',code:'USER_NOT_FOUND'});
+  const actor=req.user!;
+  if(!canManagePermissionTarget(actor,target)) return res.status(403).json({error:'You cannot manage permissions for that user.',code:'PERMISSION_DELEGATION_NOT_ALLOWED'});
+  const requested=Array.isArray(req.body.permissionKeys)?req.body.permissionKeys:[];
+  if(requested.some((key:unknown)=>!isPermissionKey(key))) return res.status(400).json({error:'One or more permission keys are invalid.',code:'INVALID_PERMISSION_KEY'});
+  const desired=new Set<PermissionKey>(requested as PermissionKey[]);
+  const inherited=new Set(inheritedPermissions(target.role));
+  for(const key of desired) {
+    if(inherited.has(key)) return res.status(400).json({error:'Inherited permissions cannot be stored as special grants.',code:'INHERITED_PERMISSION',permission:key});
+    if(!hasPermission(actor,key)) return res.status(403).json({error:'You cannot grant a permission you do not possess.',code:'PERMISSION_DELEGATION_NOT_ALLOWED',permission:key});
+  }
+  const timestamp=now();
+  const expiresAtByPermission=isRecord(req.body.expiresAtByPermission)?req.body.expiresAtByPermission:{};
+  const reason=String(req.body.reason??'').trim().slice(0,500)||null;
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    run('UPDATE user_permission_grants SET revoked_at=?,revoked_by_user_id=? WHERE user_id=? AND revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at<=?',[timestamp,actor.id,target.id,timestamp]);
+    const current=activeSpecialGrants(target.id);
+    const currentKeys=new Set(current.map(grant=>grant.permission_key as PermissionKey));
+    for(const grant of current) {
+      const key=grant.permission_key as PermissionKey;
+      if(desired.has(key)) continue;
+      run('UPDATE user_permission_grants SET revoked_at=?,revoked_by_user_id=? WHERE id=?',[timestamp,actor.id,grant.id]);
+      const definition=permissionByKey.get(key)!;
+      audit(req,'permission revoked','user',target.id,{targetUser:target.full_name,permissionKey:key,permissionLabel:definition.label,revokedBy:actor.email});
+    }
+    for(const key of desired) {
+      if(currentKeys.has(key)) continue;
+      const rawExpiration=String(expiresAtByPermission[key]??'').trim();
+      const expiresAt=rawExpiration&&Number.isFinite(Date.parse(rawExpiration))?new Date(rawExpiration).toISOString():null;
+      if(expiresAt&&expiresAt<=timestamp) throw new Error('Permission expiration must be in the future.');
+      run('INSERT INTO user_permission_grants (user_id,permission_key,granted_by_user_id,granted_at,expires_at,reason) VALUES (?,?,?,?,?,?)',[target.id,key,actor.id,timestamp,expiresAt,reason]);
+      const definition=permissionByKey.get(key)!;
+      audit(req,'permission granted','user',target.id,{targetUser:target.full_name,permissionKey:key,permissionLabel:definition.label,grantedBy:actor.email,expiresAt,reason});
+    }
+    db.exec('COMMIT');
+  }catch(error){
+    db.exec('ROLLBACK');
+    const message=safeErrorMessage(error);
+    return res.status(/future/i.test(message)?400:500).json({error:message});
+  }
+  res.json({ok:true,...permissionDetailsForUser(findUserById(target.id)!,actor)});
+});
 app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canEditTarget(req.user!,target)) return res.status(403).json({error:'Cannot edit that user.'}); const role=(req.body.role??target.role) as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'}); run('UPDATE users SET full_name=?, email=?, role=?, updated_at=? WHERE id=?', [req.body.fullName??target.full_name,req.body.email??target.email,role,now(),target.id]); audit(req,'user update','user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
 app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
-app.get('/api/vendors', requireAuth, (req,res)=>{
+app.get('/api/vendors', requireAuth, requirePermission('vendors.view'), (req,res)=>{
   const q = queryText(req.query.q);
   const includeDeleted = String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
   const where = includeDeleted ? ['1=1'] : ['deleted=0'];
@@ -7515,14 +7739,14 @@ app.get('/api/vendors', requireAuth, (req,res)=>{
   const vendors = all<VendorRow>(`SELECT * FROM inventory_vendors WHERE ${where.join(' AND ')} ORDER BY name COLLATE NOCASE, id`, params).map(publicVendor);
   res.json({ok:true,vendors});
 });
-app.get('/api/vendors/options', requireAuth, (_req,res)=>{
+app.get('/api/vendors/options', requireAuth, requirePermission('vendors.view'), (_req,res)=>{
   const options = all<{ id: number; name: string; is_active: number; deleted: number }>('SELECT id, name, is_active, deleted FROM inventory_vendors WHERE deleted=0 AND is_active=1 ORDER BY name COLLATE NOCASE, id').map(row=>({id:row.id,companyName:row.name,isActive:Boolean(row.is_active),deleted:Boolean(row.deleted)}));
   res.json({ok:true,options});
 });
-app.get('/api/vendors/export/template', requireAuth, requirePermission('inventory.write'), (_req,res)=>{
+app.get('/api/vendors/export/template', requireAuth, requirePermission('vendors.import_export'), (_req,res)=>{
   sendDownload(res, `MCC_Vendors_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', vendorCsvFromRows([]));
 });
-app.get('/api/vendors/export/csv', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.get('/api/vendors/export/csv', requireAuth, requirePermission('vendors.import_export'), (req,res)=>{
   const rows = all<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 ORDER BY name COLLATE NOCASE, id').flatMap(vendor => {
     const contacts = vendorContacts(vendor.id);
     return contacts.length ? contacts.map(contact => vendorExportRecord(vendor, contact)) : [vendorExportRecord(vendor)];
@@ -7530,7 +7754,7 @@ app.get('/api/vendors/export/csv', requireAuth, requirePermission('inventory.wri
   audit(req,'vendor export CSV','vendor','bulk',{rowCount:rows.length});
   sendDownload(res, `MCC_Vendors_Export_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', vendorCsvFromRows(rows));
 });
-app.post('/api/vendors/import', requireAuth, requirePermission('inventory.write'), upload.single('file'), async (req:AuthRequest,res)=>{
+app.post('/api/vendors/import', requireAuth, requirePermission('vendors.import_export'), upload.single('file'), async (req:AuthRequest,res)=>{
   try {
     const file = req.file;
     if (!file) throw new Error('Choose a CSV file to import.');
@@ -7544,14 +7768,14 @@ app.post('/api/vendors/import', requireAuth, requirePermission('inventory.write'
     res.status(/choose|must include|must be CSV|required|valid|120|20|80|15|phone|digit|country|Website URL/i.test(message) ? 400 : 500).json({ok:false,error:message,vendorsAdded:0,vendorsUpdated:0,contactsAdded:0,contactsUpdated:0,duplicateContactsSkipped:0,skippedCount:0,errorCount:1,errors:[message]});
   }
 });
-app.get('/api/vendors/:id/contacts', requireAuth, (req:AuthRequest,res)=>{
+app.get('/api/vendors/:id/contacts', requireAuth, requirePermission('vendors.view'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
   if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
-  const includeDeleted = (String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true') && roleRank(req.user!.role) >= roleRank('Manager');
+  const includeDeleted = (String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true') && hasPermission(req.user!,'vendors.delete');
   res.json({ok:true,vendor:publicVendor(vendor),contacts:vendorContacts(vendorId, includeDeleted).map(publicVendorContact)});
 });
-app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   try {
     const actor = req.user!;
@@ -7573,7 +7797,7 @@ app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('inventory.
     res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|160|20|80|15|phone|digit|country/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.vendorId);
   const contactId = Number(req.params.contactId);
   try {
@@ -7597,11 +7821,10 @@ app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermis
     res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|160|20|80|15|phone|digit|country/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, (req:AuthRequest,res)=>{
+app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('vendors.delete'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.vendorId);
   const contactId = Number(req.params.contactId);
   try {
-    if (roleRank(req.user!.role) < roleRank('Manager')) return res.status(403).json({ok:false,error:'Permission denied.'});
     const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
     if (!vendor) throw new Error('Vendor not found.');
     const existing = Number.isInteger(contactId) && contactId > 0 ? vendorContactById(vendorId, contactId) : undefined;
@@ -7617,7 +7840,7 @@ app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, (req:AuthR
     res.status(/not found/i.test(message) ? 404 : /reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.vendorId);
   const contactId = Number(req.params.contactId);
   try {
@@ -7636,13 +7859,13 @@ app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requ
     res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/vendors/:id', requireAuth, (req,res)=>{
+app.get('/api/vendors/:id', requireAuth, requirePermission('vendors.view'), (req,res)=>{
   const vendorId = Number(req.params.id);
   const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
   if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
   res.json({ok:true,vendor:publicVendor(vendor)});
 });
-app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/vendors', requireAuth, requirePermission('vendors.create'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const input = validateVendorInput(req.body);
@@ -7677,7 +7900,7 @@ app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req
     res.status(/already exists/i.test(message) ? 409 : /required|valid|120|20|80|15|phone|digit|country|reason|Website URL/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.put('/api/vendors/:id', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   try {
     if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error('Vendor not found.');
@@ -7716,11 +7939,10 @@ app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (
     res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|80|15|phone|digit|country|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
+app.delete('/api/vendors/:id', requireAuth, requirePermission('vendors.delete'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   try {
     if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error('Vendor not found.');
-    if (roleRank(req.user!.role) < roleRank('Manager')) return res.status(403).json({ok:false,error:'Permission denied.'});
     const existing = vendorById(vendorId);
     if (!existing) throw new Error('Vendor not found.');
     const reasonNote = requiredReasonNote(isRecord(req.body) ? req.body.reasonNote ?? req.body.reason : '', 'Vendor delete');
@@ -7772,7 +7994,7 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
     historyPreview:all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 1",[String(row.id),String(row.id),row.asset_number]).map(publicHistoryRecord),
   }));
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
-  res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});
+  res.json({ok:true,assets,brandSettings,permissions:{canEdit:hasPermission(req.user!,'machine.edit')||hasPermission(req.user!,'machine.create'),canDelete:hasPermission(req.user!,'machine.delete'),effective:[...getEffectivePermissions(req.user!)].filter(key=>key.startsWith('machine.'))}});
 });
 app.get('/api/machine-library/assets/:id/specification.pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
   try {
@@ -7808,7 +8030,7 @@ app.get('/api/machine-library/assets/:id/inspection-records', requireAuth, requi
   const records = all<MachineInspectionRecordRow>(`SELECT r.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number FROM machine_inspection_records r JOIN machine_assets a ON a.id=r.asset_id WHERE r.asset_id=? AND a.deleted=0 ORDER BY r.record_date DESC,r.uploaded_at DESC,r.id DESC`,[asset.id]).map(publicMachineInspectionRecord);
   res.json({ok:true,records});
 });
-app.post('/api/machine-library/assets/:id/inspection-records', requireAuth, requirePermission('machine.view'), receiveMachineInspectionRecord, (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:id/inspection-records', requireAuth, requirePermission('machine.documents_upload'), receiveMachineInspectionRecord, (req:AuthRequest,res)=>{
   let storedPath = '';
   try {
     const asset = machineAssetById(Number(req.params.id));
@@ -7851,7 +8073,7 @@ app.get('/api/machine-library/inspection-records/:id/file', requireAuth, require
     res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Inspection record could not be opened.')});
   }
 });
-app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   const record = machineInspectionRecordById(Number(req.params.id));
   if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
   const recordDate = validMachineInspectionDate(req.body?.recordDate);
@@ -7859,7 +8081,7 @@ app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePer
   scheduleAutoBackup('machine inspection record date updated',req.user!);
   res.json({ok:true,record:publicMachineInspectionRecord(machineInspectionRecordById(record.id)!)});
 });
-app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   const record = machineInspectionRecordById(Number(req.params.id));
   if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
   const filePath = machineInspectionRecordFilePath(record.stored_file_reference);
@@ -7874,7 +8096,7 @@ app.get('/api/machine-library/assets/:assetId/preventive-maintenance', requireAu
   const tasks=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? ORDER BY active DESC,hold ASC,COALESCE(next_due_date,'9999-12-31'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE",[asset.id]).map(publicPmTask);
   res.status(200).json(tasks);
 });
-app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
   try {
     const asset=machineAssetById(Number(req.params.assetId));
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
@@ -7899,7 +8121,7 @@ app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireA
     res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
   }
 });
-app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
   try {
     const existing=pmTaskById(Number(req.params.pmId));
     if (!existing) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
@@ -7919,7 +8141,7 @@ app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requir
     res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
   }
 });
-app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
   const task=pmTaskById(Number(req.params.pmId));
   if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
   const asset=machineAssetById(task.asset_id);
@@ -7931,7 +8153,7 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', require
   scheduleAutoBackup('preventive maintenance deactivated',req.user!);
   res.json({ok:true,task:publicPmTask(updated)});
 });
-app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
   try {
     const task=pmTaskById(Number(req.params.pmId));
     if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
@@ -7984,7 +8206,7 @@ app.get('/api/machine-library/assets/:assetId/document-folders', requireAuth, re
   const documentCount=one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=?',[asset.id])?.count??0;
   res.json({ok:true,assetId:asset.id,folders,summary:{folderCount:folders.length,documentCount}});
 });
-app.post('/api/machine-library/assets/:assetId/document-folders', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:assetId/document-folders', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   try {
     const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
     const name=validateMachineDocumentFolderName(isRecord(req.body)?req.body.name:'');
@@ -7998,7 +8220,7 @@ app.post('/api/machine-library/assets/:assetId/document-folders', requireAuth, r
     res.status(201).json({ok:true,folder:publicMachineDocumentFolder(folder)});
   } catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be created.')});}
 });
-app.patch('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.patch('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   try {
     const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
     const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
@@ -8012,7 +8234,7 @@ app.patch('/api/machine-library/assets/:assetId/document-folders/:folderId', req
     res.json({ok:true,folder:publicMachineDocumentFolder(machineDocumentFolderById(asset.id,folder.id)!)});
   } catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be updated.')});}
 });
-app.delete('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
   const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
   const count=one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=? AND folder_id=?',[asset.id,folder.id])?.count??0;
@@ -8026,7 +8248,7 @@ app.get('/api/machine-library/assets/:assetId/documents', requireAuth, requirePe
   const search=String(req.query.search??'').trim().slice(0,180);const sort=String(req.query.sort??'name').trim().toLowerCase();
   res.json({ok:true,documents:machineDocuments(asset.id,search,sort).map(publicMachineDocument)});
 });
-app.post('/api/machine-library/assets/:assetId/document-folders/:folderId/documents', requireAuth, requirePermission('machine.write'), receiveMachineDocuments, (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:assetId/document-folders/:folderId/documents', requireAuth, requirePermission('machine.documents_upload'), receiveMachineDocuments, (req:AuthRequest,res)=>{
   const newFiles:string[]=[];const replacedFiles:string[]=[];let databaseCommitted=false;
   try {
     const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
@@ -8071,7 +8293,7 @@ for(const mode of ['open','download'] as const)app.get(`/api/machine-library/ass
     res.setHeader('Content-Type',document.mime_type);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`${disposition}; filename="${safeName}"`);res.sendFile(filePath);
   }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be opened.')});}
 });
-app.patch('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.write'),(req:AuthRequest,res)=>{
+app.patch('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.documents_manage'),(req:AuthRequest,res)=>{
   try{
     const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
     const body=isRecord(req.body)?req.body:{};const displayFilename=body.displayFilename===undefined?document.display_filename:safeMachineDocumentDisplayName(body.displayFilename,document.extension);const description=body.description===undefined?document.description:validateMachineDocumentDescription(body.description);const revision=body.revision===undefined?document.revision:validateMachineDocumentRevision(body.revision);
@@ -8082,7 +8304,7 @@ app.patch('/api/machine-library/assets/:assetId/documents/:documentId',requireAu
     refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document updated',req.user!);res.json({ok:true,document:publicMachineDocument(machineDocumentById(asset.id,document.id)!)});
   }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be updated.')});}
 });
-app.post('/api/machine-library/assets/:assetId/documents/:documentId/move',requireAuth,requirePermission('machine.write'),(req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:assetId/documents/:documentId/move',requireAuth,requirePermission('machine.documents_manage'),(req:AuthRequest,res)=>{
   let replacedPath='';
   try{
     const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
@@ -8094,7 +8316,7 @@ app.post('/api/machine-library/assets/:assetId/documents/:documentId/move',requi
     if(replacedPath&&fs.existsSync(replacedPath))fs.rmSync(replacedPath,{force:true});refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document moved',req.user!);res.json({ok:true,document:publicMachineDocument(machineDocumentById(asset.id,document.id)!)});
   }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be moved.')});}
 });
-app.delete('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.write'),(req:AuthRequest,res)=>{
+app.delete('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.documents_manage'),(req:AuthRequest,res)=>{
   try{const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const filePath=machineDocumentFilePath(asset.id,document.stored_filename);run('DELETE FROM machine_documents WHERE id=? AND asset_id=?',[document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[now(),req.user!.id,document.folder_id]);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});recordMachineDocumentHistory('document_deleted',req.user!,asset,{documentId:document.id,displayFilename:document.display_filename,folderId:document.folder_id,folderName:document.folder_name});refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document deleted',req.user!);res.json({ok:true});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be deleted.')});}
 });
 app.get('/api/machine-library/assets/:assetId/documents/export',requireAuth,requirePermission('machine.view'),(req:AuthRequest,res)=>{
@@ -8107,8 +8329,7 @@ app.get('/api/machine-library/assets/:assetId/documents/export',requireAuth,requ
     streamRecoveryArchive(res,`Asset-${visibleNumber}_Documents_${date}.zip`,archive=>appendAssetRecoveryArchive(archive,manifest));
   }catch(error){if(res.headersSent)res.destroy(error as Error);else res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Asset document export could not be created.')});}
 });
-app.get('/api/machine-library/documents/recovery-export',requireAuth,(req:AuthRequest,res)=>{
-  if(!['Admin','Manager'].includes(req.user!.role)&&!req.user!.is_owner_admin)return res.status(403).json({ok:false,error:'Admin or Manager access is required.'});
+app.get('/api/machine-library/documents/recovery-export',requireAuth,requirePermission('machine.import_export'),(req:AuthRequest,res)=>{
   try{
     validateMachineDocumentStorageIntegrity();
     const recovery=refreshMachineDocumentRecoveryMetadata();
@@ -8129,7 +8350,7 @@ app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission(
     WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicMachineAssetNote);
   res.json({ok:true,notes});
 });
-app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.notes_manage'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
   let noteId=0;
   const storedFiles:string[]=[];
   try {
@@ -8171,7 +8392,7 @@ app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission
     res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
+app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.notes_manage'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
   const newAttachmentIds:number[]=[];
   const storedFiles:string[]=[];
   let previous:MachineAssetNoteRow|null=null;
@@ -8209,7 +8430,7 @@ app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermissi
     res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.notes_manage'), (req:AuthRequest,res)=>{
   const note=machineAssetNoteById(Number(req.params.noteId));
   if (!note) return res.status(404).json({ok:false,error:'Asset note not found.'});
   const attachments=machineAssetNoteAttachments(note.id);
@@ -8220,7 +8441,7 @@ app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermi
   scheduleAutoBackup('machine asset note deleted',req.user!);
   res.json({ok:true});
 });
-app.delete('/api/machine-library/asset-note-attachments/:attachmentId', requireAuth, requirePermission('machine.write'), async (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/asset-note-attachments/:attachmentId', requireAuth, requirePermission('machine.notes_manage'), async (req:AuthRequest,res)=>{
   try {
     const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM machine_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);
     if (!attachment || !machineAssetNoteById(attachment.note_id)) return res.status(404).json({ok:false,error:'Asset note attachment not found.'});
@@ -8295,7 +8516,7 @@ app.get('/api/machine-library/assets/:id/component-images/:componentType/image',
     res.status(/invalid/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.put('/api/machine-library/assets/:id/component-images/:componentType', requireAuth, requirePermission('machine.write'), receiveMachineComponentImage, (req:AuthRequest,res)=>{
+app.put('/api/machine-library/assets/:id/component-images/:componentType', requireAuth, requirePermission('machine.documents_manage'), receiveMachineComponentImage, (req:AuthRequest,res)=>{
   let newFilePath = '';
   let databaseCommitted = false;
   try {
@@ -8337,7 +8558,7 @@ app.put('/api/machine-library/assets/:id/component-images/:componentType', requi
     res.status(/not found/i.test(message)?404:/choose|must be|invalid|match|10 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.create'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const input = validateMachineAssetInput(req.body);
@@ -8365,7 +8586,7 @@ app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.
     res.status(/required|numeric|Voltage Type|Setup Type|unsafe characters|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.edit'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const id = Number(req.params.id);
@@ -8426,7 +8647,7 @@ app.delete('/api/machine-library/assets/:id', requireAuth, requirePermission('ma
     res.status(/required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/machine-library/assets/:id/replacements/:field', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:id/replacements/:field', requireAuth, requirePermission('machine.edit'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const config = replacementFields[String(req.params.field) as MachineReplacementField];
@@ -8453,7 +8674,7 @@ app.get('/api/machine-library/brand-settings', requireAuth, requirePermission('m
   seedMachineBrandSettings();
   res.json({ok:true,brandSettings:all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}))});
 });
-app.put('/api/machine-library/brand-settings/:brandName', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.put('/api/machine-library/brand-settings/:brandName', requireAuth, requirePermission('machine.edit'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const brandName = normalizeMachineBrand(String(req.params.brandName));
@@ -8597,10 +8818,10 @@ app.post('/api/machine-library/measurement-inspection/pdf', requireAuth, require
     res.status(500).json({ok:false,error:'Measurement PDF generation failed. Check server console for details.',detail:safeErrorMessage(error)});
   }
 });
-app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.write'), (_req,res)=>{
+app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.import_export'), (_req,res)=>{
   sendDownload(res, `MCC_Machine_List_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', machineCsvFromRows(machineImportHeaders, []));
 });
-app.post('/api/machine-library/import', requireAuth, requirePermission('machine.write'), upload.single('file'), async (req:AuthRequest,res)=>{
+app.post('/api/machine-library/import', requireAuth, requirePermission('machine.import_export'), upload.single('file'), async (req:AuthRequest,res)=>{
   try {
     const rows = await parseMachineImportFile(req.file);
     const summary = importMachineAssetRows(req, rows, machineImportModeFromValue(isRecord(req.body) ? req.body.importMode : ''));
@@ -8619,13 +8840,13 @@ app.get('/api/equipment-library/assets',requireAuth,requirePermission('equipment
     const latest=one<HistoryLogRow>("SELECT * FROM history_logs WHERE ((section='equipment_library' AND entity_type='equipment_asset') OR (section='preventive_maintenance' AND equipment_name<>'')) AND asset_id=? ORDER BY created_at DESC,id DESC LIMIT 1",[String(row.id)]);
     return {...publicEquipmentAsset(row),pmSummary:machineAssetPmCardSummary(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC",[row.id])),latestHistory:latest?publicHistoryRecord(latest):null};
   });
-  res.json({ok:true,assets,categories:equipmentCategories,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineWrite(req.user!)}});
+  res.json({ok:true,assets,categories:equipmentCategories,permissions:{canEdit:hasPermission(req.user!,'equipment.edit')||hasPermission(req.user!,'equipment.create'),canDelete:hasPermission(req.user!,'equipment.delete'),effective:[...getEffectivePermissions(req.user!)].filter(key=>key.startsWith('equipment.'))}});
 });
-app.post('/api/equipment-library/assets',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{
+app.post('/api/equipment-library/assets',requireAuth,requirePermission('equipment.create'),(req:AuthRequest,res)=>{
   try{const input=validateEquipmentAssetInput(req.body);const existing=equipmentAssetByNumber(input.assetNumber);if(existing&&!existing.deleted)return res.status(409).json({ok:false,error:'Equipment Asset Number already exists.'});const timestamp=now();const actor=req.user!;let assetId=0;db.exec('BEGIN IMMEDIATE');try{assetId=existing?.deleted?existing.id:insertEquipmentAsset(input,actor,timestamp);if(existing?.deleted)updateEquipmentAsset(existing.id,input,actor,timestamp);const created=equipmentAssetById(assetId)!;recordEquipmentHistory({action:'equipment_created',actor,row:created,newValue:equipmentHistoryValue(created)});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}audit(req,'equipment asset create','equipment_asset',assetId,{assetNumber:input.assetNumber});scheduleAutoBackup('equipment asset create',actor);res.status(201).json({ok:true,asset:publicEquipmentAsset(equipmentAssetById(assetId)!)});}
   catch(error){const message=safeErrorMessage(error);res.status(/required|unsafe|160|already/i.test(message)?400:500).json({ok:false,error:message});}
 });
-app.put('/api/equipment-library/assets/:id',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{
+app.put('/api/equipment-library/assets/:id',requireAuth,requirePermission('equipment.edit'),(req:AuthRequest,res)=>{
   try{const id=Number(req.params.id);const existing=equipmentAssetById(id);if(!existing)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const input=validateEquipmentAssetInput(req.body);const duplicate=equipmentAssetByNumber(input.assetNumber);if(duplicate&&duplicate.id!==id&&!duplicate.deleted)return res.status(409).json({ok:false,error:'Equipment Asset Number already exists.'});const oldValue=equipmentHistoryValue(existing);updateEquipmentAsset(id,input,req.user!,now());const updated=equipmentAssetById(id)!;recordEquipmentHistory({action:'equipment_edited',actor:req.user!,row:updated,oldValue,newValue:equipmentHistoryValue(updated),reasonNote:textField(isRecord(req.body)?req.body:{},['reasonNote','reason'])});audit(req,'equipment asset update','equipment_asset',id,{assetNumber:input.assetNumber});scheduleAutoBackup('equipment asset update',req.user!);res.json({ok:true,asset:publicEquipmentAsset(updated)});}
   catch(error){const message=safeErrorMessage(error);res.status(/not found/i.test(message)?404:/required|unsafe|160|already/i.test(message)?400:500).json({ok:false,error:message});}
 });
@@ -8641,26 +8862,26 @@ app.get('/api/equipment-library/assets/:id/history',requireAuth,requirePermissio
 app.get('/api/equipment-library/assets/:id/specification.pdf',requireAuth,requirePermission('equipment.view'),async(req:AuthRequest,res)=>{
   try{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const tasks=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC",[asset.id]).map(publicPmTask);const generatedAt=new Date();const buffer=await buildEquipmentAssetSpecPdf(publicEquipmentAsset(asset),tasks,generatedAt);const filename=equipmentAssetSpecPdfFilename(asset.asset_number,generatedAt);res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`${String(req.query.download)==='true'?'attachment':'inline'}; filename="${filename}"`);res.setHeader('Content-Length',String(buffer.length));res.send(buffer);}catch(error){res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Equipment specification PDF could not be generated.')});}
 });
-app.get('/api/equipment-library/export/template',requireAuth,requirePermission('equipment.write'),(_req,res)=>sendDownload(res,`MCC_Equipment_Library_Template_${downloadDateStamp()}.csv`,'text/csv; charset=utf-8',machineCsvFromRows(equipmentImportHeaders,[])));
-app.get('/api/equipment-library/export',requireAuth,requirePermission('equipment.view'),(_req,res)=>{
+app.get('/api/equipment-library/export/template',requireAuth,requirePermission('equipment.import_export'),(_req,res)=>sendDownload(res,`MCC_Equipment_Library_Template_${downloadDateStamp()}.csv`,'text/csv; charset=utf-8',machineCsvFromRows(equipmentImportHeaders,[])));
+app.get('/api/equipment-library/export',requireAuth,requirePermission('equipment.import_export'),(_req,res)=>{
   const rows=all<EquipmentAssetRow>('SELECT * FROM equipment_assets WHERE deleted=0 ORDER BY asset_number COLLATE NOCASE').map(row=>{const item=publicEquipmentAsset(row);return Object.fromEntries(equipmentImportHeaders.map(header=>[header,({ 'Equipment Asset Number':item.assetNumber,'Equipment Name':item.equipmentName,'Category':item.category,'Equipment Type':item.equipmentType,'Manufacturer / Brand':item.manufacturer,'Model':item.model,'Serial Number':item.serialNumber,'Year':item.equipmentYear,'Location':item.location,'Department / Area':item.department,'Status':item.status,'Criticality':item.criticality,'Power Type':item.powerType,'Voltage':item.voltage,'Phase':item.phase,'Amperage':item.amperage,'Air Requirement':item.airRequirement,'Water Requirement':item.waterRequirement,'Capacity / Rating':item.capacityRating,'Dimensions':item.dimensions,'Weight':item.weight,'Specification Notes':item.specificationNotes } as Record<string,string>)[header]??'']));});sendDownload(res,`MCC_Equipment_Library_${downloadDateStamp()}.csv`,'text/csv; charset=utf-8',machineCsvFromRows(equipmentImportHeaders,rows));
 });
-app.post('/api/equipment-library/import',requireAuth,requirePermission('equipment.write'),upload.single('file'),async(req:AuthRequest,res)=>{try{const rows=await parseEquipmentImportFile(req.file);res.json(importEquipmentRows(req,rows,machineImportModeFromValue(isRecord(req.body)?req.body.importMode:'')));}catch(error){const message=safeErrorMessage(error);res.status(/Choose|must include|must be CSV|required/i.test(message)?400:500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],changedAssetNumbers:[]});}});
+app.post('/api/equipment-library/import',requireAuth,requirePermission('equipment.import_export'),upload.single('file'),async(req:AuthRequest,res)=>{try{const rows=await parseEquipmentImportFile(req.file);res.json(importEquipmentRows(req,rows,machineImportModeFromValue(isRecord(req.body)?req.body.importMode:'')));}catch(error){const message=safeErrorMessage(error);res.status(/Choose|must include|must be CSV|required/i.test(message)?400:500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],changedAssetNumbers:[]});}});
 
 app.get('/api/equipment-library/assets/:assetId/preventive-maintenance',requireAuth,requirePermission('equipment.view'),(req,res)=>{
   const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});
   res.json(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND asset_id=? ORDER BY active DESC,hold ASC,COALESCE(next_due_date,'9999-12-31'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE",[asset.id]).map(publicPmTask));
 });
-app.post('/api/equipment-library/assets/:assetId/preventive-maintenance',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{
+app.post('/api/equipment-library/assets/:assetId/preventive-maintenance',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
   try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const clientRequestId=String(req.get('Idempotency-Key')??'').trim();if(clientRequestId&&!/^[A-Za-z0-9._:-]{8,128}$/.test(clientRequestId))return res.status(400).json({ok:false,error:'Invalid PM save request identifier.'});const existingRequest=clientRequestId?one<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND client_request_id=?",[clientRequestId]):undefined;if(existingRequest){if(existingRequest.asset_id!==asset.id)return res.status(409).json({ok:false,error:'PM save request identifier is already in use.'});return res.json({ok:true,task:publicPmTask(existingRequest),duplicatePrevented:true});}const input=validatePmTaskInput(req.body);const timestamp=now();const result=run(`INSERT INTO pm_tasks (asset_id,asset_library,client_request_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[asset.id,'equipment',clientRequestId||null,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp]);const task=pmTaskById(Number(result.lastInsertRowid),'equipment')!;recordPmAudit({action:'pm_created',task,asset,actor:req.user!,newValue:pmHistoryValue(task)});scheduleAutoBackup('equipment preventive maintenance created',req.user!);res.status(201).json({ok:true,task:publicPmTask(task)});}catch(error){const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be created.');res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});}
 });
-app.put('/api/equipment-library/preventive-maintenance/:pmId',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{
+app.put('/api/equipment-library/preventive-maintenance/:pmId',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
   try{const existing=pmTaskById(Number(req.params.pmId),'equipment');if(!existing)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(existing.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const input=validatePmTaskInput(req.body);const oldValue=pmHistoryValue(existing);run('UPDATE pm_tasks SET title=?,instructions=?,interval_type=?,interval_value=?,last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,active=?,hold=?,notes=?,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library=?',[input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,now(),existing.id,'equipment']);const task=pmTaskById(existing.id,'equipment')!;recordPmAudit({action:'pm_updated',task,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(task)});scheduleAutoBackup('equipment preventive maintenance updated',req.user!);res.json({ok:true,task:publicPmTask(task)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance tracking could not be updated.')});}
 });
-app.post('/api/equipment-library/preventive-maintenance/:pmId/deactivate',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{
+app.post('/api/equipment-library/preventive-maintenance/:pmId/deactivate',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
   const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const oldValue=pmHistoryValue(task);run("UPDATE pm_tasks SET active=0,hold=0,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library='equipment'",[req.user!.id,now(),task.id]);const updated=pmTaskById(task.id,'equipment')!;recordPmAudit({action:'pm_deactivated',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated)});scheduleAutoBackup('equipment preventive maintenance deactivated',req.user!);res.json({ok:true,task:publicPmTask(updated)});
 });
-app.post('/api/equipment-library/preventive-maintenance/:pmId/complete',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{
+app.post('/api/equipment-library/preventive-maintenance/:pmId/complete',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
   try{const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});if(!task.active)throw new Error('Inactive preventive maintenance tracking cannot be completed.');if(task.hold)throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');const completionDate=validPmDate((isRecord(req.body)?req.body.completionDate:null)??new Date().toISOString().slice(0,10),'completion date',true)!;const completedMeter=optionalPmNumber(isRecord(req.body)?req.body.completedMeter:null,'Completed meter');if(pmMeterIntervals.has(task.interval_type)&&completedMeter===null)throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);const completionNotes=String(isRecord(req.body)?req.body.completionNotes??'':'').replace(/\r/g,'').trim().slice(0,12000);const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);const timestamp=now();const oldValue=pmHistoryValue(task);let historyId=0;db.exec('BEGIN IMMEDIATE');try{const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_date,completed_meter,performed_by_user_id,performed_by_name,completion_notes,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,[task.id,task.asset_id,'equipment',completionDate,completedMeter,req.user!.id,req.user!.full_name,completionNotes,task.next_due_date,task.next_due_meter,due.nextDueDate,due.nextDueMeter,timestamp]);historyId=Number(result.lastInsertRowid);run("UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library='equipment'",[completionDate,pmMeterIntervals.has(task.interval_type)?completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?completedMeter:task.current_meter,due.nextDueDate,due.nextDueMeter,req.user!.id,timestamp,task.id]);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}const updated=pmTaskById(task.id,'equipment')!;const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=? AND asset_library=?',[historyId,'equipment'])!;recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated),reasonNote:completionNotes});scheduleAutoBackup('equipment preventive maintenance completed',req.user!);res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.')});}
 });
 app.get('/api/equipment-library/preventive-maintenance/:pmId/history',requireAuth,requirePermission('equipment.view'),(req,res)=>{
@@ -8692,7 +8913,7 @@ function registerEquipmentDocumentLibraryRoutes(){
   app.get(`${base}/assets/:assetId/documents/export`,requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const recovery=refreshEquipmentDocumentRecoveryMetadata(asset.id);const manifest=recovery.manifests[0];const date=new Date().toISOString().slice(0,10);streamRecoveryArchive(res,`Equipment-${safeArchiveSegment(asset.asset_number,String(asset.id))}_Documents_${date}.zip`,archive=>{archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:'asset-info.json'});for(const document of manifest.documents){const source=equipmentDocumentFilePath(asset.id,String(document.storedFilename));if(!fs.existsSync(source))throw new Error(`Stored document is missing: ${document.visibleFilename}`);archive.file(source,{name:`${safeArchiveSegment(String(document.folderName),'Unfiled')}/${safeArchiveSegment(String(document.visibleFilename),'document')}`});}});});
 }
 registerEquipmentDocumentLibraryRoutes();
-app.get('/api/equipment-library/documents/recovery-export',requireAuth,(req:AuthRequest,res)=>{if(!['Admin','Manager'].includes(req.user!.role)&&!req.user!.is_owner_admin)return res.status(403).json({ok:false,error:'Admin or Manager access is required.'});const recovery=refreshEquipmentDocumentRecoveryMetadata();const date=new Date().toISOString().slice(0,10);streamRecoveryArchive(res,`MCC_Equipment_Document_Recovery_${date}.zip`,archive=>{archive.append(`${JSON.stringify(recovery.index,null,2)}\n`,{name:'equipment-library-index.json'});archive.append('MCC Equipment Asset Document Library - Full Recovery Export\n\nFiles are grouped by visible Equipment Asset Number. asset-info.json retains stable internal IDs and physical filenames for recovery.\n',{name:'README.txt'});for(const manifest of recovery.manifests){const prefix=`Equipment-${safeArchiveSegment(manifest.asset.assetNumber,String(manifest.asset.internalAssetId))} - ${safeArchiveSegment(manifest.asset.equipmentName,'Unnamed Equipment')}`;archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:`${prefix}/asset-info.json`});for(const document of manifest.documents){const source=equipmentDocumentFilePath(manifest.asset.internalAssetId,String(document.storedFilename));if(fs.existsSync(source))archive.file(source,{name:`${prefix}/${safeArchiveSegment(String(document.folderName),'Unfiled')}/${safeArchiveSegment(String(document.visibleFilename),'document')}`});}}});});
+app.get('/api/equipment-library/documents/recovery-export',requireAuth,requirePermission('equipment.import_export'),(req:AuthRequest,res)=>{const recovery=refreshEquipmentDocumentRecoveryMetadata();const date=new Date().toISOString().slice(0,10);streamRecoveryArchive(res,`MCC_Equipment_Document_Recovery_${date}.zip`,archive=>{archive.append(`${JSON.stringify(recovery.index,null,2)}\n`,{name:'equipment-library-index.json'});archive.append('MCC Equipment Asset Document Library - Full Recovery Export\n\nFiles are grouped by visible Equipment Asset Number. asset-info.json retains stable internal IDs and physical filenames for recovery.\n',{name:'README.txt'});for(const manifest of recovery.manifests){const prefix=`Equipment-${safeArchiveSegment(manifest.asset.assetNumber,String(manifest.asset.internalAssetId))} - ${safeArchiveSegment(manifest.asset.equipmentName,'Unnamed Equipment')}`;archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:`${prefix}/asset-info.json`});for(const document of manifest.documents){const source=equipmentDocumentFilePath(manifest.asset.internalAssetId,String(document.storedFilename));if(fs.existsSync(source))archive.file(source,{name:`${prefix}/${safeArchiveSegment(String(document.folderName),'Unfiled')}/${safeArchiveSegment(String(document.visibleFilename),'document')}`});}}});});
 
 function equipmentAssetNoteFilePath(storedReference:string){const relative=storedReference.replace(/\\/g,'/');if(!relative.startsWith('uploads/equipment-asset-notes/'))throw new Error('Equipment note file reference is invalid.');const resolved=path.resolve(equipmentAssetNotesDir,path.basename(relative));const root=path.resolve(equipmentAssetNotesDir);if(!resolved.startsWith(`${root}${path.sep}`))throw new Error('Equipment note file reference is invalid.');return resolved;}
 function equipmentAssetNoteById(noteId:number){return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.id=? AND a.deleted=0`,[noteId]);}
@@ -8899,7 +9120,7 @@ app.get('/api/settings/network-links', requireAuth, requirePermission('settings.
     primaryLanUrl: lanUrls[0] ?? null,
   });
 });
-app.get('/api/requisition-batches', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+app.get('/api/requisition-batches', requireAuth, requirePermission('requisitions.view'), (req:AuthRequest,res)=>{
   try {
     ensureGeneralRequisitionBatch();
     res.json({ok:true,batches:requisitionBatchList(queryText(req.query.view) || 'active')});
@@ -8907,7 +9128,7 @@ app.get('/api/requisition-batches', requireAuth, requirePermission('inventory.vi
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-batches', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = validateRequisitionBatchInput(req.body);
@@ -8923,7 +9144,7 @@ app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.w
     res.status(/required|invalid|must|reserved/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requisition-batch.manage'), (req:AuthRequest,res)=>{
+app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const batchId = Number(req.params.id);
   try {
@@ -8944,7 +9165,7 @@ app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requis
     res.status(/not found/i.test(message) ? 404 : /required|invalid|cannot|must|reserved/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requisition-batch.manage'), (req:AuthRequest,res)=>{
+app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const batchId = Number(req.params.id);
   try {
@@ -8992,7 +9213,7 @@ app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requi
     res.status(500).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+app.get('/api/requisition-staging', requireAuth, requirePermission('requisitions.view'), (req:AuthRequest,res)=>{
   try {
     const batchId = Number(req.query.batchId ?? 0);
     const includeCompleted = ['1','true','yes'].includes(String(req.query.includeCompleted ?? '').toLowerCase());
@@ -9002,7 +9223,7 @@ app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.vi
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = validateRequisitionStagingInput(req.body);
@@ -9029,7 +9250,7 @@ app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.w
     res.status(/already staged/i.test(message) ? 409 : /required|must|invalid|not found/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -9077,7 +9298,7 @@ app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('invent
     res.status(/required|select|not found|must|positive|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/move', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/move', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -9131,7 +9352,7 @@ app.post('/api/requisition-staging/move', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /select|only|different|open|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const itemId = Number(req.params.id);
   try {
@@ -9160,7 +9381,7 @@ app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /already staged/i.test(message) ? 409 : /required|must|invalid/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   try {
     const input = isRecord(req.body) ? req.body : {};
     const ids = Array.isArray(input.ids) ? uniquePositiveIds(input.ids.map(value=>Number(value))) : [];
@@ -9182,7 +9403,7 @@ app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermissi
     res.status(/select/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const itemId = Number(req.params.id);
   try {
     const existing = requisitionStagingById(itemId);
@@ -9202,7 +9423,7 @@ app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inven
     res.status(/not found/i.test(message) ? 404 : /only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/preview', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/preview', requireAuth, requirePermission('requisitions.print_download'), (req:AuthRequest,res)=>{
   try {
     const input = isRecord(req.body) ? req.body : {};
     res.json({ok:true,...createStagingPreview(req.user!,input)});
@@ -9211,7 +9432,7 @@ app.post('/api/requisition-staging/preview', requireAuth, requirePermission('inv
     res.status(/not found|select|must|required|already exists|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth, requirePermission('inventory.view'), async (req:AuthRequest,res)=>{
+app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth, requirePermission('requisitions.print_download'), async (req:AuthRequest,res)=>{
   try {
     const record = stagingPreviewRecord(req.user!,String(req.params.token));
     const groupIndex = Number(req.params.groupIndex);
@@ -9229,7 +9450,7 @@ app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth,
     res.status(/not found|expired/i.test(message) ? 404 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePermission('requisitions.create'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -9251,8 +9472,8 @@ app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePer
     sendRequisitionError(req,res,'requisition create from staging','selection',error);
   }
 });
-app.get('/api/requisitions/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...requisitionSummary()}));
-app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+app.get('/api/requisitions/summary', requireAuth, requirePermission('requisitions.view'), (_req,res)=>res.json({ok:true,...requisitionSummary()}));
+app.get('/api/requisitions', requireAuth, requirePermission('requisitions.view'), (req:AuthRequest,res)=>{
   try {
     const includeDeleted = canDeleteRequisitions(req.user!) && String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
     const includeDrafts = canDeleteRequisitions(req.user!) && String(req.query.includeDrafts ?? '').toLowerCase() === 'true';
@@ -9261,12 +9482,12 @@ app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.get('/api/requisitions/:id', requireAuth, requirePermission('inventory.view'), (req,res)=>{
+app.get('/api/requisitions/:id', requireAuth, requirePermission('requisitions.view'), (req,res)=>{
   const requisition = requisitionById(Number(req.params.id));
   if (!requisition) return res.status(404).json({ok:false,error:'Requisition not found.'});
   res.json({ok:true,requisition:publicRequisition(requisition)});
 });
-app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.view'), async (req:AuthRequest,res)=>{
+app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('requisitions.print_download'), async (req:AuthRequest,res)=>{
   const requisitionId = Number(req.params.id);
   try {
     const requisition = requisitionById(requisitionId, { includeDeleted: canDeleteRequisitions(req.user!) });
@@ -9297,7 +9518,7 @@ app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.v
     res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions', requireAuth, requirePermission('requisitions.create'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition create';
   try {
@@ -9317,7 +9538,7 @@ app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'),
   }
 });
 
-app.post('/api/requisitions/preview', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions/preview', requireAuth, requirePermission('requisitions.print_download'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition preview create';
   try {
@@ -9337,7 +9558,7 @@ app.post('/api/requisitions/preview', requireAuth, requirePermission('inventory.
   }
 });
 
-app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('requisitions.create'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition preview pass';
   const requisitionId = Number(req.params.id);
@@ -9384,7 +9605,7 @@ app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('inventory
   }
 });
 
-app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('inventory.write'), async (req:AuthRequest,res)=>{
+app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('requisitions.print_download'), async (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'vendor requisition PDF create';
   try {
@@ -9452,7 +9673,7 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
   }
 });
 
-app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisitions/:id/status', requireAuth, (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition status changed';
   const requisitionId = Number(req.params.id);
@@ -9460,6 +9681,11 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
     const input = isRecord(req.body) ? req.body : {};
     const nextStatus = textField(input, ['status']) as RequisitionStatus;
     if (!['Ordered','Received','Canceled'].includes(nextStatus)) throw new Error('Status must be Ordered, Received, or Canceled.');
+    const requiredPermission:PermissionKey=nextStatus==='Ordered'?'requisitions.mark_ordered':nextStatus==='Received'?'requisitions.mark_received':'requisitions.cancel';
+    if(!hasPermission(actor,requiredPermission)) {
+      const definition=permissionByKey.get(requiredPermission)!;
+      return res.status(403).json({error:`You do not have permission to ${definition.label.toLowerCase()}.`,code:'PERMISSION_REQUIRED',permission:requiredPermission});
+    }
     const cancelReason = textField(input, ['cancelReason','cancel_reason']);
     if (nextStatus === 'Canceled' && !cancelReason) throw new Error('Cancel reason is required.');
     const timestamp = now();
@@ -9511,7 +9737,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
     sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
   }
 });
-app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisitions/:id', requireAuth, requirePermission('requisitions.edit'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition edit';
   const requisitionId = Number(req.params.id);
@@ -9554,7 +9780,7 @@ app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.wri
     sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
   }
 });
-app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
+app.delete('/api/requisitions/:id', requireAuth, requirePermission('requisitions.delete'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const requisitionId = Number(req.params.id);
   const targetId = Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? '');
@@ -9603,7 +9829,7 @@ app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
     res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : /required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('requisitions.cancel'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -9636,7 +9862,7 @@ app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /required|select|only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisitions/bulk-delete', requireAuth, (req:AuthRequest,res)=>{
+app.post('/api/requisitions/bulk-delete', requireAuth, requirePermission('requisitions.delete'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     if (!canDeleteRequisitions(actor)) return res.status(403).json({ok:false,error:'Permission denied.'});
@@ -9677,7 +9903,7 @@ app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory
   const filter: NativePartFilter = ['low','requisition'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
   res.json({ok:true,source:'mcc-native',parts:nativeParts(search,filter),summary:nativeInventorySummary()});
 });
-app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inventory.export'), (req,res)=>{
   try {
     const records = nativeInventoryRows().map(nativeExportRecord);
     const fileName = `MCC_Inventory_Export_${downloadDateStamp()}.csv`;
@@ -9689,7 +9915,7 @@ app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inve
     res.status(500).json({ok:false,error:message});
   }
 });
-app.get('/api/inventory/native/export/excel-update-template', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.get('/api/inventory/native/export/excel-update-template', requireAuth, requirePermission('inventory.export'), async (req,res)=>{
   try {
     const records = nativeInventoryRows().map(nativeExportRecord);
     const fileName = `MCC_Inventory_Update_Template_${downloadDateStamp()}.xlsx`;
@@ -9702,7 +9928,7 @@ app.get('/api/inventory/native/export/excel-update-template', requireAuth, requi
     res.status(500).json({ok:false,error:message});
   }
 });
-app.get('/api/inventory/native/export/blank-import-template', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.get('/api/inventory/native/export/blank-import-template', requireAuth, requirePermission('inventory.export'), async (req,res)=>{
   try {
     const fileName = 'MCC_Inventory_Blank_Import_Template.xlsx';
     const buffer = await workbookBuffer('MCC Inventory Import', nativeBlankImportHeaders, []);
@@ -9714,10 +9940,10 @@ app.get('/api/inventory/native/export/blank-import-template', requireAuth, requi
     res.status(500).json({ok:false,error:message});
   }
 });
-app.get('/api/inventory/native/backups', requireAuth, requirePermission('inventory.write'), (_req,res)=>{
+app.get('/api/inventory/native/backups', requireAuth, requirePermission('inventory.export'), (_req,res)=>{
   res.json({ok:true,backups:listNativeInventoryBackups()});
 });
-app.post('/api/inventory/native/backups/create', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.post('/api/inventory/native/backups/create', requireAuth, requirePermission('inventory.export'), (req,res)=>{
   try {
     const backups = createAndAuditNativeBackup(req,'manual');
     res.status(201).json({ok:true,backups,backupCount:backups.length});
@@ -9726,7 +9952,7 @@ app.post('/api/inventory/native/backups/create', requireAuth, requirePermission(
     res.status(500).json({ok:false,error:message});
   }
 });
-app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.write'), upload.single('file'), async (req,res)=>{
+app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.import'), upload.single('file'), async (req,res)=>{
   try {
     const backupFiles = createAndAuditNativeBackup(req,'auto-before-import');
     const rows = await parseInventoryImportFile(req.file);
@@ -9741,7 +9967,7 @@ app.post('/api/inventory/native/import', requireAuth, requirePermission('invento
     res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,duplicateMergedCount:0,duplicatesRemovedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errorCount:1,errors:[message]});
   }
 });
-app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.create'), (req,res)=>{
   const actor = (req as AuthRequest).user!;
   const operation = 'native part create';
   try {
@@ -9776,7 +10002,7 @@ app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventor
     sendNativeInventoryError(req,res,operation,'',error);
   }
 });
-app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inventory.edit'), (req,res)=>{
   const actor = (req as AuthRequest).user!;
   const operation = 'native part edit';
   const partId = Number(req.params.id);
@@ -9817,7 +10043,7 @@ app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inv
     sendNativeInventoryError(req,res,operation,Number.isFinite(partId) ? partId : String(req.params.id ?? ''),error);
   }
 });
-app.patch('/api/inventory/native/parts/:id/requisition', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.patch('/api/inventory/native/parts/:id/requisition', requireAuth, requirePermission('inventory.edit'), (req,res)=>{
   const actor = (req as AuthRequest).user!;
   const operation = 'native requisition change';
   const partId = Number(req.params.id);
@@ -9905,7 +10131,7 @@ app.get('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.v
     res.status(503).json({ok:false,error:error instanceof Error ? error.message : 'Retired inventory bridge unavailable.',mit3Url});
   }
 });
-app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.create'), async (req,res)=>{
   const operation = 'inventory add through retired inventory bridge';
   try {
     const input = validateMit3PartInput(req.body);
@@ -9949,7 +10175,7 @@ app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.
     sendMit3InventoryError(req,res,operation,'',error);
   }
 });
-app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inventory.edit'), async (req,res)=>{
   const operation = 'inventory edit through retired inventory bridge';
   const targetId = String(req.params.id ?? '');
   try {
@@ -9968,7 +10194,7 @@ app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inven
     sendMit3InventoryError(req,res,operation,targetId,error);
   }
 });
-app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermission('inventory.edit'), async (req,res)=>{
   const operation = 'inventory requisition update through retired inventory bridge';
   const targetId = String(req.params.id ?? '');
   try {

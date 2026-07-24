@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccContactPill, MccLinkPill, MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
+import { hasPermission } from '../../permissions';
 import {
   canonicalCountryValue,
   canonicalUsStateValue,
@@ -663,7 +664,7 @@ function VendorCard({vendor,onView,onEdit,onDelete,onContacts,onEmailCopied}:{ve
   );
 }
 
-export function VendorsPage({userRole=''}:{userRole?:string}) {
+export function VendorsPage({userRole='',effectivePermissions}:{userRole?:string;effectivePermissions?:string[]}) {
   const [vendors,setVendors]=useState<VendorRecord[]>([]);
   const [search,setSearch]=useState('');
   const [loading,setLoading]=useState(true);
@@ -695,8 +696,8 @@ export function VendorsPage({userRole=''}:{userRole?:string}) {
 
   const sortedVendors = useMemo(()=>[...vendors].sort((left,right)=>compareText(left.companyName,right.companyName)),[vendors]);
   const editorInitial = editingVendor ? vendorFormFromVendor(editingVendor) : blankVendorForm;
-  const canEditContacts = roleRank(userRole) >= roleRank('Maintenance Tech 2');
-  const canDeleteContacts = roleRank(userRole) >= roleRank('Manager');
+  const canEditContacts = hasPermission(effectivePermissions,'vendors.edit',roleRank(userRole)>=roleRank('Maintenance Tech 2'));
+  const canDeleteContacts = hasPermission(effectivePermissions,'vendors.delete',roleRank(userRole)>=roleRank('Manager'));
 
   function updateVendorInState(vendor: VendorRecord) {
     setVendors(current=>current.map(item=>item.id === vendor.id ? vendor : item));

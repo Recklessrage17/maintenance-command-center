@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusAge } from '../../components/MccStatusAge';
 import { MccSuccessBurst } from '../../components/MccSuccessBurst';
+import { hasPermission } from '../../permissions';
 import { RequisitionItemsPopover } from './RequisitionItemsPopover';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
@@ -215,7 +216,7 @@ function blankStagingReviewForm(userFullName = ''): StagingReviewForm {
   return {poInitiator:'',requisitionedByName:userFullName,taxExempt:'',workOrderNumber:'',confirmedWith:'',materialCert:'No',shipVia:'',fob:'Destination',notes:''};
 }
 
-export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: string; userFullName?: string }) {
+export function RequisitionsPage({ userRole, effectivePermissions, userFullName = '' }: { userRole: string; effectivePermissions?:string[]; userFullName?: string }) {
   const [requisitions,setRequisitions]=useState<Requisition[]>([]);
   const [summary,setSummary]=useState<Summary>(emptySummary);
   const [filter,setFilter]=useState<StatusFilter>(()=>filterFromLocation());
@@ -272,9 +273,13 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [reducedMotion,setReducedMotion]=useState(()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const receiveFeedbackTimerRef=useRef<number|null>(null);
 
-  const canWrite = writeRoles.has(userRole);
-  const canDelete = deleteRoles.has(userRole);
-  const canManageBatches = batchManageRoles.has(userRole);
+  const canWrite = hasPermission(effectivePermissions,'requisitions.create',writeRoles.has(userRole))||hasPermission(effectivePermissions,'requisitions.edit',writeRoles.has(userRole))||hasPermission(effectivePermissions,'inventory.requisition_stage',writeRoles.has(userRole));
+  const canDelete = hasPermission(effectivePermissions,'requisitions.delete',deleteRoles.has(userRole));
+  const canManageBatches = hasPermission(effectivePermissions,'requisitions.manage_batches',batchManageRoles.has(userRole));
+  const canMarkOrdered=hasPermission(effectivePermissions,'requisitions.mark_ordered',canWrite);
+  const canMarkReceived=hasPermission(effectivePermissions,'requisitions.mark_received',canWrite);
+  const canCancel=hasPermission(effectivePermissions,'requisitions.cancel',canWrite);
+  const canPrint=hasPermission(effectivePermissions,'requisitions.print_download',true);
 
   async function loadStaging(nextView: 'active'|'completed' = batchView, preferredBatchId: number|null = activeBatchId) {
     setLoading(true);
@@ -869,7 +874,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   async function updateStatus(requisition: Requisition, status: Exclude<RequisitionStatus,'Requested'>) {
-    if (!canWrite || requisition.deleted || busyId) return;
+    const allowed=status==='Ordered'?canMarkOrdered:status==='Received'?canMarkReceived:canCancel;
+    if (!allowed || requisition.deleted || busyId) return;
     if (status === 'Canceled') {
       openReasonAction('cancel',[requisition]);
       return;
@@ -1065,7 +1071,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
           <span>Selected: {selectedRequisitions.length}</span>
           <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!filteredRequisitions.length}>{allVisibleSelected?'Unselect Visible':'Select Visible'}</button>
           <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedRequisitions.length}>Clear Selection</button>
-          {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',selectedCancelable)} disabled={!selectedCancelable.length}>Cancel Selected</button>}
+          {canCancel&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',selectedCancelable)} disabled={!selectedCancelable.length}>Cancel Selected</button>}
           {canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('delete',selectedRequisitions)} disabled={!selectedRequisitions.length}>Delete Selected</button>}
         </div>
 
@@ -1105,11 +1111,11 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                   <td>{formatDateTime(requisition.requestedAt)}</td>
                   <td>
                     <div className="requisition-row-actions">
-                      <button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>
-                      <button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
-                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-ordered" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<span className="requisition-receive-action"><button className={`secondary-button compact-button mcc-industrial-button requisition-action-received${receivedSuccessId===requisition.id?' is-success':''}`} type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id} aria-live="polite">{receivedSuccessId===requisition.id?'Received ✓':'Mark Received'}</button><MccSuccessBurst active={receivedSuccessId===requisition.id}/></span>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button mcc-industrial-button requisition-action-cancel" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
+                      {canPrint&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>}
+                      {canPrint&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>}
+                      {canMarkOrdered&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-ordered" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
+                      {canMarkReceived&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<span className="requisition-receive-action"><button className={`secondary-button compact-button mcc-industrial-button requisition-action-received${receivedSuccessId===requisition.id?' is-success':''}`} type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id} aria-live="polite">{receivedSuccessId===requisition.id?'Received ✓':'Mark Received'}</button><MccSuccessBurst active={receivedSuccessId===requisition.id}/></span>}
+                      {canCancel&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button mcc-industrial-button requisition-action-cancel" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
                       {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button mcc-industrial-button requisition-action-edit" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
                       {canDelete&&!requisition.deleted&&<button className="danger-button compact-button mcc-industrial-button requisition-action-delete" type="button" onClick={()=>deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
                     </div>

@@ -38,7 +38,8 @@ export function createFacilityInfoService(deps:{
   app:Application;
   uploadsDir:string;
   requireAuth:RequestHandler;
-  requireWrite:RequestHandler;
+  requirePermission:(permission:string)=>RequestHandler;
+  hasPermission:(user:FacilityUser,permission:string)=>boolean;
   all:<T>(sql:string,params?:SqlParam[])=>T[];
   one:<T>(sql:string,params?:SqlParam[])=>T|undefined;
   run:(sql:string,params?:SqlParam[])=>{lastInsertRowid:number|bigint};
@@ -294,16 +295,16 @@ export function createFacilityInfoService(deps:{
     res.status(status).json({ok:false,error:message});
   }
 
-  app.get('/api/facility-info',deps.requireAuth,(req:FacilityRequest,res)=>{
+  app.get('/api/facility-info',deps.requireAuth,deps.requirePermission('facility.view'),(req:FacilityRequest,res)=>{
     const areas=all<FacilityAreaRow>('SELECT * FROM facility_areas WHERE deleted=0 ORDER BY name COLLATE NOCASE').map(publicArea);
-    const user=req.user!;const canWrite=user.is_owner_admin===1||['Maintenance Tech 3','Manager','Admin'].includes(user.role);
-    res.json({ok:true,areas,permissions:{canWrite,canRecoveryExport:user.is_owner_admin===1||['Manager','Admin'].includes(user.role)},limits:{documentsMb:configuredDocumentMb,picturesMb:configuredPictureMb,videosMb:configuredVideoMb}});
+    const user=req.user!;const canWrite=['facility.create','facility.edit','facility.delete','facility.folders_manage','facility.upload','facility.rename_move','facility.content_delete'].some(permission=>deps.hasPermission(user,permission));
+    res.json({ok:true,areas,permissions:{canWrite,canRecoveryExport:deps.hasPermission(user,'facility.recovery_export')},limits:{documentsMb:configuredDocumentMb,picturesMb:configuredPictureMb,videosMb:configuredVideoMb}});
   });
-  app.get('/api/facility-info/permissions',deps.requireAuth,(req:FacilityRequest,res)=>{
-    const user=req.user!;const canWrite=user.is_owner_admin===1||['Maintenance Tech 3','Manager','Admin'].includes(user.role);
-    res.json({ok:true,canWrite,canRecoveryExport:user.is_owner_admin===1||['Manager','Admin'].includes(user.role)});
+  app.get('/api/facility-info/permissions',deps.requireAuth,deps.requirePermission('facility.view'),(req:FacilityRequest,res)=>{
+    const user=req.user!;const canWrite=['facility.create','facility.edit','facility.delete','facility.folders_manage','facility.upload','facility.rename_move','facility.content_delete'].some(permission=>deps.hasPermission(user,permission));
+    res.json({ok:true,canWrite,canRecoveryExport:deps.hasPermission(user,'facility.recovery_export')});
   });
-  app.post('/api/facility-info/areas',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.post('/api/facility-info/areas',deps.requireAuth,deps.requirePermission('facility.create'),(req:FacilityRequest,res)=>{
     try{
       const body=isRecord(req.body)?req.body:{};const name=safeName(body.name,'Facility / Area name');const timestamp=now();
       if(one('SELECT id FROM facility_areas WHERE lower(name)=lower(?) AND deleted=0',[name]))throw new Error('A Facility area with this name already exists.');
@@ -313,13 +314,13 @@ export function createFacilityInfoService(deps:{
       res.status(201).json({ok:true,area:publicArea(area)});
     }catch(error){sendError(res,error,'Facility area could not be created.');}
   });
-  app.get('/api/facility-info/areas/:areaId',deps.requireAuth,(req,res)=>{
+  app.get('/api/facility-info/areas/:areaId',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
     const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});
     const folders=all<FacilityFolderRow>('SELECT * FROM facility_folders WHERE area_id=? ORDER BY name COLLATE NOCASE',[area.id]).map(publicFolder);
     const items=all<FacilityItemRow>(`SELECT i.*,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name,a.name AS facility_name,f.name AS folder_name FROM facility_items i JOIN facility_areas a ON a.id=i.area_id JOIN facility_folders f ON f.id=i.folder_id LEFT JOIN users u ON u.id=i.uploaded_by_user_id WHERE i.area_id=? ORDER BY i.display_filename COLLATE NOCASE`,[area.id]).map(publicItem);
     res.json({ok:true,area:publicArea(area),folders,items});
   });
-  app.patch('/api/facility-info/areas/:areaId',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.patch('/api/facility-info/areas/:areaId',deps.requireAuth,deps.requirePermission('facility.edit'),(req:FacilityRequest,res)=>{
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
       const body=isRecord(req.body)?req.body:{};const name=body.name===undefined?area.name:safeName(body.name,'Facility / Area name');
@@ -330,7 +331,7 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true,area:publicArea(saved)});
     }catch(error){sendError(res,error,'Facility area could not be updated.');}
   });
-  app.delete('/api/facility-info/areas/:areaId',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.delete('/api/facility-info/areas/:areaId',deps.requireAuth,deps.requirePermission('facility.delete'),(req:FacilityRequest,res)=>{
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
       const itemCount=one<{count:number}>('SELECT COUNT(*) AS count FROM facility_items WHERE area_id=?',[area.id])?.count??0;
@@ -351,7 +352,7 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true});
     }catch(error){sendError(res,error,'Facility area could not be deleted.');}
   });
-  app.post('/api/facility-info/areas/:areaId/folders',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.post('/api/facility-info/areas/:areaId/folders',deps.requireAuth,deps.requirePermission('facility.folders_manage'),(req:FacilityRequest,res)=>{
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
       const body=isRecord(req.body)?req.body:{};const parentId=body.parentId?Number(body.parentId):null;
@@ -363,7 +364,7 @@ export function createFacilityInfoService(deps:{
       res.status(201).json({ok:true,folder:publicFolder(folder)});
     }catch(error){sendError(res,error,'Folder could not be created.');}
   });
-  app.patch('/api/facility-info/areas/:areaId/folders/:folderId',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.patch('/api/facility-info/areas/:areaId/folders/:folderId',deps.requireAuth,deps.requirePermission('facility.folders_manage'),(req:FacilityRequest,res)=>{
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
       const folder=folderById(area.id,Number(req.params.folderId));if(!folder)throw new Error('Folder not found.');
@@ -377,7 +378,7 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true,folder:publicFolder(saved)});
     }catch(error){sendError(res,error,'Folder could not be updated.');}
   });
-  app.delete('/api/facility-info/areas/:areaId/folders/:folderId',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.delete('/api/facility-info/areas/:areaId/folders/:folderId',deps.requireAuth,deps.requirePermission('facility.folders_manage'),(req:FacilityRequest,res)=>{
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
       const folder=folderById(area.id,Number(req.params.folderId));if(!folder)throw new Error('Folder not found.');
@@ -388,7 +389,7 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true});
     }catch(error){sendError(res,error,'Folder could not be deleted.');}
   });
-  app.post('/api/facility-info/areas/:areaId/folders/:folderId/items',deps.requireAuth,deps.requireWrite,receiveFiles,(req:FacilityRequest,res)=>{
+  app.post('/api/facility-info/areas/:areaId/folders/:folderId/items',deps.requireAuth,deps.requirePermission('facility.upload'),receiveFiles,(req:FacilityRequest,res)=>{
     const written:string[]=[];const replaced:string[]=[];let committed=false;
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
@@ -423,7 +424,7 @@ export function createFacilityInfoService(deps:{
       cleanupIncoming(req);if(!committed)written.forEach(file=>{if(fs.existsSync(file))fs.rmSync(file,{force:true});});sendError(res,error,'Files could not be uploaded.');
     }
   });
-  app.get('/api/facility-info/search',deps.requireAuth,(req,res)=>{
+  app.get('/api/facility-info/search',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
     const query=String(req.query.q??req.query.search??'').trim();const mediaType=String(req.query.type??'all').toLowerCase();const areaId=Number(req.query.areaId??0);const fileType=String(req.query.fileType??'').toLowerCase();const sort=String(req.query.sort??'name');
     const params:SqlParam[]=[];let where='a.deleted=0';
     if(query){const like=`%${escapeLike(query)}%`;where+=` AND (a.name LIKE ? ESCAPE '\\' COLLATE NOCASE OR f.name LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.display_filename LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.description LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.caption LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.revision LIKE ? ESCAPE '\\' COLLATE NOCASE OR COALESCE(u.full_name,'') LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.extension LIKE ? ESCAPE '\\' COLLATE NOCASE)`;params.push(like,like,like,like,like,like,like,like);}
@@ -441,7 +442,7 @@ export function createFacilityInfoService(deps:{
       :[];
     res.json({ok:true,query,areas:matchingAreas,folders:matchingFolders,items,count:matchingAreas.length+matchingFolders.length+items.length});
   });
-  app.patch('/api/facility-info/items/:itemId',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.patch('/api/facility-info/items/:itemId',deps.requireAuth,deps.requirePermission('facility.edit'),(req:FacilityRequest,res)=>{
     try{
       const item=itemById(Number(req.params.itemId));if(!item)throw new Error('Facility item not found.');const area=areaById(item.area_id)!;const body=isRecord(req.body)?req.body:{};
       const displayFilename=body.displayFilename===undefined?item.display_filename:safeFilename(body.displayFilename,item.extension);
@@ -451,7 +452,7 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true,item:publicItem(saved)});
     }catch(error){sendError(res,error,'Facility item could not be updated.');}
   });
-  app.post('/api/facility-info/items/:itemId/move',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.post('/api/facility-info/items/:itemId/move',deps.requireAuth,deps.requirePermission('facility.rename_move'),(req:FacilityRequest,res)=>{
     try{
       const item=itemById(Number(req.params.itemId));if(!item)throw new Error('Facility item not found.');const sourceArea=areaById(item.area_id)!;const body=isRecord(req.body)?req.body:{};const area=areaById(Number(body.areaId??item.area_id));if(!area)throw new Error('Destination Facility area not found.');const folder=folderById(area.id,Number(body.folderId));if(!folder)throw new Error('Destination folder not found.');
       if(folder.id===item.folder_id&&area.id===item.area_id)throw new Error('Choose a different destination folder.');
@@ -469,14 +470,14 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true,item:publicItem(itemById(item.id)!)});
     }catch(error){sendError(res,error,'Facility item could not be moved.');}
   });
-  app.delete('/api/facility-info/items/:itemId',deps.requireAuth,deps.requireWrite,(req:FacilityRequest,res)=>{
+  app.delete('/api/facility-info/items/:itemId',deps.requireAuth,deps.requirePermission('facility.content_delete'),(req:FacilityRequest,res)=>{
     try{
       const item=itemById(Number(req.params.itemId));if(!item)throw new Error('Facility item not found.');const area=areaById(item.area_id)!;const file=itemPath(item);
       run('DELETE FROM facility_items WHERE id=?',[item.id]);if(fs.existsSync(file))fs.rmSync(file,{force:true});record(`${item.media_type}_deleted`,req.user!,area,'facility_item',item.id,item.display_filename,{folderPath:folderPath(area.id,item.folder_id)});mutateComplete(area.id,'facility file deleted',req.user!);res.json({ok:true});
     }catch(error){sendError(res,error,'Facility item could not be deleted.');}
   });
-  app.get('/api/facility-info/items/:itemId/content',deps.requireAuth,(req,res)=>sendItemFile(req,res,false));
-  app.get('/api/facility-info/items/:itemId/download',deps.requireAuth,(req,res)=>sendItemFile(req,res,true));
+  app.get('/api/facility-info/items/:itemId/content',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>sendItemFile(req,res,false));
+  app.get('/api/facility-info/items/:itemId/download',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>sendItemFile(req,res,true));
 
   function sendItemFile(req:Request,res:Response,download:boolean) {
     try{
@@ -497,10 +498,10 @@ export function createFacilityInfoService(deps:{
     }catch(error){if(!res.headersSent)sendError(res,error,'Facility file could not be opened.');else res.destroy();}
   }
 
-  app.get('/api/facility-info/areas/:areaId/export',deps.requireAuth,(req,res)=>{
+  app.get('/api/facility-info/areas/:areaId/export',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
     const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});const manifest=buildManifest(area);streamArchive(res,`${safeArchiveSegment(area.name,'Facility')}_${new Date().toISOString().slice(0,10)}.zip`,archive=>appendAreaArchive(archive,manifest,''));
   });
-  app.get('/api/facility-info/recovery-export',deps.requireAuth,(req:FacilityRequest,res)=>{
+  app.get('/api/facility-info/recovery-export',deps.requireAuth,deps.requirePermission('facility.recovery_export'),(req:FacilityRequest,res)=>{
     if(!req.user?.is_owner_admin&&!['Manager','Admin'].includes(req.user?.role??''))return res.status(403).json({ok:false,error:'Admin or Manager access is required.'});
     const recovery=refreshRecoveryMetadata();streamArchive(res,`MCC_Facility_Info_Recovery_${new Date().toISOString().slice(0,10)}.zip`,archive=>{
       archive.append(`${JSON.stringify(recovery.index,null,2)}\n`,{name:'facility-info-index.json'});archive.append(recovery.csv,{name:'facility-info-index.csv'});

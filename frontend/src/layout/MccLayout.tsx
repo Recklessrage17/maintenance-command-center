@@ -56,8 +56,8 @@ function scrubJbtBrandText(value: unknown, fallback = '') {
   return text;
 }
 
-export function MccLayout({activeSection,children,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;onLogout:()=>void}) {
- const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory));
+export function MccLayout({activeSection,children,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,allowedSections,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;allowedSections?:string[];onLogout:()=>void}) {
+ const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory) && (!allowedSections||allowedSections.includes(i.id)));
  const currentPage=mccPageMetadata[activeSection];
  const pageTooltipId=`mcc-page-tooltip-${activeSection}`;
  const [launcherOpen,setLauncherOpen]=useState(false);
