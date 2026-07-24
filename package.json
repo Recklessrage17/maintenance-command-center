@@ -24,6 +24,8 @@
     "test:user-security": "playwright test tests/user-security-permissions.spec.ts",
     "test:auth-password-change": "node tests/authentication-password-change-regression.mjs",
     "test:password-permissions-api": "node tests/password-permissions-api.mjs",
+    "test:presence-api": "node tests/presence-team-api.mjs",
+    "test:teams": "playwright test tests/maintenance-team-roster.spec.ts",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
     "test:requisitions": "playwright test tests/requisitions-lifecycle.spec.ts",

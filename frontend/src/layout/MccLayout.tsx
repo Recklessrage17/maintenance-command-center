@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { MaintenanceTeamControl } from '../components/MaintenanceTeamRoster';
 import { RoleBadge } from '../components/RoleBadge';
 import { mccPageMetadata, type MccSection } from './pageMetadata';
 
@@ -56,7 +57,7 @@ function scrubJbtBrandText(value: unknown, fallback = '') {
   return text;
 }
 
-export function MccLayout({activeSection,children,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,allowedSections,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;allowedSections?:string[];onLogout:()=>void}) {
+export function MccLayout({activeSection,children,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,allowedSections,onUpdatePassword,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;allowedSections?:string[];onUpdatePassword:()=>void;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory) && (!allowedSections||allowedSections.includes(i.id)));
  const currentPage=mccPageMetadata[activeSection];
  const pageTooltipId=`mcc-page-tooltip-${activeSection}`;
@@ -64,6 +65,7 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
  const [warpingSection,setWarpingSection]=useState<MccSection|null>(null);
  const [pageEntering,setPageEntering]=useState(false);
  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
+ const [teamsOpen,setTeamsOpen]=useState(false);
  const launcherRef=useRef<HTMLDivElement>(null);
  const warpTimerRef=useRef<number>();
  const inventoryFocus=activeSection==='inventory';
@@ -87,10 +89,13 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
    if(!launcherOpen) return;
    function onKeyDown(event: KeyboardEvent) {
      if(event.key==='Escape') {
+       if(teamsOpen) return;
        closeLauncher();
      }
    }
    function onPointerDown(event: PointerEvent) {
+     if(teamsOpen) return;
+     if(event.target instanceof Element&&event.target.closest('[data-mcc-command-overlay]')) return;
      if(launcherRef.current&&!launcherRef.current.contains(event.target as Node)) {
        closeLauncher();
      }
@@ -101,7 +106,7 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
      document.removeEventListener('keydown',onKeyDown);
      document.removeEventListener('pointerdown',onPointerDown);
    };
- },[launcherOpen]);
+ },[launcherOpen,teamsOpen]);
 
  useEffect(()=>()=>{ clearWarpTimer(); },[]);
 
@@ -184,7 +189,11 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
                <strong>{user.fullName}</strong>
                <RoleBadge role={user.role} isOwnerAdmin={user.isOwnerAdmin} compact />
              </div>
-             <button className="secondary-button compact-button" type="button" onClick={()=>{ closeLauncher(); onLogout(); }}>Logout</button>
+             <div className="command-menu-user-actions">
+               <MaintenanceTeamControl onOpenChange={setTeamsOpen} />
+               <button className="secondary-button compact-button" type="button" onClick={()=>{ closeLauncher(); onUpdatePassword(); }}>Update Password</button>
+               <button className="secondary-button compact-button" type="button" onClick={()=>{ closeLauncher(); onLogout(); }}>Logout</button>
+             </div>
            </div>
          </div>
          <div className="command-menu-list" role="menu">

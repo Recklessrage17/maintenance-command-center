@@ -92,6 +92,14 @@ const passwordComplexityError = 'Temporary password must be at least 10 characte
 const passwordOk = (p: unknown): p is string => typeof p === 'string' && p.length >= passwordRequirements.minLength && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[^A-Za-z0-9]/.test(p);
 const now = () => new Date().toISOString();
 const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
+const serverStartedAt = now();
+const presencePolicy = {
+  heartbeatIntervalMs: 45_000,
+  rosterRefreshIntervalMs: 25_000,
+  onlineThresholdMs: 2 * 60_000,
+  awayAfterMs: 10 * 60_000,
+  writeThrottleMs: 25_000,
+} as const;
 
 let db = new DatabaseSync(dbPath);
 let facilityInfoService: FacilityInfoService | null = null;
@@ -106,6 +114,8 @@ function initDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, is_owner_admin INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, previous_role TEXT, new_role TEXT NOT NULL, assigned_by_user_id INTEGER, assigned_at TEXT NOT NULL, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(assigned_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_normalized TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', website_url TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_normalized TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
@@ -182,14 +192,23 @@ CREATE INDEX IF NOT EXISTS idx_history_logs_part_number ON history_logs (part_nu
 CREATE INDEX IF NOT EXISTS idx_history_logs_requisition_number ON history_logs (requisition_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_history_logs_asset_id ON history_logs (asset_id COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_history_logs_entity_label ON history_logs (entity_label COLLATE NOCASE);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_presence_user ON user_presence_sessions (user_id,logged_out_at,last_heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user ON user_role_assignments (user_id,assigned_at DESC,id DESC);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
 }
 initDb();
 function migrateDb() {
-  db.exec(`CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
+  db.exec(`CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, previous_role TEXT, new_role TEXT NOT NULL, assigned_by_user_id INTEGER, assigned_at TEXT NOT NULL, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(assigned_by_user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
+CREATE INDEX IF NOT EXISTS idx_user_presence_user ON user_presence_sessions (user_id,logged_out_at,last_heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user ON user_role_assignments (user_id,assigned_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
+  // Live state cannot survive a process restart or database restore. A still-valid
+  // browser session becomes live again only after its next authenticated heartbeat.
+  run('UPDATE user_presence_sessions SET logged_out_at=? WHERE logged_out_at IS NULL', [serverStartedAt]);
   const userColumns = new Set(all<{ name: string }>('PRAGMA table_info(users)').map(column => column.name));
   if (!userColumns.has('is_owner_admin')) run('ALTER TABLE users ADD COLUMN is_owner_admin INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.has('deleted')) run('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
@@ -446,6 +465,24 @@ interface PermissionGrantRow {
   revoked_by_user_id:number|null;
   reason:string|null;
 }
+interface PresenceSessionRow {
+  session_ref_hash:string;
+  user_id:number;
+  last_heartbeat_at:string;
+  last_activity_at:string;
+  logged_out_at:string|null;
+  created_at:string;
+}
+interface RoleAssignmentRow {
+  id:number;
+  user_id:number;
+  previous_role:Role|null;
+  new_role:Role;
+  assigned_by_user_id:number|null;
+  assigned_by_name:string|null;
+  assigned_at:string;
+  reason:string|null;
+}
 interface AuthRequest extends Request { user?: User; sessionId?: string }
 function activeSpecialGrants(userId:number) {
   return all<PermissionGrantRow>(`SELECT g.*,COALESCE(grantor.full_name,'Unknown user') AS granted_by_name
@@ -502,8 +539,33 @@ function verifyPassword(password: string, stored: string) { const [, salt, hash]
 function sign(id: string) { return `${id}.${crypto.createHmac('sha256', sessionSecret).update(id).digest('hex')}`; }
 function unsign(cookie?: string) { if (!cookie) return; const [id, sig] = cookie.split('.'); if (!id || !sig) return; return sign(id) === cookie ? id : undefined; }
 function cookie(req: Request, name: string) { return req.headers.cookie?.split(';').map(x=>x.trim()).find(x=>x.startsWith(`${name}=`))?.split('=').slice(1).join('='); }
-function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run('INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES (?,?,?,?)', [id,userId,exp,now()]); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); }
-function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) run('DELETE FROM sessions WHERE id=?', [req.sessionId]); res.clearCookie('mcc_session', { path: '/' }); }
+function presenceSessionHash(sessionId:string) {
+  return crypto.createHmac('sha256',sessionSecret).update(`mcc-presence:${sessionId}`).digest('hex');
+}
+function recordPresenceHeartbeat(sessionId:string,userId:number,activity:boolean) {
+  const timestamp=now();
+  const existing=one<PresenceSessionRow>('SELECT * FROM user_presence_sessions WHERE session_ref_hash=?',[presenceSessionHash(sessionId)]);
+  const heartbeatAge=existing?Date.now()-Date.parse(existing.last_heartbeat_at):Number.POSITIVE_INFINITY;
+  const activityAge=existing?Date.now()-Date.parse(existing.last_activity_at):Number.POSITIVE_INFINITY;
+  const shouldWrite=!existing||Boolean(existing.logged_out_at)||heartbeatAge>=presencePolicy.writeThrottleMs||(activity&&activityAge>=presencePolicy.writeThrottleMs);
+  if(shouldWrite) {
+    run(`INSERT INTO user_presence_sessions (session_ref_hash,user_id,last_heartbeat_at,last_activity_at,logged_out_at,created_at)
+      VALUES (?,?,?,?,NULL,?)
+      ON CONFLICT(session_ref_hash) DO UPDATE SET user_id=excluded.user_id,last_heartbeat_at=excluded.last_heartbeat_at,
+      last_activity_at=CASE WHEN ?=1 THEN excluded.last_activity_at ELSE user_presence_sessions.last_activity_at END,logged_out_at=NULL`,
+    [presenceSessionHash(sessionId),userId,timestamp,timestamp,timestamp,activity?1:0]);
+  }
+  return {serverTime:timestamp,written:shouldWrite};
+}
+function markPresenceSessionOffline(sessionId:string) {
+  run('UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?) WHERE session_ref_hash=?',[now(),presenceSessionHash(sessionId)]);
+}
+function invalidateUserSessions(userId:number) {
+  run('UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?) WHERE user_id=?',[now(),userId]);
+  return Number(run('DELETE FROM sessions WHERE user_id=?',[userId]).changes);
+}
+function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run('INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES (?,?,?,?)', [id,userId,exp,now()]); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); return id; }
+function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) { markPresenceSessionOffline(req.sessionId); run('DELETE FROM sessions WHERE id=?', [req.sessionId]); } res.clearCookie('mcc_session', { path: '/' }); }
 function audit(req: Request, action: string, targetType?: string, targetId?: string|number, details: Record<string, unknown> = {}) { const u = (req as AuthRequest).user; run('INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [u?.id ?? null,u?.email ?? '',action,targetType ?? '',String(targetId ?? ''),JSON.stringify(details),req.ip ?? '',req.get('user-agent') ?? '',now()]); auditWriteBackup(req, action); }
 function shouldScheduleDailyBackupFromAudit(action: string) {
   const value = action.toLowerCase();
@@ -730,6 +792,99 @@ function safeBrandingFileName(originalName: string, extension: string) {
   return `${base}-${crypto.randomBytes(8).toString('hex')}${extension}`;
 }
 function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,temp_password_expires_at,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.force?tempExpiry():null,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
+function recordRoleAssignment(input:{userId:number;previousRole:Role|null;newRole:Role;assignedByUserId:number|null;assignedAt?:string;reason?:string|null}) {
+  run('INSERT INTO user_role_assignments (user_id,previous_role,new_role,assigned_by_user_id,assigned_at,reason) VALUES (?,?,?,?,?,?)',[
+    input.userId,input.previousRole,input.newRole,input.assignedByUserId,input.assignedAt??now(),input.reason?.trim().slice(0,500)||null,
+  ]);
+}
+function roleProvenance(user:User) {
+  const assignment=one<RoleAssignmentRow>(`SELECT assignment.*,assigner.full_name AS assigned_by_name
+    FROM user_role_assignments assignment
+    LEFT JOIN users assigner ON assigner.id=assignment.assigned_by_user_id
+    WHERE assignment.user_id=? AND assignment.new_role=?
+    ORDER BY assignment.assigned_at DESC,assignment.id DESC LIMIT 1`,[user.id,user.role]);
+  if(assignment) {
+    const sourceAvailable=Boolean(assignment.assigned_by_name);
+    return {
+      currentRank:user.is_owner_admin?'Owner Admin':user.role,
+      assignedBy:assignment.assigned_by_name,
+      assignedAt:assignment.assigned_at,
+      previousRank:assignment.previous_role,
+      reason:assignment.reason,
+      assignmentSourceAvailable:sourceAvailable,
+      source:sourceAvailable?'role_assignment_history':'unavailable',
+    };
+  }
+  if(user.is_owner_admin) {
+    return {
+      currentRank:'Owner Admin',
+      assignedBy:'System bootstrap',
+      assignedAt:user.created_at,
+      previousRank:null,
+      reason:null,
+      assignmentSourceAvailable:true,
+      source:'system_bootstrap',
+    };
+  }
+  return {
+    currentRank:user.role,
+    assignedBy:null,
+    assignedAt:null,
+    previousRank:null,
+    reason:null,
+    assignmentSourceAvailable:false,
+    source:'unavailable',
+  };
+}
+function maintenanceTeamRoster(currentUser:User) {
+  const serverTime=now();
+  const serverMillis=Date.parse(serverTime);
+  const validSessions=all<{id:string;user_id:number}>('SELECT id,user_id FROM sessions WHERE expires_at>?',[serverTime]);
+  const validPresenceHashes=new Map(validSessions.map(session=>[presenceSessionHash(session.id),session.user_id]));
+  const presenceRows=all<PresenceSessionRow>('SELECT * FROM user_presence_sessions ORDER BY last_heartbeat_at DESC');
+  const users=all<User>('SELECT * FROM users WHERE deleted=0 ORDER BY full_name COLLATE NOCASE,id');
+  const stateOrder={Online:0,Away:1,Offline:2} as const;
+  const roster=users.map(user=>{
+    const userRows=presenceRows.filter(row=>row.user_id===user.id);
+    const liveRows=user.disabled?[]:userRows.filter(row=>!row.logged_out_at&&validPresenceHashes.get(row.session_ref_hash)===user.id&&serverMillis-Date.parse(row.last_heartbeat_at)<=presencePolicy.onlineThresholdMs);
+    const state:'Online'|'Away'|'Offline'=liveRows.length
+      ?liveRows.some(row=>serverMillis-Date.parse(row.last_activity_at)<=presencePolicy.awayAfterMs)?'Online':'Away'
+      :'Offline';
+    const lastSeenSource=state==='Away'?liveRows.map(row=>row.last_activity_at):userRows.map(row=>row.last_heartbeat_at);
+    const lastSeenAt=lastSeenSource.filter(Boolean).sort((left,right)=>right.localeCompare(left))[0]??null;
+    return {
+      id:user.id,
+      fullName:user.full_name,
+      role:user.role,
+      isOwnerAdmin:Boolean(user.is_owner_admin),
+      disabled:Boolean(user.disabled),
+      isCurrentUser:user.id===currentUser.id,
+      presence:state,
+      lastSeenAt,
+      rankProvenance:roleProvenance(user),
+      specialPermissionGrants:activeSpecialGrants(user.id).map(publicPermissionGrant),
+    };
+  }).sort((left,right)=>{
+    if(left.isCurrentUser!==right.isCurrentUser)return left.isCurrentUser?-1:1;
+    if(left.disabled!==right.disabled)return left.disabled?1:-1;
+    const stateDifference=stateOrder[left.presence]-stateOrder[right.presence];
+    if(stateDifference)return stateDifference;
+    if(left.presence==='Offline'&&left.lastSeenAt!==right.lastSeenAt)return String(right.lastSeenAt??'').localeCompare(String(left.lastSeenAt??''));
+    return left.fullName.localeCompare(right.fullName,undefined,{sensitivity:'base'});
+  });
+  const activeRoster=roster.filter(user=>!user.disabled);
+  return {
+    serverTime,
+    policy:presencePolicy,
+    totalUsers:roster.length,
+    activeUsers:activeRoster.length,
+    onlineCount:activeRoster.filter(user=>user.presence==='Online').length,
+    awayCount:activeRoster.filter(user=>user.presence==='Away').length,
+    offlineCount:activeRoster.filter(user=>user.presence==='Offline').length,
+    disabledCount:roster.filter(user=>user.disabled).length,
+    users:roster,
+  };
+}
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
 function canUserManage(actor: User) { return actor.role !== 'Maintenance Tech 1'; }
@@ -7517,7 +7672,7 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
   plunger_barrel_end_cap: { column: 'plunger_barrel_end_cap_installed_date', action: 'new_plunger_barrel_end_cap_installed', label: 'Plunger Barrel End Cap' },
 };
 
-function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
+function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); req.sessionId=sid; if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
 function permissionAliasAllowed(user:User,permission:string) {
   if(isPermissionKey(permission)) return hasPermission(user,permission);
@@ -7578,8 +7733,17 @@ app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
 app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
 app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(req,'mcc_session')); const u=sid ? one<User>('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.deleted=0 AND s.id=? AND s.expires_at > ?', [sid,now()]) : undefined; res.json({ setupRequired:userCount()===0, user: u && !u.disabled ? publicUser(u) : null }); });
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,owner:true,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true,ownerAdmin:true}); res.json({ok:true}); });
-app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [now(),u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:now()})}); });
+app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); const sessionId=setSession(res,u.id); recordPresenceHeartbeat(sessionId,u.id,true); const loggedInAt=now(); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [loggedInAt,u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:loggedInAt})}); });
 app.post('/api/auth/logout', requireAuth, (req:AuthRequest,res)=>{ audit(req,'logout','user',req.user!.id); clearSession(req,res); res.json({ok:true}); });
+app.post('/api/presence/heartbeat',requireAuth,(req:AuthRequest,res)=>{
+  const heartbeat=recordPresenceHeartbeat(req.sessionId!,req.user!.id,req.body?.active===true);
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,...heartbeat,policy:presencePolicy});
+});
+app.get('/api/presence/team',requireAuth,(req:AuthRequest,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json(maintenanceTeamRoster(req.user!));
+});
 app.post('/api/auth/forgot-password', async (req,res)=>{
   const requestedEmail = String(req.body.email ?? '').trim();
   const key=`${req.ip}:${requestedEmail.toLowerCase()}`;
@@ -7596,11 +7760,12 @@ app.post('/api/auth/forgot-password', async (req,res)=>{
     const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`;
     const expiresAt=tempExpiry();
     run('UPDATE users SET password_hash=?, force_password_change=1, temp_password_expires_at=?, updated_at=? WHERE id=?', [hashPassword(temp),expiresAt,now(),u!.id]);
+    const sessionsInvalidated=invalidateUserSessions(u!.id);
     console.log('MCC reset email send attempted.');
     try {
       const messageId = await sendResetEmail(u!, temp, expiresAt);
       console.log(`MCC reset email sent successfully. messageId: ${messageId ?? 'unknown'}`);
-      audit(req,'password reset email sent','user',u!.id,{messageId: messageId ?? null});
+      audit(req,'password reset email sent','user',u!.id,{messageId: messageId ?? null,sessionsInvalidated});
     } catch (error) {
       const safeMessage = safeErrorMessage(error, [temp], 'Unknown SMTP error.');
       console.log(`MCC reset email failed: ${safeMessage}`);
@@ -7623,6 +7788,7 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), (req:Auth
   if(!passwordOk(req.body.temporaryPassword)) return res.status(400).json({error:passwordComplexityError,code:'PASSWORD_COMPLEXITY',field:'temporaryPassword',requirements:passwordRequirements});
   if(one<{id:number}>('SELECT id FROM users WHERE lower(email)=lower(?)',[email])) return res.status(409).json({error:'A user with this email already exists.',code:'EMAIL_EXISTS',field:'email'});
   const id=createUser({fullName,email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id});
+  recordRoleAssignment({userId:id,previousRole:null,newRole:role,assignedByUserId:req.user!.id,reason:'Initial rank assignment'});
   audit(req,'user create','user',id,{role});
   res.status(201).json({user:publicUser(findUserById(id)!)});
 });
@@ -7638,7 +7804,7 @@ app.post('/api/users/:id/reset-password',requireAuth,requirePermission('users.re
   const expiresAt=tempExpiry();
   const timestamp=now();
   run('UPDATE users SET password_hash=?,force_password_change=1,temp_password_expires_at=?,updated_at=? WHERE id=?',[hashPassword(temporaryPassword),expiresAt,timestamp,target.id]);
-  const invalidated=Number(run('DELETE FROM sessions WHERE user_id=?',[target.id]).changes);
+  const invalidated=invalidateUserSessions(target.id);
   audit(req,'password reset performed','user',target.id,{targetUser:target.full_name,targetEmail:target.email,administrator:req.user!.email,forcedPasswordChangeEnabled:true,tempPasswordExpiresAt:expiresAt,sessionsInvalidated:invalidated});
   res.setHeader('Cache-Control','no-store');
   res.json({ok:true,message:'Temporary password created successfully',temporaryPassword,tempPasswordExpiresAt:expiresAt,forcePasswordChange:true,sessionsInvalidated:invalidated});
@@ -7720,9 +7886,28 @@ app.put('/api/users/:id/permissions',requireAuth,requirePermission('users.permis
   }
   res.json({ok:true,...permissionDetailsForUser(findUserById(target.id)!,actor)});
 });
-app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canEditTarget(req.user!,target)) return res.status(403).json({error:'Cannot edit that user.'}); const role=(req.body.role??target.role) as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'}); run('UPDATE users SET full_name=?, email=?, role=?, updated_at=? WHERE id=?', [req.body.fullName??target.full_name,req.body.email??target.email,role,now(),target.id]); audit(req,'user update','user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
-for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
-app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
+app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{
+  const target=findUserById(Number(req.params.id));
+  if(!target) return res.status(404).json({error:'User not found.'});
+  if(!canEditTarget(req.user!,target)) return res.status(403).json({error:'Cannot edit that user.'});
+  const role=(req.body.role??target.role) as Role;
+  if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'});
+  const timestamp=now();
+  const roleChanged=role!==target.role;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    run('UPDATE users SET full_name=?, email=?, role=?, updated_at=? WHERE id=?', [req.body.fullName??target.full_name,req.body.email??target.email,role,timestamp,target.id]);
+    if(roleChanged) recordRoleAssignment({userId:target.id,previousRole:target.role,newRole:role,assignedByUserId:req.user!.id,assignedAt:timestamp,reason:String(req.body.roleChangeReason??'').trim()||null});
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  audit(req,'user update','user',target.id,roleChanged?{previousRole:target.role,newRole:role,roleAssignedBy:req.user!.email,roleAssignedAt:timestamp}:{});
+  res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)});
+});
+for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); const sessionsInvalidated=action==='disable'?invalidateUserSessions(target.id):0; audit(req,`user ${action}`,'user',target.id,{sessionsInvalidated}); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
+app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); const sessionsInvalidated=invalidateUserSessions(target.id); audit(req,'user delete','user',target.id,{softDelete:true,sessionsInvalidated}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
 app.get('/api/vendors', requireAuth, requirePermission('vendors.view'), (req,res)=>{
   const q = queryText(req.query.q);
