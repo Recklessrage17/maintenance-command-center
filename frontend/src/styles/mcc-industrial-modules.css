@@ -1,0 +1,2977 @@
+/*
+ * MCC Issue #49 — industrial maintenance-suite module migration.
+ *
+ * This is the final, routed-application cascade layer. It intentionally consumes
+ * the canonical values from mcc-tokens.css and is expected to load after the
+ * legacy app.css and glass-system.css files. Business-state classes remain
+ * untouched; this file only normalizes presentation, layout resilience, focus,
+ * motion, overlays, and print behavior.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Route accents                                                              */
+/* -------------------------------------------------------------------------- */
+
+.dashboard-page {
+  --mcc-module-accent: var(--mcc-accent-module-dashboard);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-dashboard-rgb);
+}
+
+.inventory-page {
+  --mcc-module-accent: var(--mcc-accent-module-inventory);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-inventory-rgb);
+}
+
+.vendors-page {
+  --mcc-module-accent: var(--mcc-accent-module-vendors);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-vendors-rgb);
+}
+
+.requisitions-page {
+  --mcc-module-accent: var(--mcc-accent-module-requisitions);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-requisitions-rgb);
+}
+
+.history-page {
+  --mcc-module-accent: var(--mcc-accent-module-history);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-history-rgb);
+}
+
+.machine-library-page {
+  --mcc-module-accent: var(--mcc-accent-module-machine-library);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-machine-library-rgb);
+}
+
+:is(.equipment-library-page, .equipment-detail-page) {
+  --mcc-module-accent: var(--mcc-accent-module-equipment-library);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-equipment-library-rgb);
+}
+
+.facility-info-page {
+  --mcc-module-accent: var(--mcc-accent-module-facility-info);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-facility-info-rgb);
+}
+
+.mcc-shell :has(> .user-table-card),
+.mcc-shell :has(> .user-create-form) {
+  --mcc-module-accent: var(--mcc-accent-module-users);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-users-rgb);
+}
+
+.settings-page {
+  --mcc-module-accent: var(--mcc-accent-module-settings);
+  --mcc-module-accent-rgb: var(--mcc-accent-module-settings-rgb);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Application shell and workspace                                            */
+/* -------------------------------------------------------------------------- */
+
+.mcc-shell {
+  color: var(--mcc-text-primary);
+  background: var(--mcc-bg-industrial);
+  color-scheme: dark;
+  scrollbar-color: var(--mcc-border-strong) var(--mcc-bg-deep);
+  scrollbar-width: thin;
+}
+
+.mcc-shell::before {
+  background-color: transparent;
+  background-image: var(--mcc-texture-hex), var(--mcc-texture-grid);
+  opacity: 0.58;
+}
+
+.mcc-shell::after {
+  background: var(--mcc-bg-ambient), var(--mcc-bg-reflection);
+  opacity: 0.72;
+}
+
+.mcc-shell > * {
+  min-width: 0;
+}
+
+.mcc-shell.mcc-scrollbar-hidden {
+  scrollbar-width: thin;
+  -ms-overflow-style: auto;
+}
+
+.mcc-shell.mcc-scrollbar-hidden::-webkit-scrollbar,
+.mcc-shell :where(
+  .table-card,
+  [class$="-table-wrap"],
+  [class$="-history-list"],
+  [class$="-log-list"],
+  [class$="-scroll"],
+  .mcc-wide-modal,
+  .glass-modal-shell
+)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.mcc-shell.mcc-scrollbar-hidden::-webkit-scrollbar-track,
+.mcc-shell :where(
+  .table-card,
+  [class$="-table-wrap"],
+  [class$="-history-list"],
+  [class$="-log-list"],
+  [class$="-scroll"],
+  .mcc-wide-modal,
+  .glass-modal-shell
+)::-webkit-scrollbar-track {
+  background: var(--mcc-bg-deep);
+}
+
+.mcc-shell.mcc-scrollbar-hidden::-webkit-scrollbar-thumb,
+.mcc-shell :where(
+  .table-card,
+  [class$="-table-wrap"],
+  [class$="-history-list"],
+  [class$="-log-list"],
+  [class$="-scroll"],
+  .mcc-wide-modal,
+  .glass-modal-shell
+)::-webkit-scrollbar-thumb {
+  border: 2px solid var(--mcc-bg-deep);
+  border-radius: var(--mcc-radius-pill);
+  background: var(--mcc-border-strong);
+}
+
+.mcc-main {
+  min-width: 0;
+  background: transparent;
+}
+
+.mcc-workspace-frame,
+.mcc-workspace,
+.mcc-content {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mcc-workspace {
+  width: min(100%, 1720px);
+  margin-inline: auto;
+}
+
+.mcc-content {
+  isolation: isolate;
+}
+
+.page-stack,
+.mcc-page {
+  min-width: 0;
+  gap: var(--mcc-space-7);
+}
+
+.page-stack > *,
+.mcc-page > * {
+  min-width: 0;
+}
+
+.mcc-page-topbar {
+  border-color: var(--mcc-border-default);
+  border-top-color: var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-lg);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-panel), var(--mcc-shadow-inset);
+  backdrop-filter: blur(14px) saturate(108%);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+}
+
+.mcc-current-page h1 {
+  color: var(--mcc-text-primary);
+}
+
+.mcc-page-help {
+  border-color: var(--mcc-border-interactive);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-control);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.mcc-page-help:is(:hover, :focus-visible) {
+  border-color: var(--mcc-module-accent);
+  color: var(--mcc-text-inverse);
+  background: var(--mcc-module-accent);
+}
+
+.mcc-page-tooltip {
+  border-color: var(--mcc-border-interactive);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-modal);
+}
+
+.page-heading,
+.mcc-page-header {
+  border-left-color: var(--mcc-module-accent);
+  border-radius: 0 var(--mcc-radius-lg) var(--mcc-radius-lg) 0;
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-module-accent-rgb), 0.13),
+      transparent 72%
+    ),
+    var(--mcc-surface-panel);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.page-heading::after,
+.mcc-page-header::after {
+  background: linear-gradient(
+    90deg,
+    var(--mcc-module-accent),
+    transparent
+  );
+  opacity: 0.54;
+}
+
+.page-heading :where(h1, h2, h3),
+.mcc-page-header :where(h1, h2, h3) {
+  color: var(--mcc-text-primary);
+}
+
+.page-heading p,
+.mcc-page-header p,
+.eyebrow + :where(p, small) {
+  color: var(--mcc-text-secondary);
+}
+
+.eyebrow {
+  color: var(--mcc-module-accent, var(--mcc-accent-info));
+}
+
+.mcc-route-state {
+  border-color: var(--mcc-border-interactive);
+  border-radius: var(--mcc-radius-lg);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-panel);
+}
+
+.mcc-route-state span {
+  color: var(--mcc-text-secondary);
+}
+
+.mcc-route-state--error {
+  border-color: var(--mcc-status-danger);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(var(--mcc-status-danger-rgb), 0.13),
+      transparent 64%
+    ),
+    var(--mcc-surface-panel-strong);
+}
+
+.mcc-route-loader {
+  border-color: var(--mcc-border-default);
+  border-top-color: var(--mcc-accent-maintenance);
+  border-right-color: var(--mcc-accent-info);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared industrial surfaces                                                 */
+/* -------------------------------------------------------------------------- */
+
+.mcc-shell :where(
+  .mcc-card,
+  .mcc-full-width-panel,
+  .glass-panel,
+  .wide-card,
+  .table-card
+) {
+  min-width: 0;
+  border-color: var(--mcc-border-default);
+  border-top-color: var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-lg);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-panel);
+  box-shadow: var(--mcc-shadow-panel), var(--mcc-shadow-inset);
+}
+
+.mcc-shell :where(
+  .glass-card,
+  .mcc-pill-card,
+  [class$="-card"]:not(.mcc-card):not(.table-card)
+) {
+  min-width: 0;
+  border-color: var(--mcc-border-subtle);
+  border-top-color: var(--mcc-border-default);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-card), var(--mcc-shadow-inset);
+}
+
+.mcc-shell :where(
+  .glass-panel--nested,
+  .glass-card--nested,
+  [class$="-panel"] [class$="-panel"],
+  [class$="-card"] [class$="-card"]
+) {
+  border-color: var(--mcc-border-subtle);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.mcc-shell :where(
+  .glass-panel--dense,
+  .glass-card--dense,
+  .table-card,
+  [class$="-table-wrap"]
+) {
+  background: var(--mcc-surface-dense);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.mcc-shell :where(.mcc-card, .glass-card, .glass-panel) :where(h1, h2, h3, h4, strong) {
+  color: var(--mcc-text-primary);
+}
+
+.mcc-shell :where(.mcc-card, .glass-card, .glass-panel) :where(p, small, dd) {
+  color: var(--mcc-text-secondary);
+}
+
+.mcc-shell :where(
+  .glass-empty-state,
+  .empty-table-cell,
+  [class$="-empty-state"],
+  [class$="-empty"],
+  [class$="-loading"]
+) {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-card-nested);
+}
+
+.mcc-shell :where(
+  .mcc-pill-card.is-interactive,
+  .glass-card[role="button"],
+  [class$="-card"][role="button"]
+) {
+  transition:
+    border-color var(--mcc-motion-standard) var(--mcc-motion-ease),
+    box-shadow var(--mcc-motion-standard) var(--mcc-motion-ease),
+    transform var(--mcc-motion-standard) var(--mcc-motion-ease);
+}
+
+.mcc-shell :where(
+  .mcc-pill-card.is-interactive,
+  .glass-card[role="button"],
+  [class$="-card"][role="button"]
+):is(:hover, :focus-visible) {
+  border-color: color-mix(in srgb, var(--mcc-module-accent) 70%, var(--mcc-border-default));
+  box-shadow:
+    var(--mcc-shadow-card),
+    0 0 0 1px rgba(var(--mcc-module-accent-rgb), 0.16),
+    0 0 24px rgba(var(--mcc-module-accent-rgb), 0.09);
+  transform: translateY(-1px);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Buttons, controls, focus, notices                                           */
+/* -------------------------------------------------------------------------- */
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(
+  .primary-button,
+  .secondary-button,
+  .link-button,
+  .danger-button,
+  .glass-button,
+  .mcc-industrial-button,
+  .mcc-industrial-action
+) {
+  appearance: none;
+  min-height: var(--mcc-control-height);
+  max-width: 100%;
+  border: 1px solid var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      180deg,
+      var(--mcc-border-inner-highlight),
+      transparent var(--mcc-space-1)
+    ),
+    var(--mcc-surface-control);
+  box-shadow: var(--mcc-shadow-control), var(--mcc-shadow-inset);
+  font-weight: 800;
+  line-height: 1.15;
+  text-decoration: none;
+  transition:
+    color var(--mcc-motion-fast) var(--mcc-motion-ease),
+    border-color var(--mcc-motion-fast) var(--mcc-motion-ease),
+    background-color var(--mcc-motion-fast) var(--mcc-motion-ease),
+    box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease),
+    transform var(--mcc-motion-fast) var(--mcc-motion-ease-out);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(
+  .compact-button,
+  .mcc-industrial-action,
+  .pager-button,
+  .mcc-overflow-menu__trigger
+) {
+  min-height: var(--mcc-control-height-compact);
+  padding-block: var(--mcc-space-2);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(.secondary-button, .link-button, .glass-button--secondary, .mcc-industrial-button) {
+  border-color: var(--mcc-border-default);
+  color: var(--mcc-text-secondary);
+  background:
+    linear-gradient(
+      180deg,
+      var(--mcc-border-inner-highlight),
+      transparent var(--mcc-space-1)
+    ),
+    var(--mcc-surface-control);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(.primary-button, .glass-button--primary) {
+  border-color: var(--mcc-accent-maintenance-strong);
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      180deg,
+      var(--mcc-border-inner-highlight),
+      transparent var(--mcc-space-1)
+    ),
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-accent-maintenance-rgb), 0.34),
+      rgba(var(--mcc-accent-maintenance-rgb), 0.13)
+    ),
+    var(--mcc-surface-control);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(.danger-button, .glass-button--danger) {
+  border-color: var(--mcc-status-danger);
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      180deg,
+      var(--mcc-border-inner-highlight),
+      transparent var(--mcc-space-1)
+    ),
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-status-danger-rgb), 0.31),
+      rgba(var(--mcc-status-danger-rgb), 0.12)
+    ),
+    var(--mcc-surface-control);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(.glass-button--warning, .mcc-industrial-action--password) {
+  border-color: var(--mcc-accent-workflow-strong);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-accent-workflow-rgb), 0.3),
+      rgba(var(--mcc-accent-workflow-rgb), 0.11)
+    ),
+    var(--mcc-surface-control);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(.glass-button--success) {
+  border-color: var(--mcc-status-success);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-status-success-rgb), 0.31),
+      rgba(var(--mcc-status-success-rgb), 0.11)
+    ),
+    var(--mcc-surface-control);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(.mcc-industrial-action--logout) {
+  border-color: color-mix(in srgb, var(--mcc-status-danger) 66%, var(--mcc-border-default));
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(
+  .primary-button,
+  .secondary-button,
+  .link-button,
+  .danger-button,
+  .glass-button,
+  .mcc-industrial-button,
+  .mcc-industrial-action
+):is(:hover, :focus-visible):not(:disabled) {
+  border-color: var(--mcc-module-accent, var(--mcc-accent-info));
+  color: var(--mcc-text-primary);
+  background-color: var(--mcc-surface-control-hover);
+  box-shadow:
+    var(--mcc-shadow-control),
+    0 0 0 1px rgba(var(--mcc-module-accent-rgb, var(--mcc-accent-info-rgb)), 0.16);
+  transform: translateY(-1px);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(
+  button,
+  [role="button"],
+  a[href],
+  input,
+  select,
+  textarea,
+  summary,
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--mcc-focus-color);
+  outline-offset: 2px;
+  box-shadow: var(--mcc-focus-ring-shadow);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop,
+  [data-mcc-command-overlay]
+) :where(button, input, select, textarea):disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  filter: saturate(0.52);
+  transform: none;
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea,
+  .glass-input,
+  .searchable-combobox-control
+) {
+  min-width: 0;
+  min-height: var(--mcc-control-height);
+  border: 1px solid var(--mcc-border-default);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-control);
+  box-shadow: var(--mcc-shadow-inset);
+  caret-color: var(--mcc-accent-maintenance);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(input, textarea)::placeholder {
+  color: var(--mcc-text-placeholder);
+  opacity: 1;
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(input, select, textarea):is(:hover, :focus) {
+  border-color: var(--mcc-border-interactive);
+  background: var(--mcc-surface-control-hover);
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(input, textarea):-webkit-autofill {
+  -webkit-text-fill-color: var(--mcc-text-primary);
+  caret-color: var(--mcc-accent-maintenance);
+  box-shadow:
+    0 0 0 1000px var(--mcc-bg-raised) inset,
+    var(--mcc-shadow-inset);
+  transition: background-color 0s;
+}
+
+:is(
+  .mcc-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--mcc-accent-maintenance);
+}
+
+.mcc-shell .form-field {
+  min-width: 0;
+  color: var(--mcc-text-secondary);
+}
+
+.mcc-shell .form-field > span,
+.mcc-shell :where(fieldset > legend, .form-help) {
+  color: var(--mcc-text-secondary);
+}
+
+.mcc-shell :where(.required-marker, .field-validation-error, .user-field-error) {
+  color: var(--mcc-status-danger);
+}
+
+.mcc-shell :where(
+  .form-message,
+  .glass-notice,
+  [class$="-notice"],
+  [class$="-warning"],
+  [class$="-error"]
+) {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-card-nested);
+}
+
+.mcc-shell :where(.form-message.error, [class$="-error"]) {
+  border-color: color-mix(in srgb, var(--mcc-status-danger) 68%, var(--mcc-border-default));
+  color: color-mix(in srgb, var(--mcc-status-danger) 68%, var(--mcc-text-primary));
+  background:
+    linear-gradient(
+      135deg,
+      rgba(var(--mcc-status-danger-rgb), 0.13),
+      transparent 72%
+    ),
+    var(--mcc-surface-card-nested);
+}
+
+.mcc-shell :where(.success, [class$="-success"]) {
+  border-color: color-mix(in srgb, var(--mcc-status-success) 68%, var(--mcc-border-default));
+}
+
+.mcc-shell .mcc-link-pill {
+  color: var(--mcc-text-link);
+}
+
+/* Horizontal action rows are intentionally allowed to wrap, never tower. */
+.mcc-shell :where(
+  .glass-button-group,
+  .mcc-action-group,
+  .mcc-responsive-toolbar,
+  .modal-actions,
+  .mcc-modal-actions,
+  .header-actions,
+  .inventory-focus-actions,
+  .inventory-search-tools,
+  .inventory-row-actions,
+  .inventory-row-actions-primary,
+  .inventory-tool-actions,
+  .inventory-setup-actions,
+  .vendors-toolbar-actions,
+  .vendor-card-actions,
+  .vendor-contact-actions,
+  .vendor-contact-expanded-actions,
+  .requisition-row-actions,
+  .requisition-selection-toolbar,
+  .active-batch-actions,
+  .staging-toolbar,
+  .history-table-toolbar,
+  .history-pagination,
+  .machine-toolbar-actions,
+  .machine-card-summary-actions,
+  .machine-detail-header-actions,
+  .machine-record-launch-actions,
+  .machine-replacement-actions,
+  .equipment-library-actions,
+  .equipment-detail-actions,
+  .facility-toolbar,
+  .facility-view-switch,
+  .user-actions,
+  .user-password-actions,
+  .backup-action-row,
+  .backup-row-actions
+) {
+  min-width: 0;
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: var(--mcc-space-4);
+}
+
+.mcc-shell :where(
+  .glass-button-group,
+  .mcc-action-group,
+  .modal-actions,
+  .mcc-modal-actions,
+  .inventory-focus-actions,
+  .inventory-search-tools,
+  .inventory-row-actions,
+  .inventory-row-actions-primary,
+  .inventory-tool-actions,
+  .vendors-toolbar-actions,
+  .vendor-card-actions,
+  .requisition-row-actions,
+  .requisition-selection-toolbar,
+  .active-batch-actions,
+  .machine-toolbar-actions,
+  .machine-card-summary-actions,
+  .machine-detail-header-actions,
+  .machine-record-launch-actions,
+  .machine-replacement-actions,
+  .equipment-library-actions,
+  .equipment-detail-actions,
+  .facility-toolbar,
+  .user-actions,
+  .backup-action-row,
+  .backup-row-actions
+) > :where(button, a, label) {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tables and dense data                                                      */
+/* -------------------------------------------------------------------------- */
+
+.mcc-shell :where(
+  .table-card,
+  .inventory-table-wrap,
+  .vendors-table-wrap,
+  .requisitions-table-wrap,
+  .history-table-wrap,
+  .staging-table-wrap,
+  .requisition-staging-table,
+  .user-table-card,
+  .measurement-records-panel
+) {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--mcc-border-default);
+  border-radius: var(--mcc-radius-md);
+  background: var(--mcc-surface-dense);
+  box-shadow: var(--mcc-shadow-card), var(--mcc-shadow-inset);
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mcc-shell :where(
+  .table-card,
+  .inventory-table-wrap,
+  .vendors-table-wrap,
+  .requisitions-table-wrap,
+  .history-table-wrap,
+  .staging-table-wrap,
+  .requisition-staging-table,
+  .user-table-card,
+  .measurement-records-panel
+) table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--mcc-text-primary);
+}
+
+.mcc-shell table th {
+  border-color: var(--mcc-border-subtle);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-table-header);
+  font-size: 0.72rem;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.mcc-shell table td {
+  border-color: var(--mcc-border-subtle);
+  color: var(--mcc-text-secondary);
+  background: color-mix(in srgb, var(--mcc-surface-dense) 93%, transparent);
+}
+
+.mcc-shell table tbody tr {
+  transition:
+    background-color var(--mcc-motion-fast) var(--mcc-motion-ease),
+    box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease);
+}
+
+.mcc-shell table tbody tr:is(:hover, :focus-within) > td {
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-module-accent-rgb), 0.09),
+      transparent 78%
+    ),
+    var(--mcc-surface-dense);
+}
+
+.mcc-shell table tbody tr:focus-within {
+  box-shadow: inset 3px 0 0 var(--mcc-module-accent);
+}
+
+.mcc-shell :where(
+  .inventory-row-selected,
+  .staging-draggable-row.dragging,
+  tr[aria-selected="true"]
+) > td {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-maintenance-rgb), 0.15),
+      transparent 82%
+    ),
+    var(--mcc-surface-dense);
+}
+
+.mcc-shell :where(.empty-table-cell, td.empty-table-cell) {
+  padding: var(--mcc-space-8);
+  color: var(--mcc-text-muted);
+  background: var(--mcc-surface-card-nested);
+}
+
+.mcc-shell :where(
+  .inventory-actions-column,
+  .requisition-row-actions,
+  .user-actions
+) {
+  white-space: normal;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Pills, status, resource rows, menus                                         */
+/* -------------------------------------------------------------------------- */
+
+.mcc-shell :where(
+  .mcc-status-pill,
+  .status-pill,
+  .glass-pill,
+  [class$="-badge"],
+  [class$="-pill"],
+  [class$="-chip"]
+) {
+  width: fit-content;
+  max-width: 100%;
+  border-color: var(--mcc-border-default);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-control);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.mcc-shell :where(
+  .mcc-status-pill--success,
+  .glass-pill--success,
+  .status-active,
+  .status-received,
+  .status-current,
+  .is-met
+) {
+  border-color: var(--mcc-status-success);
+  color: color-mix(in srgb, var(--mcc-status-success) 70%, var(--mcc-text-primary));
+  background: rgba(var(--mcc-status-success-rgb), 0.16);
+}
+
+.mcc-shell :where(
+  .mcc-status-pill--warning,
+  .status-requested,
+  .status-ordered,
+  .status-due-soon,
+  .status-due-now
+) {
+  border-color: var(--mcc-status-warning);
+  color: color-mix(in srgb, var(--mcc-status-warning) 72%, var(--mcc-text-primary));
+  background: rgba(var(--mcc-status-warning-rgb), 0.15);
+}
+
+.mcc-shell :where(
+  .mcc-status-pill--danger,
+  .status-canceled,
+  .status-disabled,
+  .status-down,
+  .status-past-due,
+  .status-overdue,
+  .is-unmet
+) {
+  border-color: var(--mcc-status-danger);
+  color: color-mix(in srgb, var(--mcc-status-danger) 68%, var(--mcc-text-primary));
+  background: rgba(var(--mcc-status-danger-rgb), 0.15);
+}
+
+.mcc-shell :where(.mcc-status-pill--info, .glass-pill--cyan, .status-info) {
+  border-color: var(--mcc-status-info);
+  color: color-mix(in srgb, var(--mcc-status-info) 68%, var(--mcc-text-primary));
+  background: rgba(var(--mcc-status-info-rgb), 0.15);
+}
+
+.mcc-resource-row {
+  min-width: 0;
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.mcc-resource-row__content {
+  min-width: 0;
+  color: var(--mcc-text-primary);
+  background: transparent;
+}
+
+.mcc-resource-row__title {
+  color: var(--mcc-text-primary);
+}
+
+.mcc-resource-row :where(.mcc-resource-row__metadata, .mcc-resource-row__description) {
+  color: var(--mcc-text-muted);
+}
+
+.mcc-resource-row.is-activatable .mcc-resource-row__content:is(:hover, :focus-visible) {
+  background: rgba(var(--mcc-module-accent-rgb), 0.08);
+}
+
+.mcc-overflow-menu__panel,
+.searchable-combobox-menu,
+.permission-details-popover,
+.team-rank-popover,
+.requisition-items-popover__panel {
+  max-width: calc(100vw - (var(--mcc-space-6) * 2));
+  overflow: auto;
+  border: 1px solid var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-modal), var(--mcc-shadow-inset);
+  scrollbar-color: var(--mcc-border-strong) var(--mcc-bg-deep);
+}
+
+.mcc-overflow-menu__item,
+.searchable-combobox-menu button {
+  color: var(--mcc-text-secondary);
+  background: transparent;
+}
+
+.mcc-overflow-menu__item:is(:hover, :focus-visible),
+.searchable-combobox-menu button:is(:hover, :focus-visible) {
+  color: var(--mcc-text-primary);
+  background: rgba(var(--mcc-accent-info-rgb), 0.13);
+}
+
+.mcc-overflow-menu__item.is-danger {
+  color: color-mix(in srgb, var(--mcc-status-danger) 70%, var(--mcc-text-primary));
+}
+
+.mcc-overflow-menu__item.is-danger:is(:hover, :focus-visible) {
+  background: rgba(var(--mcc-status-danger-rgb), 0.16);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Command Deck and approved Teams parity                                     */
+/* -------------------------------------------------------------------------- */
+
+.command-launcher-button {
+  border-color: var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      180deg,
+      var(--mcc-border-inner-highlight),
+      transparent var(--mcc-space-1)
+    ),
+    var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-panel), var(--mcc-shadow-inset);
+}
+
+.command-launcher-button:is(:hover, :focus-visible),
+.command-launcher.open .command-launcher-button {
+  border-color: var(--mcc-accent-info);
+  box-shadow:
+    var(--mcc-shadow-panel),
+    0 0 20px rgba(var(--mcc-accent-info-rgb), 0.12);
+}
+
+.launcher-gear {
+  border-color: var(--mcc-border-interactive);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-control-hover);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.mcc-command-deck {
+  width: min(720px, calc(100vw - 176px));
+  max-height: calc(100dvh - (var(--mcc-space-6) * 2));
+  overflow: auto;
+  border-color: var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-lg);
+  color: var(--mcc-text-primary);
+  background:
+    var(--mcc-texture-grid),
+    var(--mcc-bg-reflection),
+    var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-modal), var(--mcc-shadow-inset);
+  scrollbar-color: var(--mcc-border-strong) var(--mcc-bg-deep);
+}
+
+.mcc-command-deck::before {
+  background: var(--mcc-texture-grid), var(--mcc-bg-sheen);
+  opacity: 0.54;
+}
+
+.mcc-command-deck-header {
+  border-bottom-color: var(--mcc-border-subtle);
+}
+
+.mcc-command-deck-title {
+  border-left-color: var(--mcc-accent-info);
+}
+
+.mcc-command-deck-title span {
+  color: var(--mcc-text-muted);
+}
+
+.mcc-command-deck-title h2,
+.mcc-user-command-console .mcc-user-console-identity > strong {
+  color: var(--mcc-text-primary);
+}
+
+.mcc-user-command-console {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.mcc-user-console-presence {
+  color: var(--mcc-status-success);
+}
+
+.mcc-command-module-tile {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-card), var(--mcc-shadow-inset);
+  transition:
+    transform var(--mcc-motion-standard) var(--mcc-motion-ease-out),
+    border-color var(--mcc-motion-standard) var(--mcc-motion-ease),
+    box-shadow var(--mcc-motion-standard) var(--mcc-motion-ease);
+}
+
+.mcc-command-module-tile::before {
+  background: linear-gradient(
+    90deg,
+    var(--mcc-border-inner-highlight),
+    transparent
+  );
+}
+
+.mcc-command-module-tile::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(var(--mcc-module-accent-rgb), 0.1),
+    var(--mcc-border-inner-highlight),
+    transparent
+  );
+  transition: transform var(--mcc-motion-slow) var(--mcc-motion-ease-out);
+}
+
+.mcc-command-module-tile:is(:hover, :focus-visible, .is-active) {
+  border-color: color-mix(in srgb, var(--mcc-module-accent) 70%, var(--mcc-border-default));
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-module-accent-rgb), 0.1),
+      transparent 60%
+    ),
+    var(--mcc-surface-card);
+  box-shadow:
+    var(--mcc-shadow-card),
+    0 0 18px rgba(var(--mcc-module-accent-rgb), 0.1);
+}
+
+.mcc-command-module-rail {
+  background: var(--mcc-border-strong);
+}
+
+.mcc-command-module-icon-housing {
+  border-color: color-mix(in srgb, var(--mcc-module-accent) 42%, var(--mcc-border-default));
+  background: rgba(var(--mcc-module-accent-rgb), 0.1);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.mcc-command-module-name {
+  color: var(--mcc-text-primary);
+}
+
+.mcc-command-module-label,
+.mcc-command-module-chevron,
+.mcc-command-module-active-marker {
+  color: var(--mcc-text-muted);
+}
+
+.maintenance-team-panel {
+  border-color: var(--mcc-border-strong);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-modal), var(--mcc-shadow-inset);
+  scrollbar-color: var(--mcc-border-strong) var(--mcc-bg-deep);
+}
+
+.maintenance-team-header {
+  border-bottom-color: var(--mcc-border-subtle);
+}
+
+.maintenance-team-header :where(h2, strong),
+.maintenance-team-row strong {
+  color: var(--mcc-text-primary);
+}
+
+.maintenance-team-header p,
+.team-user-copy small {
+  color: var(--mcc-text-muted);
+}
+
+.maintenance-team-section-heading {
+  color: var(--mcc-text-secondary);
+  border-color: var(--mcc-border-subtle);
+}
+
+.maintenance-team-row {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-md);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.maintenance-team-row:is(:hover, :focus-within) {
+  border-color: var(--mcc-border-interactive);
+  background: var(--mcc-surface-card-nested);
+}
+
+.teams-control {
+  border-color: var(--mcc-accent-maintenance);
+  color: var(--mcc-text-primary);
+  background: rgba(var(--mcc-accent-maintenance-rgb), 0.14);
+}
+
+.team-avatar,
+.team-you-token {
+  border-color: var(--mcc-border-interactive);
+  background: var(--mcc-surface-control);
+}
+
+.team-rank-popover,
+.permission-details-popover {
+  position: fixed;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dashboard                                                                  */
+/* -------------------------------------------------------------------------- */
+
+.dashboard-metric-grid {
+  gap: var(--mcc-space-6);
+}
+
+.dashboard-metric-pill.mcc-pill-card {
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 48%, var(--mcc-border-default));
+  border-radius: var(--mcc-radius-lg);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--mcc-pill-accent) 11%, transparent),
+      transparent 58%
+    ),
+    var(--mcc-surface-card);
+  box-shadow:
+    var(--mcc-shadow-card),
+    0 0 20px color-mix(in srgb, var(--mcc-pill-accent) 10%, transparent);
+}
+
+.dashboard-metric-label {
+  color: color-mix(in srgb, var(--mcc-pill-accent) 68%, var(--mcc-text-primary));
+}
+
+.dashboard-metric-value-row strong {
+  color: var(--mcc-text-primary);
+}
+
+.dashboard-metric-arrow {
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 54%, var(--mcc-border-default));
+  color: var(--mcc-text-primary);
+  background: color-mix(in srgb, var(--mcc-pill-accent) 13%, var(--mcc-surface-control));
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.dashboard-metric-note {
+  color: var(--mcc-text-muted);
+}
+
+.dashboard-pm-panel {
+  border-color: var(--mcc-border-default);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(var(--mcc-accent-module-dashboard-rgb), 0.08),
+      transparent 68%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.dashboard-pm-heading h2,
+.dashboard-pm-task strong {
+  color: var(--mcc-text-primary);
+}
+
+.dashboard-pm-alert.mcc-pill-card {
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 50%, var(--mcc-border-default));
+  border-radius: var(--mcc-radius-md);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--mcc-pill-accent) 9%, transparent),
+      transparent 66%
+    ),
+    var(--mcc-surface-card);
+  box-shadow:
+    var(--mcc-shadow-card),
+    0 0 18px color-mix(in srgb, var(--mcc-pill-accent) 9%, transparent);
+}
+
+.dashboard-pm-due {
+  border-top-color: var(--mcc-border-subtle);
+}
+
+.dashboard-pm-due :where(span, i),
+.dashboard-pm-task span {
+  color: var(--mcc-text-muted);
+}
+
+.dashboard-pm-state {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+}
+
+.dashboard-pm-detail {
+  border-color: var(--mcc-border-strong);
+  background: var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-modal);
+}
+
+.dashboard-pm-detail-grid,
+.dashboard-pm-history {
+  gap: var(--mcc-space-4);
+}
+
+.dashboard-pm-detail-item {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Inventory                                                                  */
+/* -------------------------------------------------------------------------- */
+
+.inventory-focus-toolbar,
+.inventory-toolbar {
+  border: 1px solid var(--mcc-border-default);
+  border-top-color: var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-lg);
+  color: var(--mcc-text-primary);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-inventory-rgb), 0.09),
+      transparent 68%
+    ),
+    var(--mcc-surface-panel);
+  box-shadow: var(--mcc-shadow-panel), var(--mcc-shadow-inset);
+}
+
+.inventory-focus-meta,
+.page-count,
+.top-select-field {
+  color: var(--mcc-text-secondary);
+}
+
+.inventory-tools-card,
+.inventory-setup-card,
+.inventory-table-card {
+  border-color: var(--mcc-border-default);
+}
+
+.inventory-tools-panel,
+.inventory-form-section,
+.inventory-tool-summary,
+.backup-row {
+  border: 1px solid var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-md);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.inventory-form-section > legend,
+.inventory-tools-panel > span {
+  color: var(--mcc-module-accent);
+}
+
+.plain-part-number {
+  color: var(--mcc-text-primary);
+}
+
+.mcc-shell .inventory-description-text {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: unset;
+}
+
+.inventory-important-note {
+  color: color-mix(in srgb, var(--mcc-status-danger) 70%, var(--mcc-text-primary));
+}
+
+.inventory-lead-time,
+.inactive-vendor-note {
+  color: color-mix(in srgb, var(--mcc-status-warning) 72%, var(--mcc-text-primary));
+}
+
+.inventory-staged-pill,
+.new-part-badge {
+  border-color: var(--mcc-status-success);
+  color: color-mix(in srgb, var(--mcc-status-success) 72%, var(--mcc-text-primary));
+  background: rgba(var(--mcc-status-success-rgb), 0.15);
+}
+
+.row-requisition-note {
+  color: var(--mcc-text-link);
+}
+
+.inventory-toast {
+  border-color: var(--mcc-border-interactive);
+  background: var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-panel);
+}
+
+.inventory-modal fieldset {
+  min-width: 0;
+}
+
+.mcc-shell .inventory-row-actions {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: var(--mcc-space-3);
+}
+
+.mcc-shell .inventory-row-actions-primary {
+  display: contents;
+}
+
+.mcc-shell .inventory-row-actions .compact-button {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Vendors                                                                    */
+/* -------------------------------------------------------------------------- */
+
+.vendors-toolbar-card {
+  border-color: var(--mcc-border-default);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-vendors-rgb), 0.09),
+      transparent 68%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.vendor-card.mcc-pill-card {
+  border-color: color-mix(in srgb, var(--mcc-module-accent) 36%, var(--mcc-border-default));
+  background: var(--mcc-surface-card);
+}
+
+.vendor-card:is(.disabled, .deleted) {
+  border-color: var(--mcc-border-subtle);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-status-neutral-rgb), 0.1),
+      transparent 70%
+    ),
+    var(--mcc-surface-card-nested);
+}
+
+.vendor-pill-card-name,
+.vendor-primary-contact-name,
+.vendor-card-heading strong {
+  color: var(--mcc-text-primary);
+}
+
+.vendor-pill-card-metrics,
+.vendor-primary-contact-line,
+.vendor-primary-contact-title {
+  color: var(--mcc-text-muted);
+}
+
+.vendors-card-section,
+.vendor-detail-row,
+.vendor-contact-inline-form,
+.vendor-contact-info-grid > div,
+.vendor-inline-empty {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+}
+
+.vendor-section-heading,
+.vendor-primary-contact-label {
+  color: var(--mcc-module-accent);
+}
+
+.vendor-contact-summary-button,
+.vendor-contact-accordion-toggle {
+  border-color: var(--mcc-border-default);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-control);
+}
+
+.vendor-contact-accordion-panel {
+  border-color: var(--mcc-border-subtle);
+  background: var(--mcc-surface-card-nested);
+}
+
+.vendor-disabled-warning {
+  border-color: var(--mcc-status-warning);
+  color: color-mix(in srgb, var(--mcc-status-warning) 70%, var(--mcc-text-primary));
+  background: rgba(var(--mcc-status-warning-rgb), 0.12);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Requisitions — preserve workflow state classes and transform-only effects  */
+/* -------------------------------------------------------------------------- */
+
+.requisition-toolbar,
+.requisition-selection-toolbar,
+.staging-toolbar {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-md);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-requisitions-rgb), 0.09),
+      transparent 68%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.requisition-view-pills,
+.requisition-batch-view-pills,
+.requisition-preview-tabs {
+  min-width: 0;
+  display: flex;
+  flex-flow: row wrap;
+  gap: var(--mcc-space-3);
+}
+
+.requisition-view-pills :where(button, .mcc-workflow-tab),
+.requisition-batch-view-pills :where(button, .mcc-workflow-tab),
+.requisition-preview-tabs button {
+  flex: 0 1 auto;
+  width: auto;
+  min-height: var(--mcc-control-height-compact);
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-pill);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-control);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.requisition-view-pills .mcc-workflow-tab:is(.active, [aria-selected="true"]),
+.requisition-batch-view-pills .mcc-workflow-tab:is(.active, [aria-selected="true"]) {
+  color: var(--mcc-text-primary);
+  box-shadow: var(--mcc-shadow-control), var(--mcc-shadow-inset);
+}
+
+.requisition-view-pills .mcc-workflow-tab.workflow-active.active {
+  border-color: var(--mcc-accent-workflow);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-accent-workflow-rgb), 0.27),
+      rgba(var(--mcc-accent-workflow-rgb), 0.1)
+    ),
+    var(--mcc-surface-control);
+}
+
+.requisition-view-pills .mcc-workflow-tab.workflow-requested.active {
+  border-color: var(--mcc-status-warning);
+  background: rgba(var(--mcc-status-warning-rgb), 0.18);
+}
+
+.requisition-view-pills .mcc-workflow-tab.workflow-ordered.active {
+  border-color: var(--mcc-accent-workflow-strong);
+  background: rgba(var(--mcc-accent-workflow-rgb), 0.2);
+}
+
+.requisition-view-pills .mcc-workflow-tab.workflow-received.active {
+  border-color: var(--mcc-status-success);
+  background: rgba(var(--mcc-status-success-rgb), 0.18);
+}
+
+.requisition-view-pills .mcc-workflow-tab.workflow-canceled.active {
+  border-color: var(--mcc-status-danger);
+  background: rgba(var(--mcc-status-danger-rgb), 0.18);
+}
+
+.requisition-row-actions :where(
+  .requisition-action-neutral,
+  .requisition-action-edit
+) {
+  border-color: var(--mcc-border-strong);
+  background: var(--mcc-surface-control);
+}
+
+.requisition-row-actions .requisition-action-ordered,
+.requisition-action-ordered {
+  border-color: var(--mcc-accent-workflow-strong);
+  background: rgba(var(--mcc-accent-workflow-rgb), 0.17);
+}
+
+.requisition-row-actions :where(
+  .requisition-action-cancel,
+  .requisition-action-delete
+) {
+  border-color: var(--mcc-status-danger);
+  background: rgba(var(--mcc-status-danger-rgb), 0.15);
+}
+
+.requisition-receive-action {
+  border-color: var(--mcc-status-success);
+  background: rgba(var(--mcc-status-success-rgb), 0.17);
+}
+
+.staging-list-card,
+.active-batch-summary,
+.opened-batch-empty-state,
+.staging-review-summary,
+.staging-review-items,
+.staging-created-list,
+.requisition-preview-summary,
+.requisition-items-popover__panel {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-md);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-card), var(--mcc-shadow-inset);
+}
+
+.requisition-batch-grid > *,
+.staging-batch-choice-grid > * {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-card-nested);
+}
+
+.requisition-batch-grid > :is(:hover, :focus-visible, .active, [aria-current="true"]),
+.staging-batch-choice-grid > :is(:hover, :focus-visible, .active, [aria-current="true"]) {
+  border-color: var(--mcc-accent-workflow);
+  color: var(--mcc-text-primary);
+  background: rgba(var(--mcc-accent-workflow-rgb), 0.12);
+}
+
+.requisition-items-popover__trigger {
+  color: var(--mcc-text-link);
+}
+
+.staging-draggable-row {
+  cursor: grab;
+}
+
+.staging-draggable-row.dragging {
+  opacity: 0.64;
+  cursor: grabbing;
+}
+
+/* -------------------------------------------------------------------------- */
+/* History Logs                                                               */
+/* -------------------------------------------------------------------------- */
+
+.history-section-bar,
+.history-search-card,
+.history-filter-card,
+.history-table-toolbar {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-md);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-history-rgb), 0.08),
+      transparent 68%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.history-section-card {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-md);
+  background: var(--mcc-surface-card);
+}
+
+.history-section-card:is(:hover, :focus-visible, .active, [aria-current="true"]) {
+  border-color: var(--mcc-module-accent);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-accent-module-history-rgb), 0.12),
+      transparent 66%
+    ),
+    var(--mcc-surface-card);
+}
+
+.history-preview-row,
+.history-detail-row {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+}
+
+.history-action-icon {
+  border-color: var(--mcc-border-interactive);
+  color: var(--mcc-module-accent);
+  background: rgba(var(--mcc-accent-module-history-rgb), 0.12);
+}
+
+.history-reason-cell,
+.history-preview-row :where(p, small) {
+  color: var(--mcc-text-muted);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Machine Library, PM, records, documents, notes                             */
+/* -------------------------------------------------------------------------- */
+
+.machine-toolbar-card {
+  border-color: var(--mcc-border-default);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-machine-library-rgb), 0.09),
+      transparent 70%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.machine-tools-menu,
+.record-panel-tools-menu {
+  border-color: var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-modal);
+}
+
+.machine-tools-item {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.machine-tools-item:is(:hover, :focus-visible, .active) {
+  border-color: var(--mcc-module-accent);
+  background: rgba(var(--mcc-accent-module-machine-library-rgb), 0.12);
+}
+
+.machine-asset-card.mcc-pill-card {
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 46%, var(--mcc-border-default));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--mcc-pill-accent) 9%, transparent),
+      transparent 66%
+    ),
+    var(--mcc-surface-card);
+}
+
+.machine-pill-card-title,
+.machine-asset-number-pill,
+.machine-card-brand-name {
+  color: var(--mcc-text-primary);
+}
+
+.machine-pill-card-metrics,
+.machine-card-summary-actions {
+  color: var(--mcc-text-muted);
+}
+
+.machine-detail-summary-card,
+.machine-record-launch-card,
+.machine-record-newest-preview,
+.machine-measurement-panel,
+.machine-history-preview,
+.machine-replacement-panel,
+.machine-document-library-card,
+.asset-notes-card,
+.pm-tracking-card {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-md);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-card), var(--mcc-shadow-inset);
+}
+
+.machine-detail-summary-grid > *,
+.machine-detail-grid > *,
+.machine-spec-grid > *,
+.machine-wear-grid > *,
+.machine-form-section,
+.machine-component-box,
+.machine-record-newest-preview,
+.machine-history-preview-row,
+.machine-log-row,
+.machine-placeholder-grid > *,
+.machine-color-row {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.machine-detail-accordion-card {
+  --machine-detail-card-bg: var(--mcc-surface-card);
+  --machine-detail-card-open-bg: var(--mcc-surface-card-nested);
+  --machine-detail-card-border: var(--mcc-border-subtle);
+  --machine-detail-card-open-border: color-mix(
+    in srgb,
+    var(--mcc-category-accent, var(--mcc-module-accent)) 54%,
+    var(--mcc-border-default)
+  );
+  border-radius: var(--mcc-radius-sm);
+  box-shadow: var(--mcc-shadow-card), var(--mcc-shadow-inset);
+  transition:
+    border-color var(--mcc-motion-standard) var(--mcc-motion-ease),
+    box-shadow var(--mcc-motion-standard) var(--mcc-motion-ease),
+    background-color var(--mcc-motion-standard) var(--mcc-motion-ease);
+}
+
+.machine-detail-accordion-toggle {
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-primary);
+  background: transparent;
+}
+
+.machine-detail-accordion-toggle:is(:hover, :focus-visible) {
+  background: rgba(var(--mcc-module-accent-rgb), 0.08);
+}
+
+/*
+ * Legacy accordions transitioned max-height and padding. Keep state behavior,
+ * but make geometry switch immediately; only opacity/transform are animated.
+ */
+.machine-detail-accordion-panel {
+  transition:
+    opacity var(--mcc-motion-standard) var(--mcc-motion-ease),
+    transform var(--mcc-motion-standard) var(--mcc-motion-ease-out),
+    visibility 0s linear var(--mcc-motion-standard);
+}
+
+.machine-detail-accordion-card.is-open .machine-detail-accordion-panel {
+  transition:
+    opacity var(--mcc-motion-standard) var(--mcc-motion-ease),
+    transform var(--mcc-motion-standard) var(--mcc-motion-ease-out),
+    visibility 0s;
+}
+
+.machine-form-section > span,
+.machine-detail-summary-label,
+.machine-detail-pill-label,
+.machine-measurement-panel-heading,
+.machine-history-preview-heading {
+  color: var(--mcc-module-accent);
+}
+
+.machine-check-field,
+.machine-yes-no,
+.machine-unit-display {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-control);
+}
+
+.machine-condition-badge,
+.machine-age-pill,
+.machine-age-helper-pill,
+.machine-measurement-setup-pill {
+  border-color: var(--mcc-border-default);
+  background: var(--mcc-surface-control);
+}
+
+.machine-condition-badge.condition-new {
+  border-color: var(--mcc-status-success);
+  background: rgba(var(--mcc-status-success-rgb), 0.14);
+}
+
+.machine-condition-badge.condition-worn {
+  border-color: var(--mcc-status-danger);
+  background: rgba(var(--mcc-status-danger-rgb), 0.14);
+}
+
+.machine-condition-badge:is(.condition-used, .condition-rebuilt_repaired) {
+  border-color: var(--mcc-status-warning);
+  background: rgba(var(--mcc-status-warning-rgb), 0.13);
+}
+
+.machine-action-badge,
+.machine-unit-edit {
+  border-color: var(--mcc-border-interactive);
+  color: var(--mcc-text-link);
+  background: var(--mcc-surface-control);
+}
+
+.machine-disable-zone {
+  border-color: var(--mcc-status-danger);
+  border-radius: var(--mcc-radius-md);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(var(--mcc-status-danger-rgb), 0.13),
+      transparent 72%
+    ),
+    var(--mcc-surface-card);
+}
+
+.machine-document-folder-body,
+.machine-document-list,
+.asset-note-list,
+.pm-history-list,
+.measurement-log-list,
+.measurement-folder-records {
+  border-color: var(--mcc-border-subtle);
+  background: var(--mcc-surface-card-nested);
+}
+
+.machine-document-row,
+.asset-note-entry,
+.pm-history-entry,
+.pm-task-card,
+.measurement-log-row,
+.measurement-year-folder,
+.measurement-folder-row {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.inspection-record-viewer-canvas img {
+  transition: filter var(--mcc-motion-fast) var(--mcc-motion-ease);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Equipment Library                                                         */
+/* -------------------------------------------------------------------------- */
+
+.equipment-library-toolbar,
+.equipment-detail-header {
+  border-color: var(--mcc-border-default);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-equipment-library-rgb), 0.09),
+      transparent 70%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.equipment-asset-card.mcc-pill-card {
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 44%, var(--mcc-border-default));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--mcc-pill-accent) 8%, transparent),
+      transparent 66%
+    ),
+    var(--mcc-surface-card);
+}
+
+.equipment-card-number,
+.equipment-asset-card h3 {
+  color: var(--mcc-text-primary);
+}
+
+.equipment-card-category,
+.equipment-card-history :where(span, small) {
+  color: var(--mcc-text-muted);
+}
+
+.equipment-card-facts > div,
+.equipment-detail-grid > div,
+.equipment-history-item {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.equipment-card-facts dt,
+.equipment-detail-grid dt {
+  color: var(--mcc-text-muted);
+}
+
+.equipment-card-facts dd,
+.equipment-detail-grid dd {
+  color: var(--mcc-text-primary);
+}
+
+.equipment-card-history {
+  border-top-color: var(--mcc-border-subtle);
+}
+
+.equipment-import-mode {
+  color: var(--mcc-text-secondary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Facility Info                                                              */
+/* -------------------------------------------------------------------------- */
+
+.facility-toolbar,
+.facility-home-heading,
+.facility-area-heading {
+  border-color: var(--mcc-border-default);
+  border-radius: var(--mcc-radius-md);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-facility-info-rgb), 0.09),
+      transparent 72%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.facility-area-card.mcc-pill-card {
+  border-color: color-mix(in srgb, var(--mcc-module-accent) 40%, var(--mcc-border-default));
+  background: var(--mcc-surface-card);
+}
+
+.facility-area-card__heading,
+.facility-folder-header,
+.facility-item-row {
+  color: var(--mcc-text-primary);
+}
+
+.facility-folder-card,
+.facility-item-row,
+.facility-gallery-card,
+.facility-context-results button {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.facility-folder-card.is-open {
+  border-color: color-mix(in srgb, var(--mcc-module-accent) 55%, var(--mcc-border-default));
+}
+
+.facility-folder-body {
+  border-top-color: var(--mcc-border-subtle);
+}
+
+.facility-gallery-card {
+  color: var(--mcc-text-primary);
+}
+
+.facility-gallery-card:is(:hover, :focus-visible),
+.facility-context-results button:is(:hover, :focus-visible) {
+  border-color: var(--mcc-module-accent);
+  background: rgba(var(--mcc-accent-module-facility-info-rgb), 0.1);
+}
+
+.facility-gallery-card__visual,
+.facility-video-stage,
+.facility-viewer main {
+  border-color: var(--mcc-border-default);
+  background: var(--mcc-bg-deep);
+}
+
+.facility-search-context,
+.facility-gallery-card > span,
+.facility-context-results small {
+  color: var(--mcc-text-muted);
+}
+
+.facility-viewer {
+  border-color: var(--mcc-border-strong);
+  background: var(--mcc-bg-overlay);
+  box-shadow: var(--mcc-shadow-modal);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Users, security, permissions                                               */
+/* -------------------------------------------------------------------------- */
+
+.user-create-form,
+.security-password-form,
+.user-table-card {
+  border-color: var(--mcc-border-default);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--mcc-accent-module-users-rgb), 0.08),
+      transparent 74%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.user-name,
+.one-time-password {
+  color: var(--mcc-text-primary);
+}
+
+.user-last-login,
+.permission-pending-summary,
+.user-copy-message {
+  color: var(--mcc-text-muted);
+}
+
+.user-password-input-row,
+.permission-module-list,
+.permission-choice-list,
+.reset-checkbox-list {
+  min-width: 0;
+}
+
+.user-password-requirements,
+.permission-module-list details,
+.permission-choice,
+.permission-pending-summary {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+}
+
+.user-password-requirements .is-met {
+  color: var(--mcc-status-success);
+}
+
+.user-password-requirements .is-unmet {
+  color: var(--mcc-text-muted);
+}
+
+.permission-choice.is-granted {
+  border-color: var(--mcc-status-success);
+  background: rgba(var(--mcc-status-success-rgb), 0.11);
+}
+
+.permission-choice.is-inherited {
+  border-color: var(--mcc-status-info);
+  background: rgba(var(--mcc-status-info-rgb), 0.1);
+}
+
+.special-permissions-modal,
+.mcc-modal-backdrop > section {
+  border-color: var(--mcc-border-strong);
+  background: var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-modal);
+}
+
+.permission-module-badge {
+  border-color: var(--mcc-border-interactive);
+  color: var(--mcc-text-secondary);
+  background: var(--mcc-surface-control);
+}
+
+.permission-disabled-note,
+.locked-action {
+  color: var(--mcc-text-muted);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Settings                                                                   */
+/* -------------------------------------------------------------------------- */
+
+.settings-page :where(
+  .branding-card,
+  .backup-card,
+  .backup-center-card,
+  .share-card,
+  .danger-zone-card,
+  .backup-protection-panel
+) {
+  border-color: var(--mcc-border-default);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(var(--mcc-accent-module-settings-rgb), 0.07),
+      transparent 68%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.branding-preview,
+.network-link-panel,
+.backup-status-panel,
+.backup-tier-card,
+.backup-list-row,
+.share-url-row,
+.reset-option-card,
+.restore-warning-panel,
+.backup-protected-area {
+  border-color: var(--mcc-border-subtle);
+  border-radius: var(--mcc-radius-sm);
+  background: var(--mcc-surface-card-nested);
+  box-shadow: var(--mcc-shadow-inset);
+}
+
+.backup-tier-heading,
+.share-card-heading,
+.backup-protection-heading,
+.backup-progress-heading {
+  color: var(--mcc-text-primary);
+}
+
+.backup-tier-meta,
+.backup-health-detail,
+.network-notes {
+  color: var(--mcc-text-muted);
+}
+
+.danger-zone-card,
+.restore-warning-panel {
+  border-color: color-mix(in srgb, var(--mcc-status-danger) 58%, var(--mcc-border-default));
+  background:
+    linear-gradient(
+      135deg,
+      rgba(var(--mcc-status-danger-rgb), 0.11),
+      transparent 72%
+    ),
+    var(--mcc-surface-panel);
+}
+
+.backup-spinner {
+  border-color: var(--mcc-border-default);
+  border-top-color: var(--mcc-accent-maintenance);
+}
+
+.backup-step-list .running {
+  color: var(--mcc-status-info);
+}
+
+.backup-step-list .done {
+  color: var(--mcc-status-success);
+}
+
+.backup-step-list .failed {
+  color: var(--mcc-status-danger);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Overlay and modal layer aliases                                            */
+/* -------------------------------------------------------------------------- */
+
+:where(
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) {
+  padding:
+    max(var(--mcc-space-6), env(safe-area-inset-top))
+    max(var(--mcc-space-6), env(safe-area-inset-right))
+    max(var(--mcc-space-6), env(safe-area-inset-bottom))
+    max(var(--mcc-space-6), env(safe-area-inset-left));
+  background: var(--mcc-surface-backdrop);
+  backdrop-filter: blur(8px) saturate(88%);
+  -webkit-backdrop-filter: blur(8px) saturate(88%);
+}
+
+:where(
+  .inventory-modal,
+  .vendor-modal,
+  .vendor-detail-modal,
+  .vendor-contacts-modal,
+  .requisition-modal,
+  .requisition-preview-modal,
+  .machine-modal,
+  .machine-detail-modal,
+  .machine-editor-modal,
+  .machine-small-modal,
+  .machine-color-modal,
+  .machine-logs-modal,
+  .machine-setup-modal,
+  .machine-import-result-modal,
+  .equipment-form-modal,
+  .equipment-history-modal,
+  .facility-modal,
+  .pm-modal,
+  .pm-complete-modal,
+  .pm-history-modal,
+  .pm-view-modal,
+  .measurement-record-modal,
+  .reason-modal,
+  .reset-modal,
+  .restore-modal,
+  .special-permissions-modal,
+  .glass-modal-shell
+) {
+  max-width: min(100%, 1120px);
+  max-height: calc(100dvh - (var(--mcc-space-8) * 2));
+  overflow: auto;
+  border: 1px solid var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-lg);
+  color: var(--mcc-text-primary);
+  background: var(--mcc-surface-panel-strong);
+  box-shadow: var(--mcc-shadow-modal), var(--mcc-shadow-inset);
+  scrollbar-color: var(--mcc-border-strong) var(--mcc-bg-deep);
+}
+
+.modal-heading,
+.mcc-modal-heading {
+  border-bottom-color: var(--mcc-border-subtle);
+}
+
+.modal-heading :where(h2, h3),
+.mcc-modal-heading :where(h2, h3) {
+  color: var(--mcc-text-primary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Responsive, zoom, and narrow viewport safety                               */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 1180px) {
+  .mcc-main {
+    padding-right: var(--mcc-space-6);
+    padding-left: var(--mcc-space-6);
+  }
+
+  .dashboard-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .machine-card-grid,
+  .equipment-asset-grid,
+  .vendor-card-grid,
+  .facility-card-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  }
+
+  .mcc-shell :where(
+    .machine-detail-summary-grid,
+    .machine-detail-grid,
+    .equipment-detail-grid,
+    .equipment-edit-grid,
+    .settings-page .network-link-grid,
+    .backup-center-grid
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .mcc-workspace {
+    width: 100%;
+  }
+
+  .mcc-command-deck {
+    width: auto;
+    max-width: calc(100vw - (var(--mcc-space-6) * 2));
+  }
+
+  .mcc-command-deck-header {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-metric-pill:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  .inventory-focus-toolbar,
+  .inventory-toolbar,
+  .vendors-toolbar-card,
+  .equipment-detail-header {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-focus-actions,
+  .vendors-toolbar-actions,
+  .equipment-detail-actions {
+    justify-content: flex-start;
+  }
+
+  .history-filter-card,
+  .vendor-form-grid,
+  .vendor-contact-edit-grid,
+  .facility-form,
+  .machine-form-grid,
+  .machine-setup-grid,
+  .machine-screw-barrel-grid,
+  .equipment-library-search-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .history-filter-wide,
+  .vendor-form-wide,
+  .facility-form-wide,
+  .machine-form-wide,
+  .equipment-library-search-row .form-field:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .mcc-shell :where(
+    .inventory-table-wrap,
+    .requisitions-table-wrap,
+    .history-table-wrap,
+    .user-table-card,
+    .staging-table-wrap
+  ) {
+    max-height: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .mcc-main,
+  .inventory-focus-shell .mcc-main {
+    padding-right: var(--mcc-space-5);
+    padding-left: var(--mcc-space-5);
+  }
+
+  .page-stack,
+  .mcc-page {
+    gap: var(--mcc-space-6);
+  }
+
+  .mcc-shell :where(
+    .history-filter-card,
+    .vendor-form-grid,
+    .vendor-contact-edit-grid,
+    .facility-form,
+    .machine-form-grid,
+    .machine-setup-grid,
+    .machine-screw-barrel-grid,
+    .equipment-library-search-row,
+    .machine-detail-summary-grid,
+    .machine-detail-grid,
+    .equipment-detail-grid,
+    .equipment-edit-grid,
+    .settings-page .network-link-grid,
+    .backup-center-grid
+  ) {
+    grid-template-columns: 1fr;
+  }
+
+  .mcc-shell :where(
+    .history-filter-wide,
+    .vendor-form-wide,
+    .vendor-contact-notes,
+    .facility-form-wide,
+    .machine-form-wide,
+    .equipment-field-wide,
+    .equipment-library-search-row .form-field:first-child
+  ) {
+    grid-column: auto;
+  }
+
+  .mcc-resource-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcc-resource-row__actions {
+    width: 100%;
+  }
+
+  .mcc-resource-row__actions .mcc-action-group {
+    justify-content: flex-start;
+  }
+
+  .mcc-shell :where(
+    .inventory-focus-actions,
+    .inventory-search-tools,
+    .inventory-row-actions,
+    .inventory-row-actions-primary,
+    .inventory-tool-actions,
+    .inventory-setup-actions,
+    .vendors-toolbar-actions,
+    .vendor-card-actions,
+    .requisition-row-actions,
+    .requisition-selection-toolbar,
+    .active-batch-actions,
+    .machine-toolbar-actions,
+    .machine-card-summary-actions,
+    .machine-detail-header-actions,
+    .machine-record-launch-actions,
+    .machine-replacement-actions,
+    .equipment-library-actions,
+    .equipment-detail-actions,
+    .facility-toolbar,
+    .user-actions,
+    .backup-action-row,
+    .backup-row-actions,
+    .modal-actions,
+    .mcc-modal-actions
+  ) > :where(button, a, label) {
+    flex: 0 1 auto;
+    width: auto;
+  }
+
+  .machine-detail-accordion-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(
+    .modal-backdrop,
+    .mcc-modal-backdrop,
+    .glass-modal-backdrop
+  ) {
+    padding-right: var(--mcc-space-5);
+    padding-left: var(--mcc-space-5);
+  }
+}
+
+@media (max-width: 520px) {
+  .mcc-main,
+  .inventory-focus-shell .mcc-main {
+    padding-right: var(--mcc-space-4);
+    padding-left: var(--mcc-space-4);
+  }
+
+  .mcc-page-topbar {
+    border-radius: var(--mcc-radius-md);
+  }
+
+  .page-stack,
+  .mcc-page {
+    gap: var(--mcc-space-5);
+  }
+
+  .page-heading,
+  .mcc-page-header,
+  .mcc-shell :where(.mcc-card, .glass-panel) {
+    padding: var(--mcc-space-5);
+    border-radius: var(--mcc-radius-md);
+  }
+
+  .page-heading,
+  .mcc-page-header {
+    border-left-width: 3px;
+    border-radius: 0 var(--mcc-radius-md) var(--mcc-radius-md) 0;
+  }
+
+  .dashboard-metric-grid,
+  .requisition-summary-grid,
+  .history-section-grid,
+  .machine-card-grid,
+  .equipment-asset-grid,
+  .vendor-card-grid,
+  .facility-card-grid,
+  .machine-spec-grid,
+  .machine-wear-grid,
+  .equipment-card-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-metric-pill:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+
+  .dashboard-pm-alert.mcc-pill-card {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .mcc-command-deck {
+    max-width: calc(100vw - (var(--mcc-space-4) * 2));
+    padding: var(--mcc-space-5);
+    border-radius: var(--mcc-radius-md);
+  }
+
+  .mcc-command-module-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mcc-user-console-actions {
+    flex-direction: row;
+  }
+
+  .requisition-view-pills,
+  .requisition-batch-view-pills,
+  .requisition-preview-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .requisition-view-pills :where(button, .mcc-workflow-tab),
+  .requisition-batch-view-pills :where(button, .mcc-workflow-tab),
+  .requisition-preview-tabs button {
+    width: 100%;
+  }
+
+  .mcc-shell :where(
+    .inventory-focus-actions,
+    .inventory-search-tools,
+    .inventory-row-actions,
+    .inventory-row-actions-primary,
+    .inventory-tool-actions,
+    .inventory-setup-actions,
+    .vendors-toolbar-actions,
+    .vendor-card-actions,
+    .requisition-row-actions,
+    .requisition-selection-toolbar,
+    .active-batch-actions,
+    .machine-toolbar-actions,
+    .machine-card-summary-actions,
+    .machine-detail-header-actions,
+    .machine-record-launch-actions,
+    .machine-replacement-actions,
+    .equipment-library-actions,
+    .equipment-detail-actions,
+    .facility-toolbar,
+    .facility-view-switch,
+    .user-actions,
+    .backup-action-row,
+    .backup-row-actions,
+    .modal-actions,
+    .mcc-modal-actions
+  ) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .mcc-shell :where(
+    .inventory-focus-actions,
+    .inventory-search-tools,
+    .inventory-row-actions,
+    .inventory-row-actions-primary,
+    .inventory-tool-actions,
+    .inventory-setup-actions,
+    .vendors-toolbar-actions,
+    .vendor-card-actions,
+    .requisition-row-actions,
+    .requisition-selection-toolbar,
+    .active-batch-actions,
+    .machine-toolbar-actions,
+    .machine-card-summary-actions,
+    .machine-detail-header-actions,
+    .machine-record-launch-actions,
+    .machine-replacement-actions,
+    .equipment-library-actions,
+    .equipment-detail-actions,
+    .facility-toolbar,
+    .facility-view-switch,
+    .user-actions,
+    .backup-action-row,
+    .backup-row-actions,
+    .modal-actions,
+    .mcc-modal-actions
+  ) > :where(button, a, label) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mcc-shell :where(
+    .inventory-row-actions,
+    .inventory-row-actions-primary,
+    .requisition-row-actions,
+    .machine-card-summary-actions,
+    .vendor-card-actions,
+    .mcc-action-group,
+    .glass-button-group
+  ) {
+    display: flex;
+    flex-flow: row wrap;
+  }
+
+  .mcc-shell :where(
+    .inventory-row-actions,
+    .inventory-row-actions-primary,
+    .requisition-row-actions,
+    .machine-card-summary-actions,
+    .vendor-card-actions,
+    .mcc-action-group,
+    .glass-button-group
+  ) > :where(button, a, label) {
+    flex: 0 1 auto;
+    width: auto;
+  }
+
+  .equipment-import-mode {
+    grid-column: 1 / -1;
+  }
+
+  :where(
+    .modal-backdrop,
+    .mcc-modal-backdrop,
+    .glass-modal-backdrop
+  ) {
+    padding:
+      max(var(--mcc-space-4), env(safe-area-inset-top))
+      max(var(--mcc-space-4), env(safe-area-inset-right))
+      max(var(--mcc-space-4), env(safe-area-inset-bottom))
+      max(var(--mcc-space-4), env(safe-area-inset-left));
+  }
+
+  :where(
+    .inventory-modal,
+    .vendor-modal,
+    .vendor-detail-modal,
+    .vendor-contacts-modal,
+    .requisition-modal,
+    .requisition-preview-modal,
+    .machine-modal,
+    .machine-detail-modal,
+    .machine-editor-modal,
+    .equipment-form-modal,
+    .equipment-history-modal,
+    .facility-modal,
+    .pm-modal,
+    .measurement-record-modal,
+    .reset-modal,
+    .restore-modal,
+    .special-permissions-modal,
+    .glass-modal-shell
+  ) {
+    max-height: calc(100dvh - (var(--mcc-space-4) * 2));
+    border-radius: var(--mcc-radius-md);
+  }
+}
+
+@media (max-width: 390px) {
+  .mcc-main,
+  .inventory-focus-shell .mcc-main {
+    padding-right: var(--mcc-space-3);
+    padding-left: var(--mcc-space-3);
+  }
+
+  .mcc-command-deck {
+    max-width: calc(100vw - (var(--mcc-space-3) * 2));
+    padding: var(--mcc-space-4);
+  }
+
+  .mcc-command-module-tile {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: var(--mcc-space-4);
+    padding-inline: var(--mcc-space-5);
+  }
+
+  .mcc-command-module-icon-housing {
+    width: 34px;
+    height: 34px;
+  }
+
+  .mcc-user-console-actions {
+    gap: var(--mcc-space-2);
+  }
+
+  .mcc-shell :where(
+    .inventory-focus-actions,
+    .inventory-search-tools,
+    .inventory-tool-actions,
+    .inventory-setup-actions,
+    .vendors-toolbar-actions,
+    .requisition-selection-toolbar,
+    .active-batch-actions,
+    .machine-toolbar-actions,
+    .machine-detail-header-actions,
+    .machine-record-launch-actions,
+    .machine-replacement-actions,
+    .equipment-library-actions,
+    .equipment-detail-actions,
+    .facility-toolbar,
+    .facility-view-switch,
+    .user-actions,
+    .backup-action-row,
+    .backup-row-actions,
+    .modal-actions,
+    .mcc-modal-actions
+  ) {
+    display: flex;
+    flex-flow: row wrap;
+  }
+
+  .mcc-shell :where(
+    .inventory-focus-actions,
+    .inventory-search-tools,
+    .inventory-tool-actions,
+    .inventory-setup-actions,
+    .vendors-toolbar-actions,
+    .requisition-selection-toolbar,
+    .active-batch-actions,
+    .machine-toolbar-actions,
+    .machine-detail-header-actions,
+    .machine-record-launch-actions,
+    .machine-replacement-actions,
+    .equipment-library-actions,
+    .equipment-detail-actions,
+    .facility-toolbar,
+    .facility-view-switch,
+    .user-actions,
+    .backup-action-row,
+    .backup-row-actions,
+    .modal-actions,
+    .mcc-modal-actions
+  ) > :where(button, a, label) {
+    flex: 1 1 132px;
+    width: auto;
+  }
+
+  .mcc-status-pill,
+  .status-pill,
+  [class$="-badge"],
+  [class$="-pill"] {
+    justify-self: start;
+    width: fit-content;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Motion and transparency preferences                                        */
+/* -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .mcc-shell :where(
+    .mcc-page-enter,
+    .mcc-route-loader,
+    .mcc-pill-card,
+    .mcc-command-module-tile,
+    .mcc-command-module-tile::after,
+    .mcc-command-module-rail,
+    .mcc-command-module-icon-housing,
+    .mcc-command-module-chevron,
+    .command-launcher-button,
+    .launcher-gear,
+    .machine-detail-accordion-card,
+    .machine-detail-accordion-panel,
+    .machine-accordion-chevron,
+    .mcc-success-burst,
+    .mcc-success-burst > span,
+    .backup-spinner,
+    .brand-animation-glow .mcc-brand-mark,
+    .brand-animation-rotate .mcc-brand-image,
+    .brand-animation-pulse .mcc-brand-mark
+  ),
+  .maintenance-team-panel,
+  .team-rank-popover,
+  .permission-details-popover {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .mcc-shell :where(
+    .mcc-pill-card,
+    .mcc-command-module-tile,
+    .command-launcher-button,
+    .launcher-gear
+  ):is(:hover, :focus-visible) {
+    transform: none;
+  }
+
+  .mcc-shell .mcc-command-module-tile::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .mcc-page-topbar,
+  .mcc-command-deck,
+  .maintenance-team-panel,
+  :where(
+    .inventory-modal,
+    .vendor-modal,
+    .requisition-modal,
+    .machine-modal,
+    .equipment-form-modal,
+    .facility-modal,
+    .glass-modal-shell
+  ) {
+    background: var(--mcc-bg-overlay);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Light, economical application print fallback                              */
+/* Dedicated PM/spec/requisition PDF rules remain authoritative.              */
+/* -------------------------------------------------------------------------- */
+
+@media print {
+  .mcc-shell {
+    min-height: 0 !important;
+    color: CanvasText !important;
+    background: Canvas !important;
+  }
+
+  .mcc-shell::before,
+  .mcc-shell::after {
+    display: none !important;
+  }
+
+  .command-launcher,
+  .mcc-page-topbar,
+  .mcc-shell :where(
+    .header-actions,
+    .modal-actions,
+    .mcc-modal-actions,
+    .glass-button-group,
+    .mcc-action-group,
+    .inventory-focus-actions,
+    .inventory-search-tools,
+    .vendors-toolbar-actions,
+    .requisition-row-actions,
+    .machine-toolbar-actions,
+    .equipment-library-actions,
+    .facility-toolbar,
+    .user-actions,
+    .backup-action-row,
+    .backup-row-actions
+  ) {
+    display: none !important;
+  }
+
+  .mcc-main,
+  .mcc-workspace-frame,
+  .mcc-workspace,
+  .mcc-content,
+  .page-stack,
+  .mcc-page {
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    color: CanvasText !important;
+    background: Canvas !important;
+  }
+
+  .mcc-shell :where(
+    .page-heading,
+    .mcc-page-header,
+    .mcc-card,
+    .glass-panel,
+    .glass-card,
+    .mcc-pill-card,
+    .table-card,
+    [class$="-card"],
+    [class$="-panel"],
+    [class$="-row"]
+  ) {
+    color: CanvasText !important;
+    border-color: ButtonBorder !important;
+    background: Canvas !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+  }
+
+  .mcc-shell :where(h1, h2, h3, h4, strong, p, span, small, dt, dd, td, th) {
+    color: CanvasText !important;
+    text-shadow: none !important;
+  }
+
+  .mcc-shell :where(
+    .table-card,
+    [class$="-table-wrap"],
+    [class$="-history-list"],
+    [class$="-log-list"]
+  ) {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .mcc-shell table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .mcc-shell :where(th, td) {
+    border: 1px solid ButtonBorder !important;
+    background: Canvas !important;
+  }
+
+  .mcc-shell :where(a, .mcc-text-link, .mcc-link-pill) {
+    color: LinkText !important;
+    text-decoration: underline !important;
+  }
+
+  .mcc-shell :where(tr, img, figure, .mcc-resource-row) {
+    break-inside: avoid;
+  }
+}
