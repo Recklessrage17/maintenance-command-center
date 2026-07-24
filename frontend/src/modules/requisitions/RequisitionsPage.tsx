@@ -953,7 +953,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   return (
-    <div className="page-stack requisitions-page">
+    <div className={`page-stack requisitions-page${filter==='Requisition Staging'?' requisitions-page--staging':''}`}>
       {!canWrite&&<span className="view-only-badge requisitions-access-badge">View-only access.</span>}
 
       <div className="card-grid requisition-summary-grid">
@@ -977,8 +977,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
             {canWrite&&<button className="primary-button" type="button" onClick={openBatchCreator}>Create Requisition Batch</button>}
           </div>
           <div className="requisition-batch-view-pills" role="tablist" aria-label="Requisition Batch views">
-            <button className={batchView==='active'?'active':''} type="button" onClick={()=>{setBatchView('active');void loadStaging('active',null);}}>Open Batches</button>
-            <button className={batchView==='completed'?'active':''} type="button" onClick={()=>{setBatchView('completed');void loadStaging('completed',null);}}>Converted / Closed</button>
+            <button className={`mcc-industrial-button requisition-batch-view-button${batchView==='active'?' active':''}`} type="button" aria-pressed={batchView==='active'} onClick={()=>{setBatchView('active');void loadStaging('active',null);}}>Open Batches</button>
+            <button className={`mcc-industrial-button requisition-batch-view-button${batchView==='completed'?' active':''}`} type="button" aria-pressed={batchView==='completed'} onClick={()=>{setBatchView('completed');void loadStaging('completed',null);}}>Converted / Closed</button>
           </div>
           <div className="requisition-batch-grid">
             {requisitionBatches.map(batch=>{

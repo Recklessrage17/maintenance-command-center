@@ -1811,13 +1811,27 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .mcc-workflow-tab.workflow-ordered.active::after { display: none; animation: none; }
   .mcc-industrial-button,.requisitions-page .requisition-row-actions button { transition: none; }
 }
-.staging-list-card { display: grid; gap: 12px; }
+.requisitions-page.requisitions-page--staging {
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
+  align-content: start;
+}
+.staging-list-card {
+  display: grid;
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
+  align-self: start;
+  align-content: start;
+  min-height: 0;
+  height: auto;
+  gap: 12px;
+}
 .staging-list-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .staging-list-heading h3,.staging-list-heading p { margin: 0; }
 .staging-list-heading > div { display: grid; gap: 5px; }
-.requisition-batch-view-pills { display: flex; gap: 8px; flex-wrap: wrap; }
-.requisition-batch-view-pills button { min-height: 34px; padding: 0 15px; border: 1px solid rgba(143,205,233,.28); border-radius: 999px; color: #c8e8f5; background: rgba(4,18,34,.58); font: inherit; font-size: .78rem; font-weight: 850; cursor: pointer; }
-.requisition-batch-view-pills button.active { color: #001523; border-color: #44d7ff; background: linear-gradient(135deg,#44d7ff,#36e5aa); }
+.requisition-batch-view-pills { width: fit-content; max-width: 100%; min-height: 0; height: auto; display: flex; align-self: start; align-items: flex-start; justify-self: start; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; }
+.requisition-batch-view-pills .requisition-batch-view-button { width: auto; min-height: 34px; height: auto; max-height: 55px; align-self: flex-start; flex: 0 0 auto; aspect-ratio: auto; padding: 8px 15px; border-radius: 10px; font: inherit; font-size: .78rem; font-weight: 850; line-height: 1.2; cursor: pointer; }
+.requisition-batch-view-pills .requisition-batch-view-button.active { color: #f2f6f8; border-color: rgba(205,220,227,.72); background: linear-gradient(180deg,rgba(255,255,255,.14),transparent 36%),linear-gradient(145deg,rgba(68,79,85,.9),rgba(18,25,29,.98)); box-shadow: inset 0 1px 0 rgba(255,255,255,.22),0 0 17px rgba(194,212,220,.16); }
 .requisition-batch-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 10px; }
 .requisition-batch-card { position: relative; display: grid; gap: 5px; min-width: 0; padding: 14px 15px; border: 1px solid rgba(143,205,233,.22); border-radius: 20px; color: #eafaff; background: linear-gradient(145deg,rgba(9,37,61,.88),rgba(4,18,34,.72)); font: inherit; text-align: left; cursor: pointer; }
 .requisition-batch-card:hover,.requisition-batch-card.active { border-color: rgba(68,215,255,.72); box-shadow: 0 0 0 1px rgba(68,215,255,.18),0 12px 28px rgba(0,0,0,.2); }
