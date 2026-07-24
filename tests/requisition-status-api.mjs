@@ -5,7 +5,9 @@ import net from 'node:net';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
+import pdfLib from '../backend/node_modules/pdf-lib/cjs/index.js';
 
+const {PDFDocument}=pdfLib;
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const fixture=path.join(root,'tmp',`requisition-status-api-${Date.now()}-${process.pid}`);
 const dataDir=path.join(fixture,'data');
@@ -16,6 +18,12 @@ let server;
 let assertions=0;
 function check(actual,expected,message){assertions+=1;assert.equal(actual,expected,message);}
 function ok(value,message){assertions+=1;assert.ok(value,message);}
+function writePdfQaArtifact(filename,bytes){
+  if(!process.env.MCC_PDF_QA_DIR)return;
+  const outputDir=path.resolve(process.env.MCC_PDF_QA_DIR);
+  fs.mkdirSync(outputDir,{recursive:true});
+  fs.writeFileSync(path.join(outputDir,filename),bytes);
+}
 async function freePort(){return new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});}
 async function start(port){const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',SESSION_SECRET:'requisition-status-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<100;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
 async function request(base,pathname,{method='GET',cookie='',body}={}){const response=await fetch(`${base}${pathname}`,{method,headers:{...(cookie?{Cookie:cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({}));return {response,data,cookie:response.headers.get('set-cookie')?.split(';')[0]||''};}
@@ -76,7 +84,15 @@ async function run(){
   const persisted=database.prepare('SELECT requested_at,ordered_at,received_at FROM inventory_requisitions WHERE id=1').get();
   check(persisted.requested_at,legacy.created);check(persisted.ordered_at,orderedAt);check(persisted.received_at,receivedAt);
   database.close();
-  console.log(`Requisition API/status-transition tests passed: ${assertions} assertions with isolated legacy migration, conservative fallbacks, edit preservation, and Requested → Ordered → Received/Canceled lifecycle.`);
+
+  const requisitionPdf=await fetch(`${base}/api/requisitions/1/pdf`,{headers:{Cookie:cookie}});
+  check(requisitionPdf.status,200,'Representative requisition PDF must be generated.');
+  ok(/application\/pdf/.test(requisitionPdf.headers.get('content-type')||''),'Requisition PDF must use the application/pdf content type.');
+  const requisitionPdfBytes=Buffer.from(await requisitionPdf.arrayBuffer());const requisitionDocument=await PDFDocument.load(requisitionPdfBytes);
+  check(requisitionDocument.getPageCount(),1,'Representative single-line requisition must be exactly one page.');
+  writePdfQaArtifact('requisition.pdf',requisitionPdfBytes);
+
+  console.log(`Requisition API/status-transition tests passed: ${assertions} assertions with isolated legacy migration, conservative fallbacks, edit preservation, Requested → Ordered → Received/Canceled lifecycle, and representative PDF=1 page.`);
 }
 
 try{await run();}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}

@@ -108,7 +108,6 @@ export function MccCommandModuleTile({
       onPointerEnter={onPrefetch}
       onFocus={onPrefetch}
       type="button"
-      role="menuitem"
       aria-current={active?'page':undefined}
       aria-busy={warping}
     >
@@ -127,6 +126,7 @@ export function MccCommandModuleTile({
 
 export function MccCommandDeck({
   id,
+  open,
   modules,
   activeSection,
   warpingSection,
@@ -138,6 +138,7 @@ export function MccCommandDeck({
   onPrefetch,
 }: {
   id: string;
+  open: boolean;
   modules: MccCommandModule[];
   activeSection: MccSection;
   warpingSection: MccSection | null;
@@ -149,8 +150,17 @@ export function MccCommandDeck({
   onPrefetch?: (section: MccSection) => void;
 }) {
   const titleId=`${id}-title`;
+  const inertProps=open?{}:{inert:''};
   return (
-    <nav className="mcc-command-deck command-menu" id={id} aria-labelledby={titleId}>
+    <nav
+      className="mcc-command-deck command-menu"
+      id={id}
+      aria-labelledby={titleId}
+      aria-hidden={open?undefined:true}
+      hidden={!open}
+      style={open?undefined:{visibility:'hidden'}}
+      {...inertProps}
+    >
       <header className="mcc-command-deck-header command-menu-heading">
         <div className="mcc-command-deck-title command-menu-title">
           <span>COMMAND DECK</span>
@@ -163,7 +173,7 @@ export function MccCommandDeck({
           onLogout={onLogout}
         />
       </header>
-      <div className="mcc-command-module-grid" role="menu">
+      <div className="mcc-command-module-grid">
         {modules.map(module=>(
           <MccCommandModuleTile
             key={module.id}

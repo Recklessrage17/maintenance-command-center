@@ -22,10 +22,23 @@ async function mockLauncher(page:Page,user=owner){
 }
 
 async function openDeck(page:Page){
-  await page.getByRole('button',{name:'Open command menu'}).click();
+  const launcher=page.getByRole('button',{name:'Open command menu'});
+  await launcher.click();
   const deck=page.locator('.mcc-command-deck');
   await expect(deck).toBeVisible();
+  await expect(deck).not.toHaveAttribute('hidden');
+  await expect(deck).not.toHaveAttribute('aria-hidden');
+  expect(await deck.evaluate(element=>element.inert)).toBe(false);
   return deck;
+}
+
+async function expectDeckClosed(page:Page){
+  const deck=page.locator('.mcc-command-deck');
+  await expect(deck).toBeHidden();
+  await expect(deck).toHaveAttribute('hidden','');
+  await expect(deck).toHaveAttribute('aria-hidden','true');
+  expect(await deck.evaluate(element=>element.inert)).toBe(true);
+  await expect(page.getByRole('navigation',{name:'Maintenance Command Center'})).toHaveCount(0);
 }
 
 async function expectNoHorizontalOverflow(page:Page){
@@ -37,6 +50,8 @@ test('industrial command deck has shared smoke-glass tiles, module accents, and 
   await mockLauncher(page);
   await page.goto('/');
   const deck=await openDeck(page);
+  await expect(deck).toHaveRole('navigation');
+  await expect(deck.locator('[role="menu"], [role="menuitem"]')).toHaveCount(0);
   await expect(deck.getByText('COMMAND DECK',{exact:true})).toBeVisible();
   await expect(deck.getByRole('heading',{name:'Maintenance Command Center'})).toBeVisible();
   const console=deck.getByRole('region',{name:'Signed-in user command console'});
@@ -45,12 +60,12 @@ test('industrial command deck has shared smoke-glass tiles, module accents, and 
   await expect(console).toContainText('Owner Admin');
   await expect(console.getByRole('button',{name:'Open Maintenance Team roster'})).toHaveText(/Teams\s*1/);
 
-  const tiles=deck.getByRole('menuitem');
+  const tiles=deck.locator('.mcc-command-module-grid').getByRole('button');
   await expect(tiles).toHaveCount(10);
-  const active=deck.getByRole('menuitem',{name:/Dashboard/});
+  const active=deck.getByRole('button',{name:/Dashboard/});
   await expect(active).toHaveAttribute('aria-current','page');
   await expect(active).toContainText('Active');
-  await expect(deck.getByRole('menuitem',{name:/Inventory/})).not.toHaveAttribute('aria-current','page');
+  await expect(deck.getByRole('button',{name:/Inventory/})).not.toHaveAttribute('aria-current','page');
 
   const tileStyles=await tiles.evaluateAll(elements=>elements.map(element=>{
     const style=getComputedStyle(element);
@@ -60,7 +75,7 @@ test('industrial command deck has shared smoke-glass tiles, module accents, and 
   expect(tileStyles.every(style=>style.background.includes('linear-gradient')&&!style.background.includes('rgb(68, 215, 255)'))).toBe(true);
   expect(tileStyles.every(style=>Number.parseFloat(style.borderRadius)<=6)).toBe(true);
 
-  const inventory=deck.getByRole('menuitem',{name:/Inventory/});
+  const inventory=deck.getByRole('button',{name:/Inventory/});
   await inventory.hover();
   await expect(inventory.locator('.mcc-command-module-icon-housing')).toHaveCSS('color','rgb(243, 254, 255)');
   await expectNoHorizontalOverflow(page);
@@ -69,36 +84,51 @@ test('industrial command deck has shared smoke-glass tiles, module accents, and 
 test('launcher preserves Escape, outside-click, keyboard navigation, warp, and aria-current',async({page})=>{
   await mockLauncher(page);
   await page.goto('/');
+  const launcher=page.getByRole('button',{name:'Open command menu'});
+  await expect(launcher).not.toHaveAttribute('aria-haspopup');
+  await expectDeckClosed(page);
+  await launcher.focus();
+  await page.keyboard.press('Tab');
+  expect(await page.locator('.mcc-command-deck').evaluate(deck=>deck.contains(document.activeElement))).toBe(false);
+
   await openDeck(page);
   await page.keyboard.press('Escape');
   await expect(page.locator('.command-launcher')).not.toHaveClass(/\bopen\b/);
   await expect(page.getByRole('button',{name:'Open command menu'})).toHaveAttribute('aria-expanded','false');
+  await expectDeckClosed(page);
+  await expect(launcher).toBeFocused();
 
-  await openDeck(page);
+  let deck=await openDeck(page);
+  await deck.getByRole('button',{name:/Inventory/}).focus();
   await page.locator('.mcc-page-topbar').dispatchEvent('pointerdown');
   await expect(page.locator('.command-launcher')).not.toHaveClass(/\bopen\b/);
   await expect(page.getByRole('button',{name:'Open command menu'})).toHaveAttribute('aria-expanded','false');
+  await expectDeckClosed(page);
+  await expect(launcher).toBeFocused();
 
-  const deck=await openDeck(page);
-  const inventory=deck.getByRole('menuitem',{name:/Inventory/});
+  deck=await openDeck(page);
+  const inventory=deck.getByRole('button',{name:/Inventory/});
   await inventory.focus();
   await page.keyboard.press('Space');
   await expect(page).toHaveURL(/\/inventory$/);
-  await openDeck(page);
-  await expect(page.getByRole('menuitem',{name:/Inventory/})).toHaveAttribute('aria-current','page');
+  await expectDeckClosed(page);
+  await expect(launcher).toBeFocused();
+  deck=await openDeck(page);
+  await expect(deck.getByRole('button',{name:/Inventory/})).toHaveAttribute('aria-current','page');
 });
 
 test('permission-controlled module visibility remains authoritative',async({page})=>{
   await mockLauncher(page,{...owner,isOwnerAdmin:false,effectivePermissions:['inventory.view']});
   await page.goto('/');
   const deck=await openDeck(page);
-  await expect(deck.getByRole('menuitem')).toHaveCount(4);
-  await expect(deck.getByRole('menuitem',{name:/Dashboard/})).toBeVisible();
-  await expect(deck.getByRole('menuitem',{name:/Inventory/})).toBeVisible();
-  await expect(deck.getByRole('menuitem',{name:/Admin \/ Users/})).toBeVisible();
-  await expect(deck.getByRole('menuitem',{name:/Settings/})).toBeVisible();
-  await expect(deck.getByRole('menuitem',{name:/Vendors/})).toHaveCount(0);
-  await expect(deck.getByRole('menuitem',{name:/History Logs/})).toHaveCount(0);
+  const tiles=deck.locator('.mcc-command-module-grid').getByRole('button');
+  await expect(tiles).toHaveCount(4);
+  await expect(deck.getByRole('button',{name:/Dashboard/})).toBeVisible();
+  await expect(deck.getByRole('button',{name:/Inventory/})).toBeVisible();
+  await expect(deck.getByRole('button',{name:/Admin \/ Users/})).toBeVisible();
+  await expect(deck.getByRole('button',{name:/Settings/})).toBeVisible();
+  await expect(deck.getByRole('button',{name:/Vendors/})).toHaveCount(0);
+  await expect(deck.getByRole('button',{name:/History Logs/})).toHaveCount(0);
 });
 
 test('user console actions stay content-sized and preserve password and logout flows',async({page})=>{
@@ -128,7 +158,7 @@ test('390px mobile uses one column and horizontally wrapped console actions with
   await page.goto('/');
   const deck=await openDeck(page);
   await expect(deck.locator('.mcc-command-module-grid')).toHaveCSS('grid-template-columns',/\d+px/);
-  const tiles=deck.getByRole('menuitem');
+  const tiles=deck.locator('.mcc-command-module-grid').getByRole('button');
   const first=await tiles.nth(0).boundingBox();
   const second=await tiles.nth(1).boundingBox();
   expect(first).not.toBeNull();
@@ -158,8 +188,9 @@ test('desktop launcher remains usable at 125% and 150% equivalent layout zoom',a
     const box=await deck.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x+box!.width).toBeLessThanOrEqual(viewport.width);
-    const first=await deck.getByRole('menuitem').nth(0).boundingBox();
-    const second=await deck.getByRole('menuitem').nth(1).boundingBox();
+    const tiles=deck.locator('.mcc-command-module-grid').getByRole('button');
+    const first=await tiles.nth(0).boundingBox();
+    const second=await tiles.nth(1).boundingBox();
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
     expect(second!.x).toBeGreaterThan(first!.x);

@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, type FocusEvent, type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccPermissionBadgeGroup, type SpecialPermissionGrant } from './MccPermissionBadges';
 import { RoleBadge } from './RoleBadge';
@@ -45,6 +45,17 @@ type TeamResponse={
 };
 
 const fallbackPolicy:PresencePolicy={heartbeatIntervalMs:45_000,rosterRefreshIntervalMs:25_000,onlineThresholdMs:120_000,awayAfterMs:600_000,writeThrottleMs:25_000};
+const rosterDialogId='maintenance-team-roster';
+const mobileBackdropStyle:CSSProperties={
+  position:'fixed',
+  inset:0,
+  zIndex:59,
+  width:'100vw',
+  height:'100dvh',
+  background:'rgba(2, 9, 15, .78)',
+  touchAction:'none',
+  overscrollBehavior:'contain',
+};
 
 async function jsonRequest(path:string,options:RequestInit={}){
   const response=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
@@ -136,6 +147,15 @@ function MccRankBadge({user}:{user:TeamUser}){
     if(event.key==='Enter'||event.key===' '){event.preventDefault();setOpen(current=>!current);}
     if(event.key==='Escape'&&open){event.preventDefault();event.stopPropagation();setOpen(false);}
   }
+  function onBlur(event:FocusEvent<HTMLButtonElement>){
+    const next=event.relatedTarget as Node|null;
+    if(next&&panelRef.current?.contains(next))return;
+    window.requestAnimationFrame(()=>{
+      if(triggerRef.current?.matches(':focus, :hover')||panelRef.current?.matches(':focus-within, :hover'))return;
+      cancelClose();
+      setOpen(false);
+    });
+  }
 
   const provenance=user.rankProvenance;
   return <>
@@ -149,6 +169,7 @@ function MccRankBadge({user}:{user:TeamUser}){
       onMouseEnter={()=>{cancelClose();setOpen(true);}}
       onMouseLeave={closeSoon}
       onFocus={()=>setOpen(true)}
+      onBlur={onBlur}
       onPointerDown={()=>{pointerStartedOpen.current=open;}}
       onClick={()=>setOpen(!pointerStartedOpen.current)}
       onKeyDown={onKeyDown}
@@ -161,6 +182,7 @@ function MccRankBadge({user}:{user:TeamUser}){
         role="region"
         aria-label={`Rank provenance for ${user.fullName}`}
         data-mcc-nested-popover
+        data-mcc-popover-owner={rosterDialogId}
         style={position}
         onMouseEnter={cancelClose}
         onMouseLeave={closeSoon}
@@ -192,7 +214,7 @@ function TeamRow({user,serverTime}:{user:TeamUser;serverTime:string}){
       {!user.disabled&&user.presence!=='Online'&&<small>{relativeLastSeen(user.lastSeenAt,serverTime)}</small>}
       <div className="team-user-badges">
         <MccRankBadge user={user} />
-        {user.specialPermissionGrants.length>0&&<MccPermissionBadgeGroup grants={user.specialPermissionGrants} disabledAccount={user.disabled} />}
+        {user.specialPermissionGrants.length>0&&<MccPermissionBadgeGroup grants={user.specialPermissionGrants} disabledAccount={user.disabled} popoverOwnerId={rosterDialogId} />}
       </div>
     </div>
   </article>;
@@ -289,22 +311,49 @@ export function MaintenanceTeamControl({onOpenChange}:{onOpenChange?:(open:boole
     updatePosition();
     window.addEventListener('resize',updatePosition);
     window.addEventListener('scroll',updatePosition,true);
-    window.requestAnimationFrame(()=>panelRef.current?.querySelector<HTMLButtonElement>('.maintenance-team-close')?.focus());
     return()=>{window.removeEventListener('resize',updatePosition);window.removeEventListener('scroll',updatePosition,true);};
   },[open,updatePosition,data?.users.length]);
+
+  useLayoutEffect(()=>{
+    if(!open)return;
+    const frame=window.requestAnimationFrame(()=>panelRef.current?.querySelector<HTMLButtonElement>('.maintenance-team-close')?.focus());
+    return()=>window.cancelAnimationFrame(frame);
+  },[open]);
+
+  useEffect(()=>{
+    if(!open||!mobile)return;
+    const root=document.documentElement;
+    const body=document.body;
+    const previous={
+      rootOverflow:root.style.overflow,
+      rootOverscroll:root.style.overscrollBehavior,
+      bodyOverflow:body.style.overflow,
+      bodyOverscroll:body.style.overscrollBehavior,
+    };
+    root.style.overflow='hidden';
+    root.style.overscrollBehavior='none';
+    body.style.overflow='hidden';
+    body.style.overscrollBehavior='none';
+    return()=>{
+      root.style.overflow=previous.rootOverflow;
+      root.style.overscrollBehavior=previous.rootOverscroll;
+      body.style.overflow=previous.bodyOverflow;
+      body.style.overscrollBehavior=previous.bodyOverscroll;
+    };
+  },[mobile,open]);
 
   useEffect(()=>{
     if(!open)return;
     const onPointerDown=(event:PointerEvent)=>{
       const target=event.target as Node;
       if(triggerRef.current?.contains(target)||panelRef.current?.contains(target))return;
-      if(target instanceof Element&&target.closest('[data-mcc-nested-popover]'))return;
+      if(target instanceof Element&&target.closest(`[data-mcc-popover-owner="${rosterDialogId}"]`))return;
+      if(mobile&&target instanceof Element&&target.closest('[data-maintenance-team-backdrop]'))return;
       close();
     };
     const onKeyDown=(event:globalThis.KeyboardEvent)=>{
-      const target=event.target;
       if(event.key==='Escape'){
-        if(document.querySelector('[data-mcc-nested-popover]'))return;
+        if(document.querySelector(`[data-mcc-popover-owner="${rosterDialogId}"]`))return;
         event.preventDefault();
         close();
         return;
@@ -333,31 +382,19 @@ export function MaintenanceTeamControl({onOpenChange}:{onOpenChange?:(open:boole
     if(event.key!=='Tab'||window.innerWidth>600||!panelRef.current)return;
     const focusable=[...panelRef.current.querySelectorAll<HTMLElement>('button,summary,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')].filter(element=>{
       const rect=element.getBoundingClientRect();
-      return !element.classList.contains('maintenance-team-focus-sentinel')&&!element.hasAttribute('disabled')&&rect.width>0&&rect.height>0;
+      const closedDetails=element.closest<HTMLDetailsElement>('details:not([open])');
+      const isClosedDetailsSummary=closedDetails?.querySelector(':scope > summary')===element;
+      return !element.hasAttribute('disabled')
+        &&!element.closest('[hidden],[inert],[aria-hidden="true"]')
+        &&(!closedDetails||isClosedDetailsSummary)
+        &&rect.width>0
+        &&rect.height>0;
     });
     if(!focusable.length)return;
     const first=focusable[0],last=focusable.at(-1)!;
     if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
   }
-  function focusPanelBoundary(edge:'first'|'last'){
-    if(window.innerWidth>600||!panelRef.current)return;
-    const focusable=[...panelRef.current.querySelectorAll<HTMLElement>('button,summary,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')].filter(element=>{
-      const rect=element.getBoundingClientRect();
-      return !element.classList.contains('maintenance-team-focus-sentinel')&&!element.hasAttribute('disabled')&&rect.width>0&&rect.height>0;
-    });
-    (edge==='first'?focusable[0]:focusable.at(-1))?.focus();
-  }
-  useEffect(()=>{
-    if(!open||!panelRef.current)return;
-    const panel=panelRef.current;
-    const onFocusIn=(event:FocusEvent)=>{
-      const edge=(event.target as HTMLElement)?.dataset.teamFocusEdge;
-      if(edge==='first'||edge==='last')window.requestAnimationFrame(()=>focusPanelBoundary(edge));
-    };
-    panel.addEventListener('focusin',onFocusIn);
-    return()=>panel.removeEventListener('focusin',onFocusIn);
-  },[mobile,open]);
 
   return <>
     <button
@@ -367,43 +404,50 @@ export function MaintenanceTeamControl({onOpenChange}:{onOpenChange?:(open:boole
       aria-label="Open Maintenance Team roster"
       aria-haspopup="dialog"
       aria-expanded={open}
-      aria-controls="maintenance-team-roster"
+      aria-controls={rosterDialogId}
       onClick={toggle}
     ><TeamsIcon /><span>Teams</span><strong>{data?.onlineCount??0}</strong></button>
     {open&&createPortal(
-      <aside
-        ref={panelRef}
-        id="maintenance-team-roster"
-        className={`maintenance-team-panel${mobile?' is-mobile':''}`}
-        role="dialog"
-        aria-modal={mobile}
-        aria-labelledby="maintenance-team-title"
-        data-mcc-command-overlay
-        style={panelStyle}
-        onKeyDownCapture={trapPanelFocus}
-      >
-        <span className="maintenance-team-focus-sentinel" tabIndex={mobile?0:-1} aria-hidden="true" data-team-focus-edge="last" />
-        <header className="maintenance-team-header">
-          <div>
-            <span className="eyebrow">MCC presence</span>
-            <h2 id="maintenance-team-title">Maintenance Team</h2>
-            <p>{data?.totalUsers??0} users · <strong>{data?.onlineCount??0} Online</strong></p>
-          </div>
-          <button className="maintenance-team-close" type="button" aria-label="Close Maintenance Team roster" onClick={()=>close()}>×</button>
-        </header>
-        {error&&<p className="maintenance-team-error" role="status">{error}</p>}
-        {!data&&!error&&<p className="maintenance-team-loading" role="status">Loading live presence…</p>}
-        {data&&<div className="maintenance-team-scroll">
-          <TeamSection state="Online" users={grouped.Online} serverTime={data.serverTime} />
-          <TeamSection state="Away" users={grouped.Away} serverTime={data.serverTime} />
-          <TeamSection state="Offline" users={grouped.Offline} serverTime={data.serverTime} />
-          {grouped.Disabled.length>0&&<details className="maintenance-team-disabled">
-            <summary>Disabled accounts <strong>{grouped.Disabled.length}</strong></summary>
-            <div className="maintenance-team-rows">{grouped.Disabled.map(user=><TeamRow key={user.id} user={user} serverTime={data.serverTime} />)}</div>
-          </details>}
-        </div>}
-        <span className="maintenance-team-focus-sentinel" tabIndex={mobile?0:-1} aria-hidden="true" data-team-focus-edge="first" />
-      </aside>,
+      <>
+        {mobile&&<div
+          aria-hidden="true"
+          data-maintenance-team-backdrop
+          style={mobileBackdropStyle}
+          onPointerDown={event=>{event.preventDefault();event.stopPropagation();}}
+          onClick={event=>{event.preventDefault();event.stopPropagation();if(event.target===event.currentTarget)close();}}
+        />}
+        <aside
+          ref={panelRef}
+          id={rosterDialogId}
+          className={`maintenance-team-panel${mobile?' is-mobile':''}`}
+          role="dialog"
+          aria-modal={mobile||undefined}
+          aria-labelledby="maintenance-team-title"
+          data-mcc-command-overlay
+          style={panelStyle}
+          onKeyDownCapture={trapPanelFocus}
+        >
+          <header className="maintenance-team-header">
+            <div>
+              <span className="eyebrow">MCC presence</span>
+              <h2 id="maintenance-team-title">Maintenance Team</h2>
+              <p>{data?.totalUsers??0} users · <strong>{data?.onlineCount??0} Online</strong></p>
+            </div>
+            <button className="maintenance-team-close" type="button" aria-label="Close Maintenance Team roster" onClick={()=>close()}>×</button>
+          </header>
+          {error&&<p className="maintenance-team-error" role="status">{error}</p>}
+          {!data&&!error&&<p className="maintenance-team-loading" role="status">Loading live presence…</p>}
+          {data&&<div className="maintenance-team-scroll">
+            <TeamSection state="Online" users={grouped.Online} serverTime={data.serverTime} />
+            <TeamSection state="Away" users={grouped.Away} serverTime={data.serverTime} />
+            <TeamSection state="Offline" users={grouped.Offline} serverTime={data.serverTime} />
+            {grouped.Disabled.length>0&&<details className="maintenance-team-disabled">
+              <summary>Disabled accounts <strong>{grouped.Disabled.length}</strong></summary>
+              <div className="maintenance-team-rows">{grouped.Disabled.map(user=><TeamRow key={user.id} user={user} serverTime={data.serverTime} />)}</div>
+            </details>}
+          </div>}
+        </aside>
+      </>,
       document.body,
     )}
   </>;

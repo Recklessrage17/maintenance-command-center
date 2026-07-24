@@ -77,12 +77,26 @@ test('module badges stay content-sized and portal details support hover, keyboar
   await expect(popover.getByText('View inventory')).toHaveCount(0);
   const box=await popover.boundingBox();expect(box).not.toBeNull();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(await page.evaluate(()=>innerWidth));
 
+  await page.mouse.move(1,1);
+  await expect(popover).toHaveCount(0);
   await inventory.focus();
+  await expect(popover).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
+  await page.evaluate(()=>new Promise<void>(resolve=>window.requestAnimationFrame(()=>resolve())));
   await page.keyboard.press('Enter');
   await expect(popover).toBeVisible();
   await expect(inventory).toHaveAttribute('aria-expanded','true');
+  await page.keyboard.press('Tab');
+  await expect(inventory).not.toBeFocused();
+  await expect(facility).toBeFocused();
+  await expect(popover).toHaveCount(0);
+  const facilityPopover=page.getByRole('region',{name:'Facility Info special permissions'});
+  await expect(facilityPopover).toBeVisible();
+  await page.keyboard.press('Shift+Tab');
+  await expect(inventory).toBeFocused();
+  await expect(facilityPopover).toHaveCount(0);
+  await expect(popover).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(inventory).toHaveAttribute('aria-expanded','false');
 

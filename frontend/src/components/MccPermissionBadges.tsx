@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type RefObject, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type FocusEvent, type KeyboardEvent, type RefObject, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export type SpecialPermissionGrant={
@@ -28,13 +28,14 @@ function readableDate(value:string|null){
   return Number.isNaN(date.getTime())?value:date.toLocaleString();
 }
 
-export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onOpen,onCloseSoon,onPointerDown,onToggle,onKeyDown,anchorRef}:{
+export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onOpen,onCloseSoon,onBlur,onPointerDown,onToggle,onKeyDown,anchorRef}:{
   group:MccPermissionModuleGroup;
   expanded:boolean;
   popoverId:string;
   disabledAccount:boolean;
   onOpen:()=>void;
   onCloseSoon:()=>void;
+  onBlur:(event:FocusEvent<HTMLButtonElement>)=>void;
   onPointerDown:()=>void;
   onToggle:()=>void;
   onKeyDown:(event:KeyboardEvent<HTMLButtonElement>)=>void;
@@ -50,17 +51,19 @@ export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onO
     onMouseEnter={onOpen}
     onMouseLeave={onCloseSoon}
     onFocus={onOpen}
+    onBlur={onBlur}
     onPointerDown={onPointerDown}
     onClick={onToggle}
     onKeyDown={onKeyDown}
   >{group.shortLabel} {group.grants.length}</button>;
 }
 
-export function MccPermissionDetailsPopover({group,id,position,panelRef,onMouseEnter,onMouseLeave,onEscape}:{
+export function MccPermissionDetailsPopover({group,id,position,panelRef,ownerId,onMouseEnter,onMouseLeave,onEscape}:{
   group:MccPermissionModuleGroup;
   id:string;
   position:{left:number;top:number};
   panelRef:RefObject<HTMLDivElement>;
+  ownerId?:string;
   onMouseEnter:()=>void;
   onMouseLeave:()=>void;
   onEscape:()=>void;
@@ -72,6 +75,7 @@ export function MccPermissionDetailsPopover({group,id,position,panelRef,onMouseE
     role="region"
     aria-label={`${group.label} special permissions`}
     data-mcc-nested-popover
+    data-mcc-popover-owner={ownerId}
     style={{left:position.left,top:position.top}}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
@@ -89,7 +93,7 @@ export function MccPermissionDetailsPopover({group,id,position,panelRef,onMouseE
   </div>;
 }
 
-export function MccPermissionBadgeGroup({grants,disabledAccount=false}:{grants:SpecialPermissionGrant[];disabledAccount?:boolean}){
+export function MccPermissionBadgeGroup({grants,disabledAccount=false,popoverOwnerId}:{grants:SpecialPermissionGrant[];disabledAccount?:boolean;popoverOwnerId?:string}){
   const grouped=useMemo(()=>Object.values(grants.reduce<Record<string,MccPermissionModuleGroup>>((result,grant)=>{
     const group=result[grant.module]??={module:grant.module,label:grant.moduleLabel,shortLabel:grant.moduleShortLabel,grants:[]};
     group.grants.push(grant);
@@ -155,6 +159,16 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false}:{grants:S
     if(event.key==='Enter'||event.key===' '){event.preventDefault();setOpenModule(current=>current===module?null:module);}
     if(event.key==='Escape'&&openModule===module){event.preventDefault();event.stopPropagation();setOpenModule(null);}
   }
+  function focusLeft(event:FocusEvent<HTMLButtonElement>,module:string){
+    const next=event.relatedTarget as Node|null;
+    if(next&&panelRef.current?.contains(next))return;
+    window.requestAnimationFrame(()=>{
+      const anchor=anchors.current.get(module);
+      if(anchor?.matches(':focus, :hover')||panelRef.current?.matches(':focus-within, :hover'))return;
+      cancelClose();
+      setOpenModule(current=>current===module?null:current);
+    });
+  }
 
   if(!grouped.length)return <span className="permission-badge-empty">No special permissions</span>;
   return <>
@@ -170,6 +184,7 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false}:{grants:S
           anchorRef={element=>{if(element)anchors.current.set(group.module,element);else anchors.current.delete(group.module);}}
           onOpen={()=>open(group.module)}
           onCloseSoon={closeSoon}
+          onBlur={event=>focusLeft(event,group.module)}
           onPointerDown={()=>{pointerStartedOpen.current=openModule===group.module;}}
           onToggle={()=>setOpenModule(pointerStartedOpen.current?null:group.module)}
           onKeyDown={event=>keyDown(event,group.module)}
@@ -183,6 +198,7 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false}:{grants:S
         id={`${popoverId}-${openGroup.module}`}
         position={position}
         panelRef={panelRef}
+        ownerId={popoverOwnerId}
         onMouseEnter={cancelClose}
         onMouseLeave={closeSoon}
         onEscape={()=>{setOpenModule(null);anchors.current.get(openGroup.module)?.focus();}}

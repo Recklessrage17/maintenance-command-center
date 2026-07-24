@@ -17,7 +17,7 @@ test('route modules load on demand with a styled fallback and navigation prefetc
   await expect(page.getByRole('heading',{name:'Facility Areas'})).toBeVisible();
   expect(facilityRequests).toBe(1);
   await page.getByRole('button',{name:'Open command menu'}).click();
-  await page.getByRole('menuitem',{name:/Equipment Library/}).focus();
+  await page.getByRole('button',{name:/Equipment Library/}).focus();
   await expect.poll(()=>equipmentRequests).toBe(1);
 });
 

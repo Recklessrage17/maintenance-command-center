@@ -1,5 +1,9 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { MccCommandDeck } from '../components/MccCommandDeck';
+import {
+  MccIndustrialSurfaceBoundary,
+  MccLegacyDialogManager,
+} from '../components/MccIndustrialPrimitives';
 import { mccPageMetadata, type MccSection } from './pageMetadata';
 
 export type { MccSection };
@@ -48,7 +52,9 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
    '--mcc-module-accent-rgb':`var(--mcc-accent-module-${activeSection}-rgb)`,
  } as CSSProperties;
  const launcherRef=useRef<HTMLDivElement>(null);
+ const launcherButtonRef=useRef<HTMLButtonElement>(null);
  const warpTimerRef=useRef<number>();
+ const launcherFocusFrameRef=useRef<number>();
  const inventoryFocus=activeSection==='inventory';
 
  function clearWarpTimer() {
@@ -58,8 +64,14 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
    }
  }
 
- function closeLauncher() {
+ function closeLauncher(restoreFocus=false) {
    setLauncherOpen(false);
+   if(!restoreFocus) return;
+   if(launcherFocusFrameRef.current) window.cancelAnimationFrame(launcherFocusFrameRef.current);
+   launcherFocusFrameRef.current=window.requestAnimationFrame(()=>{
+     launcherFocusFrameRef.current=undefined;
+     launcherButtonRef.current?.focus();
+   });
  }
 
  function toggleLauncher() {
@@ -71,14 +83,16 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
    function onKeyDown(event: KeyboardEvent) {
      if(event.key==='Escape') {
        if(teamsOpen) return;
-       closeLauncher();
+       event.preventDefault();
+       event.stopPropagation();
+       closeLauncher(true);
      }
    }
    function onPointerDown(event: PointerEvent) {
      if(teamsOpen) return;
      if(event.target instanceof Element&&event.target.closest('[data-mcc-command-overlay]')) return;
      if(launcherRef.current&&!launcherRef.current.contains(event.target as Node)) {
-       closeLauncher();
+       closeLauncher(true);
      }
    }
    document.addEventListener('keydown',onKeyDown);
@@ -89,7 +103,10 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
    };
  },[launcherOpen,teamsOpen]);
 
- useEffect(()=>()=>{ clearWarpTimer(); },[]);
+ useEffect(()=>()=>{
+   clearWarpTimer();
+   if(launcherFocusFrameRef.current) window.cancelAnimationFrame(launcherFocusFrameRef.current);
+ },[]);
 
  useEffect(()=>{
    const targets=[document.documentElement,document.body];
@@ -138,12 +155,13 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
    warpTimerRef.current=window.setTimeout(()=>{
      onSectionChange(section);
      setWarpingSection(null);
-     closeLauncher();
+     closeLauncher(true);
    },MENU_WARP_MS);
  }
 
  return (
-   <div className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell mcc-scrollbar-hidden':'mcc-shell command-shell mcc-scrollbar-hidden'} data-mcc-module={activeSection} style={routeAccentStyle}>
+   <MccIndustrialSurfaceBoundary surface="strong" className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell mcc-scrollbar-hidden':'mcc-shell command-shell mcc-scrollbar-hidden'} data-mcc-module={activeSection} style={routeAccentStyle}>
+     <MccLegacyDialogManager />
      <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef}>
        <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
          <div className="mcc-brand-mark">
@@ -155,12 +173,13 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
            <span>{branding.companySubtitle}</span>
          </div>
        </div>
-       <button className="command-launcher-button" type="button" aria-label={launcherOpen?'Close command menu':'Open command menu'} aria-haspopup="menu" aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onClick={toggleLauncher}>
+       <button ref={launcherButtonRef} className="command-launcher-button" type="button" aria-label={launcherOpen?'Close command menu':'Open command menu'} aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onClick={toggleLauncher}>
          <span className="launcher-gear" aria-hidden="true">⚙</span>
          <span>Menu</span>
        </button>
         <MccCommandDeck
           id="command-launcher-menu"
+          open={launcherOpen}
           modules={navItems}
           activeSection={activeSection}
           warpingSection={warpingSection}
@@ -184,6 +203,6 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
      <main className="mcc-main mcc-workspace-frame">
        <section className={pageEntering?'mcc-content mcc-workspace mcc-page-enter':'mcc-content mcc-workspace'}>{children}</section>
      </main>
-   </div>
+   </MccIndustrialSurfaceBoundary>
  );
 }

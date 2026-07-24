@@ -84,25 +84,32 @@ async function expectSingleDetail(page: Page, assetNumber = 'Press 51') {
   await expect(detail).toHaveCount(1);
   await expect(detail).toBeVisible();
   await expect(detail.getByRole('heading', { name: assetNumber })).toBeVisible();
+  await expect(detail).toBeFocused();
 }
 
 async function closeDetail(page: Page, mobile: boolean) {
   const detail = page.locator('.machine-detail-modal');
+  const assetNumber = (await detail.locator('h3').first().textContent())?.trim();
   await activate(detail.getByRole('button', { name: 'Close' }).first(), mobile);
   await expect(detail).toHaveCount(0);
   await expect(page.locator('.machine-asset-card')).toHaveCount(2);
+  if (!assetNumber) throw new Error('Machine detail asset number was unavailable.');
+  await expect(page.getByRole('button', { name: `View details for ${assetNumber}` })).toBeFocused();
 }
 
-async function tabToAssetCard(page: Page) {
+async function tabToAssetCard(page: Page, assetNumber = 'Press 51') {
   await page.evaluate(()=>{
     const active = document.activeElement;
     if (active instanceof HTMLElement) active.blur();
   });
   for (let index = 0; index < 60; index += 1) {
     await page.keyboard.press('Tab');
-    if (await page.evaluate(()=>document.activeElement?.classList.contains('machine-asset-card') ?? false)) return;
+    if (await page.evaluate(expectedLabel=>(
+      document.activeElement?.classList.contains('machine-asset-card')
+      && document.activeElement.getAttribute('aria-label')===expectedLabel
+    ),`View details for ${assetNumber}`)) return;
   }
-  throw new Error('An asset card was not reached after 60 Tab presses.');
+  throw new Error(`${assetNumber} was not reached after 60 Tab presses.`);
 }
 
 async function documentCardClickCount(page: Page) {

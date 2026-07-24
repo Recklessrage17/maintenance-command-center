@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export type MccOverflowMenuItem = {
@@ -44,6 +44,8 @@ export function MccActionGroup({children,className='',align='end'}:{children:Rea
 export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{items:MccOverflowMenuItem[];label?:string;ariaLabel?:string;className?:string}) {
   const [open,setOpen]=useState(false);
   const [panelStyle,setPanelStyle]=useState<CSSProperties>({visibility:'hidden'});
+  const generatedId=useId().replace(/:/g,'');
+  const panelId=`mcc-overflow-menu-${generatedId}`;
   const rootRef=useRef<HTMLDivElement>(null);
   const triggerRef=useRef<HTMLButtonElement>(null);
   const panelRef=useRef<HTMLDivElement>(null);
@@ -94,9 +96,15 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
       if(rootRef.current?.contains(target)||panelRef.current?.contains(target))return;
       setOpen(false);
     }
+    function onFocusIn(event:FocusEvent){
+      const target=event.target as Node;
+      if(rootRef.current?.contains(target)||panelRef.current?.contains(target))return;
+      setOpen(false);
+    }
     function onKeyDown(event:KeyboardEvent){if(event.key!=='Escape')return;setOpen(false);triggerRef.current?.focus();}
     function onViewportChange(){schedulePosition();}
     document.addEventListener('pointerdown',onPointerDown);
+    document.addEventListener('focusin',onFocusIn);
     document.addEventListener('keydown',onKeyDown);
     window.addEventListener('resize',onViewportChange);
     window.addEventListener('scroll',onViewportChange,true);
@@ -104,6 +112,7 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
     window.visualViewport?.addEventListener('scroll',onViewportChange);
     return()=>{
       document.removeEventListener('pointerdown',onPointerDown);
+      document.removeEventListener('focusin',onFocusIn);
       document.removeEventListener('keydown',onKeyDown);
       window.removeEventListener('resize',onViewportChange);
       window.removeEventListener('scroll',onViewportChange,true);
@@ -128,6 +137,41 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
   useEffect(()=>{if(!items.length)setOpen(false);},[items.length]);
 
   function handlePanelKeyDown(event:ReactKeyboardEvent<HTMLDivElement>){
+    if(event.key==='Tab'){
+      event.preventDefault();
+      const trigger=triggerRef.current;
+      if(!trigger)return;
+      const scope=trigger.closest<HTMLElement>(
+        '[data-mcc-modal], [data-mcc-legacy-dialog], [role="dialog"][aria-modal="true"]',
+      )??document.body;
+      const candidates=[...scope.querySelectorAll<HTMLElement>([
+        'a[href]',
+        'button:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        'summary',
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(','))].filter(element=>{
+        const style=window.getComputedStyle(element);
+        const rect=element.getBoundingClientRect();
+        return element.tabIndex>=0
+          &&element.getAttribute('aria-disabled')!=='true'
+          &&style.display!=='none'
+          &&style.visibility!=='hidden'
+          &&!element.closest('[hidden], [inert], [aria-hidden="true"]')
+          &&rect.width>0
+          &&rect.height>0
+          &&!panelRef.current?.contains(element);
+      });
+      const triggerIndex=candidates.indexOf(trigger);
+      const next=event.shiftKey
+        ? candidates[triggerIndex-1]??candidates.at(-1)
+        : candidates[triggerIndex+1]??candidates[0];
+      setOpen(false);
+      (next??trigger).focus();
+      return;
+    }
     if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
     const buttons=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('.mcc-overflow-menu__item:not(:disabled)')];
     if(!buttons.length)return;
@@ -139,8 +183,8 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
 
   if(!items.length)return null;
   return <div className={`mcc-overflow-menu${open?' is-open':''}${className?` ${className}`:''}`} ref={rootRef} onClick={event=>event.stopPropagation()} onPointerDown={event=>event.stopPropagation()}>
-    <button ref={triggerRef} className="secondary-button compact-button glass-button glass-button--secondary mcc-overflow-menu__trigger" type="button" aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel??label} onKeyDown={event=>{if(['Enter',' ','ArrowDown'].includes(event.key))focusMenuOnOpenRef.current=true;if(event.key==='ArrowDown'&&!open){event.preventDefault();setOpen(true);}}} onClick={()=>setOpen(current=>!current)}>{label}<span aria-hidden="true">&#9662;</span></button>
-    {open&&createPortal(<div ref={panelRef} className="mcc-overflow-menu__panel" role="menu" aria-label={ariaLabel??label} style={panelStyle} onKeyDown={handlePanelKeyDown} onClick={event=>event.stopPropagation()} onPointerDown={event=>event.stopPropagation()}>{items.map(item=><button className={`mcc-overflow-menu__item${item.danger?' is-danger':''}`} type="button" role="menuitem" disabled={item.disabled} key={item.label} onClick={()=>{setOpen(false);item.onSelect();}}>{item.label}</button>)}</div>,document.body)}
+    <button ref={triggerRef} className="secondary-button compact-button glass-button glass-button--secondary mcc-overflow-menu__trigger" type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={panelId} aria-label={ariaLabel??label} onKeyDown={event=>{if(['Enter',' ','ArrowDown'].includes(event.key))focusMenuOnOpenRef.current=true;if(event.key==='ArrowDown'&&!open){event.preventDefault();setOpen(true);}}} onClick={()=>setOpen(current=>!current)}>{label}<span aria-hidden="true">&#9662;</span></button>
+    {open&&createPortal(<div id={panelId} ref={panelRef} className="mcc-overflow-menu__panel" role="menu" aria-label={ariaLabel??label} style={panelStyle} onKeyDown={handlePanelKeyDown} onClick={event=>event.stopPropagation()} onPointerDown={event=>event.stopPropagation()}>{items.map(item=><button className={`mcc-overflow-menu__item${item.danger?' is-danger':''}`} type="button" role="menuitem" tabIndex={-1} disabled={item.disabled} key={item.label} onClick={()=>{triggerRef.current?.focus();setOpen(false);item.onSelect();}}>{item.label}</button>)}</div>,document.body)}
   </div>;
 }
 

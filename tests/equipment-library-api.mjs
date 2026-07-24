@@ -16,6 +16,12 @@ const uploadsDir=path.join(fixture,'uploads');
 const backupsDir=path.join(fixture,'backups');
 const password='Equipment-Library-Test!9';
 let server;
+function writePdfQaArtifact(filename,bytes){
+  if(!process.env.MCC_PDF_QA_DIR)return;
+  const outputDir=path.resolve(process.env.MCC_PDF_QA_DIR);
+  fs.mkdirSync(outputDir,{recursive:true});
+  fs.writeFileSync(path.join(outputDir,filename),bytes);
+}
 async function freePort(){return new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});}
 async function start(port){const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',SESSION_SECRET:'equipment-library-api-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<100;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
 async function request(base,pathname,{method='GET',cookie='',body,headers={}}={}){const response=await fetch(`${base}${pathname}`,{method,headers:{...(cookie?{Cookie:cookie}:{}),...(body===undefined||body instanceof FormData?{}:{'Content-Type':'application/json'}),...headers},body:body===undefined?undefined:body instanceof FormData?body:JSON.stringify(body)});const data=await response.json().catch(()=>({}));return {response,data,cookie:response.headers.get('set-cookie')?.split(';')[0]||''};}
@@ -57,8 +63,10 @@ async function run(){
   const noteBody=new FormData();noteBody.append('title','Dryer observation');noteBody.append('noteDate','2026-07-23');noteBody.append('body','Inspected airflow and confirmed normal operation.');
   result=await request(base,`/api/equipment-library/assets/${assetId}/notes`,{method:'POST',cookie:ownerCookie,body:noteBody});assert.equal(result.response.status,201);const note=result.data.note;assert.match(note.pdfFilename,/Maintenance_Note/);
   const notePdf=await fetch(`${base}${note.pdfUrl}`,{headers:{Cookie:ownerCookie}});assert.equal(notePdf.status,200);assert.match(notePdf.headers.get('content-type')||'',/application\/pdf/);
+  const notePdfBytes=Buffer.from(await notePdf.arrayBuffer());const noteDocument=await PDFDocument.load(notePdfBytes);assert.equal(noteDocument.getPageCount(),1,'Normal Equipment Asset Note must be exactly one page.');writePdfQaArtifact('equipment-asset-note.pdf',notePdfBytes);
 
   const specification=await fetch(`${base}/api/equipment-library/assets/${assetId}/specification.pdf`,{headers:{Cookie:ownerCookie}});assert.equal(specification.status,200);const specificationBytes=Buffer.from(await specification.arrayBuffer());const pdf=await PDFDocument.load(specificationBytes);assert.equal(pdf.getPageCount(),1,'Normal Equipment specification must be exactly one page.');assert.match(specification.headers.get('content-disposition')||'',/Equipment_Specification_\d{4}-\d{2}-\d{2}\.pdf/);
+  writePdfQaArtifact('equipment-specification.pdf',specificationBytes);
 
   const csv='Equipment Asset Number,Equipment Name,Category\r\nEQ-CSV,Portable Chiller,Chiller\r\n';
   const importBody=new FormData();importBody.append('file',new Blob([csv],{type:'text/csv'}),'equipment.csv');importBody.append('importMode','add_new_only');
@@ -79,6 +87,6 @@ async function run(){
   result=await request(base,`/api/equipment-library/assets/${assetId}/documents`,{cookie:ownerCookie});assert.equal(result.data.documents.length,1,'Restore must recreate Equipment documents.');
   result=await request(base,`/api/equipment-library/assets/${assetId}/notes`,{cookie:ownerCookie});assert.equal(result.data.notes.length,1,'Restore must recreate Equipment notes.');
   const database=new DatabaseSync(path.join(dataDir,'mcc.sqlite'),{readOnly:true});assert.equal(database.prepare("SELECT asset_library FROM pm_tasks WHERE id=?").get(pmId).asset_library,'equipment');assert.equal(database.prepare('SELECT COUNT(*) AS count FROM equipment_documents').get().count,1);database.close();
-  console.log('Equipment Library API tests passed: 60 assertion sites across metadata/custom category, Tier 2 write 403s, shared PM/dashboard/history, documents/ZIP, notes/PDF, CSV/XLSX import/export, audit, full backup/restore, and normal specification=1 page.');
+  console.log('Equipment Library API tests passed: 61 assertion sites across metadata/custom category, Tier 2 write 403s, shared PM/dashboard/history, documents/ZIP, notes/PDF=1 page, CSV/XLSX import/export, audit, full backup/restore, and normal specification=1 page.');
 }
 try{await run();}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}

@@ -290,6 +290,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const fileRef = useRef<HTMLInputElement|null>(null);
   const listScrollPositionRef = useRef(0);
   const openingAssetIdRef = useRef<number|null>(null);
+  const detailReturnAssetNumberRef = useRef<string|null>(null);
   const brands = useMemo(()=>[...new Set(assets.map(asset=>asset.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[assets]);
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
@@ -312,14 +313,26 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   function openDetail(asset: MachineAsset) {
     if (openingAssetIdRef.current===asset.id) return;
     openingAssetIdRef.current=asset.id;
+    detailReturnAssetNumberRef.current=asset.assetNumber;
     listScrollPositionRef.current=window.scrollY;
     setDetailAsset(asset);
+    window.requestAnimationFrame(()=>{
+      document.querySelector<HTMLElement>('.machine-detail-modal')?.focus();
+    });
   }
-  function closeDetail() {
+  function closeDetail(afterClose?:()=>void) {
     const listScrollPosition=listScrollPositionRef.current;
+    const returnAssetNumber=detailReturnAssetNumberRef.current;
     openingAssetIdRef.current=null;
     setDetailAsset(null);
-    window.requestAnimationFrame(()=>window.scrollTo({top:listScrollPosition,left:0,behavior:'auto'}));
+    window.requestAnimationFrame(()=>{
+      window.scrollTo({top:listScrollPosition,left:0,behavior:'auto'});
+      const returnCard=Array.from(
+        document.querySelectorAll<HTMLElement>('.machine-asset-card'),
+      ).find(card=>card.getAttribute('aria-label')===`View details for ${returnAssetNumber}`);
+      returnCard?.focus();
+      afterClose?.();
+    });
   }
   function setField<K extends keyof AssetForm>(key: K, value: AssetForm[K]) { setForm(current=>({...current,[key]:value})); }
   async function saveAsset(event: FormEvent) {
@@ -422,7 +435,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   return (
     <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'}`}>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
-      {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} onClose={closeDetail} onEdit={()=>{ const asset = detailAsset; closeDetail(); openEdit(asset); }} onLogs={()=>{ const asset = detailAsset; closeDetail(); void loadLogs(asset); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
+      {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
         <section className="mcc-card machine-toolbar-card glass-panel glass-panel--highlight">
         <label className="form-field machine-search"><span>Search assets</span><input className="glass-input" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>
         <label className="form-field"><span>Brand</span><select className="glass-input" value={brandFilter} onChange={event=>setBrandFilter(event.target.value)}><option value="">All brands</option>{brands.map(brand=><option key={brand} value={brand}>{brand}</option>)}</select></label>
@@ -692,7 +705,7 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
     ] : []),
   ];
 
-  return <><section className="mcc-card machine-modal machine-detail-modal glass-panel glass-panel--highlight glass-modal-shell mcc-detail-shell" aria-labelledby={`machine-detail-title-${currentAsset.id}`}>
+  return <><section className="mcc-card machine-modal machine-detail-modal glass-panel glass-panel--highlight glass-modal-shell mcc-detail-shell" aria-labelledby={`machine-detail-title-${currentAsset.id}`} tabIndex={-1}>
     <div className="modal-heading machine-detail-heading"><div><p className="eyebrow">Machine Asset Detail</p><h3 id={`machine-detail-title-${currentAsset.id}`}>{currentAsset.assetNumber}</h3><p className="machine-detail-identity-badge glass-pill" style={{'--machine-detail-brand-color':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}><span className="machine-detail-brand-dot" aria-hidden="true" /><span>{currentAsset.brand || 'Brand unknown'}</span><span>Model {currentAsset.model || '-'}</span><span>S/N {currentAsset.serialNumber || '-'}</span></p>{assetSpecError&&<p className="form-message error" role="alert">{assetSpecError}</p>}</div><div className="machine-detail-header-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>setShowAssetSpec(true)}>Print Asset Spec</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>void downloadAssetSpec()}>Download Spec PDF</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>onRecordLogs(currentAsset)}>Barrel &amp; Screw Logs</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onLogs}>History</button><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></div>
     <div className="machine-detail-summary-grid">
       <SummaryBadge label="Status" value={machineStatusLabel(currentAsset.status)} tone={machineSummaryStatusClass(currentAsset.status)} />

@@ -534,7 +534,9 @@ textarea.mcc-industrial-input {
 }
 
 .mcc-industrial-field input[type="file"]::file-selector-button,
+.form-field input[type="file"]::file-selector-button,
 input.mcc-industrial-input[type="file"]::file-selector-button {
+  appearance: none;
   min-height: var(--mcc-control-height-compact);
   margin: calc(0px - var(--mcc-space-2)) var(--mcc-space-5) calc(0px - var(--mcc-space-2)) calc(0px - var(--mcc-space-2));
   padding: var(--mcc-space-3) var(--mcc-space-5);
@@ -547,12 +549,47 @@ input.mcc-industrial-input[type="file"]::file-selector-button {
   font-weight: 800;
 }
 
+.mcc-industrial-field input[type="file"]::file-selector-button:hover,
+.form-field input[type="file"]::file-selector-button:hover,
+input.mcc-industrial-input[type="file"]::file-selector-button:hover {
+  border-color: var(--mcc-border-interactive);
+  background: var(--mcc-action-neutral-hover);
+}
+
+.mcc-industrial-field input[type="file"]:focus-visible,
+.form-field input[type="file"]:focus-visible,
+input.mcc-industrial-input[type="file"]:focus-visible {
+  outline: var(--mcc-focus-ring);
+  outline-offset: var(--mcc-space-1);
+  border-color: var(--mcc-border-interactive);
+  box-shadow: var(--mcc-focus-ring-shadow);
+}
+
 .mcc-industrial-field :is(input, select, textarea):-webkit-autofill,
 .mcc-industrial-field :is(input, select, textarea):-webkit-autofill:hover,
-.mcc-industrial-field :is(input, select, textarea):-webkit-autofill:focus {
+.mcc-industrial-field :is(input, select, textarea):-webkit-autofill:focus,
+.auth-shell .auth-form :is(input, select, textarea):-webkit-autofill,
+.auth-shell .auth-form :is(input, select, textarea):-webkit-autofill:hover,
+.auth-shell .auth-form :is(input, select, textarea):-webkit-autofill:focus,
+.mcc-shell .form-field :is(input, select, textarea):-webkit-autofill,
+.mcc-shell .form-field :is(input, select, textarea):-webkit-autofill:hover,
+.mcc-shell .form-field :is(input, select, textarea):-webkit-autofill:focus {
   -webkit-text-fill-color: var(--mcc-text-primary);
-  caret-color: var(--mcc-text-primary);
-  box-shadow: 0 0 0 1000px var(--mcc-bg-canvas) inset;
+  caret-color: var(--mcc-accent-maintenance);
+  border-color: var(--mcc-border-interactive);
+  background-color: var(--mcc-surface-dense);
+  box-shadow:
+    0 0 0 1000px var(--mcc-surface-dense) inset,
+    var(--mcc-shadow-inset);
+}
+
+.auth-shell .auth-form :is(input, select, textarea):-webkit-autofill:focus,
+.mcc-shell .form-field :is(input, select, textarea):-webkit-autofill:focus {
+  outline: var(--mcc-focus-ring);
+  outline-offset: var(--mcc-space-1);
+  box-shadow:
+    0 0 0 1000px var(--mcc-surface-dense) inset,
+    var(--mcc-focus-ring-shadow);
 }
 
 .mcc-industrial-notice {
