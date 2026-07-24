@@ -27,7 +27,8 @@ async function swipePageUp(page:Page) {
   await session.detach();
 }
 
-test('shared maintenance-lab background fills a short Dashboard without intercepting input',async({page})=>{
+test('shared maintenance-lab decal fills a short Dashboard without intercepting input',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
   await mockApp(page);
   await page.goto('/');
   const shell=page.locator('.mcc-shell');
@@ -38,8 +39,12 @@ test('shared maintenance-lab background fills a short Dashboard without intercep
     return {
       shellBackground:getComputedStyle(element).backgroundImage,
       beforeBackground:getComputedStyle(element,'::before').backgroundImage,
+      beforeMask:getComputedStyle(element,'::before').maskImage||getComputedStyle(element,'::before').webkitMaskImage,
+      beforeMaskSize:getComputedStyle(element,'::before').maskSize||getComputedStyle(element,'::before').webkitMaskSize,
       beforePosition:getComputedStyle(element,'::before').position,
+      beforeInset:getComputedStyle(element,'::before').inset,
       beforeOpacity:getComputedStyle(element,'::before').opacity,
+      beforeAnimation:getComputedStyle(element,'::before').animationName,
       afterPosition:getComputedStyle(element,'::after').position,
       afterBackground:getComputedStyle(element,'::after').backgroundImage,
       afterBlend:getComputedStyle(element,'::after').mixBlendMode,
@@ -54,9 +59,15 @@ test('shared maintenance-lab background fills a short Dashboard without intercep
     };
   });
   expect(audit.shellBackground).not.toBe('none');
-  expect(audit.beforeBackground).toContain('data:image/svg+xml');
+  expect(audit.beforeBackground).toContain('radial-gradient');
+  expect(audit.beforeMask).toContain('data:image/svg+xml');
+  expect(audit.beforeMask).toContain('radial-gradient');
+  expect(audit.beforeMaskSize).toContain(mobile?'162px 108px':'180px 120px');
   expect(audit.beforePosition).toBe('fixed');
-  expect(Number(audit.beforeOpacity)).toBeLessThanOrEqual(.3);
+  expect(audit.beforeInset).toBe('0px');
+  expect(Number(audit.beforeOpacity)).toBeGreaterThanOrEqual(.08);
+  expect(Number(audit.beforeOpacity)).toBeLessThanOrEqual(mobile?.11:.16);
+  expect(audit.beforeAnimation).toBe('none');
   expect(audit.afterPosition).toBe('fixed');
   expect(audit.afterBackground).toContain('radial-gradient');
   expect(audit.afterBlend).toBe('normal');

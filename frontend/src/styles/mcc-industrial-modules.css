@@ -83,10 +83,38 @@ body {
 .mcc-shell::before,
 .auth-shell::before {
   background-color: transparent;
-  background-image: var(--mcc-texture-hex), var(--mcc-texture-grid);
-  background-position: 0 0, 0 0;
-  background-size: 160px 96px, auto;
-  opacity: var(--mcc-texture-opacity);
+  background-image:
+    radial-gradient(
+      circle at 82% 74%,
+      color-mix(
+        in srgb,
+        var(--mcc-decal-teal-highlight) var(--mcc-decal-teal-highlight-strength),
+        var(--mcc-decal-color)
+      ) 0 18%,
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 14% 86%,
+      color-mix(
+        in srgb,
+        var(--mcc-decal-teal-highlight) var(--mcc-decal-teal-highlight-strength),
+        var(--mcc-decal-color)
+      ) 0 12%,
+      transparent 34%
+    ),
+    linear-gradient(var(--mcc-decal-color), var(--mcc-decal-color));
+  opacity: var(--mcc-decal-opacity);
+  mask-image: var(--mcc-decal-pattern), var(--mcc-decal-edge-fade);
+  mask-position: 0 0, 0 0;
+  mask-repeat: repeat, no-repeat;
+  mask-size: var(--mcc-decal-scale), 100% 100%;
+  mask-composite: intersect;
+  mask-mode: alpha;
+  -webkit-mask-image: var(--mcc-decal-pattern), var(--mcc-decal-edge-fade);
+  -webkit-mask-position: 0 0, 0 0;
+  -webkit-mask-repeat: repeat, no-repeat;
+  -webkit-mask-size: var(--mcc-decal-scale), 100% 100%;
+  -webkit-mask-composite: source-in;
   filter: none;
 }
 
@@ -183,6 +211,15 @@ body {
     repeating-linear-gradient(0deg, rgba(175, 192, 195, 0.008) 0 1px, transparent 1px 64px);
   mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 76%, transparent);
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 76%, transparent);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --mcc-decal-opacity: var(--mcc-decal-mobile-opacity);
+    --mcc-decal-scale: var(--mcc-decal-mobile-scale);
+    --mcc-decal-edge-fade: var(--mcc-decal-mobile-edge-fade);
+    --mcc-decal-teal-highlight-strength: var(--mcc-decal-mobile-teal-highlight-strength);
+  }
 }
 
 .page-stack,

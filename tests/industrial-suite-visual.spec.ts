@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const fixedNow = '2026-07-24T14:00:00.000Z';
-const artifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-52');
+const artifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-53');
 const fullPermissions = [
   'inventory.view', 'inventory.create', 'inventory.edit', 'inventory.delete', 'inventory.import', 'inventory.export', 'inventory.requisition_stage',
   'requisitions.view', 'requisitions.create', 'requisitions.edit', 'requisitions.mark_ordered', 'requisitions.mark_received', 'requisitions.cancel', 'requisitions.delete', 'requisitions.manage_batches', 'requisitions.print_download',
@@ -223,6 +223,19 @@ async function capture(page: Page, name: string, fullPage = false) {
   });
 }
 
+async function captureDashboardLowerBackground(page: Page) {
+  const viewport=page.viewportSize();
+  if(!viewport)throw new Error('Dashboard lower-background capture requires a fixed viewport.');
+  const y=Math.floor(viewport.height*.5);
+  await mkdir(artifactDirectory,{recursive:true});
+  await page.screenshot({
+    path:resolve(artifactDirectory,'dashboard-lower-background.png'),
+    clip:{x:0,y,width:viewport.width,height:viewport.height-y},
+    animations:'disabled',
+    caret:'hide',
+  });
+}
+
 async function expectNoDocumentOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(dimensions.scrollWidth - dimensions.clientWidth).toBeLessThanOrEqual(1);
@@ -312,20 +325,27 @@ test('canonical industrial tokens, smoke-glass surfaces, and keyboard focus are 
     expect(family.names.length, `${family.prefix} token declarations`).toBeGreaterThan(0);
     expect(family.resolved.length, `${family.prefix} resolved root tokens`).toBeGreaterThan(0);
   }
-  const issue52Tokens = await page.evaluate(() => {
+  const backgroundTokens = await page.evaluate(() => {
     const style=getComputedStyle(document.documentElement);
     return Object.fromEntries([
       '--mcc-bg-smoke-light',
       '--mcc-bg-cleanroom-ambient',
       '--mcc-texture-opacity',
+      '--mcc-decal-color',
+      '--mcc-decal-opacity',
+      '--mcc-decal-scale',
+      '--mcc-decal-edge-fade',
+      '--mcc-decal-teal-highlight-strength',
       '--mcc-workspace-fade-strength',
       '--mcc-shadow-workspace-outer',
       '--mcc-glass-blur',
       '--mcc-glass-saturation',
     ].map(name=>[name,style.getPropertyValue(name).trim()]));
   });
-  for(const [name,value] of Object.entries(issue52Tokens))expect(value,`${name} must resolve`).not.toBe('');
-  expect(Number(issue52Tokens['--mcc-texture-opacity'])).toBeLessThanOrEqual(.3);
+  for(const [name,value] of Object.entries(backgroundTokens))expect(value,`${name} must resolve`).not.toBe('');
+  expect(Number(backgroundTokens['--mcc-texture-opacity'])).toBeLessThanOrEqual(.3);
+  expect(Number(backgroundTokens['--mcc-decal-opacity'])).toBeGreaterThanOrEqual(.08);
+  expect(Number(backgroundTokens['--mcc-decal-opacity'])).toBeLessThanOrEqual(.16);
 
   const surface = page.locator('.glass-panel:visible, .mcc-industrial-panel:visible, .mcc-card:visible').first();
   await expect(surface).toBeVisible();
@@ -355,6 +375,7 @@ test('captures deterministic visual evidence for every representative MCC worksp
   await goTo(page, '/', 'Dashboard');
   await expect(page.locator('.dashboard-pm-alert')).toHaveCount(2);
   await capture(page, 'dashboard.png');
+  await captureDashboardLowerBackground(page);
 
   await goTo(page, '/inventory', 'Inventory');
   await expect(page.getByText('35MB', { exact: true })).toBeVisible();
@@ -663,6 +684,11 @@ test('print media protects a light, high-contrast application surface', async ({
         contrast: contrast(parse(color), sampleBackground.parsed),
       };
     });
+    const decalSelectors=['.mcc-shell::before','.mcc-shell::after'];
+    const decals=[
+      getComputedStyle(document.querySelector('.mcc-shell')!,'::before'),
+      getComputedStyle(document.querySelector('.mcc-shell')!,'::after'),
+    ].map((decal,index)=>({selector:decalSelectors[index],display:decal.display}));
     return {
       background: luminance(background),
       foreground: luminance(foreground),
@@ -673,6 +699,7 @@ test('print media protects a light, high-contrast application surface', async ({
       shellColorScheme: shellStyle.colorScheme,
       surfaces,
       textSamples,
+      decals,
     };
   });
   expect(colors.rootColorScheme).toBe('light');
@@ -680,6 +707,7 @@ test('print media protects a light, high-contrast application surface', async ({
   expect(colors.shellColorScheme).toBe('light');
   expect(colors.background, `print background ${colors.backgroundColor}`).toBeGreaterThan(0.8);
   expect(colors.foreground, `print text ${colors.color}`).toBeLessThan(0.45);
+  for(const decal of colors.decals)expect(decal.display,`${decal.selector} must be disabled for print`).toBe('none');
   for (const surface of colors.surfaces) expect(surface.luminance, `${surface.selector} print background ${surface.backgroundColor}`).toBeGreaterThan(0.8);
   for (const sample of colors.textSamples) {
     expect(sample.found, `${sample.selector} should exist in the print fixture`).toBe(true);
@@ -689,6 +717,8 @@ test('print media protects a light, high-contrast application surface', async ({
   await expect(page.locator('.inventory-table-wrap')).toBeVisible();
   await expect(page.getByText('35MB', { exact: true })).toBeVisible();
   await capture(page, 'print-light-inventory.png', true);
+  await goTo(page, '/', 'Dashboard');
+  expect(await page.locator('.dashboard-page').evaluate(element=>getComputedStyle(element,'::after').display)).toBe('none');
 
   const hiddenPrintGroups = [
     { path: '/requisitions?view=active', heading: 'Requisitions', selector: '.requisition-selection-toolbar' },
