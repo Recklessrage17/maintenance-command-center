@@ -1,0 +1,21 @@
+.mcc-access-button::before {
+  opacity: 1;
+  backdrop-filter: none;
+  transition: none;
+}
+
+.mcc-access-button::after {
+  inset: 4px;
+  width: auto;
+  height: auto;
+  opacity: 1;
+  background: none;
+  transform: none;
+  animation: none;
+}
+
+.mcc-bubble-transition.mcc-access-button.is-warping::after {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
