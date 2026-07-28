@@ -2,6 +2,7 @@ import { type CSSProperties, type FocusEvent, type KeyboardEvent, useCallback, u
 import { createPortal } from 'react-dom';
 import { MccPermissionBadgeGroup, type SpecialPermissionGrant } from './MccPermissionBadges';
 import { RoleBadge } from './RoleBadge';
+import presencePolicy from '../../../shared/presence-policy.json';
 
 type PresenceState='Online'|'Away'|'Offline';
 type RankProvenance={
@@ -28,7 +29,7 @@ type TeamUser={
 type PresencePolicy={
   heartbeatIntervalMs:number;
   rosterRefreshIntervalMs:number;
-  onlineThresholdMs:number;
+  onlineTimeoutMs:number;
   awayAfterMs:number;
   writeThrottleMs:number;
 };
@@ -44,7 +45,6 @@ type TeamResponse={
   users:TeamUser[];
 };
 
-const fallbackPolicy:PresencePolicy={heartbeatIntervalMs:45_000,rosterRefreshIntervalMs:25_000,onlineThresholdMs:120_000,awayAfterMs:600_000,writeThrottleMs:25_000};
 const rosterDialogId='maintenance-team-roster';
 const mobileBackdropStyle:CSSProperties={
   position:'fixed',
@@ -239,8 +239,6 @@ export function MaintenanceTeamControl({onOpenChange}:{onOpenChange?:(open:boole
   const [mobile,setMobile]=useState(false);
   const triggerRef=useRef<HTMLButtonElement>(null);
   const panelRef=useRef<HTMLDivElement>(null);
-  const activitySinceHeartbeat=useRef(true);
-  const lastActivityCapture=useRef(0);
 
   const fetchTeam=useCallback(async()=>{
     try{
@@ -250,35 +248,18 @@ export function MaintenanceTeamControl({onOpenChange}:{onOpenChange?:(open:boole
       setError('');
     }catch(nextError){setError((nextError as Error).message);}
   },[]);
-  const sendHeartbeat=useCallback(async(forceActivity=false)=>{
-    const active=forceActivity||activitySinceHeartbeat.current;
-    try{
-      await jsonRequest('/api/presence/heartbeat',{method:'POST',body:JSON.stringify({active})});
-      activitySinceHeartbeat.current=false;
-    }catch{}
-  },[]);
-
   useEffect(()=>{
-    const captureActivity=()=>{
-      const timestamp=Date.now();
-      if(timestamp-lastActivityCapture.current<15_000)return;
-      lastActivityCapture.current=timestamp;
-      activitySinceHeartbeat.current=true;
-    };
-    const activityEvents=['pointerdown','keydown','touchstart','wheel'] as const;
-    activityEvents.forEach(eventName=>window.addEventListener(eventName,captureActivity,{passive:true}));
-    const visible=()=>{if(document.visibilityState==='visible'){captureActivity();void sendHeartbeat(true).then(fetchTeam);}};
-    document.addEventListener('visibilitychange',visible);
-    void sendHeartbeat(true).then(fetchTeam);
-    const heartbeatTimer=window.setInterval(()=>void sendHeartbeat(),data?.policy.heartbeatIntervalMs??fallbackPolicy.heartbeatIntervalMs);
-    const rosterTimer=window.setInterval(()=>void fetchTeam(),data?.policy.rosterRefreshIntervalMs??fallbackPolicy.rosterRefreshIntervalMs);
+    const refreshWhenVisible=()=>{if(document.visibilityState==='visible')void fetchTeam();};
+    void fetchTeam();
+    const rosterTimer=window.setInterval(()=>void fetchTeam(),data?.policy.rosterRefreshIntervalMs??presencePolicy.rosterRefreshIntervalMs);
+    window.addEventListener('focus',refreshWhenVisible);
+    document.addEventListener('visibilitychange',refreshWhenVisible);
     return()=>{
-      activityEvents.forEach(eventName=>window.removeEventListener(eventName,captureActivity));
-      document.removeEventListener('visibilitychange',visible);
-      window.clearInterval(heartbeatTimer);
       window.clearInterval(rosterTimer);
+      window.removeEventListener('focus',refreshWhenVisible);
+      document.removeEventListener('visibilitychange',refreshWhenVisible);
     };
-  },[data?.policy.heartbeatIntervalMs,data?.policy.rosterRefreshIntervalMs,fetchTeam,sendHeartbeat]);
+  },[data?.policy.rosterRefreshIntervalMs,fetchTeam]);
 
   const close=useCallback((restoreFocus=true)=>{
     setOpen(false);
@@ -375,7 +356,7 @@ export function MaintenanceTeamControl({onOpenChange}:{onOpenChange?:(open:boole
     if(open){close();return;}
     setOpen(true);
     onOpenChange?.(true);
-    void sendHeartbeat().then(fetchTeam);
+    void fetchTeam();
   }
 
   function trapPanelFocus(event:KeyboardEvent<HTMLElement>){

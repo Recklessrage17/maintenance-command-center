@@ -50,7 +50,7 @@ const securityUser = {
   specialPermissionGrants: specialGrants,
   effectivePermissions: [...fullPermissions, ...specialGrants.map(grant => grant.permissionKey)],
 };
-const presencePolicy = { heartbeatIntervalMs: 45_000, rosterRefreshIntervalMs: 25_000, onlineThresholdMs: 120_000, awayAfterMs: 600_000, writeThrottleMs: 25_000 };
+const presencePolicy = { heartbeatIntervalMs: 25_000, rosterRefreshIntervalMs: 25_000, onlineTimeoutMs: 90_000, awayAfterMs: 300_000, writeThrottleMs: 20_000 };
 const roster = {
   serverTime: fixedNow,
   policy: presencePolicy,

@@ -4,7 +4,7 @@ const fullPermissions=['inventory.view','requisitions.view','machine.view','equi
 const owner={id:1,fullName:'Jeff R Grove',email:'owner@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false,disabled:false,lastLoginAt:null,effectivePermissions:fullPermissions};
 const roster={
   serverTime:'2026-07-24T14:00:00.000Z',
-  policy:{heartbeatIntervalMs:45000,rosterRefreshIntervalMs:25000,onlineThresholdMs:120000,awayAfterMs:600000,writeThrottleMs:25000},
+  policy:{heartbeatIntervalMs:25000,rosterRefreshIntervalMs:25000,onlineTimeoutMs:90000,awayAfterMs:300000,writeThrottleMs:20000},
   totalUsers:1,activeUsers:1,onlineCount:1,awayCount:0,offlineCount:0,disabledCount:0,
   users:[{id:1,fullName:'Jeff R Grove',role:'Admin',isOwnerAdmin:true,disabled:false,isCurrentUser:true,presence:'Online',lastSeenAt:'2026-07-24T14:00:00.000Z',rankProvenance:{currentRank:'Owner Admin',assignedBy:'System bootstrap',assignedAt:'2026-07-01T12:00:00.000Z',previousRank:null,reason:null,assignmentSourceAvailable:true,source:'system_bootstrap'},specialPermissionGrants:[]}],
 };

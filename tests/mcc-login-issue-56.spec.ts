@@ -22,11 +22,11 @@ const owner = {
   effectivePermissions: fullPermissions,
 };
 const presencePolicy = {
-  heartbeatIntervalMs: 45_000,
+  heartbeatIntervalMs: 25_000,
   rosterRefreshIntervalMs: 25_000,
-  onlineThresholdMs: 120_000,
-  awayAfterMs: 600_000,
-  writeThrottleMs: 25_000,
+  onlineTimeoutMs: 90_000,
+  awayAfterMs: 300_000,
+  writeThrottleMs: 20_000,
 };
 
 async function mockLoginAndDashboard(page: Page) {

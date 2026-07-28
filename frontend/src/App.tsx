@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNo
 import { MccLogin } from './components/auth/MccLogin';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/historyRouting';
+import { useMccPresence } from './presence/useMccPresence';
 
 type DashboardRequisitionView = 'active'|'requested'|'ordered';
 function cachedImport<T>(loader:()=>Promise<T>){let promise:Promise<T>|undefined;return()=>promise??=loader();}
@@ -51,6 +52,7 @@ function pathForSection(section: MccSection, historySection?: HistorySection | n
 function App() {
   const initialRoute = useMemo(()=>routeFromPath(window.location.pathname),[]);
   const [mode,setMode]=useState<AuthMode>('loading'); const [user,setUser]=useState<User|null>(null); const [activeSection,setActiveSection]=useState<MccSection>(initialRoute.section); const [historySection,setHistorySection]=useState<HistorySection|null>(initialRoute.historySection);
+  useMccPresence(Boolean(user)&&(mode==='app'||mode==='change'));
   const refresh=()=>api('/api/auth/status').then(d=>{setUser(d.user); setMode(d.setupRequired?'setup':d.user?.forcePasswordChange?'change':d.user?'app':'login');}).catch(()=>setMode('login'));
   useEffect(()=>{ refresh(); },[]);
   useEffect(()=>{

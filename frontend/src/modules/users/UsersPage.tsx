@@ -1,8 +1,9 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccPermissionBadgeGroup, type SpecialPermissionGrant } from '../../components/MccPermissionBadges';
 import { RoleBadge } from '../../components/RoleBadge';
 import { generateTemporaryPassword, temporaryPasswordRequirements, validateTemporaryPassword } from './passwordValidation';
+import presencePolicy from '../../../../shared/presence-policy.json';
 
 const roles=['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2','Maintenance Tech 1'];
 const roleHelp:Record<string,string>={
@@ -42,6 +43,8 @@ type User={
   canResetPassword?:boolean;
   canManagePermissions?:boolean;
   specialPermissionGrants?:SpecialPermissionGrant[];
+  presence?:'Online'|'Away'|'Offline';
+  lastSeenAt?:string|null;
 };
 type PermissionItem={
   key:string;
@@ -62,6 +65,33 @@ function formatMccDateTime(value?:string|null){
   const date=new Date(value);
   if(Number.isNaN(date.getTime()))return value||'Unknown';
   return date.toLocaleString();
+}
+
+function relativePresenceTime(value?:string|null){
+  if(!value)return null;
+  const timestamp=Date.parse(value);
+  if(!Number.isFinite(timestamp))return null;
+  const elapsed=Math.max(0,Date.now()-timestamp);
+  if(elapsed<60_000)return 'less than a minute ago';
+  if(elapsed<60*60_000){const minutes=Math.floor(elapsed/60_000);return `${minutes} minute${minutes===1?'':'s'} ago`;}
+  if(elapsed<24*60*60_000){const hours=Math.floor(elapsed/(60*60_000));return `${hours} hour${hours===1?'':'s'} ago`;}
+  const days=Math.floor(elapsed/(24*60*60_000));return `${days} day${days===1?'':'s'} ago`;
+}
+
+function PresenceCell({user}:{user:User}){
+  const presence=user.disabled?'Offline':user.presence??'Offline';
+  const relative=relativePresenceTime(user.lastSeenAt);
+  const detail=presence==='Online'
+    ?'Online now'
+    :presence==='Away'
+      ?`Away — last active ${relative??'recently'}`
+      :user.lastSeenAt
+        ?`Offline — last seen ${formatMccDateTime(user.lastSeenAt)}`
+        :'Never connected';
+  return <div className="user-presence-cell">
+    <span className={`user-presence-badge ${presence.toLowerCase()}`}><i aria-hidden="true" />{presence}</span>
+    <small>{detail}</small>
+  </div>;
 }
 
 function Modal({label,onClose,children,className=''}:{label:string;onClose:()=>void;children:ReactNode;className?:string}){
@@ -239,6 +269,7 @@ export function UsersPage(){
   const [resetTarget,setResetTarget]=useState<User|null>(null);
   const [permissionTarget,setPermissionTarget]=useState<User|null>(null);
   const [updateMyPassword,setUpdateMyPassword]=useState(false);
+  const [refreshIntervalMs,setRefreshIntervalMs]=useState(presencePolicy.rosterRefreshIntervalMs);
   const submittingRef=useRef(false);
   const fullNameRef=useRef<HTMLInputElement>(null);
   const emailRef=useRef<HTMLInputElement>(null);
@@ -246,13 +277,26 @@ export function UsersPage(){
   const passwordRef=useRef<HTMLInputElement>(null);
   const passwordValidation=validateTemporaryPassword(form.temporaryPassword);
 
-  const load=async()=>{
+  const load=useCallback(async()=>{
     try{
-      const [usersResult,authResult]=await Promise.all([api<{users:User[]}>('/api/users'),api<{user:User|null}>('/api/auth/status')]);
+      const [usersResult,authResult]=await Promise.all([api<{users:User[];presencePolicy?:{rosterRefreshIntervalMs?:number}}>('/api/users'),api<{user:User|null}>('/api/auth/status')]);
       setUsers(usersResult.users);setCurrentUser(authResult.user);
+      const nextInterval=Number(usersResult.presencePolicy?.rosterRefreshIntervalMs);
+      if(Number.isInteger(nextInterval)&&nextInterval>=10_000&&nextInterval<=5*60_000)setRefreshIntervalMs(nextInterval);
     }catch(requestError){setError(true);setMsg((requestError as Error).message);}
-  };
-  useEffect(()=>{void load();},[]);
+  },[]);
+  useEffect(()=>{
+    const refreshWhenVisible=()=>{if(document.visibilityState==='visible')void load();};
+    void load();
+    const refreshTimer=window.setInterval(refreshWhenVisible,refreshIntervalMs);
+    window.addEventListener('focus',refreshWhenVisible);
+    document.addEventListener('visibilitychange',refreshWhenVisible);
+    return()=>{
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('focus',refreshWhenVisible);
+      document.removeEventListener('visibilitychange',refreshWhenVisible);
+    };
+  },[load,refreshIntervalMs]);
 
   function updateField<K extends keyof UserForm>(field:K,value:UserForm[K]){setForm(current=>({...current,[field]:value}));setFieldErrors(current=>({...current,[field]:undefined}));if(field==='temporaryPassword')setCopyMessage('');}
   function validateForm(){const next:FieldErrors={};if(!form.fullName.trim())next.fullName='Full name is required.';if(!form.email.trim())next.email='Email is required.';else if(!emailPattern.test(form.email.trim()))next.email='Enter a valid email address.';if(!form.role||!roles.includes(form.role))next.role='Role is required.';if(!passwordValidation.valid)next.temporaryPassword='Temporary password must meet every requirement.';return next;}
@@ -285,13 +329,14 @@ export function UsersPage(){
       <button className="primary-button user-create-button" type="submit" disabled={isSubmitting}>{isSubmitting?'Creating User…':'Create User'}</button>
     </form>
     {msg&&<p className={error?'form-message error':'form-message'} role={error?'alert':'status'}>{msg}</p>}
-    <div className="mcc-card table-card user-table-card"><table><thead><tr><th>Name</th><th>Email</th><th>Rank</th><th>Last login</th><th>Status</th><th>Special permissions</th><th>Actions</th></tr></thead><tbody>
+    <div className="mcc-card table-card user-table-card"><table><thead><tr><th>Name</th><th>Email</th><th>Rank</th><th>Last login</th><th>Presence</th><th>Account status</th><th>Special permissions</th><th>Actions</th></tr></thead><tbody>
       {users.map(user=><tr key={user.id}>
         <td data-label="Name"><strong className="user-name">{user.fullName}</strong></td>
         <td data-label="Email">{user.email}</td>
         <td data-label="Rank"><RoleBadge role={user.role} isOwnerAdmin={user.isOwnerAdmin} /></td>
         <td data-label="Last login" className="user-last-login">{formatMccDateTime(user.lastLoginAt)}</td>
-        <td data-label="Status"><span className={user.disabled?'status-pill disabled':'status-pill'}>{user.disabled?'Disabled':'Active'}</span></td>
+        <td data-label="Presence"><PresenceCell user={user} /></td>
+        <td data-label="Account status"><span className={user.disabled?'status-pill disabled':'status-pill'}>{user.disabled?'Disabled':'Active'}</span></td>
         <td data-label="Special permissions"><MccPermissionBadgeGroup grants={user.specialPermissionGrants??[]} disabledAccount={user.disabled} /></td>
         <td data-label="Actions"><div className="user-actions">
           {user.canManagePermissions&&<button type="button" className="secondary-button compact-button" onClick={()=>setPermissionTarget(user)}>Special Permissions</button>}

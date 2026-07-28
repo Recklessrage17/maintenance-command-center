@@ -118,13 +118,24 @@ const passwordOk = (p: unknown): p is string => typeof p === 'string' && p.lengt
 const now = () => new Date().toISOString();
 const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
 const serverStartedAt = now();
-const presencePolicy = {
-  heartbeatIntervalMs: 45_000,
-  rosterRefreshIntervalMs: 25_000,
-  onlineThresholdMs: 2 * 60_000,
-  awayAfterMs: 10 * 60_000,
-  writeThrottleMs: 25_000,
-} as const;
+type PresencePolicy = {
+  heartbeatIntervalMs:number;
+  rosterRefreshIntervalMs:number;
+  onlineTimeoutMs:number;
+  awayAfterMs:number;
+  writeThrottleMs:number;
+};
+function readPresencePolicy(): PresencePolicy {
+  const raw = JSON.parse(fs.readFileSync(path.join(repoRootPath, 'shared', 'presence-policy.json'), 'utf8')) as Partial<PresencePolicy>;
+  const keys: Array<keyof PresencePolicy> = ['heartbeatIntervalMs','rosterRefreshIntervalMs','onlineTimeoutMs','awayAfterMs','writeThrottleMs'];
+  for (const key of keys) {
+    if (!Number.isInteger(raw[key]) || Number(raw[key]) <= 0) throw new Error(`Invalid shared presence policy value: ${key}`);
+  }
+  if (Number(raw.heartbeatIntervalMs) >= Number(raw.onlineTimeoutMs)) throw new Error('Presence heartbeat interval must be shorter than the online timeout.');
+  if (Number(raw.writeThrottleMs) > Number(raw.heartbeatIntervalMs)) throw new Error('Presence write throttle cannot exceed the heartbeat interval.');
+  return raw as PresencePolicy;
+}
+const presencePolicy = Object.freeze(readPresencePolicy());
 
 let db = new DatabaseSync(dbPath);
 let facilityInfoService: FacilityInfoService | null = null;
@@ -139,7 +150,7 @@ function initDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, is_owner_admin INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, auth_session_ref_hash TEXT, visibility TEXT NOT NULL DEFAULT 'visible', disconnected_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS user_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, previous_role TEXT, new_role TEXT NOT NULL, assigned_by_user_id INTEGER, assigned_at TEXT NOT NULL, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(assigned_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
@@ -224,13 +235,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_perm
 }
 initDb();
 function migrateDb() {
-  db.exec(`CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id));
+  db.exec(`CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, auth_session_ref_hash TEXT, visibility TEXT NOT NULL DEFAULT 'visible', disconnected_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS user_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, previous_role TEXT, new_role TEXT NOT NULL, assigned_by_user_id INTEGER, assigned_at TEXT NOT NULL, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(assigned_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
 CREATE INDEX IF NOT EXISTS idx_user_presence_user ON user_presence_sessions (user_id,logged_out_at,last_heartbeat_at);
 CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user ON user_role_assignments (user_id,assigned_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
+  const presenceColumns = new Set(all<{ name: string }>('PRAGMA table_info(user_presence_sessions)').map(column => column.name));
+  if (!presenceColumns.has('auth_session_ref_hash')) run('ALTER TABLE user_presence_sessions ADD COLUMN auth_session_ref_hash TEXT');
+  if (!presenceColumns.has('visibility')) run("ALTER TABLE user_presence_sessions ADD COLUMN visibility TEXT NOT NULL DEFAULT 'visible'");
+  if (!presenceColumns.has('disconnected_at')) run('ALTER TABLE user_presence_sessions ADD COLUMN disconnected_at TEXT');
+  run("UPDATE user_presence_sessions SET auth_session_ref_hash=session_ref_hash WHERE auth_session_ref_hash IS NULL OR auth_session_ref_hash=''");
+  run("UPDATE user_presence_sessions SET visibility='visible' WHERE visibility IS NULL OR visibility NOT IN ('visible','hidden')");
+  db.exec('CREATE INDEX IF NOT EXISTS idx_user_presence_auth_session ON user_presence_sessions (auth_session_ref_hash,user_id,logged_out_at,disconnected_at,last_heartbeat_at)');
   // Live state cannot survive a process restart or database restore. A still-valid
   // browser session becomes live again only after its next authenticated heartbeat.
   run('UPDATE user_presence_sessions SET logged_out_at=? WHERE logged_out_at IS NULL', [serverStartedAt]);
@@ -498,6 +516,9 @@ interface PresenceSessionRow {
   last_activity_at:string;
   logged_out_at:string|null;
   created_at:string;
+  auth_session_ref_hash:string|null;
+  visibility:'visible'|'hidden';
+  disconnected_at:string|null;
 }
 interface RoleAssignmentRow {
   id:number;
@@ -569,23 +590,62 @@ function cookie(req: Request, name: string) { return req.headers.cookie?.split('
 function presenceSessionHash(sessionId:string) {
   return crypto.createHmac('sha256',sessionSecret).update(`mcc-presence:${sessionId}`).digest('hex');
 }
-function recordPresenceHeartbeat(sessionId:string,userId:number,activity:boolean) {
+function presenceClientHash(sessionId:string,clientInstanceId:string) {
+  return crypto.createHmac('sha256',sessionSecret).update(`mcc-presence:${sessionId}:${clientInstanceId}`).digest('hex');
+}
+const presenceClientIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function validatePresenceClientId(value:unknown) {
+  if(typeof value!=='string'||!presenceClientIdPattern.test(value)) throw new Error('Presence client identifier is invalid.');
+  return value.toLowerCase();
+}
+function validatePresenceBodyKeys(body:Record<string,unknown>,allowed:string[]) {
+  const unexpected=Object.keys(body).filter(key=>!allowed.includes(key));
+  if(unexpected.length) throw new Error('Presence requests cannot submit user, session, or unsupported fields.');
+}
+function validatedPresenceHeartbeat(value:unknown) {
+  if(!isRecord(value)) throw new Error('Presence heartbeat body is required.');
+  validatePresenceBodyKeys(value,['clientInstanceId','visibility','activitySinceLastHeartbeat','lastActivityAt']);
+  const clientInstanceId=validatePresenceClientId(value.clientInstanceId);
+  const visibility=value.visibility;
+  if(visibility!=='visible'&&visibility!=='hidden') throw new Error('Presence visibility must be visible or hidden.');
+  if(typeof value.activitySinceLastHeartbeat!=='boolean') throw new Error('Presence activity flag must be boolean.');
+  if(typeof value.lastActivityAt!=='string'||value.lastActivityAt.length>40) throw new Error('Presence last activity time is invalid.');
+  const lastActivityDate=new Date(value.lastActivityAt);
+  if(Number.isNaN(lastActivityDate.getTime())||lastActivityDate.toISOString()!==value.lastActivityAt) throw new Error('Presence last activity time must be an ISO timestamp.');
+  return {clientInstanceId,visibility:visibility as 'visible'|'hidden',activitySinceLastHeartbeat:value.activitySinceLastHeartbeat,lastActivityAt:value.lastActivityAt};
+}
+function validatedPresenceDisconnect(value:unknown) {
+  if(!isRecord(value)) throw new Error('Presence disconnect body is required.');
+  validatePresenceBodyKeys(value,['clientInstanceId']);
+  return validatePresenceClientId(value.clientInstanceId);
+}
+function recordPresenceHeartbeat(sessionId:string,userId:number,clientInstanceId:string,visibility:'visible'|'hidden',activity:boolean) {
   const timestamp=now();
-  const existing=one<PresenceSessionRow>('SELECT * FROM user_presence_sessions WHERE session_ref_hash=?',[presenceSessionHash(sessionId)]);
+  const authSessionRefHash=presenceSessionHash(sessionId);
+  const sessionRefHash=presenceClientHash(sessionId,clientInstanceId);
+  const existing=one<PresenceSessionRow>('SELECT * FROM user_presence_sessions WHERE session_ref_hash=?',[sessionRefHash]);
   const heartbeatAge=existing?Date.now()-Date.parse(existing.last_heartbeat_at):Number.POSITIVE_INFINITY;
   const activityAge=existing?Date.now()-Date.parse(existing.last_activity_at):Number.POSITIVE_INFINITY;
-  const shouldWrite=!existing||Boolean(existing.logged_out_at)||heartbeatAge>=presencePolicy.writeThrottleMs||(activity&&activityAge>=presencePolicy.writeThrottleMs);
+  const shouldWrite=!existing||Boolean(existing.logged_out_at)||Boolean(existing.disconnected_at)||existing.visibility!==visibility||heartbeatAge>=presencePolicy.writeThrottleMs||(activity&&activityAge>=presencePolicy.writeThrottleMs);
   if(shouldWrite) {
-    run(`INSERT INTO user_presence_sessions (session_ref_hash,user_id,last_heartbeat_at,last_activity_at,logged_out_at,created_at)
-      VALUES (?,?,?,?,NULL,?)
-      ON CONFLICT(session_ref_hash) DO UPDATE SET user_id=excluded.user_id,last_heartbeat_at=excluded.last_heartbeat_at,
-      last_activity_at=CASE WHEN ?=1 THEN excluded.last_activity_at ELSE user_presence_sessions.last_activity_at END,logged_out_at=NULL`,
-    [presenceSessionHash(sessionId),userId,timestamp,timestamp,timestamp,activity?1:0]);
+    run(`INSERT INTO user_presence_sessions (session_ref_hash,user_id,last_heartbeat_at,last_activity_at,logged_out_at,created_at,auth_session_ref_hash,visibility,disconnected_at)
+      VALUES (?,?,?,?,NULL,?,?,?,NULL)
+      ON CONFLICT(session_ref_hash) DO UPDATE SET user_id=excluded.user_id,auth_session_ref_hash=excluded.auth_session_ref_hash,
+      last_heartbeat_at=excluded.last_heartbeat_at,last_activity_at=CASE WHEN ?=1 THEN excluded.last_activity_at ELSE user_presence_sessions.last_activity_at END,
+      logged_out_at=NULL,visibility=excluded.visibility,disconnected_at=NULL`,
+    [sessionRefHash,userId,timestamp,timestamp,timestamp,authSessionRefHash,visibility,activity?1:0]);
   }
   return {serverTime:timestamp,written:shouldWrite};
 }
+function markPresenceClientDisconnected(sessionId:string,clientInstanceId:string) {
+  const result=run(`UPDATE user_presence_sessions SET disconnected_at=COALESCE(disconnected_at,?)
+    WHERE session_ref_hash=? AND auth_session_ref_hash=?`,[now(),presenceClientHash(sessionId,clientInstanceId),presenceSessionHash(sessionId)]);
+  return Number(result.changes)>0;
+}
 function markPresenceSessionOffline(sessionId:string) {
-  run('UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?) WHERE session_ref_hash=?',[now(),presenceSessionHash(sessionId)]);
+  const authSessionRefHash=presenceSessionHash(sessionId);
+  run(`UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?)
+    WHERE auth_session_ref_hash=? OR (auth_session_ref_hash IS NULL AND session_ref_hash=?)`,[now(),authSessionRefHash,authSessionRefHash]);
 }
 function invalidateUserSessions(userId:number) {
   run('UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?) WHERE user_id=?',[now(),userId]);
@@ -863,22 +923,50 @@ function roleProvenance(user:User) {
     source:'unavailable',
   };
 }
-function maintenanceTeamRoster(currentUser:User) {
-  const serverTime=now();
+type PresenceState='Online'|'Away'|'Offline';
+type UserPresenceSummary={presence:PresenceState;lastSeenAt:string|null};
+function latestPresenceTimestamp(values:Array<string|null|undefined>) {
+  return values.filter((value):value is string=>Boolean(value)).sort((left,right)=>right.localeCompare(left))[0]??null;
+}
+function presenceByUser(users:User[],serverTime=now()) {
   const serverMillis=Date.parse(serverTime);
   const validSessions=all<{id:string;user_id:number}>('SELECT id,user_id FROM sessions WHERE expires_at>?',[serverTime]);
   const validPresenceHashes=new Map(validSessions.map(session=>[presenceSessionHash(session.id),session.user_id]));
   const presenceRows=all<PresenceSessionRow>('SELECT * FROM user_presence_sessions ORDER BY last_heartbeat_at DESC');
+  const rowsByUser=new Map<number,PresenceSessionRow[]>();
+  for(const row of presenceRows) rowsByUser.set(row.user_id,[...(rowsByUser.get(row.user_id)??[]),row]);
+  const summaries=new Map<number,UserPresenceSummary>();
+  for(const user of users) {
+    const userRows=rowsByUser.get(user.id)??[];
+    const liveRows=user.disabled?[]:userRows.filter(row=>{
+      const heartbeatMillis=Date.parse(row.last_heartbeat_at);
+      const heartbeatAge=serverMillis-heartbeatMillis;
+      const authSessionRefHash=row.auth_session_ref_hash||row.session_ref_hash;
+      return !row.logged_out_at&&!row.disconnected_at
+        &&validPresenceHashes.get(authSessionRefHash)===user.id
+        &&Number.isFinite(heartbeatAge)&&heartbeatAge>=0&&heartbeatAge<=presencePolicy.onlineTimeoutMs;
+    });
+    const hasOnlineSession=liveRows.some(row=>{
+      const activityAge=serverMillis-Date.parse(row.last_activity_at);
+      return row.visibility==='visible'&&Number.isFinite(activityAge)&&activityAge>=0&&activityAge<=presencePolicy.awayAfterMs;
+    });
+    const presence:PresenceState=hasOnlineSession?'Online':liveRows.length?'Away':'Offline';
+    const lastSeenAt=presence==='Online'
+      ?latestPresenceTimestamp(liveRows.filter(row=>row.visibility==='visible').map(row=>row.last_activity_at))
+      :presence==='Away'
+        ?latestPresenceTimestamp(liveRows.map(row=>row.last_activity_at))
+        :latestPresenceTimestamp(userRows.map(row=>row.last_heartbeat_at));
+    summaries.set(user.id,{presence,lastSeenAt});
+  }
+  return summaries;
+}
+function maintenanceTeamRoster(currentUser:User) {
+  const serverTime=now();
   const users=all<User>('SELECT * FROM users WHERE deleted=0 ORDER BY full_name COLLATE NOCASE,id');
+  const summaries=presenceByUser(users,serverTime);
   const stateOrder={Online:0,Away:1,Offline:2} as const;
   const roster=users.map(user=>{
-    const userRows=presenceRows.filter(row=>row.user_id===user.id);
-    const liveRows=user.disabled?[]:userRows.filter(row=>!row.logged_out_at&&validPresenceHashes.get(row.session_ref_hash)===user.id&&serverMillis-Date.parse(row.last_heartbeat_at)<=presencePolicy.onlineThresholdMs);
-    const state:'Online'|'Away'|'Offline'=liveRows.length
-      ?liveRows.some(row=>serverMillis-Date.parse(row.last_activity_at)<=presencePolicy.awayAfterMs)?'Online':'Away'
-      :'Offline';
-    const lastSeenSource=state==='Away'?liveRows.map(row=>row.last_activity_at):userRows.map(row=>row.last_heartbeat_at);
-    const lastSeenAt=lastSeenSource.filter(Boolean).sort((left,right)=>right.localeCompare(left))[0]??null;
+    const summary=summaries.get(user.id)??{presence:'Offline' as const,lastSeenAt:null};
     return {
       id:user.id,
       fullName:user.full_name,
@@ -886,8 +974,8 @@ function maintenanceTeamRoster(currentUser:User) {
       isOwnerAdmin:Boolean(user.is_owner_admin),
       disabled:Boolean(user.disabled),
       isCurrentUser:user.id===currentUser.id,
-      presence:state,
-      lastSeenAt,
+      presence:summary.presence,
+      lastSeenAt:summary.lastSeenAt,
       rankProvenance:roleProvenance(user),
       specialPermissionGrants:activeSpecialGrants(user.id).map(publicPermissionGrant),
     };
@@ -933,7 +1021,7 @@ function canManagePermissionTarget(actor:User,target:User) {
   if(actor.role==='Maintenance Tech 3') return ['Maintenance Tech 1','Maintenance Tech 2'].includes(target.role);
   return roleRank(actor.role)>roleRank(target.role);
 }
-function publicUserForActor(u: User, actor: User) {
+function publicUserForActor(u: User, actor: User, presence?:UserPresenceSummary) {
   return {
     ...publicUser(u),
     canEdit: canEditTarget(actor, u),
@@ -942,6 +1030,7 @@ function publicUserForActor(u: User, actor: User) {
     canResetPassword: canResetPasswordTarget(actor,u),
     canManagePermissions: canManagePermissionTarget(actor,u),
     specialPermissionGrants: activeSpecialGrants(u.id).map(publicPermissionGrant),
+    ...(presence?{presence:presence.presence,lastSeenAt:presence.lastSeenAt}:{}),
   };
 }
 function safeErrorMessage(error: unknown, extraSecrets: string[] = [], fallback = 'Unknown error.') {
@@ -7782,12 +7871,23 @@ app.get('/api/version', requireAuth, requireSystemVersionAccess, (_req,res)=>res
 }));
 app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(req,'mcc_session')); const u=sid ? one<User>('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.deleted=0 AND s.id=? AND s.expires_at > ?', [sid,now()]) : undefined; res.json({ setupRequired:userCount()===0, user: u && !u.disabled ? publicUser(u) : null }); });
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,owner:true,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true,ownerAdmin:true}); res.json({ok:true}); });
-app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); const sessionId=setSession(res,u.id); recordPresenceHeartbeat(sessionId,u.id,true); const loggedInAt=now(); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [loggedInAt,u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:loggedInAt})}); });
+app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); const loggedInAt=now(); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [loggedInAt,u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:loggedInAt})}); });
 app.post('/api/auth/logout', requireAuth, (req:AuthRequest,res)=>{ audit(req,'logout','user',req.user!.id); clearSession(req,res); res.json({ok:true}); });
 app.post('/api/presence/heartbeat',requireAuth,(req:AuthRequest,res)=>{
-  const heartbeat=recordPresenceHeartbeat(req.sessionId!,req.user!.id,req.body?.active===true);
-  res.setHeader('Cache-Control','no-store');
-  res.json({ok:true,...heartbeat,policy:presencePolicy});
+  try{
+    const input=validatedPresenceHeartbeat(req.body);
+    const heartbeat=recordPresenceHeartbeat(req.sessionId!,req.user!.id,input.clientInstanceId,input.visibility,input.activitySinceLastHeartbeat);
+    res.setHeader('Cache-Control','no-store');
+    res.json({ok:true,...heartbeat,policy:presencePolicy});
+  }catch(error){res.status(400).json({ok:false,code:'INVALID_PRESENCE_HEARTBEAT',error:error instanceof Error?error.message:'Presence heartbeat is invalid.'});}
+});
+app.post('/api/presence/disconnect',requireAuth,(req:AuthRequest,res)=>{
+  try{
+    const clientInstanceId=validatedPresenceDisconnect(req.body);
+    const disconnected=markPresenceClientDisconnected(req.sessionId!,clientInstanceId);
+    res.setHeader('Cache-Control','no-store');
+    res.json({ok:true,disconnected,serverTime:now()});
+  }catch(error){res.status(400).json({ok:false,code:'INVALID_PRESENCE_DISCONNECT',error:error instanceof Error?error.message:'Presence disconnect is invalid.'});}
 });
 app.get('/api/presence/team',requireAuth,(req:AuthRequest,res)=>{
   res.setHeader('Cache-Control','no-store');
@@ -7825,7 +7925,15 @@ app.post('/api/auth/forgot-password', async (req,res)=>{
   res.json({ok:true,message:'If the email matches an account, password reset instructions will be sent.'});
 });
 app.post('/api/auth/change-password', requireAuth, (req:AuthRequest,res)=>{ const {currentPassword,newPassword,confirmPassword}=req.body; const u=req.user!; if(!verifyPassword(currentPassword??'',u.password_hash)) return res.status(400).json({error:'Current password is incorrect.'}); if(newPassword!==confirmPassword||!passwordOk(newPassword)) return res.status(400).json({error:'New password must match and meet complexity rules.'}); if(verifyPassword(newPassword,u.password_hash)) return res.status(400).json({error:'New password cannot match the temporary/current password.'}); run('UPDATE users SET password_hash=?, force_password_change=0, temp_password_expires_at=NULL, updated_at=? WHERE id=?', [hashPassword(newPassword),now(),u.id]); audit(req,'password change','user',u.id); res.json({ok:true}); });
-app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{ const max=roleRank(req.user!.role); const manageableRoles = roles.slice(0,max+1); const placeholders = manageableRoles.map(() => '?').join(','); res.json({users: all<User>(`SELECT * FROM users WHERE deleted=0 AND (?=4 OR role IN (${placeholders})) ORDER BY is_owner_admin DESC, full_name`, [max,...manageableRoles]).map(user => publicUserForActor(user, req.user!))}); });
+app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{
+  const max=roleRank(req.user!.role);
+  const manageableRoles=roles.slice(0,max+1);
+  const placeholders=manageableRoles.map(()=>'?').join(',');
+  const users=all<User>(`SELECT * FROM users WHERE deleted=0 AND (?=4 OR role IN (${placeholders})) ORDER BY is_owner_admin DESC, full_name`,[max,...manageableRoles]);
+  const presence=presenceByUser(users);
+  res.setHeader('Cache-Control','no-store');
+  res.json({users:users.map(user=>publicUserForActor(user,req.user!,presence.get(user.id))),presencePolicy});
+});
 app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{
   const fullName=String(req.body.fullName??'').trim();
   const email=String(req.body.email??'').trim();

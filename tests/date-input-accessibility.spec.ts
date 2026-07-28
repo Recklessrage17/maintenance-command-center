@@ -60,11 +60,11 @@ async function mockRequisitionBatchEditor(page: Page) {
           serverTime: '2026-07-24T14:00:00.000Z',
           written: true,
           policy: {
-            heartbeatIntervalMs: 45_000,
+            heartbeatIntervalMs: 25_000,
             rosterRefreshIntervalMs: 25_000,
-            onlineThresholdMs: 120_000,
-            awayAfterMs: 600_000,
-            writeThrottleMs: 25_000,
+            onlineTimeoutMs: 90_000,
+            awayAfterMs: 300_000,
+            writeThrottleMs: 20_000,
           },
         },
       });
@@ -74,11 +74,11 @@ async function mockRequisitionBatchEditor(page: Page) {
         json: {
           serverTime: '2026-07-24T14:00:00.000Z',
           policy: {
-            heartbeatIntervalMs: 45_000,
+            heartbeatIntervalMs: 25_000,
             rosterRefreshIntervalMs: 25_000,
-            onlineThresholdMs: 120_000,
-            awayAfterMs: 600_000,
-            writeThrottleMs: 25_000,
+            onlineTimeoutMs: 90_000,
+            awayAfterMs: 300_000,
+            writeThrottleMs: 20_000,
           },
           totalUsers: 0,
           activeUsers: 0,

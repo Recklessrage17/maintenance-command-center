@@ -8,7 +8,7 @@ const grants=[
 ];
 const roster={
   serverTime:'2026-07-24T14:00:00.000Z',
-  policy:{heartbeatIntervalMs:45000,rosterRefreshIntervalMs:25000,onlineThresholdMs:120000,awayAfterMs:600000,writeThrottleMs:25000},
+  policy:{heartbeatIntervalMs:25000,rosterRefreshIntervalMs:25000,onlineTimeoutMs:90000,awayAfterMs:300000,writeThrottleMs:20000},
   totalUsers:4,activeUsers:3,onlineCount:1,awayCount:1,offlineCount:1,disabledCount:1,
   users:[
     {id:1,fullName:'Jeff R Grove',role:'Admin',isOwnerAdmin:true,disabled:false,isCurrentUser:true,presence:'Online',lastSeenAt:'2026-07-24T14:00:00.000Z',rankProvenance:{currentRank:'Owner Admin',assignedBy:'System bootstrap',assignedAt:'2026-07-01T12:00:00.000Z',previousRank:null,reason:null,assignmentSourceAvailable:true,source:'system_bootstrap'},specialPermissionGrants:[]},

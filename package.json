@@ -1,6 +1,6 @@
 {
   "name": "maintenance-command-center",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Maintenance Command Center website shell.",
   "scripts": {
@@ -31,6 +31,7 @@
     "test:auth-password-change": "node tests/authentication-password-change-regression.mjs",
     "test:password-permissions-api": "node tests/password-permissions-api.mjs",
     "test:presence-api": "node tests/presence-team-api.mjs",
+    "test:presence-ui": "playwright test tests/reliable-user-presence.spec.ts",
     "test:teams": "playwright test tests/maintenance-team-roster.spec.ts",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
