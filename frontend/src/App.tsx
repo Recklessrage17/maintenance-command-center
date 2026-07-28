@@ -13,26 +13,9 @@ import { VendorsPage } from './modules/vendors/VendorsPage';
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; forcePasswordChange:boolean };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
-type AuthCardVariant = 'standard' | 'login';
 const LOGIN_SUCCESS_WARP_MS = 280;
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
-function AuthCard({title,eyebrow,children,variant='standard'}:{title:string;eyebrow:string;children:React.ReactNode;variant?:AuthCardVariant}) {
-  const isLogin=variant==='login';
-  return <main className={isLogin?'auth-shell auth-shell--login':'auth-shell'}>
-    {isLogin&&<div className="auth-command-atmosphere" aria-hidden="true"><span className="auth-orbit auth-orbit--one"/><span className="auth-orbit auth-orbit--two"/><span className="auth-beacon auth-beacon--one"/><span className="auth-beacon auth-beacon--two"/></div>}
-    <section className={isLogin?'auth-card auth-card--login':'auth-card'}>
-      {isLogin?<>
-        <div className="auth-command-topline"><span>MCC // LOCAL NODE 01</span><span className="auth-system-online"><i/>System online</span></div>
-        <header className="auth-command-header">
-          <div className="auth-command-mark" aria-hidden="true"><span>M</span><span>C</span><span>C</span></div>
-          <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="auth-command-subtitle">Secure maintenance operations, asset intelligence, and plant command access.</p></div>
-        </header>
-      </>:<><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></>}
-      {children}
-      {isLogin&&<footer className="auth-command-footer"><span>Encrypted local session</span><span>Raspberry Pi ready</span></footer>}
-    </section>
-  </main>;
-}
+function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:React.ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
 function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }
 function routeFromPath(pathname: string): { section: MccSection; historySection: HistorySection | null } {
   const clean = pathname.replace(/^\/+|\/+$/g, '');
@@ -93,8 +76,7 @@ function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) {
       setMsg((err as Error).message);
     }
   }
-  const buttonClass=isSubmitting?'primary-button mcc-bubble-transition mcc-login-warp mcc-access-button is-warping':'primary-button mcc-bubble-transition mcc-login-warp mcc-access-button';
-  return <AuthCard title="Maintenance Command Center" eyebrow="Authorized personnel" variant="login"><form onSubmit={submit} className="auth-form auth-login-form" aria-busy={isSubmitting}><Field label="Operator email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Secure password" type="password" value={password} onChange={setPassword} autoComplete="current-password"/><button className={buttonClass} type="submit" disabled={isSubmitting} aria-busy={isSubmitting}><span className="mcc-access-button__icon" aria-hidden="true"/><span className="mcc-access-button__copy"><strong>{isSubmitting?'Authenticating':'Enter Command Center'}</strong><small>{isSubmitting?'Establishing secure session':'Secure local access'}</small></span><span className="mcc-access-button__chevron" aria-hidden="true">›</span></button><button type="button" className="link-button" onClick={onForgot} disabled={isSubmitting}>Forgot Password</button>{msg&&<p className="form-message error" role="alert">{msg}</p>}</form></AuthCard>
+  return <AuthCard title="MCC Login" eyebrow="Maintenance command center"><form onSubmit={submit} className="auth-form" aria-busy={isSubmitting}><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password"/><button className={isSubmitting?'primary-button mcc-bubble-transition mcc-login-warp is-warping':'primary-button mcc-bubble-transition mcc-login-warp'} type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>{isSubmitting?'Opening MCC':'Log In'}</button><button type="button" className="link-button" onClick={onForgot} disabled={isSubmitting}>Forgot Password</button>{msg&&<p className="form-message error" role="alert">{msg}</p>}</form></AuthCard>
 }
 function Forgot({onBack}:{onBack:()=>void}) { const [email,setEmail]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{const d=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});setMsg(d.message);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="Forgot Password" eyebrow="Secure reset"><form onSubmit={submit} className="auth-form"><Field label="Email" value={email} onChange={setEmail}/><button className="primary-button">Request Reset</button><button type="button" className="link-button" onClick={onBack}>Back to Login</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Change({onDone}:{onDone:()=>void}) { const [currentPassword,setCurrent]=useState(''),[newPassword,setNew]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{await api('/api/auth/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword,confirmPassword})});onDone();}catch(err){setMsg((err as Error).message)}} return <AuthCard title="Change Password Required" eyebrow="Temporary credential"><form onSubmit={submit} className="auth-form"><Field label="Temporary/current password" type="password" value={currentPassword} onChange={setCurrent}/><Field label="New password" type="password" value={newPassword} onChange={setNew}/><Field label="Confirm new password" type="password" value={confirmPassword} onChange={setConfirm}/><button className="primary-button">Save New Password</button>{msg&&<p className="form-message error">{msg}</p>}</form></AuthCard> }
