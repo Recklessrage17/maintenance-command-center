@@ -4,6 +4,7 @@ import App from './App';
 import './styles/app.css';
 import './styles/glass-system.css';
 import './styles/login-command-deck.css';
+import './styles/login-command-deck-fixes.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
