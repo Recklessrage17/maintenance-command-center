@@ -1,6 +1,6 @@
 {
   "name": "maintenance-command-center",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Maintenance Command Center website shell.",
   "scripts": {
@@ -8,6 +8,12 @@
     "build": "npm run build --prefix frontend && npm run build --prefix backend",
     "start": "npm start --prefix backend",
     "smoke": "node scripts/smoke-test.mjs",
+    "version:patch": "node scripts/version.mjs patch",
+    "version:minor": "node scripts/version.mjs minor",
+    "version:major": "node scripts/version.mjs major",
+    "version:set": "node scripts/version.mjs set",
+    "test:system-version-api": "node tests/system-version-api.mjs",
+    "test:system-version": "playwright test tests/settings-system-version.spec.ts",
     "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
     "test:machine-documents": "playwright test tests/machine-asset-document-library.spec.ts",
     "test:machine-documents-api": "node tests/machine-asset-document-library-api.mjs",

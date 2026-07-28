@@ -7,6 +7,13 @@ type NetworkLinks = {
   primaryLanUrl: string | null;
 };
 
+type SystemVersionMetadata = {
+  version: string | null;
+  displayVersion: string;
+  commit: string | null;
+  buildDate: string | null;
+};
+
 type BackupCategory = 'daily' | 'weekly' | 'master' | 'legacy';
 type BackupType = string;
 type BackupHealth = {
@@ -397,7 +404,9 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
   );
 }
 
-export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
+export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{isOwnerAdmin?: boolean;canViewSystemVersion?: boolean}) {
+  const [systemVersion,setSystemVersion]=useState<SystemVersionMetadata|null>(null);
+  const [systemVersionLoading,setSystemVersionLoading]=useState(false);
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
@@ -457,6 +466,15 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
       .then(data=>{ setLinks(data); setMsg(''); })
       .catch(e=>setMsg(e.message))
       .finally(()=>setLoading(false));
+  }
+
+  function loadSystemVersion() {
+    if (!canViewSystemVersion) return Promise.resolve();
+    setSystemVersionLoading(true);
+    return api('/api/version')
+      .then(data=>setSystemVersion(data as SystemVersionMetadata))
+      .catch(()=>setSystemVersion(null))
+      .finally(()=>setSystemVersionLoading(false));
   }
 
   function loadBranding() {
@@ -620,11 +638,13 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   }
 
   useEffect(()=>{
+    if (canViewSystemVersion) void loadSystemVersion();
+    else setSystemVersion(null);
     loadLinks();
     loadBranding();
     loadBackupStatus();
     if (isOwnerAdmin) void loadResetStatus();
-  },[isOwnerAdmin]);
+  },[isOwnerAdmin,canViewSystemVersion]);
   useEffect(()=>{
     if (manualBackupProgress.state !== 'running' || manualBackupProgress.activeStep >= backupStepLabels.length - 2) return;
     const timer = window.setTimeout(()=>{
@@ -637,6 +657,13 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
 
   return (
     <div className="page-stack settings-page">
+      {canViewSystemVersion&&(
+        <aside className="mcc-card system-version-panel" aria-label="MCC system version">
+          <span className="system-version-label"><i aria-hidden="true" />System Version</span>
+          <strong>{systemVersion?.displayVersion ? `MCC ${systemVersion.displayVersion}` : systemVersionLoading ? 'MCC loading…' : 'MCC version unavailable'}</strong>
+          <small>{systemVersion?.commit ? `Build ${systemVersion.commit}` : 'Build unavailable'}</small>
+        </aside>
+      )}
       <article className="mcc-card wide-card branding-card">
         <div className="share-card-heading">
           <div>

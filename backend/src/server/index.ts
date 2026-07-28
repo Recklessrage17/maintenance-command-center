@@ -39,7 +39,32 @@ const app = express();
 const configuredPort = Number(process.env.PORT ?? 4273);
 const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 4273;
 const appName = 'Maintenance Command Center';
-const version = '0.1.0';
+function readApplicationVersion() {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(repoRootPath, 'package.json'), 'utf8')) as { version?: unknown };
+    return typeof manifest.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(manifest.version)
+      ? manifest.version
+      : null;
+  } catch {
+    return null;
+  }
+}
+function readShortCommit() {
+  try {
+    const result = spawnSync('git', ['rev-parse', '--short=7', 'HEAD'], {
+      cwd: repoRootPath,
+      encoding: 'utf8',
+      timeout: 2_000,
+      windowsHide: true,
+    });
+    const commit = result.status === 0 ? result.stdout.trim() : '';
+    return /^[0-9a-f]{7,12}$/i.test(commit) ? commit : null;
+  } catch {
+    return null;
+  }
+}
+const applicationVersion = readApplicationVersion();
+const applicationCommit = readShortCommit();
 const mit3Url = 'http://localhost:4173';
 const mit3HealthUrl = `${mit3Url}/api/health`;
 const mit3AppDataUrl = `${mit3Url}/api/app-data`;
@@ -453,6 +478,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
 migrateDb();
 
 interface User { id:number; full_name:string; email:string; role:Role; password_hash:string; force_password_change:number; disabled:number; is_owner_admin:number; deleted:number; deleted_at?:string; deleted_by_user_id?:number; temp_password_expires_at?:string; created_by_user_id?:number; created_at:string; updated_at:string; last_login_at?:string }
+const canViewSystemVersion = (user: User) => user.role === 'Admin';
 interface PermissionGrantRow {
   id:number;
   user_id:number;
@@ -522,6 +548,7 @@ const publicUser = (u: User) => ({
   email:u.email,
   role:u.role,
   isOwnerAdmin:!!u.is_owner_admin,
+  canViewSystemVersion:canViewSystemVersion(u),
   forcePasswordChange:!!u.force_password_change,
   disabled:!!u.disabled,
   createdByUserId:u.created_by_user_id ?? null,
@@ -2514,7 +2541,7 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
       backupType: type,
       createdAt,
       createdBy: actorForManifest(input.actor),
-      appVersion: version,
+      appVersion: applicationVersion ?? 'unavailable',
       databaseFile: 'mcc.sqlite',
       databaseSizeBytes,
       includedPaths,
@@ -7690,6 +7717,7 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); req.sessionId=sid; if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
+function requireSystemVersionAccess(req: AuthRequest, res: Response, next: NextFunction) { return req.user && canViewSystemVersion(req.user) ? next() : res.status(403).json({ok:false,error:'Admin access required.'}); }
 function permissionAliasAllowed(user:User,permission:string) {
   if(isPermissionKey(permission)) return hasPermission(user,permission);
   if(['dashboard.view','settings.view'].includes(permission)) return true;
@@ -7746,7 +7774,12 @@ facilityInfoService=createFacilityInfoService({
 });
 
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
-app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
+app.get('/api/version', requireAuth, requireSystemVersionAccess, (_req,res)=>res.json({
+  version:applicationVersion,
+  displayVersion:applicationVersion ? `v${applicationVersion}` : 'Version unavailable',
+  commit:applicationCommit,
+  buildDate:null,
+}));
 app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(req,'mcc_session')); const u=sid ? one<User>('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.deleted=0 AND s.id=? AND s.expires_at > ?', [sid,now()]) : undefined; res.json({ setupRequired:userCount()===0, user: u && !u.disabled ? publicUser(u) : null }); });
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,owner:true,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true,ownerAdmin:true}); res.json({ok:true}); });
 app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); const sessionId=setSession(res,u.id); recordPresenceHeartbeat(sessionId,u.id,true); const loggedInAt=now(); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [loggedInAt,u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:loggedInAt})}); });

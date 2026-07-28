@@ -35,7 +35,7 @@ On Windows, use `Start MCC Website.cmd` to start the backend website and open th
 ## Backend Endpoints
 
 - `GET /api/health` returns MCC health and port information.
-- `GET /api/version` returns basic MCC version information.
+- `GET /api/version` returns MCC version/build metadata to authenticated Admin and Owner Admin users.
 
 ## Planned Modules
 
