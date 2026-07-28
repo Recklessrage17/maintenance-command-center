@@ -141,7 +141,7 @@ test('user console removes the duplicate password action while keeping compact l
   const logout=deck.getByRole('button',{name:'Logout'});
   expect((await logout.boundingBox())!.width).toBeLessThan(160);
   await logout.click();
-  await expect(page.getByRole('heading',{name:'MCC Login'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Enter command center'})).toBeVisible();
   expect(fixture.logoutCalls()).toBe(1);
 });
 
