@@ -872,6 +872,8 @@ button.glass-attachment:focus-visible {
 .mcc-file-type-icon--excel { --mcc-file-highlight: #21a366; --mcc-file-accent: #107c41; --mcc-file-deep: #0b5e31; }
 .mcc-file-type-icon--text { --mcc-file-highlight: #86d7ff; --mcc-file-accent: #6b7f91; --mcc-file-deep: #3a5368; }
 .mcc-file-type-icon.mcc-file-type-icon--folder { width: 22px; height: 22px; color: #f3b72f; }
+.mcc-folder-icon.mcc-folder-icon--compact { width: 22px; height: 22px; }
+.mcc-folder-icon.mcc-folder-icon--standard { width: 52px; height: 52px; }
 .mcc-file-type-icon--folder .mcc-file-type-icon__folder-back { stroke: rgba(122,74,8,.66); stroke-width: .82; stroke-linejoin: round; filter: drop-shadow(0 1.2px 1px rgba(0,0,0,.28)); }
 .mcc-file-type-icon--folder .mcc-file-type-icon__folder-front { stroke: rgba(122,74,8,.72); stroke-width: .82; stroke-linejoin: round; }
 .mcc-file-type-icon__folder-tab-highlight,.mcc-file-type-icon__folder-top-highlight { fill: none; stroke: rgba(255,248,204,.65); stroke-width: .72; stroke-linecap: round; }
@@ -879,6 +881,12 @@ button.glass-attachment:focus-visible {
 .mcc-file-type-icon--folder.is-open { color: #ffd76a; filter: brightness(1.04); }
 .machine-document-folder-header .mcc-resource-row__content:hover .mcc-file-type-icon--folder,
 .machine-document-folder-header .mcc-resource-row__content:focus-visible .mcc-file-type-icon--folder { color: #ffd76a; filter: brightness(1.1); }
+@media(max-width:420px){
+  .mcc-folder-icon.mcc-folder-icon--standard { width: 44px; height: 44px; }
+}
+@media(prefers-reduced-motion:reduce){
+  .mcc-folder-icon { transition: none; }
+}
 .machine-document-row:hover .mcc-file-type-icon,
 .machine-document-row:focus-within .mcc-file-type-icon { filter: brightness(1.09) translateY(-1px); }
 

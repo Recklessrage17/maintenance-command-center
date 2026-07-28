@@ -1124,7 +1124,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .facility-area-card__heading > div { min-width: 0; display: grid; gap: 3px; }
 .facility-area-card__heading strong { overflow: hidden; color: #f7fdff; font-size: 1rem; text-overflow: ellipsis; white-space: nowrap; }
 .facility-area-card__heading span { overflow: hidden; color: #a5c4d0; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-.facility-area-card .facility-area-folder-icon { width: 52px; height: 52px; }
 .facility-area-card > p { min-height: 2.5em; margin: 0; color: #bdd4dd; font-size: .76rem; line-height: 1.4; }
 .facility-area-card__footer { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #8fb1bf; font-size: .69rem; }
 .facility-area-shell { min-width: 0; display: grid; gap: 13px; }
@@ -1206,7 +1205,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media(max-width:420px){
   .facility-area-card__heading { grid-template-columns: 46px minmax(0,1fr); }
   .facility-area-card__heading > .mcc-status-pill { grid-column: 1 / -1; justify-self: start; }
-  .facility-area-card .facility-area-folder-icon { width: 44px; height: 44px; }
   .facility-gallery { grid-template-columns: minmax(0,1fr); }
 }
 @media(prefers-reduced-motion:reduce){
@@ -3197,29 +3195,6 @@ tr:hover td {
   color: #ffffff;
   background: rgba(7, 35, 50, .92);
   box-shadow: 0 0 16px rgba(68,215,255,.14);
-}
-
-.measurement-folder-glyph {
-  position: relative;
-  width: 17px;
-  height: 12px;
-  margin: 2px 0 0 !important;
-  border: 1px solid rgba(255, 210, 94, .72);
-  border-radius: 3px;
-  background: linear-gradient(180deg, rgba(255,210,94,.34), rgba(255,180,95,.12));
-}
-
-.measurement-folder-glyph::before {
-  content: "";
-  position: absolute;
-  left: 1px;
-  top: -5px;
-  width: 8px;
-  height: 5px;
-  border: 1px solid rgba(255, 210, 94, .72);
-  border-bottom: 0;
-  border-radius: 3px 3px 0 0;
-  background: rgba(255, 210, 94, .28);
 }
 
 .measurement-year-folder em {

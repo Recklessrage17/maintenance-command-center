@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, formatDateDisplay, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { MccFolderIcon } from '../../components/MccFolderIcon';
 import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 
 type MachineImportMode = 'add_new_only' | 'upsert';
@@ -758,7 +759,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
         const count = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year).length;
         const active = year === activeYear && (isAssetPanel || isGlobalFolderView);
         return <span className={active ? 'measurement-folder-pill-wrap active' : 'measurement-folder-pill-wrap'} key={year}>
-          <button className="measurement-year-folder" type="button" onClick={()=>{ isAssetPanel ? (setSelectedYear(year), setSelectedIds(new Set())) : openFolder(year); }} aria-pressed={active}><span className="measurement-folder-glyph" aria-hidden="true" />{year}<em>{count}</em></button>
+          <button className="measurement-year-folder" type="button" onClick={()=>{ isAssetPanel ? (setSelectedYear(year), setSelectedIds(new Set())) : openFolder(year); }} aria-pressed={active}><MccFolderIcon size="compact" open={active} />{year}<em>{count}</em></button>
           {active&&<button className="measurement-folder-delete-x" type="button" aria-label={`Delete ${year} folder`} onClick={()=>void deleteYearFolder(year)}>x</button>}
         </span>;
       })}
