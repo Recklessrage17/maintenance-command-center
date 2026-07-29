@@ -154,6 +154,8 @@ test('Admin sees an available update and must explicitly confirm before installa
   await expect(panel).toContainText('WINDOWS TEST MODE');
   await expect(panel).toContainText('MCC v1.2.1');
   await expect(panel).toContainText('Build abc1234');
+  await expect(page.getByRole('textbox', { name: /branch/i })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: /branch/i })).toHaveCount(0);
   if(testInfo.project.name==='desktop-chromium')await captureApproval(page,'01-update-available-windows-test.png');
 
   await page.getByRole('button', { name: 'Update to v1.3.0' }).click();

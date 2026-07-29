@@ -2,14 +2,14 @@
 
 ## Security and process boundary
 
-The Settings control never runs a browser-supplied command. The browser can submit only an opaque server-issued check token, an explicit `confirm: true` value, and the session-bound `X-MCC-CSRF-Token`. The backend fixes all deployment values:
+The Settings control never runs a browser-supplied command. The browser can submit only an opaque server-issued check token, an explicit `confirm: true` value, and the session-bound `X-MCC-CSRF-Token`. The backend takes all deployment values from trusted deployment configuration:
 
 - repository: `https://github.com/Recklessrage17/maintenance-command-center.git`
 - remote: `origin`
-- branch: `main`
+- branch: `main` for Raspberry Pi and WindowsProduction; for WindowsTest only, one branch stored by the elevated installer in protected ProgramData configuration
 - health port: `4273`
 
-The backend performs a controlled read/check workflow (`git remote get-url`, branch and clean-tree checks, `git fetch`, commit ancestry, and `git show <verified commit>:package.json`). It never accepts a repository, branch, path, command, service, version, or commit from the browser.
+The backend performs a controlled read/check workflow (`git remote get-url`, exact configured-branch and clean-tree checks, a single-branch `git fetch`, commit ancestry, and `git show <verified commit>:package.json`). It never accepts a repository, branch, path, command, service, version, or commit from the browser. Settings exposes no branch input.
 
 Installation crosses a narrow process boundary:
 
@@ -158,7 +158,7 @@ The helper uses the fixed Z: clone, stops only the controlled PID/port `4273` pr
 
 The Node backend no longer spawns this PowerShell harness. Setting `MCC_UPDATE_MODE=windows_test` alone leaves the Settings card at `UPDATER NOT CONFIGURED`; an Administrator runs the legacy script directly.
 
-For managed `WINDOWS TEST MODE` or `WINDOWS 11 PRODUCTION` Settings control, install the Issue #61 agent from [`deploy/windows/README-Windows-Updater.md`](../deploy/windows/README-Windows-Updater.md). The managed installer sets `MCC_UPDATE_MODE=windows_agent` inside the controlled Windows task only after protected configuration and agent health are available. Raspberry Pi continues to display `RASPBERRY PI PRODUCTION`.
+For managed `WINDOWS TEST MODE` or `WINDOWS 11 PRODUCTION` Settings control, install the Issue #61 agent from [`deploy/windows/README-Windows-Updater.md`](../deploy/windows/README-Windows-Updater.md). The managed installer sets `MCC_UPDATE_MODE=windows_agent` inside the controlled Windows task only after protected configuration and agent health are available. WindowsTest defaults to `main` and accepts one explicit elevated `-TestBranch`; WindowsProduction rejects that parameter and any non-`main` protected configuration. Raspberry Pi continues to display `RASPBERRY PI PRODUCTION`.
 
 ## Removal and recovery
 

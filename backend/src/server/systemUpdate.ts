@@ -129,7 +129,7 @@ export type SystemUpdateConfiguration = {
   windowsShutdownPath: string | null;
   approvedRepository: typeof APPROVED_UPDATE_REPOSITORY;
   remote: typeof APPROVED_UPDATE_REMOTE;
-  branch: typeof APPROVED_UPDATE_BRANCH;
+  branch: string;
   port: typeof APPROVED_MCC_PORT;
 };
 
@@ -176,6 +176,18 @@ function shortCommit(value: string | null) {
 
 export function isStrictSemver(value: unknown): value is string {
   return typeof value === 'string' && semverPattern.test(value);
+}
+
+export function isSafeUpdateBranch(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 200
+    || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)
+    || value.endsWith('/') || value.endsWith('.')
+    || value.includes('..') || value.includes('//') || value.includes('@{')) {
+    return false;
+  }
+  return value.split('/').every(segment => segment.length > 0
+    && !segment.startsWith('.')
+    && !segment.toLowerCase().endsWith('.lock'));
 }
 
 export function compareSemver(left: string, right: string) {
@@ -283,11 +295,14 @@ function readWindowsUpdaterConfiguration(
       ? 'WINDOWS 11 PRODUCTION'
       : 'CONFIGURATION INVALID';
   const applicationPath = typeof item.applicationPath === 'string' ? path.win32.resolve(item.applicationPath) : '';
+  const configuredBranch = typeof item.branch === 'string' ? item.branch : '';
+  const validBranchPolicy = isSafeUpdateBranch(configuredBranch)
+    && (mode !== 'windows_production' || configuredBranch === APPROVED_UPDATE_BRANCH);
   const validFixedConfiguration = item.schemaVersion === 1
     && mode !== 'disabled'
     && canonicalRepositoryUrl(String(item.repository ?? '')) === canonicalRepositoryUrl(APPROVED_UPDATE_REPOSITORY)
     && item.remote === APPROVED_UPDATE_REMOTE
-    && item.branch === APPROVED_UPDATE_BRANCH
+    && validBranchPolicy
     && item.port === APPROVED_MCC_PORT
     && item.mccTaskName === 'MaintenanceCommandCenter'
     && item.updaterTaskName === 'MaintenanceCommandCenterUpdater';
@@ -328,7 +343,7 @@ function readWindowsUpdaterConfiguration(
     windowsShutdownPath: path.win32.join(updaterRoot, 'request', 'shutdown-request.json'),
     approvedRepository: APPROVED_UPDATE_REPOSITORY,
     remote: APPROVED_UPDATE_REMOTE,
-    branch: APPROVED_UPDATE_BRANCH,
+    branch: configuredBranch,
     port: APPROVED_MCC_PORT,
   } satisfies SystemUpdateConfiguration;
 }
@@ -504,7 +519,7 @@ function baseStatus(configuration: SystemUpdateConfiguration, nowValue: string, 
     jobId: null,
     state: 'idle',
     code: configuration.enabled ? 'not_checked' : configuration.disabledCode,
-    message: configuration.enabled ? 'Check the approved origin/main branch for MCC updates.' : configuration.disabledReason,
+    message: configuration.enabled ? 'Check the approved update branch for MCC updates.' : configuration.disabledReason,
     mode: configuration.mode,
     environmentLabel: configuration.environmentLabel,
     installed,
@@ -654,7 +669,7 @@ export class SystemUpdateService {
     const branchResult = this.git(['branch', '--show-current'], this.configuration.applicationDir);
     const branch = requireGitOutput(branchResult, 'Update check failed while validating the installed branch.');
     if (branch !== this.configuration.branch) {
-      throw new SystemUpdateError(409, 'update_check_failed', `Update blocked: the production checkout must be on ${this.configuration.branch}.`);
+      throw new SystemUpdateError(409, 'update_check_failed', 'Update blocked: the managed Windows checkout is not on its Administrator-configured branch.');
     }
   }
 
@@ -707,7 +722,7 @@ export class SystemUpdateService {
     if (targetCommit !== installed.commit) {
       const ancestry = this.git(['merge-base', '--is-ancestor', installed.commit, targetCommit], this.configuration.applicationDir);
       if (ancestry.status === 1) {
-        throw new SystemUpdateError(409, 'remote_not_fast_forward', 'Update blocked: origin/main is not a fast-forward from the installed build.');
+        throw new SystemUpdateError(409, 'remote_not_fast_forward', 'Update blocked: the approved update branch is not a fast-forward from the installed build.');
       }
       if (ancestry.status !== 0) {
         throw new SystemUpdateError(503, 'update_check_failed', 'Update check failed while verifying remote history.');
@@ -732,7 +747,7 @@ export class SystemUpdateService {
       ...current,
       state: 'checking',
       code: 'checking',
-      message: 'Checking the approved origin/main branch for updates.',
+      message: 'Checking the approved Administrator-configured branch for updates.',
       requester,
       lastUpdatedAt: startedAt,
       checkToken: null,
@@ -746,7 +761,7 @@ export class SystemUpdateService {
           ...this.readStatus(),
           state: 'idle',
           code: 'up_to_date',
-          message: 'MCC is up to date with the approved origin/main branch.',
+          message: 'MCC is up to date with the approved update branch.',
           installed: comparison.installed,
           target: comparison.target,
           requester,
@@ -763,7 +778,7 @@ export class SystemUpdateService {
           ...this.readStatus(),
           state: 'idle',
           code: 'remote_version_behind',
-          message: 'Update blocked: origin/main reports a version older than the installed MCC version.',
+          message: 'Update blocked: the approved update branch reports a version older than the installed MCC version.',
           installed: comparison.installed,
           target: comparison.target,
           requester,
@@ -781,7 +796,7 @@ export class SystemUpdateService {
         code: sameVersion ? 'same_version_different_commit' : 'update_available',
         message: sameVersion
           ? 'A newer approved build is available with the same MCC version number.'
-          : `MCC v${comparison.target.version} is available from the approved origin/main branch.`,
+          : `MCC v${comparison.target.version} is available from the approved update branch.`,
         installed: comparison.installed,
         target: comparison.target,
         requester,

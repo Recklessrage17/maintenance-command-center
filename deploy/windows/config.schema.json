@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maintenance-command-center.local/schemas/windows-updater-config-v1.json",
+  "title": "MCC protected Windows updater configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "deploymentMode",
+    "applicationPath",
+    "repository",
+    "remote",
+    "branch",
+    "port",
+    "mccTaskName",
+    "updaterTaskName",
+    "serviceIdentity",
+    "agentIdentity",
+    "nodePath",
+    "npmPath",
+    "npmCliPath",
+    "gitPath",
+    "installedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "deploymentMode": { "enum": ["WindowsTest", "WindowsProduction"] },
+    "applicationPath": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "repository": { "const": "https://github.com/Recklessrage17/maintenance-command-center.git" },
+    "remote": { "const": "origin" },
+    "branch": {
+      "type": "string",
+      "default": "main",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?!.*(?:\\.\\.|//|@\\{|(?:^|/)\\.|\\.[Ll][Oo][Cc][Kk](?:/|$)))(?=.{1,200}$)[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9_-])?$"
+    },
+    "port": { "const": 4273 },
+    "mccTaskName": { "const": "MaintenanceCommandCenter" },
+    "updaterTaskName": { "const": "MaintenanceCommandCenterUpdater" },
+    "serviceIdentity": { "const": "NT AUTHORITY\\LOCAL SERVICE" },
+    "agentIdentity": { "const": "NT AUTHORITY\\SYSTEM" },
+    "nodePath": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "npmPath": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "npmCliPath": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "gitPath": { "type": "string", "minLength": 4, "maxLength": 1024 },
+    "installedAt": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "deploymentMode": { "const": "WindowsProduction" } },
+        "required": ["deploymentMode"]
+      },
+      "then": {
+        "properties": { "branch": { "const": "main" } }
+      }
+    }
+  ]
+}

@@ -156,6 +156,14 @@ try {
   assert.equal(JSON.stringify(result.data).includes(root), false);
   const csrfToken = result.data.csrfToken;
 
+  result = await request(base, '/api/system/update/check', {
+    method: 'POST',
+    cookie: ownerCookie,
+    body: { branch: 'client-selected' },
+  });
+  assert.equal(result.response.status, 400);
+  assert.equal(result.data.code, 'invalid_request');
+
   result = await request(base, '/api/system/update/check', { method: 'POST', cookie: ownerCookie, body: {} });
   assert.equal(result.response.status, 503);
   assert.equal(result.data.code, 'deployment_not_configured');
@@ -218,7 +226,7 @@ try {
   assert.equal(result.response.status, 429);
   assert.equal(result.data.code, 'rate_limited');
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     result = await request(base, '/api/system/update/check', { method: 'POST', cookie: ownerCookie, body: {} });
     assert.equal(result.response.status, 503);
   }

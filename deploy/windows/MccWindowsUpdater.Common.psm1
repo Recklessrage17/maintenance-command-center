@@ -71,6 +71,29 @@ function Test-MccCommit {
     return [string]$Value -match '^[0-9a-fA-F]{40}$'
 }
 
+function Test-MccUpdateBranch {
+    param([AllowNull()][object]$Value)
+    $branch = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($branch) -or
+        $branch.Length -gt 200 -or
+        $branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or
+        $branch.EndsWith('/', [StringComparison]::Ordinal) -or
+        $branch.EndsWith('.', [StringComparison]::Ordinal) -or
+        $branch.Contains('..') -or
+        $branch.Contains('//') -or
+        $branch.Contains('@{')) {
+        return $false
+    }
+    foreach ($segment in $branch.Split('/')) {
+        if ([string]::IsNullOrWhiteSpace($segment) -or
+            $segment.StartsWith('.', [StringComparison]::Ordinal) -or
+            $segment.EndsWith('.lock', [StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Write-MccAtomicJson {
     param(
         [Parameter(Mandatory = $true)][string]$LiteralPath,
@@ -217,11 +240,13 @@ function Read-MccWindowsConfiguration {
     }
     $configuration = Read-MccJson -LiteralPath $normalizedConfigurationPath
     $applicationPath = Assert-MccApprovedApplicationPath -LiteralPath ([string]$configuration.applicationPath)
+    $configuredBranch = [string]$configuration.branch
     if ([int]$configuration.schemaVersion -ne 1 -or
-        @('WindowsTest', 'WindowsProduction') -notcontains [string]$configuration.deploymentMode -or
+        @('WindowsTest', 'WindowsProduction') -cnotcontains [string]$configuration.deploymentMode -or
         [string]$configuration.repository -ne $constants.Repository -or
         [string]$configuration.remote -ne $constants.Remote -or
-        [string]$configuration.branch -ne $constants.Branch -or
+        -not (Test-MccUpdateBranch -Value $configuredBranch) -or
+        ([string]$configuration.deploymentMode -eq 'WindowsProduction' -and $configuredBranch -cne $constants.Branch) -or
         [int]$configuration.port -ne $constants.Port -or
         [string]$configuration.mccTaskName -ne $constants.MccTaskName -or
         [string]$configuration.updaterTaskName -ne $constants.UpdaterTaskName) {
@@ -244,10 +269,14 @@ function Read-MccWindowsConfiguration {
 function Assert-MccRepository {
     param(
         [Parameter(Mandatory = $true)][string]$ApplicationPath,
+        [string]$ExpectedBranch = $script:MccApprovedBranch,
         [string]$DetailedLogPath = '',
         [switch]$RequireClean
     )
     $constants = Get-MccUpdaterConstants
+    if (-not (Test-MccUpdateBranch -Value $ExpectedBranch)) {
+        throw 'The configured MCC update branch is invalid.'
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $ApplicationPath '.git') -PathType Container)) {
         throw 'The MCC installation path is not a Git clone.'
     }
@@ -256,14 +285,41 @@ function Assert-MccRepository {
         throw 'The MCC Git origin does not match the approved repository.'
     }
     $branch = (Invoke-MccGit -ApplicationPath $ApplicationPath -ArgumentList @('branch', '--show-current') -DetailedLogPath $DetailedLogPath).StandardOutput.Trim()
-    if ($branch -ne $constants.Branch) {
-        throw 'The MCC Windows installation must be on the main branch.'
+    if ($branch -cne $ExpectedBranch) {
+        throw 'The MCC Windows installation must be on the exact Administrator-configured branch.'
     }
     if ($RequireClean) {
         $changes = (Invoke-MccGit -ApplicationPath $ApplicationPath -ArgumentList @('status', '--porcelain=v1', '--untracked-files=normal') -DetailedLogPath $DetailedLogPath).StandardOutput
         if ($changes) {
             throw 'Update blocked: this MCC installation contains local code changes. Review and protect those changes before updating.'
         }
+    }
+}
+
+function Assert-MccOriginBranch {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApplicationPath,
+        [Parameter(Mandatory = $true)][string]$Branch,
+        [string]$DetailedLogPath = ''
+    )
+    if (-not (Test-MccUpdateBranch -Value $Branch)) {
+        throw 'The configured MCC update branch is invalid.'
+    }
+    $constants = Get-MccUpdaterConstants
+    try {
+        $result = Invoke-MccGit -ApplicationPath $ApplicationPath -ArgumentList @(
+            'ls-remote',
+            '--exit-code',
+            '--heads',
+            $constants.Remote,
+            "refs/heads/$Branch"
+        ) -TimeoutSeconds 120 -DetailedLogPath $DetailedLogPath
+    } catch {
+        throw 'The configured update branch could not be verified on origin.'
+    }
+    $escapedBranch = [Regex]::Escape($Branch)
+    if ($result.StandardOutput -notmatch "(?m)^[0-9a-fA-F]{40}\s+refs/heads/$escapedBranch\s*$") {
+        throw 'The configured update branch does not exist on origin.'
     }
 }
 
@@ -292,6 +348,7 @@ Export-ModuleMember -Function @(
     'Get-MccCleanText',
     'Test-MccSemver',
     'Test-MccCommit',
+    'Test-MccUpdateBranch',
     'Write-MccAtomicJson',
     'Read-MccJson',
     'Invoke-MccProcess',
@@ -299,5 +356,6 @@ Export-ModuleMember -Function @(
     'Get-MccPackageVersion',
     'Read-MccWindowsConfiguration',
     'Assert-MccRepository',
+    'Assert-MccOriginBranch',
     'Test-MccHttpHealth'
 )

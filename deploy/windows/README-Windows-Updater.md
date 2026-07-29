@@ -1,6 +1,6 @@
 # Maintenance Command Center Windows 11 Updater
 
-This package installs a narrow privilege boundary for the existing Admin/Owner Admin Settings update card. A browser never submits a command, repository, remote, branch, service/task name, path, npm argument, version, or commit.
+This package installs a narrow privilege boundary for the existing Admin/Owner Admin Settings update card. A browser never submits a command, repository, remote, branch, service/task name, path, npm argument, version, or commit. The only WindowsTest branch override is an elevated installer parameter.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ Admin / Owner Admin Settings card
   -> sanitized status.json back to the existing Settings card
 ```
 
-The deployment mode comes only from the Administrator-installed `config.json`. Windows itself is not treated as proof of production. A normal Windows development clone remains `UPDATER NOT CONFIGURED`.
+The deployment mode and configured update branch come only from the Administrator-installed `config.json`. Windows itself is not treated as proof of production. A normal Windows development clone remains `UPDATER NOT CONFIGURED`.
 
 The package uses tightly scoped Task Scheduler jobs, which are the supported Windows managed-process equivalent for this release:
 
@@ -31,7 +31,8 @@ Windows 11 Pro, Enterprise, and Education are supported. Windows 11 Home is not 
 
 - Elevated Administrator PowerShell for installation, validation, manual update, and uninstall.
 - A dedicated Windows clone of `https://github.com/Recklessrage17/maintenance-command-center.git`.
-- The clone must be on `main`, have a clean tracked and untracked worktree, and use `origin`.
+- A WindowsProduction clone must be on `main`. A WindowsTest clone must be on its exact configured test branch, which defaults to `main`.
+- The configured branch must exist on `origin`; every target must have a clean tracked and untracked worktree and use `origin`.
 - Node.js 22 or newer.
 - npm and Git available to the installing Administrator.
 - Root, frontend, and backend `package-lock.json` files.
@@ -66,6 +67,18 @@ Windows Test Mode example:
   -Mode WindowsTest
 ```
 
+With no `-TestBranch`, WindowsTest remains on `origin/main`. To validate an unmerged feature from an elevated PowerShell, the target clone must already be clean and checked out on that exact origin branch:
+
+```powershell
+& 'Z:\MCC_V1_FINAL\deploy\windows\Install-MccWindowsUpdater.ps1' `
+  -MccPath 'Z:\MCC_V1_FINAL' `
+  -Mode WindowsTest `
+  -TestBranch 'feature/windows-11-updater-agent' `
+  -Confirm:$false
+```
+
+The installer validates the branch name with Git, confirms the exact branch exists on `origin`, and writes it to protected ProgramData configuration. `-TestBranch` is always rejected with `WindowsProduction`, even when its supplied value is `main`.
+
 Windows 11 Production examples:
 
 ```powershell
@@ -78,7 +91,7 @@ Windows 11 Production examples:
   -Mode WindowsProduction
 ```
 
-The installer validates before it changes managed-task or ProgramData state. It installs locked frontend/backend dependencies, builds MCC, starts both tasks, checks `http://127.0.0.1:4273/`, confirms a healthy agent heartbeat, and verifies the updater API rejects an unauthenticated request.
+The installer validates before it changes managed-task or ProgramData state. It installs locked frontend/backend dependencies, builds MCC, starts both tasks, checks `http://127.0.0.1:4273/`, confirms a healthy agent heartbeat, and verifies the updater API rejects an unauthenticated request. The checked-in [`config.schema.json`](config.schema.json) documents the protected configuration contract and its permanent WindowsProduction `main` constraint.
 
 ## Deployment labels
 
@@ -106,6 +119,8 @@ C:\ProgramData\MCC\Updater\
   backups\<timestamp>-<old-version>-before-<target-version>\
 ```
 
+`config.json` contains the single configured branch. Its ACL grants Full Control only to Administrators and SYSTEM and read-only access to LOCAL SERVICE. No Settings or API operation rewrites it.
+
 Backups remain outside the Git worktree. Each contains sanitized job metadata, a configuration snapshot without secrets, runtime data when present, and SHA-256 verification metadata.
 
 ## ACL design
@@ -125,12 +140,12 @@ The status directory contains only the sanitized Issue #60 state model; detailed
 
 ## Update behavior
 
-An Admin check is fixed to the configured `origin/main`. Installation requires a fresh server-issued check token and explicit confirmation. The API creates one unpredictable job ID and one fixed request. The agent re-fetches and verifies the target before changing code. Duplicate or stale requests are rejected.
+An Admin check is fixed to the protected configured origin branch: always `origin/main` for WindowsProduction, and the one elevated-installer branch for WindowsTest. Installation requires a fresh server-issued check token and explicit confirmation. The API creates one unpredictable job ID and one fixed request from protected configuration; request fields cannot override that configuration. The agent re-fetches and verifies the configured target before changing code. Duplicate or stale requests are rejected.
 
 The updater:
 
 1. Acquires `updater.lock`.
-2. Revalidates configuration, the target, origin, main, cleanliness, versions, commits, and fast-forward ancestry.
+2. Revalidates configuration, the target, origin, the exact configured branch, cleanliness, versions, commits, and fast-forward ancestry.
 3. Stops only `MaintenanceCommandCenter`.
 4. creates and verifies an external runtime backup.
 5. fast-forwards to the approved commit.
@@ -144,7 +159,7 @@ A dirty tracked or untracked worktree blocks the update. Nothing is stashed, res
 
 ## Manual update fallback
 
-The manual fallback still derives the target from a fresh approved `origin/main`; it accepts no commit or version:
+The manual fallback still derives the target from a fresh fetch of the protected configured branch; it accepts no branch, commit, or version:
 
 ```powershell
 & 'C:\ProgramData\MCC\Updater\scripts\Update-MccWindows.ps1' `
@@ -172,6 +187,8 @@ Administrator logs:
 - `C:\ProgramData\MCC\Updater\logs\agent.log`
 - `C:\ProgramData\MCC\Updater\logs\update-*.log`
 - `C:\ProgramData\MCC\Updater\web-logs\mcc-*.log`
+
+`install.log`, `agent.log`, and each `update-*.log` explicitly identify `WINDOWS TEST MODE` and `origin/<configured-test-branch>` for test deployments. Production logs identify `WINDOWS 11 PRODUCTION` and `origin/main`.
 
 Normal History UI records only sanitized update/audit fields and never raw PowerShell output, credentials, environment-file contents, or secrets.
 
@@ -230,4 +247,4 @@ After installation or reinstall:
 
 ## Windows and Raspberry Pi differences
 
-Windows uses protected ProgramData JSON, `LOCAL SERVICE`/`SYSTEM`, and two fixed scheduled tasks. Raspberry Pi uses `/var/lib/mcc-update`, the `mcc` account, systemd units, the narrow sudoers entry, and the manual `sudo mcc-update` command. Both share the same admin-only API, server-verified origin/main target, persistent state model, clean-worktree/fast-forward rules, backup paths outside Git, health verification, reconnect behavior, and rollback states. The Windows package does not replace or modify the Raspberry Pi runner.
+Windows uses protected ProgramData JSON, `LOCAL SERVICE`/`SYSTEM`, and two fixed scheduled tasks. Raspberry Pi uses `/var/lib/mcc-update`, the `mcc` account, systemd units, the narrow sudoers entry, and the manual `sudo mcc-update` command. WindowsProduction and Raspberry Pi remain fixed to `origin/main`; WindowsTest may use one protected Administrator-configured origin branch. All share the same admin-only API, persistent state model, clean-worktree/fast-forward rules, backup paths outside Git, health verification, reconnect behavior, and rollback states. The Windows package does not replace or modify the Raspberry Pi runner.

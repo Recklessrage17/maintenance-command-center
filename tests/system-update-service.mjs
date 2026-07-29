@@ -13,6 +13,7 @@ import {
   SystemUpdateError,
   SystemUpdateService,
   compareSemver,
+  isSafeUpdateBranch,
   loadSystemUpdateConfiguration,
 } from '../backend/dist/server/systemUpdate.js';
 
@@ -39,7 +40,7 @@ function commit(directory, message) {
   return git(directory, 'rev-parse', 'HEAD');
 }
 
-function makeFixture(name, version = '1.2.1') {
+function makeFixture(name, version = '1.2.1', branch = 'main') {
   const directory = path.join(fixtureRoot, name);
   const remote = path.join(directory, 'remote.git');
   const seed = path.join(directory, 'seed');
@@ -47,23 +48,23 @@ function makeFixture(name, version = '1.2.1') {
   fs.mkdirSync(directory, { recursive: true });
   git(directory, 'init', '--bare', remote);
   fs.mkdirSync(seed);
-  git(seed, 'init', '-b', 'main');
+  git(seed, 'init', '-b', branch);
   git(seed, 'config', 'user.name', 'MCC Update Test');
   git(seed, 'config', 'user.email', 'update-test@example.com');
   writeManifest(seed, version);
   const initialCommit = commit(seed, 'initial version');
   git(seed, 'remote', 'add', 'origin', remote);
-  git(seed, 'push', '-u', 'origin', 'main');
-  git(directory, 'clone', '--branch', 'main', remote, installed);
+  git(seed, 'push', '-u', 'origin', branch);
+  git(directory, 'clone', '--branch', branch, remote, installed);
   git(installed, 'config', 'user.name', 'MCC Installed Test');
   git(installed, 'config', 'user.email', 'installed@example.com');
-  return { directory, remote, seed, installed, initialCommit };
+  return { directory, remote, seed, installed, initialCommit, branch };
 }
 
 function advance(fixture, version, message = `release ${version}`) {
   writeManifest(fixture.seed, version);
   const targetCommit = commit(fixture.seed, message);
-  git(fixture.seed, 'push', 'origin', 'main');
+  git(fixture.seed, 'push', 'origin', fixture.branch);
   return targetCommit;
 }
 
@@ -83,7 +84,7 @@ function configuration(fixture) {
     windowsAgentHealthPath: null,
     approvedRepository: fixture.remote,
     remote: APPROVED_UPDATE_REMOTE,
-    branch: APPROVED_UPDATE_BRANCH,
+    branch: fixture.branch,
     port: APPROVED_MCC_PORT,
   };
 }
@@ -113,6 +114,10 @@ try {
   assert.equal(compareSemver('1.3.0', '1.2.9'), 1);
   assert.equal(compareSemver('1.2.1', '1.2.1'), 0);
   assert.equal(compareSemver('1.2.0', '1.2.1'), -1);
+  assert.equal(isSafeUpdateBranch('feature/windows-11-updater-agent'), true);
+  for (const branch of ['', '-unsafe', '.hidden', 'feature//unsafe', 'feature/../unsafe', 'feature/test.lock', 'feature/@{unsafe']) {
+    assert.equal(isSafeUpdateBranch(branch), false, `Expected unsafe update branch to be rejected: ${branch}`);
+  }
 
   const disabled = loadSystemUpdateConfiguration(root, {}, 'win32');
   assert.equal(disabled.enabled, false);
@@ -167,7 +172,7 @@ try {
     applicationPath: 'Z:\\MCC_V1_FINAL',
     repository: APPROVED_UPDATE_REPOSITORY,
     remote: APPROVED_UPDATE_REMOTE,
-    branch: APPROVED_UPDATE_BRANCH,
+    branch: 'feature/windows-11-updater-agent',
     port: APPROVED_MCC_PORT,
     mccTaskName: 'MaintenanceCommandCenter',
     updaterTaskName: 'MaintenanceCommandCenterUpdater',
@@ -180,6 +185,45 @@ try {
   assert.equal(managedWindowsTest.enabled, true);
   assert.equal(managedWindowsTest.mode, 'windows_test');
   assert.equal(managedWindowsTest.environmentLabel, 'WINDOWS TEST MODE');
+  assert.equal(managedWindowsTest.branch, 'feature/windows-11-updater-agent');
+
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
+    schemaVersion: 1,
+    deploymentMode: 'WindowsProduction',
+    applicationPath: managedApplicationPath,
+    repository: APPROVED_UPDATE_REPOSITORY,
+    remote: APPROVED_UPDATE_REMOTE,
+    branch: 'feature/windows-11-updater-agent',
+    port: APPROVED_MCC_PORT,
+    mccTaskName: 'MaintenanceCommandCenter',
+    updaterTaskName: 'MaintenanceCommandCenterUpdater',
+  }, null, 2)}\n`);
+  const productionBranchOverride = loadSystemUpdateConfiguration(managedApplicationPath, {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(productionBranchOverride.enabled, false);
+  assert.equal(productionBranchOverride.disabledCode, 'configuration_invalid');
+
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
+    schemaVersion: 1,
+    deploymentMode: 'WindowsTest',
+    applicationPath: 'Z:\\MCC_V1_FINAL',
+    repository: APPROVED_UPDATE_REPOSITORY,
+    remote: APPROVED_UPDATE_REMOTE,
+    branch: 'feature/../unsafe',
+    port: APPROVED_MCC_PORT,
+    mccTaskName: 'MaintenanceCommandCenter',
+    updaterTaskName: 'MaintenanceCommandCenterUpdater',
+  }, null, 2)}\n`);
+  const unsafeTestBranch = loadSystemUpdateConfiguration('Z:\\MCC_V1_FINAL', {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(unsafeTestBranch.enabled, false);
+  assert.equal(unsafeTestBranch.disabledCode, 'configuration_invalid');
 
   fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
     schemaVersion: 1,
@@ -199,6 +243,19 @@ try {
   }, 'win32');
   assert.equal(protectedManagedWindows.enabled, false);
   assert.equal(protectedManagedWindows.disabledCode, 'configuration_invalid');
+
+  const configuredTestBranch = makeFixture('configured-test-branch', '1.2.1', 'feature/windows-11-updater-agent');
+  const configuredTestTarget = advance(configuredTestBranch, '1.3.0');
+  const configuredTestService = serviceFor(configuredTestBranch).service;
+  const configuredTestStatus = configuredTestService.checkForUpdate({ id: 1, name: 'Owner Admin' });
+  assert.equal(configuredTestStatus.target.commit, configuredTestTarget);
+  const configuredTestQueued = configuredTestService.queueInstall(
+    { id: 1, name: 'Owner Admin' },
+    configuredTestStatus.checkToken,
+  );
+  assert.equal(configuredTestQueued.state, 'queued');
+  const configuredTestRequest = JSON.parse(fs.readFileSync(configuration(configuredTestBranch).requestPath, 'utf8'));
+  assert.equal(configuredTestRequest.source.branch, 'feature/windows-11-updater-agent');
 
   const current = makeFixture('current');
   const currentService = serviceFor(current).service;
@@ -269,6 +326,7 @@ try {
   const publicAvailable = availableService.publicStatus(availableStatus);
   assert.equal(publicAvailable.targetCommit, availableTarget.slice(0, 7));
   assert.equal(publicAvailable.targetCommit.length, 7);
+  assert.equal(Object.hasOwn(publicAvailable, 'branch'), false);
   const queued = availableService.queueInstall({ id: 2, name: 'Admin User' }, availableStatus.checkToken);
   assert.equal(queued.state, 'queued');
   assert.equal(triggerCount, 1);

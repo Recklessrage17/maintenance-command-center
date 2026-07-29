@@ -3,7 +3,8 @@
 Installs the managed Maintenance Command Center Windows updater.
 
 .DESCRIPTION
-Validates one explicit clean main-branch MCC Git clone, Node.js 22+, npm, Git,
+Validates one explicit clean MCC Git clone on its Administrator-configured branch,
+Node.js 22+, npm, Git,
 locked dependency manifests, and port 4273. It installs two fixed scheduled tasks:
 MaintenanceCommandCenter runs as LOCAL SERVICE and
 MaintenanceCommandCenterUpdater runs as SYSTEM. Protected configuration, scripts,
@@ -14,6 +15,10 @@ The dedicated Windows MCC installation clone. F: is always rejected.
 
 .PARAMETER Mode
 WindowsTest or WindowsProduction. The browser cannot select or change this value.
+
+.PARAMETER TestBranch
+One explicit origin branch for WindowsTest. Defaults to main. Supplying this
+parameter for WindowsProduction is always rejected.
 
 .PARAMETER Port
 The fixed MCC port. Only 4273 is accepted.
@@ -27,6 +32,9 @@ param(
     [ValidateSet('WindowsTest', 'WindowsProduction')]
     [string]$Mode,
 
+    [ValidateLength(1, 200)]
+    [string]$TestBranch = 'main',
+
     [ValidateRange(1, 65535)]
     [int]$Port = 4273
 )
@@ -38,6 +46,16 @@ $ProgressPreference = 'SilentlyContinue'
 Import-Module (Join-Path $PSScriptRoot 'MccWindowsUpdater.Common.psm1') -Force
 Assert-MccAdministrator
 $constants = Get-MccUpdaterConstants
+$Mode = if ($Mode -ieq 'WindowsTest') { 'WindowsTest' } else { 'WindowsProduction' }
+$testBranchWasSupplied = $PSBoundParameters.ContainsKey('TestBranch')
+if ($Mode -eq 'WindowsProduction' -and $testBranchWasSupplied) {
+    throw 'TestBranch is a WindowsTest-only installation setting and is never allowed in WindowsProduction.'
+}
+$configuredBranch = if ($Mode -eq 'WindowsTest') { $TestBranch } else { $constants.Branch }
+if (-not (Test-MccUpdateBranch -Value $configuredBranch)) {
+    throw 'The configured WindowsTest branch name is invalid.'
+}
+$environmentLabel = if ($Mode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
 if ($Port -ne $constants.Port) {
     throw 'Maintenance Command Center Windows deployments use the fixed port 4273.'
 }
@@ -64,8 +82,10 @@ if ([int]$Matches.major -lt 22) {
 if ($LASTEXITCODE -ne 0) { throw 'npm is installed but could not run.' }
 & $gitPath --version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Git is installed but could not run.' }
+Invoke-MccProcess -FilePath $gitPath -ArgumentList @('check-ref-format', '--branch', $configuredBranch) -WorkingDirectory $applicationPath -TimeoutSeconds 15 | Out-Null
 
-Assert-MccRepository -ApplicationPath $applicationPath -RequireClean
+Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch $configuredBranch -RequireClean
+Assert-MccOriginBranch -ApplicationPath $applicationPath -Branch $configuredBranch
 foreach ($requiredFile in @(
     'package.json',
     'package-lock.json',
@@ -84,7 +104,7 @@ if (-not (Test-MccCommit -Value $applicationCommit)) {
     throw 'The installed MCC commit could not be validated.'
 }
 
-if (-not $PSCmdlet.ShouldProcess($applicationPath, "Install $Mode managed Windows updater and startup tasks")) {
+if (-not $PSCmdlet.ShouldProcess($applicationPath, "Install $Mode managed Windows updater on origin/$configuredBranch and startup tasks")) {
     return
 }
 
@@ -102,7 +122,11 @@ foreach ($directory in $directories) {
     [System.IO.Directory]::CreateDirectory($directory) | Out-Null
 }
 $installLog = Join-Path $updaterRoot 'logs\install.log'
-Add-Content -LiteralPath $installLog -Value "[$([DateTime]::UtcNow.ToString('o'))] Starting $Mode installation for the validated MCC clone." -Encoding utf8
+Add-Content -LiteralPath $installLog -Value @(
+    "[$([DateTime]::UtcNow.ToString('o'))] $environmentLabel"
+    "[$([DateTime]::UtcNow.ToString('o'))] Starting $Mode installation for the validated MCC clone."
+    "[$([DateTime]::UtcNow.ToString('o'))] Configured update branch: origin/$configuredBranch."
+) -Encoding utf8
 
 $scriptNames = @(
     'MccWindowsUpdater.Common.psm1',
@@ -128,7 +152,7 @@ $configuration = [ordered]@{
     applicationPath = $applicationPath
     repository = $constants.Repository
     remote = $constants.Remote
-    branch = $constants.Branch
+    branch = $configuredBranch
     port = $constants.Port
     mccTaskName = $constants.MccTaskName
     updaterTaskName = $constants.UpdaterTaskName
@@ -142,7 +166,6 @@ $configuration = [ordered]@{
 }
 Write-MccAtomicJson -LiteralPath $configurationPath -Value $configuration
 
-$environmentLabel = if ($Mode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
 $modeValue = if ($Mode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
 $timestamp = [DateTime]::UtcNow.ToString('o')
 Write-MccAtomicJson -LiteralPath (Join-Path $updaterRoot 'status\status.json') -Value ([ordered]@{
@@ -150,7 +173,7 @@ Write-MccAtomicJson -LiteralPath (Join-Path $updaterRoot 'status\status.json') -
     jobId = $null
     state = 'idle'
     code = 'not_checked'
-    message = 'Check the approved origin/main branch for MCC updates.'
+    message = 'Check the approved Administrator-configured branch for MCC updates.'
     mode = $modeValue
     environmentLabel = $environmentLabel
     installed = [ordered]@{ version = $applicationVersion; commit = $applicationCommit }
@@ -316,10 +339,11 @@ if (-not $protectedApiRejected) {
     throw 'The protected update status API did not reject the unauthenticated installer probe.'
 }
 
-Add-Content -LiteralPath $installLog -Value "[$([DateTime]::UtcNow.ToString('o'))] Installation completed and health checks passed." -Encoding utf8
+Add-Content -LiteralPath $installLog -Value "[$([DateTime]::UtcNow.ToString('o'))] $environmentLabel installation on origin/$configuredBranch completed and health checks passed." -Encoding utf8
 Write-Output ''
 Write-Output 'MCC Windows updater installation complete.'
 Write-Output "Mode: $environmentLabel"
+Write-Output "Configured update branch: origin/$configuredBranch"
 Write-Output "MCC task: $($constants.MccTaskName) (LOCAL SERVICE)"
 Write-Output "Updater task: $($constants.UpdaterTaskName) (SYSTEM)"
 Write-Output "Protected updater data: $updaterRoot"

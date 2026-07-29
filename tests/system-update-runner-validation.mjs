@@ -20,6 +20,7 @@ const windowsUninstaller = fs.readFileSync('deploy/windows/Uninstall-MccWindowsU
 const windowsTest = fs.readFileSync('deploy/windows/Test-MccWindowsUpdater.ps1', 'utf8');
 const windowsReadme = fs.readFileSync('deploy/windows/README-Windows-Updater.md', 'utf8');
 const windowsTemplate = JSON.parse(fs.readFileSync('deploy/windows/config.template.json', 'utf8'));
+const windowsConfigSchema = JSON.parse(fs.readFileSync('deploy/windows/config.schema.json', 'utf8'));
 
 for (const source of [linuxRunner, windowsRunner]) {
   assert.match(source, /https:\/\/github\.com\/Recklessrage17\/maintenance-command-center\.git/);
@@ -74,6 +75,10 @@ for (const source of [windowsInstaller, windowsProductionRunner]) {
   }
 }
 assert.match(windowsInstaller, /Assert-MccAdministrator/);
+assert.match(windowsInstaller, /\[string\]\$TestBranch = 'main'/);
+assert.match(windowsInstaller, /TestBranch is a WindowsTest-only installation setting and is never allowed in WindowsProduction/);
+assert.match(windowsInstaller, /Assert-MccOriginBranch -ApplicationPath \$applicationPath -Branch \$configuredBranch/);
+assert.match(windowsInstaller, /branch = \$configuredBranch/);
 assert.match(windowsInstaller, /Node\.js 22 or newer/);
 assert.match(windowsInstaller, /MaintenanceCommandCenterUpdater/);
 assert.match(windowsInstaller, /NT AUTHORITY\\LOCAL SERVICE/);
@@ -96,18 +101,37 @@ assert.match(windowsProductionRunner, /shutdown-request\.json/);
 assert.match(windowsProductionRunner, /graceful shutdown/i);
 assert.match(windowsProductionRunner, /Find-MccJobBackup/);
 assert.match(windowsProductionRunner, /interrupted Windows update/i);
+assert.match(windowsProductionRunner, /ExpectedBranch \$configuredBranch/);
+assert.match(windowsProductionRunner, /\+refs\/heads\/\$\{configuredBranch\}:refs\/remotes/);
+assert.match(windowsProductionRunner, /request\.source\.branch -cne \$configuredBranch/);
+assert.match(windowsProductionRunner, /WINDOWS TEST MODE/);
+assert.match(windowsProductionRunner, /Configured update branch: origin\/\$configuredBranch/);
 assert.match(windowsAgent, /request\\request\.json/);
 assert.match(windowsAgent, /agent-health\.json/);
 assert.match(windowsAgent, /Update-MccWindows\.ps1/);
 assert.doesNotMatch(windowsAgent, /\$(repositoryUrl|branchName|command)\b/i);
+assert.match(windowsAgent, /ExpectedBranch \(\[string\]\$configuration\.branch\)/);
+assert.match(windowsAgent, /Configured update branch: origin/);
 assert.match(windowsUninstaller, /Preserved the MCC installation, database, uploads, documents, files, and environment files/);
 assert.match(windowsTest, /Protected F path/);
 assert.match(windowsTest, /Request ACL/);
+assert.match(windowsTest, /Configuration ACL/);
+assert.match(windowsTest, /Origin branch/);
+assert.match(windowsTest, /configured update branch origin/);
+assert.match(windowsCommon, /function Test-MccUpdateBranch/);
+assert.match(windowsCommon, /deploymentMode -eq 'WindowsProduction'.*configuredBranch -cne \$constants\.Branch/);
 assert.equal(windowsTemplate.repository, 'https://github.com/Recklessrage17/maintenance-command-center.git');
 assert.equal(windowsTemplate.branch, 'main');
 assert.equal(windowsTemplate.port, 4273);
 assert.equal(windowsTemplate.mccTaskName, 'MaintenanceCommandCenter');
 assert.equal(windowsTemplate.updaterTaskName, 'MaintenanceCommandCenterUpdater');
+assert.equal(windowsConfigSchema.properties.branch.default, 'main');
+assert.equal(windowsConfigSchema.properties.repository.const, 'https://github.com/Recklessrage17/maintenance-command-center.git');
+assert.equal(windowsConfigSchema.properties.remote.const, 'origin');
+assert.equal(windowsConfigSchema.allOf[0].then.properties.branch.const, 'main');
+const schemaBranchPattern = new RegExp(windowsConfigSchema.properties.branch.pattern);
+assert.equal(schemaBranchPattern.test('feature/windows-11-updater-agent'), true);
+assert.equal(schemaBranchPattern.test('feature/../unsafe'), false);
 
 for (const requiredText of [
   'WINDOWS TEST MODE',
@@ -151,6 +175,9 @@ const pathPolicy = spawnSync('powershell.exe', [
     "if((Assert-MccApprovedApplicationPath -LiteralPath 'Z:\\MCC_V1_FINAL') -ne 'Z:\\MCC_V1_FINAL'){exit 3}",
     "if((Assert-MccApprovedApplicationPath -LiteralPath 'C:\\MCC\\MCC_V1_FINAL') -ne 'C:\\MCC\\MCC_V1_FINAL'){exit 4}",
     "if((Assert-MccApprovedApplicationPath -LiteralPath 'D:\\MCC\\MCC_V1_FINAL') -ne 'D:\\MCC\\MCC_V1_FINAL'){exit 5}",
+    "if(-not (Test-MccUpdateBranch -Value 'feature/windows-11-updater-agent')){exit 6}",
+    "if(Test-MccUpdateBranch -Value 'feature/../unsafe'){exit 7}",
+    "if(Test-MccUpdateBranch -Value 'feature/test.lock'){exit 8}",
   ].join(';'),
 ], { encoding: 'utf8', windowsHide: true });
 assert.equal(pathPolicy.status, 0, pathPolicy.stderr || pathPolicy.stdout);

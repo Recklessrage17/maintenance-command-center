@@ -49,7 +49,7 @@ function Write-AgentHealth {
         $env:PATH = "$(Split-Path -Parent ([string]$configuration.gitPath));$(Split-Path -Parent ([string]$configuration.nodePath));$env:PATH"
         $applicationPathMatches = -not (Test-MccProtectedDevelopmentPath -LiteralPath ([string]$configuration.applicationPath))
         try {
-            Assert-MccRepository -ApplicationPath ([string]$configuration.applicationPath)
+            Assert-MccRepository -ApplicationPath ([string]$configuration.applicationPath) -ExpectedBranch ([string]$configuration.branch)
             $repositoryValid = $true
             $branchValid = $true
         } catch {
@@ -93,6 +93,13 @@ if (-not (Test-Path -LiteralPath $updateScript -PathType Leaf)) {
 }
 
 Write-AgentLog -Message 'MaintenanceCommandCenterUpdater started.'
+try {
+    $startupConfiguration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationPath
+    $startupLabel = if ([string]$startupConfiguration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
+    Write-AgentLog -Message "$startupLabel. Configured update branch: origin/$([string]$startupConfiguration.branch)."
+} catch {
+    Write-AgentLog -Message $_.Exception.Message
+}
 while ($true) {
     try {
         Write-AgentHealth

@@ -55,13 +55,27 @@ Write-TestResult -Name 'Protected F path' -Passed (Test-MccProtectedDevelopmentP
 
 if ($null -ne $configuration) {
     $applicationPath = [string]$configuration.applicationPath
+    $configuredBranch = [string]$configuration.branch
+    $environmentLabel = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
+    Write-Output "$environmentLabel - configured update branch origin/$configuredBranch"
     Write-TestResult -Name 'Mode' -Passed (@('WindowsTest', 'WindowsProduction') -contains [string]$configuration.deploymentMode) -Detail ([string]$configuration.deploymentMode)
+    $branchPolicyValid = Test-MccUpdateBranch -Value $configuredBranch
+    if ([string]$configuration.deploymentMode -eq 'WindowsProduction') {
+        $branchPolicyValid = $branchPolicyValid -and $configuredBranch -ceq $constants.Branch
+    }
+    Write-TestResult -Name 'Branch policy' -Passed $branchPolicyValid -Detail "$environmentLabel / origin/$configuredBranch"
     Write-TestResult -Name 'Target path' -Passed (-not (Test-MccProtectedDevelopmentPath -LiteralPath $applicationPath)) -Detail 'Configured target is outside protected F:.'
     try {
-        Assert-MccRepository -ApplicationPath $applicationPath -RequireClean
-        Write-TestResult -Name 'Git repository' -Passed $true -Detail 'Approved origin, main branch, and clean worktree verified.'
+        Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch $configuredBranch -RequireClean
+        Write-TestResult -Name 'Git repository' -Passed $true -Detail "Approved origin, exact $configuredBranch branch, and clean worktree verified."
     } catch {
         Write-TestResult -Name 'Git repository' -Passed $false -Detail $_.Exception.Message
+    }
+    try {
+        Assert-MccOriginBranch -ApplicationPath $applicationPath -Branch $configuredBranch
+        Write-TestResult -Name 'Origin branch' -Passed $true -Detail "origin/$configuredBranch exists."
+    } catch {
+        Write-TestResult -Name 'Origin branch' -Passed $false -Detail $_.Exception.Message
     }
     try {
         $nodeResult = Invoke-MccProcess -FilePath ([string]$configuration.nodePath) -ArgumentList @('--version') -WorkingDirectory $applicationPath -TimeoutSeconds 15
@@ -93,6 +107,7 @@ foreach ($taskName in @($constants.MccTaskName, $constants.UpdaterTaskName)) {
 $requestDirectory = Join-Path $constants.UpdaterRoot 'request'
 $statusDirectory = Join-Path $constants.UpdaterRoot 'status'
 foreach ($entry in @(
+    [ordered]@{ Name = 'Configuration ACL'; Path = $ConfigurationPath; NeedsModify = $false; ForbidModify = $true },
     [ordered]@{ Name = 'Request ACL'; Path = $requestDirectory; NeedsModify = $true; ForbidModify = $false },
     [ordered]@{ Name = 'Status ACL'; Path = $statusDirectory; NeedsModify = $false; ForbidModify = $false },
     [ordered]@{ Name = 'Scripts ACL'; Path = (Join-Path $constants.UpdaterRoot 'scripts'); NeedsModify = $false; ForbidModify = $true }
