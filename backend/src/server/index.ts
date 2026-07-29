@@ -17,6 +17,15 @@ import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpe
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
 import {
+  JsonSystemUpdateStatusStore,
+  MemorySystemUpdateStatusStore,
+  SystemUpdateError,
+  SystemUpdateService,
+  loadSystemUpdateConfiguration,
+  type SystemUpdateStatus,
+  type UpdateIdentity,
+} from './systemUpdate.js';
+import {
   inheritedPermissions,
   isPermissionKey,
   permissionByKey,
@@ -65,6 +74,11 @@ function readShortCommit() {
 }
 const applicationVersion = readApplicationVersion();
 const applicationCommit = readShortCommit();
+const systemUpdateConfiguration = loadSystemUpdateConfiguration(repoRootPath);
+const systemUpdateStatusStore = systemUpdateConfiguration.statusPath
+  ? new JsonSystemUpdateStatusStore(systemUpdateConfiguration.statusPath)
+  : new MemorySystemUpdateStatusStore();
+const systemUpdateService = new SystemUpdateService(systemUpdateConfiguration, systemUpdateStatusStore);
 const mit3Url = 'http://localhost:4173';
 const mit3HealthUrl = `${mit3Url}/api/health`;
 const mit3AppDataUrl = `${mit3Url}/api/app-data`;
@@ -1001,7 +1015,102 @@ function maintenanceTeamRoster(currentUser:User) {
   };
 }
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
+const systemUpdateCheckHits = new Map<string, number[]>(), systemUpdateInstallHits = new Map<string, number[]>();
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
+function systemUpdateIdentity(user:User):UpdateIdentity {
+  return {id:user.id,name:user.full_name.replace(/\s+/g,' ').trim().slice(0,120)};
+}
+function systemUpdateCsrfToken(req:AuthRequest) {
+  if(!req.sessionId) return '';
+  return crypto.createHmac('sha256',sessionSecret).update(`mcc-system-update:${req.sessionId}`).digest('base64url');
+}
+function safeTokenEqual(left:string,right:string) {
+  const leftBuffer=Buffer.from(left);
+  const rightBuffer=Buffer.from(right);
+  return leftBuffer.length===rightBuffer.length&&crypto.timingSafeEqual(leftBuffer,rightBuffer);
+}
+function validateSystemUpdateCsrf(req:AuthRequest) {
+  const fetchSite=String(req.get('sec-fetch-site')??'').toLowerCase();
+  if(fetchSite==='cross-site') return false;
+  const origin=req.get('origin');
+  if(origin) {
+    try {
+      const parsed=new URL(origin);
+      if(parsed.host!==req.get('host')) return false;
+      const expectedProtocol=req.secure?'https:':'http:';
+      if(parsed.protocol!==expectedProtocol) return false;
+    } catch {
+      return false;
+    }
+  }
+  const supplied=String(req.get('x-mcc-csrf-token')??'');
+  const expected=systemUpdateCsrfToken(req);
+  return Boolean(supplied&&expected&&safeTokenEqual(supplied,expected));
+}
+function systemUpdateAuditDetails(status:SystemUpdateStatus) {
+  return {
+    jobId:status.jobId,
+    requester:status.requester,
+    installedVersion:status.installed.version,
+    installedCommit:status.installed.commit?.slice(0,7)??null,
+    targetVersion:status.target.version,
+    targetCommit:status.target.commit?.slice(0,7)??null,
+    timestamp:status.lastUpdatedAt,
+    finalResult:status.outcome,
+  };
+}
+function recordSystemUpdateHistory(action:string,status:SystemUpdateStatus,actor:User|null,reasonNote:string) {
+  recordHistoryLog({
+    section:'settings',
+    action,
+    entityType:'system_update_job',
+    entityId:status.jobId??status.lastUpdatedAt,
+    entityLabel:status.target.version?`MCC v${status.target.version}`:'MCC system update',
+    newValue:systemUpdateAuditDetails(status),
+    reasonNote,
+    actor,
+    createdAt:status.lastUpdatedAt,
+  });
+}
+function reconcileExternalSystemUpdateEvents(status:SystemUpdateStatus) {
+  if(!status.jobId||!status.events.length)return;
+  const sawRollback=status.events.some(event=>event.state==='rolling_back');
+  const actions:Array<{eventId:string;auditAction:string;historyAction:string;message:string;at:string}>=[];
+  for(const event of status.events) {
+    if(event.state==='backing_up')actions.push({eventId:event.id,auditAction:'update started',historyAction:'update_started',message:event.message,at:event.at});
+    if(event.state==='succeeded')actions.push({eventId:event.id,auditAction:'update succeeded',historyAction:'update_succeeded',message:event.message,at:event.at});
+    if(event.state==='rolling_back') {
+      actions.push({eventId:`${event.id}:update_failed`,auditAction:'update failed',historyAction:'update_failed',message:'The new MCC build did not pass deployment verification.',at:event.at});
+      actions.push({eventId:event.id,auditAction:'rollback started',historyAction:'rollback_started',message:event.message,at:event.at});
+    }
+    if(event.state==='rolled_back')actions.push({eventId:event.id,auditAction:'rollback succeeded',historyAction:'rollback_succeeded',message:event.message,at:event.at});
+    if(event.state==='failed')actions.push({
+      eventId:event.id,
+      auditAction:sawRollback?'rollback failed':'update failed',
+      historyAction:sawRollback?'rollback_failed':'update_failed',
+      message:event.message,
+      at:event.at,
+    });
+  }
+  const actor=status.requester?findUserById(status.requester.id)??null:null;
+  for(const item of actions) {
+    if(one<{id:number}>('SELECT id FROM audit_log WHERE target_type=? AND target_id=? AND action=? LIMIT 1',['system_update_event',item.eventId,item.auditAction]))continue;
+    const eventStatus={...status,lastUpdatedAt:item.at};
+    const details={...systemUpdateAuditDetails(eventStatus),eventId:item.eventId,message:item.message};
+    run('INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (?,?,?,?,?,?,?,?,?)',[
+      actor?.id??status.requester?.id??null,
+      actor?.email??'',
+      item.auditAction,
+      'system_update_event',
+      item.eventId,
+      JSON.stringify(details),
+      '',
+      'external mcc update runner',
+      item.at,
+    ]);
+    recordSystemUpdateHistory(item.historyAction,eventStatus,actor,item.message);
+  }
+}
 function canUserManage(actor: User) { return actor.role !== 'Maintenance Tech 1'; }
 function canEditTarget(actor: User, target: User) { return canUserManage(actor) && !target.is_owner_admin && !target.deleted && canManageRole(actor.role, target.role); }
 function canToggleDisabledTarget(actor: User, target: User) { return canEditTarget(actor, target) && actor.id !== target.id; }
@@ -7869,6 +7978,59 @@ app.get('/api/version', requireAuth, requireSystemVersionAccess, (_req,res)=>res
   commit:applicationCommit,
   buildDate:null,
 }));
+app.get('/api/system/update/status',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
+  const status=systemUpdateService.readStatus();
+  reconcileExternalSystemUpdateEvents(status);
+  res.setHeader('Cache-Control','no-store');
+  res.json({...systemUpdateService.publicStatus(status),csrfToken:systemUpdateCsrfToken(req)});
+});
+app.post('/api/system/update/check',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
+  const rateKey=`${req.user!.id}:${req.ip}`;
+  if(limited(systemUpdateCheckHits,rateKey,6,10*60*1000))return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update checks. Try again later.'});
+  const body=isRecord(req.body)?req.body:{};
+  if(Object.keys(body).length)return res.status(400).json({ok:false,code:'invalid_request',error:'The update check does not accept deployment configuration.'});
+  try {
+    const status=systemUpdateService.checkForUpdate(systemUpdateIdentity(req.user!));
+    const details=systemUpdateAuditDetails(status);
+    audit(req,'update check','system_update_check',status.lastUpdatedAt,details);
+    recordSystemUpdateHistory('update_check',status,req.user!,status.message);
+    if(['update_available','same_version_different_commit'].includes(status.code)) {
+      audit(req,'update available','system_update_check',status.lastUpdatedAt,details);
+      recordSystemUpdateHistory('update_available',status,req.user!,status.message);
+    }
+    res.setHeader('Cache-Control','no-store');
+    res.json({...systemUpdateService.publicStatus(status),csrfToken:systemUpdateCsrfToken(req)});
+  } catch(error) {
+    const status=systemUpdateService.readStatus();
+    const failure=error instanceof SystemUpdateError?error:new SystemUpdateError(503,'update_check_failed','The MCC update check failed.');
+    audit(req,'update check','system_update_check',status.lastUpdatedAt,{...systemUpdateAuditDetails(status),result:failure.code});
+    recordSystemUpdateHistory('update_check',status,req.user!,status.message);
+    res.setHeader('Cache-Control','no-store');
+    res.status(failure.httpStatus).json({...systemUpdateService.publicStatus(status),ok:false,error:failure.message,csrfToken:systemUpdateCsrfToken(req)});
+  }
+});
+app.post('/api/system/update/install',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
+  const rateKey=`${req.user!.id}:${req.ip}`;
+  if(limited(systemUpdateInstallHits,rateKey,5,15*60*1000))return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update installation attempts. Try again later.'});
+  if(!validateSystemUpdateCsrf(req))return res.status(403).json({ok:false,code:'csrf_rejected',error:'Update confirmation could not be verified. Refresh Settings and try again.'});
+  const body=isRecord(req.body)?req.body:{};
+  const unexpectedKeys=Object.keys(body).filter(key=>!['confirm','checkToken'].includes(key));
+  if(unexpectedKeys.length)return res.status(400).json({ok:false,code:'invalid_request',error:'The update request contains unsupported fields.'});
+  if(body.confirm!==true)return res.status(400).json({ok:false,code:'confirmation_required',error:'Explicit update confirmation is required.'});
+  if(typeof body.checkToken!=='string'||!body.checkToken)return res.status(409).json({ok:false,code:'stale_update_check',error:'Run a successful update check before installing.'});
+  try {
+    const status=systemUpdateService.queueInstall(systemUpdateIdentity(req.user!),body.checkToken);
+    const details=systemUpdateAuditDetails(status);
+    audit(req,'update requested','system_update_job',status.jobId??'',details);
+    recordSystemUpdateHistory('update_requested',status,req.user!,'The Admin confirmed installation of the verified approved update.');
+    res.setHeader('Cache-Control','no-store');
+    res.status(202).json({...systemUpdateService.publicStatus(status),accepted:true,jobId:status.jobId,csrfToken:systemUpdateCsrfToken(req)});
+  } catch(error) {
+    const failure=error instanceof SystemUpdateError?error:new SystemUpdateError(503,'failed','The external MCC update runner could not be started.');
+    const status=systemUpdateService.readStatus();
+    res.status(failure.httpStatus).json({...systemUpdateService.publicStatus(status),ok:false,error:failure.message,csrfToken:systemUpdateCsrfToken(req)});
+  }
+});
 app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(req,'mcc_session')); const u=sid ? one<User>('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.deleted=0 AND s.id=? AND s.expires_at > ?', [sid,now()]) : undefined; res.json({ setupRequired:userCount()===0, user: u && !u.disabled ? publicUser(u) : null }); });
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,owner:true,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true,ownerAdmin:true}); res.json({ok:true}); });
 app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); const loggedInAt=now(); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [loggedInAt,u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:loggedInAt})}); });
@@ -10569,6 +10731,11 @@ try {
 app.use('/api', (_req,res)=>res.status(404).json({ok:false,error:'API route not found.'}));
 app.use(express.static(frontendDistPath));
 app.get('*', (_req,res)=>res.sendFile(path.join(frontendDistPath,'index.html')));
+try {
+  reconcileExternalSystemUpdateEvents(systemUpdateService.readStatus());
+} catch {
+  console.log('MCC update audit reconciliation needs attention.');
+}
 app.listen(port,()=>{
   console.log(`${appName} running at http://localhost:${port}`);
   console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);

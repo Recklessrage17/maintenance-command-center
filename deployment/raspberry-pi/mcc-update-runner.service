@@ -1,0 +1,20 @@
+[Unit]
+Description=Run the fixed MCC updater with backup, health check, and rollback
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/maintenance-command-center
+ExecStart=/usr/local/sbin/update-mcc --request
+TimeoutStartSec=20min
+Environment=NPM_CONFIG_CACHE=/var/lib/mcc-update/npm-cache
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/maintenance-command-center /var/lib/mcc-update /var/backups/mcc-updates /run/lock
+
+[Install]
+WantedBy=multi-user.target

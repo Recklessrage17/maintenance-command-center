@@ -36,6 +36,7 @@ On Windows, use `Start MCC Website.cmd` to start the backend website and open th
 
 - `GET /api/health` returns MCC health and port information.
 - `GET /api/version` returns MCC version/build metadata to authenticated Admin and Owner Admin users.
+- `GET /api/system/update/status`, `POST /api/system/update/check`, and `POST /api/system/update/install` provide the Admin/Owner-only fixed-source updater workflow. See `docs/admin-one-click-updater.md` before enabling it.
 
 ## Planned Modules
 

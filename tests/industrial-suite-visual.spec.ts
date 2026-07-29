@@ -162,6 +162,7 @@ async function mockIndustrialSuite(page: Page) {
     if (path === '/api/settings/branding') return fulfillJson(route, { ok: true, branding });
     if (path === '/api/settings/network-links') return fulfillJson(route, { localPort: 4273, localhostUrl: 'http://localhost:4273', detectedLanUrls: ['http://192.168.10.24:4273'], primaryLanUrl: 'http://192.168.10.24:4273' });
     if (path === '/api/presence/heartbeat') return fulfillJson(route, { ok: true, serverTime: fixedNow, written: true, policy: presencePolicy });
+    if (path === '/api/presence/disconnect') return fulfillJson(route, { ok: true });
     if (path === '/api/presence/team') return fulfillJson(route, roster);
     if (path === '/api/requisitions/summary') return fulfillJson(route, { ok: true, ...requisitionSummary });
     if (path === '/api/dashboard/preventive-maintenance-due') return fulfillJson(route, { ok: true, alerts: dashboardAlerts, summary: { dueSoon: 1, dueNow: 0, pastDue: 1 } });
