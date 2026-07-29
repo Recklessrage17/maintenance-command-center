@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { MccLogin } from './components/auth/MccLogin';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/historyRouting';
 
@@ -32,7 +33,6 @@ class RouteModuleBoundary extends Component<{resetKey:MccSection;children:ReactN
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; forcePasswordChange:boolean; effectivePermissions?:string[] };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
-const LOGIN_SUCCESS_WARP_MS = 280;
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
 function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
 function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }
@@ -92,24 +92,7 @@ function App() {
 }
 function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{await api('/api/auth/setup-first-admin',{method:'POST',body:JSON.stringify({fullName,email,password,confirmPassword})});setMsg('First Admin created. Please log in.'); setTimeout(onDone,800);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="First Admin Setup" eyebrow="MCC security foundation"><form onSubmit={submit} className="auth-form"><Field label="Full name" value={fullName} onChange={setFullName}/><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword}/><Field label="Confirm password" type="password" value={confirmPassword} onChange={setConfirm}/><p className="form-help">Minimum 10 characters with uppercase, lowercase, number, and special character.</p><button className="primary-button">Create First Admin</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) {
-  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[msg,setMsg]=useState(''),[isSubmitting,setIsSubmitting]=useState(false);
-  async function submit(e:FormEvent){
-    e.preventDefault();
-    if(isSubmitting) return;
-    const startedAt=Date.now();
-    setMsg('');
-    setIsSubmitting(true);
-    try{
-      const d=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})});
-      window.setTimeout(()=>onLogin(d.user),LOGIN_SUCCESS_WARP_MS);
-    }catch(err){
-      const remainingWarpMs=Math.max(0,LOGIN_SUCCESS_WARP_MS-(Date.now()-startedAt));
-      if(remainingWarpMs) await new Promise(resolve=>window.setTimeout(resolve,remainingWarpMs));
-      setIsSubmitting(false);
-      setMsg((err as Error).message);
-    }
-  }
-  return <AuthCard title="MCC Login" eyebrow="Maintenance command center"><form onSubmit={submit} className="auth-form" aria-busy={isSubmitting}><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password"/><button className={isSubmitting?'primary-button mcc-bubble-transition mcc-login-warp is-warping':'primary-button mcc-bubble-transition mcc-login-warp'} type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>{isSubmitting?'Opening MCC':'Log In'}</button><button type="button" className="link-button" onClick={onForgot} disabled={isSubmitting}>Forgot Password</button>{msg&&<p className="form-message error" role="alert">{msg}</p>}</form></AuthCard>
+  return <MccLogin<User> authenticate={async(email,password)=>{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})});return data.user;}} onForgot={onForgot} onLogin={onLogin} />;
 }
 function Forgot({onBack}:{onBack:()=>void}) { const [email,setEmail]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{const d=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});setMsg(d.message);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="Forgot Password" eyebrow="Secure reset"><form onSubmit={submit} className="auth-form"><Field label="Email" value={email} onChange={setEmail}/><button className="primary-button">Request Reset</button><button type="button" className="link-button" onClick={onBack}>Back to Login</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Change({forced,onDone}:{forced:boolean;onDone:()=>void}) { const [currentPassword,setCurrent]=useState(''),[newPassword,setNew]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{await api('/api/auth/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword,confirmPassword})});onDone();}catch(err){setMsg((err as Error).message)}} return <AuthCard title={forced?'Change Password Required':'Update Password'} eyebrow={forced?'Temporary credential':'Account security'}><form onSubmit={submit} className="auth-form"><Field label={forced?'Temporary/current password':'Current password'} type="password" value={currentPassword} onChange={setCurrent}/><Field label="New password" type="password" value={newPassword} onChange={setNew}/><Field label="Confirm new password" type="password" value={confirmPassword} onChange={setConfirm}/><button className="primary-button">Save New Password</button>{msg&&<p className="form-message error">{msg}</p>}</form></AuthCard> }
