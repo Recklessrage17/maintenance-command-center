@@ -8,6 +8,7 @@ import {
   APPROVED_UPDATE_BRANCH,
   APPROVED_UPDATE_REMOTE,
   APPROVED_UPDATE_REPOSITORY,
+  JsonSystemUpdateStatusStore,
   MemorySystemUpdateStatusStore,
   SystemUpdateError,
   SystemUpdateService,
@@ -69,7 +70,9 @@ function advance(fixture, version, message = `release ${version}`) {
 function configuration(fixture) {
   return {
     enabled: true,
+    configured: true,
     disabledReason: '',
+    disabledCode: 'not_checked',
     mode: 'windows_test',
     environmentLabel: 'WINDOWS TEST MODE',
     applicationDir: fixture.installed,
@@ -77,6 +80,7 @@ function configuration(fixture) {
     requestPath: path.join(fixture.directory, 'state', 'request.json'),
     windowsRunnerPath: path.join(fixture.directory, 'Invoke-MccTestUpdate.ps1'),
     windowsConfigPath: path.join(fixture.directory, 'config.json'),
+    windowsAgentHealthPath: null,
     approvedRepository: fixture.remote,
     remote: APPROVED_UPDATE_REMOTE,
     branch: APPROVED_UPDATE_BRANCH,
@@ -112,21 +116,89 @@ try {
 
   const disabled = loadSystemUpdateConfiguration(root, {}, 'win32');
   assert.equal(disabled.enabled, false);
-  assert.equal(disabled.environmentLabel, 'UPDATE CONTROL DISABLED');
+  assert.equal(disabled.environmentLabel, 'UPDATER NOT CONFIGURED');
   const rejectedDevelopment = loadSystemUpdateConfiguration('F:\\MCC_V1_FINAL', {
     MCC_UPDATE_MODE: 'windows_test',
     MCC_UPDATE_APP_DIR: 'F:\\MCC_V1_FINAL',
   }, 'win32');
   assert.equal(rejectedDevelopment.enabled, false);
-  assert.match(rejectedDevelopment.disabledReason, /Z:\\MCC_V1_FINAL/);
+  assert.match(rejectedDevelopment.disabledReason, /managed Windows updater agent/);
   const allowedWindows = loadSystemUpdateConfiguration('Z:\\MCC_V1_FINAL', {
     MCC_UPDATE_MODE: 'windows_test',
     MCC_UPDATE_APP_DIR: 'Z:\\MCC_V1_FINAL',
     MCC_UPDATE_STATE_DIR: 'Z:\\MCC_UPDATE\\state',
   }, 'win32');
-  assert.equal(allowedWindows.enabled, true);
-  assert.equal(allowedWindows.environmentLabel, 'WINDOWS TEST MODE');
+  assert.equal(allowedWindows.enabled, false);
+  assert.equal(allowedWindows.environmentLabel, 'UPDATER NOT CONFIGURED');
   assert.equal(allowedWindows.approvedRepository, APPROVED_UPDATE_REPOSITORY);
+
+  const managedConfigurationDirectory = path.join(fixtureRoot, 'managed-configuration');
+  fs.mkdirSync(managedConfigurationDirectory, { recursive: true });
+  const managedConfigurationPath = path.join(managedConfigurationDirectory, 'config.json');
+  const managedApplicationPath = 'C:\\MCC\\MCC_V1_FINAL';
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
+    schemaVersion: 1,
+    deploymentMode: 'WindowsProduction',
+    applicationPath: managedApplicationPath,
+    repository: APPROVED_UPDATE_REPOSITORY,
+    remote: APPROVED_UPDATE_REMOTE,
+    branch: APPROVED_UPDATE_BRANCH,
+    port: APPROVED_MCC_PORT,
+    mccTaskName: 'MaintenanceCommandCenter',
+    updaterTaskName: 'MaintenanceCommandCenterUpdater',
+  }, null, 2)}\n`);
+  const managedWindows = loadSystemUpdateConfiguration(managedApplicationPath, {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(managedWindows.enabled, true);
+  assert.equal(managedWindows.configured, true);
+  assert.equal(managedWindows.mode, 'windows_production');
+  assert.equal(managedWindows.environmentLabel, 'WINDOWS 11 PRODUCTION');
+  assert.equal(managedWindows.windowsRunnerPath, null);
+  assert.match(managedWindows.windowsAgentHealthPath, /agent-health\.json$/);
+  assert.match(managedWindows.statusWritePath, /request[\\/]api-status\.json$/);
+  assert.match(managedWindows.windowsShutdownPath, /request[\\/]shutdown-request\.json$/);
+
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
+    schemaVersion: 1,
+    deploymentMode: 'WindowsTest',
+    applicationPath: 'Z:\\MCC_V1_FINAL',
+    repository: APPROVED_UPDATE_REPOSITORY,
+    remote: APPROVED_UPDATE_REMOTE,
+    branch: APPROVED_UPDATE_BRANCH,
+    port: APPROVED_MCC_PORT,
+    mccTaskName: 'MaintenanceCommandCenter',
+    updaterTaskName: 'MaintenanceCommandCenterUpdater',
+  }, null, 2)}\n`);
+  const managedWindowsTest = loadSystemUpdateConfiguration('Z:\\MCC_V1_FINAL', {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(managedWindowsTest.enabled, true);
+  assert.equal(managedWindowsTest.mode, 'windows_test');
+  assert.equal(managedWindowsTest.environmentLabel, 'WINDOWS TEST MODE');
+
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
+    schemaVersion: 1,
+    deploymentMode: 'WindowsProduction',
+    applicationPath: 'F:\\MCC_V1_FINAL',
+    repository: APPROVED_UPDATE_REPOSITORY,
+    remote: APPROVED_UPDATE_REMOTE,
+    branch: APPROVED_UPDATE_BRANCH,
+    port: APPROVED_MCC_PORT,
+    mccTaskName: 'MaintenanceCommandCenter',
+    updaterTaskName: 'MaintenanceCommandCenterUpdater',
+  }, null, 2)}\n`);
+  const protectedManagedWindows = loadSystemUpdateConfiguration('F:\\MCC_V1_FINAL', {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(protectedManagedWindows.enabled, false);
+  assert.equal(protectedManagedWindows.disabledCode, 'configuration_invalid');
 
   const current = makeFixture('current');
   const currentService = serviceFor(current).service;
@@ -134,6 +206,57 @@ try {
   assert.equal(currentStatus.code, 'up_to_date');
   assert.equal(currentStatus.state, 'idle');
   assert.equal(currentService.publicStatus(currentStatus).installedCommit, current.initialCommit.slice(0, 7));
+
+  const managedHealthFixture = makeFixture('managed-health');
+  const managedHealthConfiguration = {
+    ...configuration(managedHealthFixture),
+    mode: 'windows_production',
+    environmentLabel: 'WINDOWS 11 PRODUCTION',
+    windowsRunnerPath: null,
+    windowsAgentHealthPath: path.join(managedHealthFixture.directory, 'state', 'agent-health.json'),
+  };
+  fs.mkdirSync(path.dirname(managedHealthConfiguration.requestPath), { recursive: true });
+  const managedHealthService = new SystemUpdateService(
+    managedHealthConfiguration,
+    new MemorySystemUpdateStatusStore(),
+    gitRunner,
+    () => undefined,
+    () => new Date('2026-07-29T12:00:00.000Z'),
+  );
+  assert.equal(managedHealthService.publicStatus().code, 'updater_agent_offline');
+  fs.writeFileSync(managedHealthConfiguration.windowsAgentHealthPath, `${JSON.stringify({
+    schemaVersion: 1,
+    checkedAt: '2026-07-29T11:59:50.000Z',
+    agentHealthy: true,
+    configurationValid: true,
+    deploymentMode: 'WindowsProduction',
+    applicationPathMatches: true,
+    repositoryValid: true,
+    branchValid: true,
+    requestDirectoryAccessible: true,
+    statusDirectoryAccessible: true,
+    mccTaskInstalled: true,
+    mccTaskRunning: false,
+    updaterTaskInstalled: true,
+  })}\n`);
+  assert.equal(managedHealthService.publicStatus().code, 'mcc_service_not_running');
+  fs.writeFileSync(managedHealthConfiguration.windowsAgentHealthPath, `${JSON.stringify({
+    schemaVersion: 1,
+    checkedAt: '2026-07-29T11:59:50.000Z',
+    agentHealthy: true,
+    configurationValid: true,
+    deploymentMode: 'WindowsProduction',
+    applicationPathMatches: true,
+    repositoryValid: true,
+    branchValid: true,
+    requestDirectoryAccessible: true,
+    statusDirectoryAccessible: true,
+    mccTaskInstalled: true,
+    mccTaskRunning: true,
+    updaterTaskInstalled: true,
+  })}\n`);
+  assert.equal(managedHealthService.publicStatus().available, true);
+  assert.equal(managedHealthService.publicStatus().environmentLabel, 'WINDOWS 11 PRODUCTION');
 
   const available = makeFixture('available');
   const availableTarget = advance(available, '1.3.0');
@@ -158,6 +281,18 @@ try {
   });
   assert.equal(request.target.commit, availableTarget);
   expectCode(() => availableService.queueInstall({ id: 2, name: 'Admin User' }, availableStatus.checkToken), 'update_already_running');
+
+  const existingRequest = makeFixture('existing-request');
+  advance(existingRequest, '1.3.0');
+  const existingRequestService = serviceFor(existingRequest).service;
+  const existingRequestStatus = existingRequestService.checkForUpdate({ id: 2, name: 'Admin User' });
+  fs.mkdirSync(path.dirname(configuration(existingRequest).requestPath), { recursive: true });
+  fs.writeFileSync(configuration(existingRequest).requestPath, '{"existing":true}\n');
+  expectCode(
+    () => existingRequestService.queueInstall({ id: 2, name: 'Admin User' }, existingRequestStatus.checkToken),
+    'update_already_running',
+  );
+  assert.equal(fs.readFileSync(configuration(existingRequest).requestPath, 'utf8'), '{"existing":true}\n');
 
   const sameVersion = makeFixture('same-version');
   git(sameVersion.seed, 'commit', '--allow-empty', '-m', 'new build same version');
@@ -239,6 +374,7 @@ try {
     environmentLabel: 'WINDOWS TEST MODE',
     installed: { version: '1.2.1', commit: rollbackFixture.initialCommit },
     target: { version: '1.3.0', commit: 'a'.repeat(40) },
+    requestedAt: timestamp,
     startedAt: timestamp,
     lastUpdatedAt: timestamp,
     completedAt: timestamp,
@@ -252,6 +388,27 @@ try {
   assert.equal(publicRollback.state, 'rolled_back');
   assert.equal(publicRollback.outcome, 'rolled_back');
   assert.equal(publicRollback.installedVersion, '1.2.1');
+
+  const canonicalStatusPath = path.join(rollbackFixture.directory, 'agent-status', 'status.json');
+  const apiStatusPath = path.join(rollbackFixture.directory, 'request', 'api-status.json');
+  fs.mkdirSync(path.dirname(canonicalStatusPath), { recursive: true });
+  fs.mkdirSync(path.dirname(apiStatusPath), { recursive: true });
+  const canonicalStatus = rollbackStore.read();
+  fs.writeFileSync(canonicalStatusPath, `${JSON.stringify(canonicalStatus, null, 2)}\n`);
+  const mergedStore = new JsonSystemUpdateStatusStore(canonicalStatusPath, apiStatusPath);
+  const apiStatus = {
+    ...canonicalStatus,
+    state: 'idle',
+    code: 'up_to_date',
+    message: 'API check state.',
+    lastUpdatedAt: '2026-07-29T12:31:00.000Z',
+    completedAt: '2026-07-29T12:31:00.000Z',
+    outcome: 'none',
+  };
+  mergedStore.write(apiStatus);
+  assert.equal(mergedStore.read().code, 'up_to_date');
+  assert.equal(JSON.parse(fs.readFileSync(canonicalStatusPath, 'utf8')).state, 'rolled_back');
+  assert.equal(JSON.parse(fs.readFileSync(apiStatusPath, 'utf8')).code, 'up_to_date');
 
   console.log('System update service tests passed: comparison, dirty/network/history rejection, lock/duplicate handling, fixed configuration, sanitization, queueing, and rollback state.');
 } finally {

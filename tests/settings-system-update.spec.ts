@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 type UpdateState = {
   ok: boolean;
   configured: boolean;
+  available: boolean;
   state: string;
   code: string;
   message: string;
@@ -15,6 +16,7 @@ type UpdateState = {
   targetVersion: string | null;
   targetCommit: string | null;
   startedAt: string | null;
+  requestedAt: string | null;
   lastUpdatedAt: string;
   completedAt: string | null;
   requester: { id: number; name: string } | null;
@@ -30,6 +32,7 @@ const approvalArtifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-60'
 const availableUpdate: UpdateState = {
   ok: true,
   configured: true,
+  available: true,
   state: 'update_available',
   code: 'update_available',
   message: 'MCC v1.3.0 is available from the approved origin/main branch.',
@@ -40,6 +43,7 @@ const availableUpdate: UpdateState = {
   targetVersion: '1.3.0',
   targetCommit: 'def5678',
   startedAt: null,
+  requestedAt: null,
   lastUpdatedAt: timestamp,
   completedAt: timestamp,
   requester: { id: 1, name: 'Admin Fixture' },
@@ -172,6 +176,43 @@ test('Admin sees an available update and must explicitly confirm before installa
   await expect(page.getByRole('dialog', { name: 'MCC Update Progress' })).toBeVisible();
   expect(fixture.installRequests()).toBe(1);
   if(testInfo.project.name==='desktop-chromium')await captureApproval(page,'03-progress-display.png');
+});
+
+test('the existing update card shows managed Windows production and sanitized unavailable states', async ({ page }) => {
+  await mockSettings(page, {
+    initialUpdate: update({
+      mode: 'windows_production',
+      environmentLabel: 'WINDOWS 11 PRODUCTION',
+      state: 'idle',
+      code: 'updater_agent_offline',
+      message: 'The Windows updater agent is offline.',
+      available: false,
+      checkToken: null,
+      checkExpiresAt: null,
+    }),
+  });
+  await page.goto('/settings');
+  const panel = page.getByRole('complementary', { name: 'MCC system version' });
+  await expect(panel).toContainText('WINDOWS 11 PRODUCTION');
+  await expect(panel).toContainText('UPDATER AGENT OFFLINE');
+  await expect(page.getByRole('button', { name: 'Unavailable' })).toBeDisabled();
+
+  await page.route('**/api/system/update/status', route => route.fulfill({
+    json: update({
+      configured: false,
+      available: false,
+      mode: 'disabled',
+      environmentLabel: 'UPDATER NOT CONFIGURED',
+      state: 'idle',
+      code: 'deployment_not_configured',
+      message: 'The updater is not configured in this environment.',
+      checkToken: null,
+      checkExpiresAt: null,
+    }),
+  }));
+  await page.reload();
+  await expect(panel).toContainText('UPDATER NOT CONFIGURED');
+  await expect(page.getByRole('button', { name: 'Unavailable' })).toBeDisabled();
 });
 
 test('up-to-date and failed-check states never claim success without a completed comparison', async ({ page },testInfo) => {

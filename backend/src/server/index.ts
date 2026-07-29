@@ -76,7 +76,10 @@ const applicationVersion = readApplicationVersion();
 const applicationCommit = readShortCommit();
 const systemUpdateConfiguration = loadSystemUpdateConfiguration(repoRootPath);
 const systemUpdateStatusStore = systemUpdateConfiguration.statusPath
-  ? new JsonSystemUpdateStatusStore(systemUpdateConfiguration.statusPath)
+  ? new JsonSystemUpdateStatusStore(
+      systemUpdateConfiguration.statusPath,
+      systemUpdateConfiguration.statusWritePath??systemUpdateConfiguration.statusPath,
+    )
   : new MemorySystemUpdateStatusStore();
 const systemUpdateService = new SystemUpdateService(systemUpdateConfiguration, systemUpdateStatusStore);
 const mit3Url = 'http://localhost:4173';
@@ -1016,6 +1019,7 @@ function maintenanceTeamRoster(currentUser:User) {
 }
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
 const systemUpdateCheckHits = new Map<string, number[]>(), systemUpdateInstallHits = new Map<string, number[]>();
+let lastSystemUpdateAvailabilityCode = '';
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
 function systemUpdateIdentity(user:User):UpdateIdentity {
   return {id:user.id,name:user.full_name.replace(/\s+/g,' ').trim().slice(0,120)};
@@ -1051,10 +1055,12 @@ function systemUpdateAuditDetails(status:SystemUpdateStatus) {
   return {
     jobId:status.jobId,
     requester:status.requester,
+    deploymentMode:status.mode,
     installedVersion:status.installed.version,
     installedCommit:status.installed.commit?.slice(0,7)??null,
     targetVersion:status.target.version,
     targetCommit:status.target.commit?.slice(0,7)??null,
+    requestedAt:status.requestedAt,
     timestamp:status.lastUpdatedAt,
     finalResult:status.outcome,
   };
@@ -7981,8 +7987,23 @@ app.get('/api/version', requireAuth, requireSystemVersionAccess, (_req,res)=>res
 app.get('/api/system/update/status',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
   const status=systemUpdateService.readStatus();
   reconcileExternalSystemUpdateEvents(status);
+  const publicStatus=systemUpdateService.publicStatus(status);
+  if(systemUpdateConfiguration.configured&&!one<{id:number}>('SELECT id FROM audit_log WHERE action=? AND target_type=? AND target_id=? LIMIT 1',[
+    'updater configured','system_update_configuration',systemUpdateConfiguration.mode,
+  ])){
+    const configuredStatus={...status,mode:systemUpdateConfiguration.mode,environmentLabel:systemUpdateConfiguration.environmentLabel,lastUpdatedAt:now()};
+    audit(req,'updater configured','system_update_configuration',systemUpdateConfiguration.mode,systemUpdateAuditDetails(configuredStatus));
+    recordSystemUpdateHistory('updater_configured',configuredStatus,req.user!,'The protected Windows updater configuration was detected by MCC.');
+  }
+  if(['updater_agent_offline','configuration_invalid','mcc_service_not_running'].includes(publicStatus.code)
+    && publicStatus.code!==lastSystemUpdateAvailabilityCode){
+    const unavailableStatus={...status,code:publicStatus.code,message:publicStatus.message,lastUpdatedAt:now()};
+    audit(req,'updater-agent unavailable','system_update_configuration',systemUpdateConfiguration.mode,systemUpdateAuditDetails(unavailableStatus));
+    recordSystemUpdateHistory('updater_agent_unavailable',unavailableStatus,req.user!,publicStatus.message);
+  }
+  lastSystemUpdateAvailabilityCode=publicStatus.code;
   res.setHeader('Cache-Control','no-store');
-  res.json({...systemUpdateService.publicStatus(status),csrfToken:systemUpdateCsrfToken(req)});
+  res.json({...publicStatus,csrfToken:systemUpdateCsrfToken(req)});
 });
 app.post('/api/system/update/check',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
   const rateKey=`${req.user!.id}:${req.ip}`;
@@ -10736,9 +10757,33 @@ try {
 } catch {
   console.log('MCC update audit reconciliation needs attention.');
 }
-app.listen(port,()=>{
+const httpServer=app.listen(port,()=>{
   console.log(`${appName} running at http://localhost:${port}`);
   console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);
   console.log(`SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
   startBackupSchedulers();
 });
+if(systemUpdateConfiguration.windowsShutdownPath){
+  const shutdownPath=systemUpdateConfiguration.windowsShutdownPath;
+  const shutdownPoll=setInterval(()=>{
+    if(!fs.existsSync(shutdownPath))return;
+    try{
+      const signal=JSON.parse(fs.readFileSync(shutdownPath,'utf8')) as Record<string,unknown>;
+      const requestedAt=Date.parse(String(signal.requestedAt??''));
+      fs.rmSync(shutdownPath,{force:true});
+      if(signal.schemaVersion!==1
+        ||Number(signal.processId)!==process.pid
+        ||!Number.isFinite(requestedAt)
+        ||Math.abs(Date.now()-requestedAt)>60_000)return;
+      clearInterval(shutdownPoll);
+      const forcedExit=setTimeout(()=>process.exit(0),15_000);
+      httpServer.close(()=>{
+        clearTimeout(forcedExit);
+        process.exit(0);
+      });
+    }catch{
+      try{fs.rmSync(shutdownPath,{force:true});}catch{}
+    }
+  },1_000);
+  shutdownPoll.unref();
+}

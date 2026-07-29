@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -27,7 +27,7 @@ export const systemUpdateStates = [
 ] as const;
 
 export type SystemUpdateState = typeof systemUpdateStates[number];
-export type SystemUpdateMode = 'disabled' | 'raspberry_pi' | 'windows_test';
+export type SystemUpdateMode = 'disabled' | 'raspberry_pi' | 'windows_test' | 'windows_production';
 export type SystemUpdateCode =
   | 'not_checked'
   | 'checking'
@@ -42,6 +42,9 @@ export type SystemUpdateCode =
   | 'remote_version_behind'
   | 'update_already_running'
   | 'deployment_not_configured'
+  | 'updater_agent_offline'
+  | 'configuration_invalid'
+  | 'mcc_service_not_running'
   | 'queued'
   | 'succeeded'
   | 'rolled_back'
@@ -75,6 +78,7 @@ export type SystemUpdateStatus = {
   installed: UpdateVersionRef;
   target: UpdateVersionRef;
   startedAt: string | null;
+  requestedAt: string | null;
   lastUpdatedAt: string;
   completedAt: string | null;
   requester: UpdateIdentity | null;
@@ -97,6 +101,7 @@ export type PublicSystemUpdateStatus = {
   targetVersion: string | null;
   targetCommit: string | null;
   startedAt: string | null;
+  requestedAt: string | null;
   lastUpdatedAt: string;
   completedAt: string | null;
   requester: UpdateIdentity | null;
@@ -104,18 +109,24 @@ export type PublicSystemUpdateStatus = {
   checkToken: string | null;
   checkExpiresAt: string | null;
   active: boolean;
+  available: boolean;
 };
 
 export type SystemUpdateConfiguration = {
   enabled: boolean;
+  configured: boolean;
   disabledReason: string;
+  disabledCode: SystemUpdateCode;
   mode: SystemUpdateMode;
   environmentLabel: string;
   applicationDir: string;
   statusPath: string | null;
+  statusWritePath: string | null;
   requestPath: string | null;
   windowsRunnerPath: string | null;
   windowsConfigPath: string | null;
+  windowsAgentHealthPath: string | null;
+  windowsShutdownPath: string | null;
   approvedRepository: typeof APPROVED_UPDATE_REPOSITORY;
   remote: typeof APPROVED_UPDATE_REMOTE;
   branch: typeof APPROVED_UPDATE_BRANCH;
@@ -186,22 +197,140 @@ function sameWindowsPath(left: string, right: string) {
     === path.win32.resolve(right).replace(/[\\/]+$/, '').toLowerCase();
 }
 
-function disabledConfiguration(applicationDir: string, reason: string): SystemUpdateConfiguration {
+export function isProtectedWindowsDevelopmentPath(value: string) {
+  const normalized = path.win32.resolve(value);
+  return path.win32.parse(normalized).root.toUpperCase() === 'F:\\';
+}
+
+function disabledConfiguration(
+  applicationDir: string,
+  reason: string,
+  code: SystemUpdateCode = 'deployment_not_configured',
+  configured = false,
+  mode: SystemUpdateMode = 'disabled',
+  environmentLabel = code === 'deployment_not_configured' ? 'UPDATER NOT CONFIGURED' : 'CONFIGURATION INVALID',
+): SystemUpdateConfiguration {
   return {
     enabled: false,
+    configured,
     disabledReason: reason,
-    mode: 'disabled',
-    environmentLabel: 'UPDATE CONTROL DISABLED',
+    disabledCode: code,
+    mode,
+    environmentLabel,
     applicationDir,
     statusPath: null,
+    statusWritePath: null,
     requestPath: null,
     windowsRunnerPath: null,
     windowsConfigPath: null,
+    windowsAgentHealthPath: null,
+    windowsShutdownPath: null,
     approvedRepository: APPROVED_UPDATE_REPOSITORY,
     remote: APPROVED_UPDATE_REMOTE,
     branch: APPROVED_UPDATE_BRANCH,
     port: APPROVED_MCC_PORT,
   };
+}
+
+type WindowsUpdaterConfigurationFile = {
+  schemaVersion?: unknown;
+  deploymentMode?: unknown;
+  applicationPath?: unknown;
+  repository?: unknown;
+  remote?: unknown;
+  branch?: unknown;
+  port?: unknown;
+  mccTaskName?: unknown;
+  updaterTaskName?: unknown;
+};
+
+function readWindowsUpdaterConfiguration(
+  resolvedApplicationDir: string,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+) {
+  if (platform !== 'win32') {
+    return disabledConfiguration(resolvedApplicationDir, 'The Windows updater requires Windows.', 'configuration_invalid', true);
+  }
+  const programData = environment.ProgramData || 'C:\\ProgramData';
+  const configPath = path.win32.resolve(environment.MCC_UPDATE_WINDOWS_CONFIG || path.win32.join(programData, 'MCC', 'Updater', 'config.json'));
+  const updaterRoot = path.win32.dirname(configPath);
+  const expectedRoot = path.win32.resolve(programData, 'MCC', 'Updater');
+  const testOverride = environment.NODE_ENV === 'test';
+  if (path.win32.basename(configPath).toLowerCase() !== 'config.json'
+    || (!testOverride && !sameWindowsPath(updaterRoot, expectedRoot))) {
+    return disabledConfiguration(resolvedApplicationDir, 'The protected Windows updater configuration location is invalid.', 'configuration_invalid', true);
+  }
+  if (!fs.existsSync(configPath)) {
+    return disabledConfiguration(resolvedApplicationDir, 'The updater is not configured in this environment.');
+  }
+
+  let item: WindowsUpdaterConfigurationFile;
+  try {
+    item = JSON.parse(fs.readFileSync(configPath, 'utf8')) as WindowsUpdaterConfigurationFile;
+  } catch {
+    return disabledConfiguration(resolvedApplicationDir, 'The protected Windows updater configuration is invalid.', 'configuration_invalid', true);
+  }
+  const deploymentMode = cleanText(item.deploymentMode, 40);
+  const mode: SystemUpdateMode = deploymentMode === 'WindowsTest'
+    ? 'windows_test'
+    : deploymentMode === 'WindowsProduction'
+      ? 'windows_production'
+      : 'disabled';
+  const environmentLabel = mode === 'windows_test'
+    ? 'WINDOWS TEST MODE'
+    : mode === 'windows_production'
+      ? 'WINDOWS 11 PRODUCTION'
+      : 'CONFIGURATION INVALID';
+  const applicationPath = typeof item.applicationPath === 'string' ? path.win32.resolve(item.applicationPath) : '';
+  const validFixedConfiguration = item.schemaVersion === 1
+    && mode !== 'disabled'
+    && canonicalRepositoryUrl(String(item.repository ?? '')) === canonicalRepositoryUrl(APPROVED_UPDATE_REPOSITORY)
+    && item.remote === APPROVED_UPDATE_REMOTE
+    && item.branch === APPROVED_UPDATE_BRANCH
+    && item.port === APPROVED_MCC_PORT
+    && item.mccTaskName === 'MaintenanceCommandCenter'
+    && item.updaterTaskName === 'MaintenanceCommandCenterUpdater';
+  if (!validFixedConfiguration || !applicationPath || isProtectedWindowsDevelopmentPath(applicationPath)) {
+    return disabledConfiguration(
+      resolvedApplicationDir,
+      'The protected Windows updater configuration is invalid.',
+      'configuration_invalid',
+      true,
+      mode,
+      environmentLabel,
+    );
+  }
+  if (!sameWindowsPath(applicationPath, resolvedApplicationDir)) {
+    return disabledConfiguration(
+      resolvedApplicationDir,
+      'The configured MCC application does not match the running managed installation.',
+      'configuration_invalid',
+      true,
+      mode,
+      environmentLabel,
+    );
+  }
+  return {
+    enabled: true,
+    configured: true,
+    disabledReason: '',
+    disabledCode: 'not_checked' as const,
+    mode,
+    environmentLabel,
+    applicationDir: applicationPath,
+    statusPath: path.win32.join(updaterRoot, 'status', 'status.json'),
+    statusWritePath: path.win32.join(updaterRoot, 'request', 'api-status.json'),
+    requestPath: path.win32.join(updaterRoot, 'request', 'request.json'),
+    windowsRunnerPath: null,
+    windowsConfigPath: configPath,
+    windowsAgentHealthPath: path.win32.join(updaterRoot, 'status', 'agent-health.json'),
+    windowsShutdownPath: path.win32.join(updaterRoot, 'request', 'shutdown-request.json'),
+    approvedRepository: APPROVED_UPDATE_REPOSITORY,
+    remote: APPROVED_UPDATE_REMOTE,
+    branch: APPROVED_UPDATE_BRANCH,
+    port: APPROVED_MCC_PORT,
+  } satisfies SystemUpdateConfiguration;
 }
 
 export function loadSystemUpdateConfiguration(
@@ -213,6 +342,10 @@ export function loadSystemUpdateConfiguration(
   const requestedMode = cleanText(environment.MCC_UPDATE_MODE, 40).toLowerCase();
   if (!requestedMode) return disabledConfiguration(resolvedApplicationDir, 'The updater is not configured in this environment.');
 
+  if (requestedMode === 'windows_agent') {
+    return readWindowsUpdaterConfiguration(resolvedApplicationDir, environment, platform);
+  }
+
   if (requestedMode === 'raspberry_pi') {
     if (platform !== 'linux') return disabledConfiguration(resolvedApplicationDir, 'Raspberry Pi production mode requires Linux.');
     const configuredApplicationDir = path.resolve(environment.MCC_UPDATE_APP_DIR || resolvedApplicationDir);
@@ -222,14 +355,19 @@ export function loadSystemUpdateConfiguration(
     const stateDir = path.resolve(environment.MCC_UPDATE_STATE_DIR || '/var/lib/mcc-update');
     return {
       enabled: true,
+      configured: true,
       disabledReason: '',
+      disabledCode: 'not_checked',
       mode: 'raspberry_pi',
       environmentLabel: 'RASPBERRY PI PRODUCTION',
       applicationDir: resolvedApplicationDir,
       statusPath: path.join(stateDir, 'status.json'),
+      statusWritePath: path.join(stateDir, 'status.json'),
       requestPath: path.join(stateDir, 'request.json'),
       windowsRunnerPath: null,
       windowsConfigPath: null,
+      windowsAgentHealthPath: null,
+      windowsShutdownPath: null,
       approvedRepository: APPROVED_UPDATE_REPOSITORY,
       remote: APPROVED_UPDATE_REMOTE,
       branch: APPROVED_UPDATE_BRANCH,
@@ -238,61 +376,46 @@ export function loadSystemUpdateConfiguration(
   }
 
   if (requestedMode === 'windows_test') {
-    if (platform !== 'win32') return disabledConfiguration(resolvedApplicationDir, 'Windows test mode requires Windows.');
-    const requiredApplicationDir = 'Z:\\MCC_V1_FINAL';
-    const configuredApplicationDir = environment.MCC_UPDATE_APP_DIR || '';
-    if (!configuredApplicationDir || !sameWindowsPath(configuredApplicationDir, requiredApplicationDir) || !sameWindowsPath(resolvedApplicationDir, requiredApplicationDir)) {
-      return disabledConfiguration(resolvedApplicationDir, 'Windows test mode is restricted to Z:\\MCC_V1_FINAL.');
-    }
-    const stateDir = path.win32.resolve(environment.MCC_UPDATE_STATE_DIR || 'Z:\\MCC_UPDATE\\state');
-    const runnerPath = path.win32.resolve(environment.MCC_UPDATE_WINDOWS_RUNNER || 'Z:\\MCC_UPDATE\\Invoke-MccTestUpdate.ps1');
-    const configPath = path.win32.resolve(environment.MCC_UPDATE_WINDOWS_CONFIG || 'Z:\\MCC_UPDATE\\config.json');
-    if (path.win32.parse(stateDir).root.toUpperCase() !== 'Z:\\'
-      || path.win32.parse(runnerPath).root.toUpperCase() !== 'Z:\\'
-      || path.win32.parse(configPath).root.toUpperCase() !== 'Z:\\'
-      || path.win32.basename(runnerPath).toLowerCase() !== 'invoke-mcctestupdate.ps1') {
-      return disabledConfiguration(resolvedApplicationDir, 'Windows test updater files must remain on the isolated Z: test drive.');
-    }
-    return {
-      enabled: true,
-      disabledReason: '',
-      mode: 'windows_test',
-      environmentLabel: 'WINDOWS TEST MODE',
-      applicationDir: path.win32.resolve(requiredApplicationDir),
-      statusPath: path.win32.join(stateDir, 'status.json'),
-      requestPath: path.win32.join(stateDir, 'request.json'),
-      windowsRunnerPath: runnerPath,
-      windowsConfigPath: configPath,
-      approvedRepository: APPROVED_UPDATE_REPOSITORY,
-      remote: APPROVED_UPDATE_REMOTE,
-      branch: APPROVED_UPDATE_BRANCH,
-      port: APPROVED_MCC_PORT,
-    };
+    return disabledConfiguration(
+      resolvedApplicationDir,
+      'Install the managed Windows updater agent before enabling the Settings update control. The legacy Z: script remains available as a manual test harness.',
+    );
   }
 
-  return disabledConfiguration(resolvedApplicationDir, 'MCC_UPDATE_MODE must be raspberry_pi or windows_test.');
+  return disabledConfiguration(resolvedApplicationDir, 'MCC_UPDATE_MODE must be raspberry_pi, windows_test, or windows_agent.', 'configuration_invalid', true);
 }
 
 export class JsonSystemUpdateStatusStore implements SystemUpdateStatusStore {
-  constructor(private readonly statusPath: string) {}
+  constructor(
+    private readonly statusPath: string,
+    private readonly writePath = statusPath,
+  ) {}
 
   read() {
-    try {
-      if (!fs.existsSync(this.statusPath)) return null;
-      return normalizeStatus(JSON.parse(fs.readFileSync(this.statusPath, 'utf8')));
-    } catch {
-      return null;
-    }
+    const candidates = [...new Set([this.statusPath, this.writePath])].flatMap(statusPath => {
+      try {
+        if (!fs.existsSync(statusPath)) return [];
+        const status = normalizeStatus(JSON.parse(fs.readFileSync(statusPath, 'utf8')));
+        return status ? [status] : [];
+      } catch {
+        return [];
+      }
+    });
+    return candidates.sort((left, right) => {
+      const leftTime = Date.parse(left.lastUpdatedAt);
+      const rightTime = Date.parse(right.lastUpdatedAt);
+      return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+    })[0] ?? null;
   }
 
   write(status: SystemUpdateStatus) {
-    const directory = path.dirname(this.statusPath);
+    const directory = path.dirname(this.writePath);
     fs.mkdirSync(directory, { recursive: true });
-    const temporaryPath = path.join(directory, `.${path.basename(this.statusPath)}.${process.pid}.${crypto.randomBytes(5).toString('hex')}.tmp`);
+    const temporaryPath = path.join(directory, `.${path.basename(this.writePath)}.${process.pid}.${crypto.randomBytes(5).toString('hex')}.tmp`);
     fs.writeFileSync(temporaryPath, `${JSON.stringify(status, null, 2)}\n`, { encoding: 'utf8', mode: 0o640, flag: 'wx' });
-    fs.renameSync(temporaryPath, this.statusPath);
+    fs.renameSync(temporaryPath, this.writePath);
     try {
-      fs.chmodSync(this.statusPath, 0o640);
+      fs.chmodSync(this.writePath, 0o640);
     } catch {
       // Windows ACLs are configured by the deployment helper rather than POSIX mode bits.
     }
@@ -317,7 +440,7 @@ function normalizeStatus(value: unknown): SystemUpdateStatus | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
   if (item.schemaVersion !== 1 || !systemUpdateStates.includes(item.state as SystemUpdateState)) return null;
-  const mode: SystemUpdateMode = ['disabled','raspberry_pi','windows_test'].includes(String(item.mode)) ? item.mode as SystemUpdateMode : 'disabled';
+  const mode: SystemUpdateMode = ['disabled','raspberry_pi','windows_test','windows_production'].includes(String(item.mode)) ? item.mode as SystemUpdateMode : 'disabled';
   const events = Array.isArray(item.events) ? item.events.flatMap(raw => {
     if (!raw || typeof raw !== 'object') return [];
     const event = raw as Record<string, unknown>;
@@ -337,6 +460,7 @@ function normalizeStatus(value: unknown): SystemUpdateStatus | null {
     installed: normalizeVersionRef(item.installed),
     target: normalizeVersionRef(item.target),
     startedAt: item.startedAt ? cleanText(item.startedAt, 40) : null,
+    requestedAt: item.requestedAt ? cleanText(item.requestedAt, 40) : null,
     lastUpdatedAt: cleanText(item.lastUpdatedAt, 40),
     completedAt: item.completedAt ? cleanText(item.completedAt, 40) : null,
     requester: item.requester && typeof item.requester === 'object' ? {
@@ -379,13 +503,14 @@ function baseStatus(configuration: SystemUpdateConfiguration, nowValue: string, 
     schemaVersion: 1,
     jobId: null,
     state: 'idle',
-    code: configuration.enabled ? 'not_checked' : 'deployment_not_configured',
+    code: configuration.enabled ? 'not_checked' : configuration.disabledCode,
     message: configuration.enabled ? 'Check the approved origin/main branch for MCC updates.' : configuration.disabledReason,
     mode: configuration.mode,
     environmentLabel: configuration.environmentLabel,
     installed,
     target: { version: null, commit: null },
     startedAt: null,
+    requestedAt: null,
     lastUpdatedAt: nowValue,
     completedAt: null,
     requester: null,
@@ -394,6 +519,50 @@ function baseStatus(configuration: SystemUpdateConfiguration, nowValue: string, 
     checkExpiresAt: null,
     events: [],
   };
+}
+
+type DeploymentAvailability = {
+  available: boolean;
+  code: SystemUpdateCode;
+  message: string;
+};
+
+function windowsAgentAvailability(configuration: SystemUpdateConfiguration, nowMs: number): DeploymentAvailability {
+  if (!configuration.enabled) {
+    return { available: false, code: configuration.disabledCode, message: configuration.disabledReason };
+  }
+  if (!configuration.windowsAgentHealthPath) {
+    return { available: true, code: 'not_checked', message: '' };
+  }
+  try {
+    const requestDirectory = path.dirname(configuration.requestPath!);
+    const statusDirectory = path.dirname(configuration.statusPath!);
+    fs.accessSync(requestDirectory, fs.constants.R_OK | fs.constants.W_OK);
+    fs.accessSync(statusDirectory, fs.constants.R_OK);
+    const health = JSON.parse(fs.readFileSync(configuration.windowsAgentHealthPath, 'utf8')) as Record<string, unknown>;
+    const checkedAt = Date.parse(cleanText(health.checkedAt, 40));
+    if (health.schemaVersion !== 1 || !Number.isFinite(checkedAt) || nowMs - checkedAt > 90_000 || checkedAt - nowMs > 30_000) {
+      return { available: false, code: 'updater_agent_offline', message: 'The Windows updater agent is offline.' };
+    }
+    if (health.configurationValid !== true
+      || health.applicationPathMatches !== true
+      || health.repositoryValid !== true
+      || health.branchValid !== true
+      || health.requestDirectoryAccessible !== true
+      || health.statusDirectoryAccessible !== true
+      || cleanText(health.deploymentMode, 40) !== (configuration.mode === 'windows_test' ? 'WindowsTest' : 'WindowsProduction')) {
+      return { available: false, code: 'configuration_invalid', message: 'The protected Windows updater configuration is invalid.' };
+    }
+    if (health.updaterTaskInstalled !== true || health.agentHealthy !== true) {
+      return { available: false, code: 'updater_agent_offline', message: 'The Windows updater agent is offline.' };
+    }
+    if (health.mccTaskInstalled !== true || health.mccTaskRunning !== true) {
+      return { available: false, code: 'mcc_service_not_running', message: 'The managed MCC background task is not running.' };
+    }
+    return { available: true, code: 'not_checked', message: '' };
+  } catch {
+    return { available: false, code: 'updater_agent_offline', message: 'The Windows updater agent is offline.' };
+  }
 }
 
 export class SystemUpdateService {
@@ -426,27 +595,49 @@ export class SystemUpdateService {
   }
 
   publicStatus(status = this.readStatus()): PublicSystemUpdateStatus {
+    const availability = windowsAgentAvailability(this.configuration, this.clock().getTime());
+    const preserveJobState = activeInstallStates.has(status.state)
+      || ['succeeded','rolled_back','failed'].includes(status.state);
+    const visibleStatus = !availability.available && !preserveJobState
+      ? {
+          ...status,
+          state: 'idle' as const,
+          code: availability.code,
+          message: availability.message,
+          checkToken: null,
+          checkExpiresAt: null,
+        }
+      : status;
     return {
       ok: true,
-      configured: this.configuration.enabled,
-      state: status.state,
-      code: status.code,
-      message: cleanText(status.message),
-      mode: status.mode,
-      environmentLabel: status.environmentLabel,
-      installedVersion: status.installed.version,
-      installedCommit: shortCommit(status.installed.commit),
-      targetVersion: status.target.version,
-      targetCommit: shortCommit(status.target.commit),
-      startedAt: status.startedAt,
-      lastUpdatedAt: status.lastUpdatedAt,
-      completedAt: status.completedAt,
-      requester: status.requester ? { id: status.requester.id, name: cleanText(status.requester.name, 120) } : null,
-      outcome: status.outcome,
-      checkToken: status.code === 'update_available' || status.code === 'same_version_different_commit' ? status.checkToken : null,
-      checkExpiresAt: status.code === 'update_available' || status.code === 'same_version_different_commit' ? status.checkExpiresAt : null,
-      active: activeInstallStates.has(status.state) || status.state === 'checking',
+      configured: this.configuration.configured ?? this.configuration.enabled,
+      available: availability.available,
+      state: visibleStatus.state,
+      code: visibleStatus.code,
+      message: cleanText(visibleStatus.message),
+      mode: visibleStatus.mode,
+      environmentLabel: visibleStatus.environmentLabel,
+      installedVersion: visibleStatus.installed.version,
+      installedCommit: shortCommit(visibleStatus.installed.commit),
+      targetVersion: visibleStatus.target.version,
+      targetCommit: shortCommit(visibleStatus.target.commit),
+      startedAt: visibleStatus.startedAt,
+      requestedAt: visibleStatus.requestedAt,
+      lastUpdatedAt: visibleStatus.lastUpdatedAt,
+      completedAt: visibleStatus.completedAt,
+      requester: visibleStatus.requester ? { id: visibleStatus.requester.id, name: cleanText(visibleStatus.requester.name, 120) } : null,
+      outcome: visibleStatus.outcome,
+      checkToken: visibleStatus.code === 'update_available' || visibleStatus.code === 'same_version_different_commit' ? visibleStatus.checkToken : null,
+      checkExpiresAt: visibleStatus.code === 'update_available' || visibleStatus.code === 'same_version_different_commit' ? visibleStatus.checkExpiresAt : null,
+      active: activeInstallStates.has(visibleStatus.state) || visibleStatus.state === 'checking',
     };
+  }
+
+  private requireDeploymentAvailable() {
+    const availability = windowsAgentAvailability(this.configuration, this.clock().getTime());
+    if (!availability.available) {
+      throw new SystemUpdateError(503, availability.code, availability.message);
+    }
   }
 
   private write(status: SystemUpdateStatus) {
@@ -482,8 +673,9 @@ export class SystemUpdateService {
 
   private inspectedRepository(fetchRemote: boolean) {
     if (!this.configuration.enabled) {
-      throw new SystemUpdateError(503, 'deployment_not_configured', this.configuration.disabledReason);
+      throw new SystemUpdateError(503, this.configuration.disabledCode, this.configuration.disabledReason);
     }
+    this.requireDeploymentAvailable();
     this.repositoryIdentity();
     this.cleanWorkingTree();
     const installed = this.localInstalledRef();
@@ -628,8 +820,9 @@ export class SystemUpdateService {
       throw new SystemUpdateError(409, 'update_already_running', 'An MCC update is already running.');
     }
     if (!this.configuration.enabled || !this.configuration.requestPath) {
-      throw new SystemUpdateError(503, 'deployment_not_configured', this.configuration.disabledReason);
+      throw new SystemUpdateError(503, this.configuration.disabledCode, this.configuration.disabledReason);
     }
+    this.requireDeploymentAvailable();
     if (!current.checkToken || !current.checkExpiresAt || !current.target.commit || !current.target.version
       || !['update_available','same_version_different_commit'].includes(current.code)
       || current.state !== 'update_available') {
@@ -669,6 +862,7 @@ export class SystemUpdateService {
       message: 'The MCC update is queued for the external update runner.',
       requester,
       startedAt: queuedAt,
+      requestedAt: queuedAt,
       lastUpdatedAt: queuedAt,
       completedAt: null,
       outcome: 'none',
@@ -681,6 +875,7 @@ export class SystemUpdateService {
         message: 'Update request accepted by MCC.',
       }],
     };
+    let requestCreated = false;
     try {
       this.writeRequest({
         schemaVersion: 1,
@@ -696,12 +891,14 @@ export class SystemUpdateService {
           port: this.configuration.port,
         },
       });
+      requestCreated = true;
       this.write(queuedStatus);
       this.trigger(this.configuration);
-    } catch {
+    } catch (error) {
+      if (!requestCreated && error instanceof SystemUpdateError) throw error;
       const failedAt = this.now();
       try {
-        if (this.configuration.requestPath && fs.existsSync(this.configuration.requestPath)) fs.rmSync(this.configuration.requestPath, { force: true });
+        if (requestCreated && this.configuration.requestPath && fs.existsSync(this.configuration.requestPath)) fs.rmSync(this.configuration.requestPath, { force: true });
       } catch {
         // The failed request remains inert unless the fixed external service is explicitly started.
       }
@@ -734,10 +931,20 @@ export class SystemUpdateService {
     const requestPath = this.configuration.requestPath!;
     const directory = path.dirname(requestPath);
     fs.mkdirSync(directory, { recursive: true });
+    if (fs.existsSync(requestPath)) {
+      throw new SystemUpdateError(409, 'update_already_running', 'An MCC update request is already queued.');
+    }
     const temporaryPath = path.join(directory, `.${path.basename(requestPath)}.${process.pid}.${crypto.randomBytes(5).toString('hex')}.tmp`);
     try {
       fs.writeFileSync(temporaryPath, `${JSON.stringify(request, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-      fs.renameSync(temporaryPath, requestPath);
+      try {
+        fs.linkSync(temporaryPath, requestPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new SystemUpdateError(409, 'update_already_running', 'An MCC update request is already queued.');
+        }
+        throw error;
+      }
       try {
         fs.chmodSync(requestPath, 0o600);
       } catch {
@@ -764,28 +971,10 @@ export function triggerConfiguredSystemUpdate(configuration: SystemUpdateConfigu
     if (result.status !== 0) throw new Error('The fixed Raspberry Pi update request service could not be started.');
     return;
   }
-  if (configuration.mode === 'windows_test' && configuration.windowsRunnerPath && configuration.windowsConfigPath) {
-    if (!fs.existsSync(configuration.windowsRunnerPath) || !fs.existsSync(configuration.windowsConfigPath)) {
-      throw new Error('The fixed Windows MCC update runner or configuration is missing.');
-    }
-    const child = spawn('powershell.exe', [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'RemoteSigned',
-      '-File',
-      configuration.windowsRunnerPath,
-      '-ConfigurationPath',
-      configuration.windowsConfigPath,
-    ], {
-      cwd: 'Z:\\MCC_UPDATE',
-      detached: true,
-      windowsHide: true,
-      stdio: 'ignore',
-    });
-    child.once('error', () => undefined);
-    child.unref();
+  if ((configuration.mode === 'windows_test' || configuration.mode === 'windows_production')
+    && configuration.windowsAgentHealthPath) {
+    // The Administrator-installed SYSTEM agent polls the fixed request location.
+    // The MCC backend never starts an elevated process or supplies command arguments.
     return;
   }
   throw new Error('The external MCC update runner is not configured.');

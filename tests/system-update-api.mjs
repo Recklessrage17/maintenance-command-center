@@ -10,6 +10,7 @@ const fixture = path.join(root, 'tmp', `system-update-api-${Date.now()}-${proces
 const dataDir = path.join(fixture, 'data');
 const ownerPassword = 'Owner-Update!7';
 const managerPassword = 'Manager-Update!7';
+const technicianPassword = 'Technician-Update!7';
 let server;
 let serverOutput = '';
 
@@ -122,20 +123,35 @@ try {
   assert.equal(result.response.status, 201, JSON.stringify(result.data));
   const managerCookie = await login(base, 'manager@example.com', managerPassword);
 
-  for (const [method, pathname] of [
-    ['GET', '/api/system/update/status'],
-    ['POST', '/api/system/update/check'],
-    ['POST', '/api/system/update/install'],
-  ]) {
-    result = await request(base, pathname, { method, cookie: managerCookie, body: method === 'POST' ? {} : undefined });
-    assert.equal(result.response.status, 403, `Manager must be denied ${method} ${pathname}.`);
-    assert.deepEqual(result.data, { ok: false, error: 'Admin access required.' });
+  result = await request(base, '/api/users', {
+    method: 'POST',
+    cookie: ownerCookie,
+    body: {
+      fullName: 'Maintenance Technician',
+      email: 'technician@example.com',
+      role: 'Maintenance Tech 1',
+      temporaryPassword: technicianPassword,
+    },
+  });
+  assert.equal(result.response.status, 201, JSON.stringify(result.data));
+  const technicianCookie = await login(base, 'technician@example.com', technicianPassword);
+
+  for (const [roleLabel, cookie] of [['Manager', managerCookie], ['Maintenance Tech', technicianCookie]]) {
+    for (const [method, pathname] of [
+      ['GET', '/api/system/update/status'],
+      ['POST', '/api/system/update/check'],
+      ['POST', '/api/system/update/install'],
+    ]) {
+      result = await request(base, pathname, { method, cookie, body: method === 'POST' ? {} : undefined });
+      assert.equal(result.response.status, 403, `${roleLabel} must be denied ${method} ${pathname}.`);
+      assert.deepEqual(result.data, { ok: false, error: 'Admin access required.' });
+    }
   }
 
   result = await request(base, '/api/system/update/status', { cookie: ownerCookie });
   assert.equal(result.response.status, 200);
   assert.equal(result.data.configured, false);
-  assert.equal(result.data.environmentLabel, 'UPDATE CONTROL DISABLED');
+  assert.equal(result.data.environmentLabel, 'UPDATER NOT CONFIGURED');
   assert.ok(result.data.csrfToken);
   assert.equal(JSON.stringify(result.data).includes(root), false);
   const csrfToken = result.data.csrfToken;
@@ -212,7 +228,8 @@ try {
 
   assert.equal(serverOutput.includes(ownerPassword), false);
   assert.equal(serverOutput.includes(managerPassword), false);
-  console.log('System update API tests passed: 401/403 role gating, sanitized status, disabled-mode safety, CSRF, explicit confirmation, and client configuration rejection.');
+  assert.equal(serverOutput.includes(technicianPassword), false);
+  console.log('System update API tests passed: 401/403 Admin/Manager/Maintenance Tech gating, sanitized status, disabled-mode safety, CSRF, explicit confirmation, and client configuration rejection.');
 } finally {
   await stopServer();
   const resolved = path.resolve(fixture);

@@ -134,9 +134,9 @@ After any post-change failure, the runner stops MCC, moves the `main` ref back t
 
 Tracked or untracked production changes block the workflow. Nothing is automatically stashed, cleaned, discarded, or overwritten.
 
-## Windows Z: test-mode installation
+## Legacy Windows Z: manual test harness
 
-The PowerShell harness is deliberately restricted to `Z:\MCC_V1_FINAL`. Its validation rejects `F:\MCC_V1_FINAL` and every non-Z target.
+The Issue #60 PowerShell harness remains available for manual validation and rollback simulation. It is deliberately restricted to `Z:\MCC_V1_FINAL`; its validation rejects `F:\MCC_V1_FINAL` and every non-Z target.
 
 Use a dedicated local service account named `MCCService` for the Z: test backend. From an elevated PowerShell:
 
@@ -154,19 +154,11 @@ icacls 'Z:\MCC_V1_FINAL' /grant 'MCCService:(OI)(CI)M'
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File 'Z:\MCC_UPDATE\Invoke-MccTestUpdate.ps1' -ConfigurationPath 'Z:\MCC_UPDATE\config.json' -ValidateOnly
 ```
 
-Configure only the Z: test copy:
-
-```dotenv
-MCC_UPDATE_MODE=windows_test
-MCC_UPDATE_APP_DIR=Z:\MCC_V1_FINAL
-MCC_UPDATE_STATE_DIR=Z:\MCC_UPDATE\state
-MCC_UPDATE_WINDOWS_RUNNER=Z:\MCC_UPDATE\Invoke-MccTestUpdate.ps1
-MCC_UPDATE_WINDOWS_CONFIG=Z:\MCC_UPDATE\config.json
-```
-
 The helper uses the fixed Z: clone, stops only the controlled PID/port `4273` process, creates and verifies a ZIP safety backup, fast-forwards, runs locked installs/build, restarts, health-checks, and rolls back on failure. The `simulation.failInstall`, `simulation.failBuild`, and `simulation.failHealth` switches exist only in the administrator-owned Windows test config so rollback paths can be exercised; they are never accepted through the API.
 
-The Settings panel says `WINDOWS TEST MODE` in this environment and `RASPBERRY PI PRODUCTION` on the Pi. Disabled development copies say `UPDATE CONTROL DISABLED` and cannot queue an update.
+The Node backend no longer spawns this PowerShell harness. Setting `MCC_UPDATE_MODE=windows_test` alone leaves the Settings card at `UPDATER NOT CONFIGURED`; an Administrator runs the legacy script directly.
+
+For managed `WINDOWS TEST MODE` or `WINDOWS 11 PRODUCTION` Settings control, install the Issue #61 agent from [`deploy/windows/README-Windows-Updater.md`](../deploy/windows/README-Windows-Updater.md). The managed installer sets `MCC_UPDATE_MODE=windows_agent` inside the controlled Windows task only after protected configuration and agent health are available. Raspberry Pi continues to display `RASPBERRY PI PRODUCTION`.
 
 ## Removal and recovery
 

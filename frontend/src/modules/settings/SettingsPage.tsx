@@ -33,16 +33,18 @@ type SystemUpdateState =
 type SystemUpdateStatus = {
   ok: boolean;
   configured: boolean;
+  available: boolean;
   state: SystemUpdateState;
   code: string;
   message: string;
-  mode: 'disabled' | 'raspberry_pi' | 'windows_test';
+  mode: 'disabled' | 'raspberry_pi' | 'windows_test' | 'windows_production';
   environmentLabel: string;
   installedVersion: string | null;
   installedCommit: string | null;
   targetVersion: string | null;
   targetCommit: string | null;
   startedAt: string | null;
+  requestedAt: string | null;
   lastUpdatedAt: string;
   completedAt: string | null;
   requester: { id: number; name: string } | null;
@@ -295,21 +297,23 @@ function normalizeSystemUpdate(value:unknown):SystemUpdateStatus|null {
     'idle','checking','update_available','queued','backing_up','stopping','pulling','installing_dependencies',
     'building','starting','health_check','succeeded','rolling_back','rolled_back','failed',
   ].includes(state))return null;
-  const mode=['raspberry_pi','windows_test'].includes(String(data.mode))?String(data.mode) as SystemUpdateStatus['mode']:'disabled';
+  const mode=['raspberry_pi','windows_test','windows_production'].includes(String(data.mode))?String(data.mode) as SystemUpdateStatus['mode']:'disabled';
   const requester=asRecord(data.requester);
   return {
     ok:data.ok!==false,
     configured:data.configured===true,
+    available:data.available!==false&&data.configured===true,
     state:state as SystemUpdateState,
     code:String(data.code??'not_checked').slice(0,80),
     message:String(data.message??'').replace(/\s+/g,' ').slice(0,240),
     mode,
-    environmentLabel:String(data.environmentLabel??(mode==='windows_test'?'WINDOWS TEST MODE':mode==='raspberry_pi'?'RASPBERRY PI PRODUCTION':'UPDATE CONTROL DISABLED')).slice(0,80),
+    environmentLabel:String(data.environmentLabel??(mode==='windows_test'?'WINDOWS TEST MODE':mode==='windows_production'?'WINDOWS 11 PRODUCTION':mode==='raspberry_pi'?'RASPBERRY PI PRODUCTION':'UPDATER NOT CONFIGURED')).slice(0,80),
     installedVersion:typeof data.installedVersion==='string'?data.installedVersion:null,
     installedCommit:typeof data.installedCommit==='string'?data.installedCommit:null,
     targetVersion:typeof data.targetVersion==='string'?data.targetVersion:null,
     targetCommit:typeof data.targetCommit==='string'?data.targetCommit:null,
     startedAt:typeof data.startedAt==='string'?data.startedAt:null,
+    requestedAt:typeof data.requestedAt==='string'?data.requestedAt:null,
     lastUpdatedAt:typeof data.lastUpdatedAt==='string'?data.lastUpdatedAt:'',
     completedAt:typeof data.completedAt==='string'?data.completedAt:null,
     requester:requester.name?{id:Number(requester.id)||0,name:String(requester.name).slice(0,120)}:null,
@@ -326,12 +330,15 @@ function updateStateLabel(update:SystemUpdateStatus|null) {
   if(update.state==='checking')return 'CHECKING FOR UPDATES';
   if(activeSystemUpdateStates.has(update.state))return `${update.state==='rolling_back'?'ROLLING BACK':'INSTALLING'}${update.targetVersion?` v${update.targetVersion}`:''}`;
   if(update.state==='succeeded')return 'UPDATE COMPLETE';
-  if(update.state==='rolled_back')return 'UPDATE FAILED — ROLLED BACK';
-  if(update.state==='failed')return 'UPDATE FAILED';
+  if(update.state==='rolled_back')return 'UPDATE FAILED — PREVIOUS VERSION RESTORED';
+  if(update.state==='failed')return 'CRITICAL UPDATE FAILURE — MANUAL RECOVERY REQUIRED';
   if(['update_available','same_version_different_commit'].includes(update.code))return 'UPDATE AVAILABLE';
   if(update.code==='up_to_date')return '✓ UP TO DATE';
   if(update.code==='not_checked')return 'READY TO CHECK';
-  if(update.code==='deployment_not_configured')return 'UPDATE CONTROL DISABLED';
+  if(update.code==='deployment_not_configured')return 'UPDATER NOT CONFIGURED';
+  if(update.code==='updater_agent_offline')return 'UPDATER AGENT OFFLINE';
+  if(update.code==='configuration_invalid')return 'CONFIGURATION INVALID';
+  if(update.code==='mcc_service_not_running')return 'MCC SERVICE NOT RUNNING';
   if(update.code==='local_changes_block_update')return 'LOCAL CHANGES BLOCK UPDATE';
   if(update.code==='remote_not_fast_forward')return 'REMOTE HISTORY BLOCKED';
   return 'UPDATE CHECK FAILED';
@@ -905,7 +912,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
         : `Update to v${systemUpdate?.targetVersion??''}`.trim()
       : systemUpdate?.code==='not_checked'||systemUpdate?.code==='up_to_date'
         ? 'Check for updates'
-        : systemUpdate?.configured===false
+        : systemUpdate?.available===false
           ? 'Unavailable'
           : 'Try again';
 
@@ -929,7 +936,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             <button
               className={updateAvailable?'primary-button compact-button':'secondary-button compact-button'}
               type="button"
-              disabled={updateBusy||(!systemUpdate?.configured&&!systemUpdate?.active)}
+              disabled={updateBusy||(!systemUpdate?.available&&!systemUpdate?.active)}
               onClick={()=>{
                 if(systemUpdate?.active){setSystemUpdateProgressOpen(true);return;}
                 if(updateAvailable){setSystemUpdateConfirmationOpen(true);return;}
