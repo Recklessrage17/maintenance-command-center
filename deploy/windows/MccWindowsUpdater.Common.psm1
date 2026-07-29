@@ -108,7 +108,15 @@ function Write-MccAtomicJson {
     try {
         $json = $Value | ConvertTo-Json -Depth $Depth
         [System.IO.File]::WriteAllText($temporaryPath, "$json`r`n", [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $temporaryPath -Destination $LiteralPath -Force
+        if ((Get-Item -LiteralPath $temporaryPath -ErrorAction Stop).Length -le 0) {
+            throw 'Atomic JSON validation produced an empty temporary file.'
+        }
+        [void]([System.IO.File]::ReadAllText($temporaryPath, [Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop)
+        if (Test-Path -LiteralPath $LiteralPath -PathType Leaf) {
+            [System.IO.File]::Replace($temporaryPath, $LiteralPath, $null, $true)
+        } else {
+            Move-Item -LiteralPath $temporaryPath -Destination $LiteralPath
+        }
     } finally {
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
             Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue

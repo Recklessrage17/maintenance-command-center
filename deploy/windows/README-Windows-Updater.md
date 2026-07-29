@@ -93,6 +93,29 @@ Windows 11 Production examples:
 
 The installer validates before it changes managed-task or ProgramData state. It installs locked frontend/backend dependencies, builds MCC, starts both tasks, checks `http://127.0.0.1:4273/`, confirms a healthy agent heartbeat, and verifies the updater API rejects an unauthenticated request. The checked-in [`config.schema.json`](config.schema.json) documents the protected configuration contract and its permanent WindowsProduction `main` constraint.
 
+If a previous installer attempt left broken ACLs under the known updater tree, rerun from an elevated PowerShell with the scoped repair switch:
+
+```powershell
+& 'F:\MCC_V1_FINAL\deploy\windows\Install-MccWindowsUpdater.ps1' `
+  -MccPath 'C:\MCC\MCC_V1_FINAL' `
+  -Mode WindowsProduction `
+  -RepairUpdaterAcl `
+  -Confirm:$false
+```
+
+`-RepairUpdaterAcl` is restricted to `C:\ProgramData\MCC\Updater`. It preserves existing configuration, requests, status, logs, and backups; restores Administrators/SYSTEM Full Control and child inheritance; and takes ownership of only that updater tree if normal elevated ACL repair cannot proceed. It never repairs the MCC runtime clone or another ProgramData directory.
+
+For the unmerged WindowsTest branch in this workspace, the elevated retry command is:
+
+```powershell
+& 'F:\MCC_V1_FINAL\deploy\windows\Install-MccWindowsUpdater.ps1' `
+  -MccPath 'Z:\MCC_V1_FINAL' `
+  -Mode WindowsTest `
+  -TestBranch 'feature/windows-11-updater-agent' `
+  -RepairUpdaterAcl `
+  -Confirm:$false
+```
+
 ## Deployment labels
 
 - `WindowsTest` displays `WINDOWS TEST MODE`.
@@ -124,6 +147,10 @@ C:\ProgramData\MCC\Updater\
 Backups remain outside the Git worktree. Each contains sanitized job metadata, a configuration snapshot without secrets, runtime data when present, and SHA-256 verification metadata.
 
 ## ACL design
+
+Installation has two ordered ACL phases. The bootstrap phase enables inheritance throughout the known updater tree and confirms Administrators and SYSTEM Full Control before the installer appends, copies, or replaces any managed file. Scripts and JSON are validated in same-directory temporary files and atomically replace their destinations. The installer then verifies log append, script/config/status create-and-replace, and installed-script reads. Neither scheduled task is installed before those checks pass.
+
+Only after all managed files and bootstrap checks succeed does the final phase replace the bootstrap ACLs with the protected design:
 
 - `Administrators` and `SYSTEM`: Full Control.
 - `LOCAL SERVICE` (MCC):
@@ -199,6 +226,8 @@ After installed code changes, any dependency, build, start, health, commit, or v
 After a Windows restart, the agent safely continues a request that had not changed code. If the verified target commit is already checked out while the same job remains active, it locates that job’s verified backup and enters rollback instead of guessing that the update succeeded.
 
 If rollback fails, the updater records `failed`, preserves the backup and detailed logs, and creates `MANUAL-RECOVERY-<job>.txt`. The Settings card shows `CRITICAL UPDATE FAILURE — MANUAL RECOVERY REQUIRED`.
+
+Installer bootstrap failures print the exact failed stage to the elevated console. If `install.log` cannot be opened, the original exception is still written to the console. A rerun with `-RepairUpdaterAcl` repairs the partial updater tree before continuing; task definitions are not changed until bootstrap verification succeeds, and task registration is rolled back if later install health checks fail.
 
 Manual recovery:
 

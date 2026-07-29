@@ -22,6 +22,10 @@ parameter for WindowsProduction is always rejected.
 
 .PARAMETER Port
 The fixed MCC port. Only 4273 is accepted.
+
+.PARAMETER RepairUpdaterAcl
+Repairs a known partial C:\ProgramData\MCC\Updater installation by restoring
+elevated bootstrap access and child inheritance before installation continues.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -36,7 +40,9 @@ param(
     [string]$TestBranch = 'main',
 
     [ValidateRange(1, 65535)]
-    [int]$Port = 4273
+    [int]$Port = 4273,
+
+    [switch]$RepairUpdaterAcl
 )
 
 Set-StrictMode -Version Latest
@@ -109,6 +115,495 @@ if (-not $PSCmdlet.ShouldProcess($applicationPath, "Install $Mode managed Window
 }
 
 $updaterRoot = $constants.UpdaterRoot
+$knownUpdaterRoot = 'C:\ProgramData\MCC\Updater'
+$installLog = Join-Path $updaterRoot 'logs\install.log'
+$script:InstallerLogPath = ''
+$script:InstallerBootstrapStage = 'bootstrap initialization'
+
+function Assert-MccKnownUpdaterRoot {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $actual = [System.IO.Path]::GetFullPath($LiteralPath).TrimEnd('\')
+    $expected = [System.IO.Path]::GetFullPath($knownUpdaterRoot).TrimEnd('\')
+    if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Updater ACL operations are restricted to $knownUpdaterRoot."
+    }
+}
+
+function Write-MccInstallerLog {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    if (-not $script:InstallerLogPath) {
+        [Console]::Error.WriteLine("MCC installer log unavailable: $Message")
+        return
+    }
+    try {
+        Add-Content -LiteralPath $script:InstallerLogPath -Value "[$([DateTime]::UtcNow.ToString('o'))] $Message" -Encoding utf8
+    } catch {
+        [Console]::Error.WriteLine("MCC installer log unavailable at $script:InstallerLogPath`: $($_.Exception.Message)")
+        [Console]::Error.WriteLine($Message)
+    }
+}
+
+function Get-MccUpdaterTreeItems {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $knownRootPath = [System.IO.Path]::GetFullPath($knownUpdaterRoot).TrimEnd('\')
+    $requestedRootPath = [System.IO.Path]::GetFullPath($LiteralPath).TrimEnd('\')
+    if (-not $requestedRootPath.Equals($knownRootPath, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $requestedRootPath.StartsWith("$knownRootPath\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Updater ACL traversal attempted to start outside the known updater directory.'
+    }
+    $rootItem = Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop
+    $items = [Collections.Generic.List[System.IO.FileSystemInfo]]::new()
+    $items.Add($rootItem)
+    $pending = [Collections.Generic.Queue[System.IO.DirectoryInfo]]::new()
+    $pending.Enqueue([System.IO.DirectoryInfo]$rootItem)
+    $rootPrefix = "$([System.IO.Path]::GetFullPath($LiteralPath).TrimEnd('\'))\"
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Dequeue()
+        foreach ($child in @(Get-ChildItem -LiteralPath $directory.FullName -Force -ErrorAction Stop)) {
+            $childPath = [System.IO.Path]::GetFullPath($child.FullName)
+            if (-not $childPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Updater ACL traversal attempted to leave the known updater directory.'
+            }
+            if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                throw "Updater ACL traversal refuses reparse points: $childPath"
+            }
+            $items.Add($child)
+            if ($child.PSIsContainer) {
+                $pending.Enqueue([System.IO.DirectoryInfo]$child)
+            }
+        }
+    }
+    return $items.ToArray()
+}
+
+function Test-MccFullControlAce {
+    param(
+        [Parameter(Mandatory = $true)][Security.AccessControl.FileSystemSecurity]$Acl,
+        [Parameter(Mandatory = $true)][string]$Sid
+    )
+    $rules = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    return @($rules | Where-Object {
+        $_.IdentityReference.Value -eq $Sid -and
+        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+            [Security.AccessControl.FileSystemRights]::FullControl
+    }).Count -gt 0
+}
+
+function Assert-MccBootstrapAcl {
+    Assert-MccKnownUpdaterRoot -LiteralPath $updaterRoot
+    foreach ($item in @(Get-MccUpdaterTreeItems -LiteralPath $updaterRoot)) {
+        $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+        if ($acl.AreAccessRulesProtected) {
+            throw "Bootstrap ACL validation found inheritance disabled: $($item.FullName)"
+        }
+        if (-not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-32-544') -or
+            -not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-18')) {
+            throw "Bootstrap ACL validation did not find Administrators and SYSTEM Full Control: $($item.FullName)"
+        }
+    }
+}
+
+function Repair-MccUpdaterAcl {
+    Assert-MccAdministrator
+    Assert-MccKnownUpdaterRoot -LiteralPath $updaterRoot
+    [System.IO.Directory]::CreateDirectory($updaterRoot) | Out-Null
+    $aclWorkingDirectory = Split-Path -Parent $updaterRoot
+    $grantArguments = @(
+        $updaterRoot,
+        '/grant:r',
+        '*S-1-5-32-544:(OI)(CI)F',
+        '*S-1-5-18:(OI)(CI)F',
+        '/L'
+    )
+    $recursiveGrantArguments = @(
+        $updaterRoot,
+        '/grant:r',
+        '*S-1-5-32-544:(OI)(CI)F',
+        '*S-1-5-18:(OI)(CI)F',
+        '/T',
+        '/L'
+    )
+    $inheritanceArguments = @($updaterRoot, '/inheritance:e', '/T', '/L')
+    try {
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $grantArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $recursiveGrantArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $inheritanceArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+    } catch {
+        [Console]::Error.WriteLine("Initial updater ACL repair required scoped ownership recovery: $($_.Exception.Message)")
+        Invoke-MccProcess -FilePath 'takeown.exe' -ArgumentList @('/F', $updaterRoot, '/A', '/R', '/D', 'Y') -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $grantArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $recursiveGrantArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $inheritanceArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+    }
+    Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $grantArguments -WorkingDirectory $aclWorkingDirectory -TimeoutSeconds 300 | Out-Null
+    foreach ($item in @(Get-MccUpdaterTreeItems -LiteralPath $updaterRoot)) {
+        Enable-MccBootstrapItemAcl -LiteralPath $item.FullName
+    }
+    Assert-MccBootstrapAcl
+}
+
+function Enable-MccBootstrapItemAcl {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $normalized = [System.IO.Path]::GetFullPath($LiteralPath)
+    $normalizedRoot = [System.IO.Path]::GetFullPath($updaterRoot).TrimEnd('\')
+    $rootPrefix = "$normalizedRoot\"
+    if (-not $normalized.TrimEnd('\').Equals($normalizedRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $normalized.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Bootstrap item ACL repair attempted to leave the known updater directory.'
+    }
+    $item = Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop
+    $acl = Get-Acl -LiteralPath $LiteralPath -ErrorAction Stop
+    $acl.SetAccessRuleProtection($false, $true)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::None
+    if ($item.PSIsContainer) {
+        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    }
+    foreach ($sidText in @('S-1-5-32-544', 'S-1-5-18')) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new($sidText),
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow
+        )
+        $acl.SetAccessRule($rule)
+    }
+    if (-not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-32-544') -or
+        -not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-18')) {
+        throw "Bootstrap replacement grants were not confirmed before restrictive ACE repair: $LiteralPath"
+    }
+    foreach ($rule in @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]) | Where-Object {
+        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny
+    })) {
+        [void]$acl.RemoveAccessRuleSpecific($rule)
+    }
+    Set-Acl -LiteralPath $LiteralPath -AclObject $acl -ErrorAction Stop
+    $validatedAcl = Get-Acl -LiteralPath $LiteralPath -ErrorAction Stop
+    if ($validatedAcl.AreAccessRulesProtected -or
+        -not (Test-MccFullControlAce -Acl $validatedAcl -Sid 'S-1-5-32-544') -or
+        -not (Test-MccFullControlAce -Acl $validatedAcl -Sid 'S-1-5-18')) {
+        throw "Bootstrap item ACL validation failed: $LiteralPath"
+    }
+}
+
+function Install-MccAtomicFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Atomic installer source file is missing: $SourcePath"
+    }
+    $destinationDirectory = Split-Path -Parent $DestinationPath
+    $destinationRootPrefix = "$([System.IO.Path]::GetFullPath($updaterRoot).TrimEnd('\'))\"
+    $normalizedDestination = [System.IO.Path]::GetFullPath($DestinationPath)
+    if (-not $normalizedDestination.StartsWith($destinationRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Atomic installer destination attempted to leave the known updater directory.'
+    }
+    $temporaryPath = Join-Path $destinationDirectory ".$([System.IO.Path]::GetFileName($DestinationPath)).install.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -ErrorAction Stop
+        Unblock-File -LiteralPath $temporaryPath -ErrorAction SilentlyContinue
+        if ((Get-Item -LiteralPath $temporaryPath -ErrorAction Stop).Length -le 0) {
+            throw "Atomic installer validation found an empty temporary file for $DestinationPath."
+        }
+        $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $temporaryHash = (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($sourceHash -cne $temporaryHash) {
+            throw "Atomic installer hash validation failed for $DestinationPath."
+        }
+        if ([System.IO.Path]::GetExtension($DestinationPath) -match '^\.ps(m)?1$') {
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($temporaryPath, [ref]$null, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) {
+                throw "Atomic installer PowerShell validation failed for $DestinationPath."
+            }
+        }
+        Enable-MccBootstrapItemAcl -LiteralPath $temporaryPath
+        if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
+            [System.IO.File]::Replace($temporaryPath, $DestinationPath, $null, $true)
+        } else {
+            Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -ErrorAction Stop
+        }
+        Enable-MccBootstrapItemAcl -LiteralPath $DestinationPath
+        $destinationHash = (Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($destinationHash -cne $sourceHash) {
+            throw "Atomic installer destination validation failed for $DestinationPath."
+        }
+        Unblock-File -LiteralPath $DestinationPath -ErrorAction SilentlyContinue
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-MccInstallerAtomicText {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+    $directory = Split-Path -Parent $LiteralPath
+    $temporaryPath = Join-Path $directory ".$([System.IO.Path]::GetFileName($LiteralPath)).write.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [System.IO.File]::WriteAllText($temporaryPath, $Value, [Text.UTF8Encoding]::new($false))
+        if ((Get-Item -LiteralPath $temporaryPath -ErrorAction Stop).Length -le 0) {
+            throw 'Atomic bootstrap verification produced an empty temporary file.'
+        }
+        Enable-MccBootstrapItemAcl -LiteralPath $temporaryPath
+        if (Test-Path -LiteralPath $LiteralPath -PathType Leaf) {
+            [System.IO.File]::Replace($temporaryPath, $LiteralPath, $null, $true)
+        } else {
+            Move-Item -LiteralPath $temporaryPath -Destination $LiteralPath -ErrorAction Stop
+        }
+        Enable-MccBootstrapItemAcl -LiteralPath $LiteralPath
+        if ([System.IO.File]::ReadAllText($LiteralPath, [Text.Encoding]::UTF8) -cne $Value) {
+            throw "Atomic bootstrap verification could not read back $LiteralPath."
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-MccInstallerJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][object]$Value
+    )
+    Write-MccAtomicJson -LiteralPath $LiteralPath -Value $Value
+    Enable-MccBootstrapItemAcl -LiteralPath $LiteralPath
+    [void](Read-MccJson -LiteralPath $LiteralPath)
+}
+
+function Invoke-MccBootstrapVerification {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$InstalledScriptNames,
+        [Parameter(Mandatory = $true)][string]$SourceDirectory
+    )
+    $verificationId = [Guid]::NewGuid().ToString('N')
+    $scriptVerificationPath = Join-Path $updaterRoot "scripts\.mcc-bootstrap-$verificationId.tmp"
+    $configVerificationPath = Join-Path $updaterRoot ".mcc-bootstrap-config-$verificationId.json"
+    $statusVerificationPath = Join-Path $updaterRoot "status\.mcc-bootstrap-status-$verificationId.json"
+    $verificationPaths = @($scriptVerificationPath, $configVerificationPath, $statusVerificationPath)
+    try {
+        $logMarker = "BOOTSTRAP WRITE TEST $verificationId"
+        Add-Content -LiteralPath $installLog -Value "[$([DateTime]::UtcNow.ToString('o'))] $logMarker" -Encoding utf8
+        if ((Get-Content -LiteralPath $installLog -Raw -Encoding utf8) -notmatch [Regex]::Escape($logMarker)) {
+            throw 'Bootstrap verification could not append and read back logs\install.log.'
+        }
+
+        Write-MccInstallerAtomicText -LiteralPath $scriptVerificationPath -Value "create-$verificationId"
+        Write-MccInstallerAtomicText -LiteralPath $scriptVerificationPath -Value "replace-$verificationId"
+        Write-MccInstallerJson -LiteralPath $configVerificationPath -Value ([ordered]@{ marker = 'create'; id = $verificationId })
+        Write-MccInstallerJson -LiteralPath $configVerificationPath -Value ([ordered]@{ marker = 'replace'; id = $verificationId })
+        Write-MccInstallerJson -LiteralPath $statusVerificationPath -Value ([ordered]@{ marker = 'create'; id = $verificationId })
+        Write-MccInstallerJson -LiteralPath $statusVerificationPath -Value ([ordered]@{ marker = 'replace'; id = $verificationId })
+
+        foreach ($scriptName in $InstalledScriptNames) {
+            $sourcePath = Join-Path $SourceDirectory $scriptName
+            $installedPath = Join-Path $updaterRoot "scripts\$scriptName"
+            $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256 -ErrorAction Stop).Hash
+            $installedHash = (Get-FileHash -LiteralPath $installedPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($sourceHash -cne $installedHash -or
+                [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $installedPath -Raw -Encoding utf8))) {
+                throw "Bootstrap verification could not read back the installed updater script: $scriptName"
+            }
+        }
+    } finally {
+        foreach ($verificationPath in $verificationPaths) {
+            if (Test-Path -LiteralPath $verificationPath -PathType Leaf) {
+                Remove-Item -LiteralPath $verificationPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function New-MccAccessRule {
+    param(
+        [Parameter(Mandatory = $true)][string]$Sid,
+        [Parameter(Mandatory = $true)][Security.AccessControl.FileSystemRights]$Rights,
+        [Parameter(Mandatory = $true)][bool]$IsDirectory
+    )
+    $inheritance = [Security.AccessControl.InheritanceFlags]::None
+    if ($IsDirectory) {
+        $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    }
+    return [Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.SecurityIdentifier]::new($Sid),
+        $Rights,
+        $inheritance,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+    )
+}
+
+function Set-MccFinalAclItem {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [AllowNull()][object]$LocalServiceRights = $null
+    )
+    $item = Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop
+    $acl = Get-Acl -LiteralPath $LiteralPath -ErrorAction Stop
+    $administratorRule = New-MccAccessRule -Sid 'S-1-5-32-544' -Rights ([Security.AccessControl.FileSystemRights]::FullControl) -IsDirectory $item.PSIsContainer
+    $systemRule = New-MccAccessRule -Sid 'S-1-5-18' -Rights ([Security.AccessControl.FileSystemRights]::FullControl) -IsDirectory $item.PSIsContainer
+    $acl.SetAccessRule($administratorRule)
+    $acl.SetAccessRule($systemRule)
+    if ($null -ne $LocalServiceRights) {
+        $localServiceRule = New-MccAccessRule -Sid 'S-1-5-19' -Rights ([Security.AccessControl.FileSystemRights]$LocalServiceRights) -IsDirectory $item.PSIsContainer
+        $acl.SetAccessRule($localServiceRule)
+    }
+    if (-not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-32-544') -or
+        -not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-18')) {
+        throw "Final ACL replacement grants were not confirmed before inheritance removal: $LiteralPath"
+    }
+
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))) {
+        [void]$acl.RemoveAccessRuleSpecific($rule)
+    }
+    $acl.AddAccessRule($administratorRule)
+    $acl.AddAccessRule($systemRule)
+    if ($null -ne $LocalServiceRights) {
+        $acl.AddAccessRule($localServiceRule)
+    }
+    if (-not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-32-544') -or
+        -not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-18')) {
+        throw "Final ACL construction would leave an unsafe DACL: $LiteralPath"
+    }
+    Set-Acl -LiteralPath $LiteralPath -AclObject $acl -ErrorAction Stop
+}
+
+function Set-MccFinalAclProfile {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [AllowNull()][object]$LocalServiceRights = $null,
+        [switch]$Recurse
+    )
+    $profileItems = if ($Recurse) {
+        @(Get-MccUpdaterTreeItems -LiteralPath $LiteralPath)
+    } else {
+        @(Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop)
+    }
+    foreach ($item in $profileItems) {
+        Set-MccFinalAclItem -LiteralPath $item.FullName -LocalServiceRights $LocalServiceRights
+    }
+}
+
+function Assert-MccFinalAclItem {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [AllowNull()][object]$LocalServiceRights = $null
+    )
+    $acl = Get-Acl -LiteralPath $LiteralPath -ErrorAction Stop
+    if (-not $acl.AreAccessRulesProtected) {
+        throw "Final ACL validation found bootstrap inheritance still enabled: $LiteralPath"
+    }
+    if (-not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-32-544') -or
+        -not (Test-MccFullControlAce -Acl $acl -Sid 'S-1-5-18')) {
+        throw "Final ACL validation did not find Administrators and SYSTEM Full Control: $LiteralPath"
+    }
+    $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+    $broadWriteMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $broadWrite = @($rules | Where-Object {
+        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+        @('S-1-1-0', 'S-1-5-32-545') -contains $_.IdentityReference.Value -and
+        ($_.FileSystemRights -band $broadWriteMask)
+    })
+    if ($broadWrite.Count -gt 0) {
+        throw "Final ACL validation found Everyone or Users write access: $LiteralPath"
+    }
+    $localServiceRules = @($rules | Where-Object {
+        $_.IdentityReference.Value -eq 'S-1-5-19' -and
+        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow
+    })
+    if ($null -eq $LocalServiceRights) {
+        if ($localServiceRules.Count -gt 0) {
+            throw "Final ACL validation found unexpected LOCAL SERVICE access: $LiteralPath"
+        }
+    } else {
+        [long]$actualRights = 0
+        foreach ($localServiceRule in $localServiceRules) {
+            $actualRights = $actualRights -bor [long]$localServiceRule.FileSystemRights
+        }
+        $expectedRights = [long]([Security.AccessControl.FileSystemRights]$LocalServiceRights -bor
+            [Security.AccessControl.FileSystemRights]::Synchronize)
+        $fullControlMask = [long][Security.AccessControl.FileSystemRights]::FullControl
+        $unexpectedRights = $actualRights -band $fullControlMask -band (-bnot $expectedRights)
+        if ($localServiceRules.Count -ne 1 -or
+            ($actualRights -band $expectedRights) -ne $expectedRights -or
+            $unexpectedRights -ne 0) {
+            throw "Final ACL validation found incorrect LOCAL SERVICE permissions: $LiteralPath"
+        }
+    }
+}
+
+function Assert-MccFinalAclProfile {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [AllowNull()][object]$LocalServiceRights = $null,
+        [switch]$Recurse
+    )
+    $profileItems = if ($Recurse) {
+        @(Get-MccUpdaterTreeItems -LiteralPath $LiteralPath)
+    } else {
+        @(Get-Item -LiteralPath $LiteralPath -Force -ErrorAction Stop)
+    }
+    foreach ($item in $profileItems) {
+        Assert-MccFinalAclItem -LiteralPath $item.FullName -LocalServiceRights $LocalServiceRights
+    }
+}
+
+function Assert-MccFinalUpdaterTree {
+    $rootPath = [System.IO.Path]::GetFullPath($updaterRoot).TrimEnd('\')
+    foreach ($item in @(Get-MccUpdaterTreeItems -LiteralPath $updaterRoot)) {
+        $relativePath = $item.FullName.Substring($rootPath.Length).TrimStart('\')
+        $rights = $readExecute
+        if ($relativePath.Equals('config.json', [StringComparison]::OrdinalIgnoreCase)) {
+            $rights = $readOnly
+        } elseif ($relativePath -match '^(logs|backups)(\\|$)') {
+            $rights = $null
+        } elseif ($relativePath -match '^(request|web-logs)(\\|$)') {
+            $rights = $modify
+        } elseif ($relativePath -match '^(scripts|status)(\\|$)') {
+            $rights = $readExecute
+        }
+        Assert-MccFinalAclItem -LiteralPath $item.FullName -LocalServiceRights $rights
+    }
+}
+
+function Restore-MccScheduledTasks {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Snapshots,
+        [Parameter(Mandatory = $true)][string[]]$TaskNames
+    )
+    foreach ($taskName in $TaskNames) {
+        if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
+        }
+    }
+    foreach ($taskName in $TaskNames) {
+        if ($Snapshots.ContainsKey($taskName)) {
+            Register-ScheduledTask -TaskName $taskName -Xml ([string]$Snapshots[$taskName].Xml) -Force | Out-Null
+            if ($Snapshots[$taskName].WasRunning) {
+                Start-ScheduledTask -TaskName $taskName
+            }
+        }
+    }
+}
+
 $directories = @(
     $updaterRoot,
     (Join-Path $updaterRoot 'scripts'),
@@ -118,235 +613,253 @@ $directories = @(
     (Join-Path $updaterRoot 'web-logs'),
     (Join-Path $updaterRoot 'backups')
 )
-foreach ($directory in $directories) {
-    [System.IO.Directory]::CreateDirectory($directory) | Out-Null
-}
-$installLog = Join-Path $updaterRoot 'logs\install.log'
-Add-Content -LiteralPath $installLog -Value @(
-    "[$([DateTime]::UtcNow.ToString('o'))] $environmentLabel"
-    "[$([DateTime]::UtcNow.ToString('o'))] Starting $Mode installation for the validated MCC clone."
-    "[$([DateTime]::UtcNow.ToString('o'))] Configured update branch: origin/$configuredBranch."
-) -Encoding utf8
+$taskNames = @($constants.MccTaskName, $constants.UpdaterTaskName)
+$taskSnapshots = @{}
+$tasksChanged = $false
 
-$scriptNames = @(
-    'MccWindowsUpdater.Common.psm1',
-    'Start-MccWindowsWeb.ps1',
-    'Start-MccWindowsAgent.ps1',
-    'Update-MccWindows.ps1',
-    'Test-MccWindowsUpdater.ps1',
-    'Uninstall-MccWindowsUpdater.ps1'
-)
-foreach ($scriptName in $scriptNames) {
-    $source = Join-Path $PSScriptRoot $scriptName
-    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-        throw "The checked-in Windows deployment package is incomplete: $scriptName"
+try {
+    $script:InstallerBootstrapStage = 'BOOTSTRAP ACL PHASE - recursive repair'
+    if ($RepairUpdaterAcl) {
+        [Console]::Error.WriteLine("RepairUpdaterAcl requested for the scoped updater tree: $knownUpdaterRoot")
     }
-    Copy-Item -LiteralPath $source -Destination (Join-Path $updaterRoot "scripts\$scriptName") -Force
-    Unblock-File -LiteralPath (Join-Path $updaterRoot "scripts\$scriptName") -ErrorAction SilentlyContinue
-}
+    Repair-MccUpdaterAcl
 
-$configurationPath = Join-Path $updaterRoot 'config.json'
-$configuration = [ordered]@{
-    schemaVersion = 1
-    deploymentMode = $Mode
-    applicationPath = $applicationPath
-    repository = $constants.Repository
-    remote = $constants.Remote
-    branch = $configuredBranch
-    port = $constants.Port
-    mccTaskName = $constants.MccTaskName
-    updaterTaskName = $constants.UpdaterTaskName
-    serviceIdentity = 'NT AUTHORITY\LOCAL SERVICE'
-    agentIdentity = 'NT AUTHORITY\SYSTEM'
-    nodePath = $nodePath
-    npmPath = $npmPath
-    npmCliPath = $npmCliPath
-    gitPath = $gitPath
-    installedAt = [DateTime]::UtcNow.ToString('o')
-}
-Write-MccAtomicJson -LiteralPath $configurationPath -Value $configuration
+    $script:InstallerBootstrapStage = 'BOOTSTRAP ACL PHASE - directory creation'
+    foreach ($directory in $directories) {
+        [System.IO.Directory]::CreateDirectory($directory) | Out-Null
+    }
+    Repair-MccUpdaterAcl
+    $script:InstallerLogPath = $installLog
+    Write-MccInstallerLog -Message $environmentLabel
+    Write-MccInstallerLog -Message "Starting $Mode installation for the validated MCC clone."
+    Write-MccInstallerLog -Message "Configured update branch: origin/$configuredBranch."
+    if ($RepairUpdaterAcl) {
+        Write-MccInstallerLog -Message 'Completed requested recursive updater ACL repair before file installation.'
+    }
 
-$modeValue = if ($Mode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
-$timestamp = [DateTime]::UtcNow.ToString('o')
-Write-MccAtomicJson -LiteralPath (Join-Path $updaterRoot 'status\status.json') -Value ([ordered]@{
-    schemaVersion = 1
-    jobId = $null
-    state = 'idle'
-    code = 'not_checked'
-    message = 'Check the approved Administrator-configured branch for MCC updates.'
-    mode = $modeValue
-    environmentLabel = $environmentLabel
-    installed = [ordered]@{ version = $applicationVersion; commit = $applicationCommit }
-    target = [ordered]@{ version = $null; commit = $null }
-    requestedAt = $null
-    startedAt = $null
-    lastUpdatedAt = $timestamp
-    completedAt = $null
-    requester = $null
-    outcome = 'none'
-    finalResult = 'none'
-    checkToken = $null
-    checkExpiresAt = $null
-    events = @()
-})
-
-foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
-    [System.IO.Directory]::CreateDirectory((Join-Path $applicationPath $runtimeDirectory)) | Out-Null
-}
-
-function Set-MccAcl {
-    param(
-        [Parameter(Mandatory = $true)][string]$LiteralPath,
-        [Parameter(Mandatory = $true)][string[]]$Grants,
-        [switch]$Recurse
+    $scriptNames = @(
+        'MccWindowsUpdater.Common.psm1',
+        'Start-MccWindowsWeb.ps1',
+        'Start-MccWindowsAgent.ps1',
+        'Update-MccWindows.ps1',
+        'Test-MccWindowsUpdater.ps1',
+        'Uninstall-MccWindowsUpdater.ps1'
     )
-    $arguments = @($LiteralPath, '/inheritance:r', '/grant:r') + $Grants
-    if ($Recurse) { $arguments += @('/T', '/C') }
-    Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList $arguments -WorkingDirectory $updaterRoot -TimeoutSeconds 300 -DetailedLogPath $installLog | Out-Null
-}
-
-$administrativeGrants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-Set-MccAcl -LiteralPath $updaterRoot -Grants ($administrativeGrants + '*S-1-5-19:(OI)(CI)RX') -Recurse
-Set-MccAcl -LiteralPath (Join-Path $updaterRoot 'request') -Grants ($administrativeGrants + '*S-1-5-19:(OI)(CI)M') -Recurse
-Set-MccAcl -LiteralPath (Join-Path $updaterRoot 'status') -Grants ($administrativeGrants + '*S-1-5-19:(OI)(CI)RX') -Recurse
-Set-MccAcl -LiteralPath (Join-Path $updaterRoot 'web-logs') -Grants ($administrativeGrants + '*S-1-5-19:(OI)(CI)M') -Recurse
-Set-MccAcl -LiteralPath (Join-Path $updaterRoot 'scripts') -Grants ($administrativeGrants + '*S-1-5-19:(OI)(CI)RX') -Recurse
-Set-MccAcl -LiteralPath (Join-Path $updaterRoot 'logs') -Grants $administrativeGrants -Recurse
-Set-MccAcl -LiteralPath (Join-Path $updaterRoot 'backups') -Grants $administrativeGrants -Recurse
-Set-MccAcl -LiteralPath $configurationPath -Grants @('*S-1-5-18:F', '*S-1-5-32-544:F', '*S-1-5-19:R')
-
-Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @($applicationPath, '/grant', '*S-1-5-19:(OI)(CI)RX', '/T', '/C') -WorkingDirectory $applicationPath -TimeoutSeconds 600 -DetailedLogPath $installLog | Out-Null
-foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
-    Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @((Join-Path $applicationPath $runtimeDirectory), '/grant', '*S-1-5-19:(OI)(CI)M', '/T', '/C') -WorkingDirectory $applicationPath -TimeoutSeconds 300 -DetailedLogPath $installLog | Out-Null
-}
-foreach ($environmentFile in @('.env', 'backend\.env')) {
-    $environmentPath = Join-Path $applicationPath $environmentFile
-    if (Test-Path -LiteralPath $environmentPath -PathType Leaf) {
-        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @($environmentPath, '/grant', '*S-1-5-19:R') -WorkingDirectory $applicationPath -TimeoutSeconds 60 -DetailedLogPath $installLog | Out-Null
+    $script:InstallerBootstrapStage = 'BOOTSTRAP ACL PHASE - atomic script installation'
+    foreach ($scriptName in $scriptNames) {
+        $source = Join-Path $PSScriptRoot $scriptName
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "The checked-in Windows deployment package is incomplete: $scriptName"
+        }
+        Install-MccAtomicFile -SourcePath $source -DestinationPath (Join-Path $updaterRoot "scripts\$scriptName")
     }
-}
 
-foreach ($protectedPath in @(
-    $updaterRoot,
-    (Join-Path $updaterRoot 'request'),
-    (Join-Path $updaterRoot 'status'),
-    (Join-Path $updaterRoot 'scripts'),
-    (Join-Path $updaterRoot 'logs'),
-    (Join-Path $updaterRoot 'backups'),
-    $configurationPath
-)) {
-    $broadWriteRule = (Get-Acl -LiteralPath $protectedPath).Access | Where-Object {
-        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-        $_.IdentityReference.Value -match '(^|\\)(Everyone|Users)$|S-1-1-0|S-1-5-32-545' -and
-        ($_.FileSystemRights -band (
-            [Security.AccessControl.FileSystemRights]::WriteData -bor
-            [Security.AccessControl.FileSystemRights]::CreateDirectories -bor
-            [Security.AccessControl.FileSystemRights]::Modify -bor
-            [Security.AccessControl.FileSystemRights]::FullControl
-        ))
+    $script:InstallerBootstrapStage = 'BOOTSTRAP ACL PHASE - atomic configuration installation'
+    $configurationPath = Join-Path $updaterRoot 'config.json'
+    $configuration = [ordered]@{
+        schemaVersion = 1
+        deploymentMode = $Mode
+        applicationPath = $applicationPath
+        repository = $constants.Repository
+        remote = $constants.Remote
+        branch = $configuredBranch
+        port = $constants.Port
+        mccTaskName = $constants.MccTaskName
+        updaterTaskName = $constants.UpdaterTaskName
+        serviceIdentity = 'NT AUTHORITY\LOCAL SERVICE'
+        agentIdentity = 'NT AUTHORITY\SYSTEM'
+        nodePath = $nodePath
+        npmPath = $npmPath
+        npmCliPath = $npmCliPath
+        gitPath = $gitPath
+        installedAt = [DateTime]::UtcNow.ToString('o')
     }
-    if ($broadWriteRule) {
-        throw 'Final ACL verification found broad write access on a protected updater path.'
+    Write-MccInstallerJson -LiteralPath $configurationPath -Value $configuration
+
+    $script:InstallerBootstrapStage = 'BOOTSTRAP ACL PHASE - atomic status installation'
+    $modeValue = if ($Mode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
+    $timestamp = [DateTime]::UtcNow.ToString('o')
+    Write-MccInstallerJson -LiteralPath (Join-Path $updaterRoot 'status\status.json') -Value ([ordered]@{
+        schemaVersion = 1
+        jobId = $null
+        state = 'idle'
+        code = 'not_checked'
+        message = 'Check the approved Administrator-configured branch for MCC updates.'
+        mode = $modeValue
+        environmentLabel = $environmentLabel
+        installed = [ordered]@{ version = $applicationVersion; commit = $applicationCommit }
+        target = [ordered]@{ version = $null; commit = $null }
+        requestedAt = $null
+        startedAt = $null
+        lastUpdatedAt = $timestamp
+        completedAt = $null
+        requester = $null
+        outcome = 'none'
+        finalResult = 'none'
+        checkToken = $null
+        checkExpiresAt = $null
+        events = @()
+    })
+
+    $script:InstallerBootstrapStage = 'BOOTSTRAP ACL PHASE - elevated write and read verification'
+    Invoke-MccBootstrapVerification -InstalledScriptNames $scriptNames -SourceDirectory $PSScriptRoot
+    Write-MccInstallerLog -Message 'Bootstrap ACL write/read verification passed before scheduled-task creation.'
+
+    $script:InstallerBootstrapStage = 'FINAL ACL PHASE - updater tree'
+    $readExecute = [Security.AccessControl.FileSystemRights]::ReadAndExecute
+    $readOnly = [Security.AccessControl.FileSystemRights]::Read
+    $modify = [Security.AccessControl.FileSystemRights]::Modify
+    Set-MccFinalAclProfile -LiteralPath $updaterRoot -LocalServiceRights $readExecute -Recurse
+    Set-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'scripts') -LocalServiceRights $readExecute -Recurse
+    Set-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'request') -LocalServiceRights $modify -Recurse
+    Set-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'status') -LocalServiceRights $readExecute -Recurse
+    Set-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'web-logs') -LocalServiceRights $modify -Recurse
+    Set-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'logs') -Recurse
+    Set-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'backups') -Recurse
+    Set-MccFinalAclProfile -LiteralPath $configurationPath -LocalServiceRights $readOnly
+
+    $script:InstallerBootstrapStage = 'FINAL ACL PHASE - verification'
+    Assert-MccFinalAclProfile -LiteralPath $updaterRoot -LocalServiceRights $readExecute
+    Assert-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'scripts') -LocalServiceRights $readExecute -Recurse
+    Assert-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'request') -LocalServiceRights $modify -Recurse
+    Assert-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'status') -LocalServiceRights $readExecute -Recurse
+    Assert-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'web-logs') -LocalServiceRights $modify -Recurse
+    Assert-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'logs') -Recurse
+    Assert-MccFinalAclProfile -LiteralPath (Join-Path $updaterRoot 'backups') -Recurse
+    Assert-MccFinalAclProfile -LiteralPath $configurationPath -LocalServiceRights $readOnly
+    Assert-MccFinalUpdaterTree
+    Write-MccInstallerLog -Message 'Final exact ACL verification passed for Administrators, SYSTEM, LOCAL SERVICE, Users, and Everyone.'
+
+    $script:InstallerBootstrapStage = 'application runtime directory preparation'
+    foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
+        [System.IO.Directory]::CreateDirectory((Join-Path $applicationPath $runtimeDirectory)) | Out-Null
     }
-}
-$localServiceScriptWrite = (Get-Acl -LiteralPath (Join-Path $updaterRoot 'scripts')).Access | Where-Object {
-    $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-    $_.IdentityReference.Value -match 'LOCAL SERVICE|S-1-5-19' -and
-    ($_.FileSystemRights -band ([Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::FullControl))
-}
-if ($localServiceScriptWrite) {
-    throw 'Final ACL verification found MCC service write access to protected updater scripts.'
-}
-$rootAclText = (Get-Acl -LiteralPath $updaterRoot).Access | ForEach-Object {
-    "$($_.IdentityReference.Value):$($_.FileSystemRights):$($_.AccessControlType)"
-}
-if (-not ($rootAclText -match 'SYSTEM|S-1-5-18') -or
-    -not ($rootAclText -match 'Administrators|S-1-5-32-544')) {
-    throw 'Final ACL verification did not find the required SYSTEM and Administrators grants.'
-}
-
-Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'ci', '--prefix', 'frontend') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
-Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'ci', '--prefix', 'backend') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
-Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'run', 'build') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
-
-$powerShellPath = Join-Path $PSHOME 'powershell.exe'
-$managedConfigPath = Join-Path $updaterRoot 'config.json'
-$mccScriptPath = Join-Path $updaterRoot 'scripts\Start-MccWindowsWeb.ps1'
-$agentScriptPath = Join-Path $updaterRoot 'scripts\Start-MccWindowsAgent.ps1'
-$mccAction = New-ScheduledTaskAction -Execute $powerShellPath -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File `"$mccScriptPath`" -ConfigurationPath `"$managedConfigPath`""
-$agentAction = New-ScheduledTaskAction -Execute $powerShellPath -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File `"$agentScriptPath`" -ConfigurationPath `"$managedConfigPath`""
-$startupTrigger = New-ScheduledTaskTrigger -AtStartup
-$taskSettings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 999 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
-    -StartWhenAvailable
-$mccPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\LOCAL SERVICE' -LogonType ServiceAccount -RunLevel Limited
-$agentPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-
-foreach ($taskName in @($constants.MccTaskName, $constants.UpdaterTaskName)) {
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @($applicationPath, '/grant', '*S-1-5-19:(OI)(CI)RX', '/T', '/C') -WorkingDirectory $applicationPath -TimeoutSeconds 600 -DetailedLogPath $installLog | Out-Null
+    foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
+        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @((Join-Path $applicationPath $runtimeDirectory), '/grant', '*S-1-5-19:(OI)(CI)M', '/T', '/C') -WorkingDirectory $applicationPath -TimeoutSeconds 300 -DetailedLogPath $installLog | Out-Null
     }
-}
-Register-ScheduledTask -TaskName $constants.MccTaskName -Action $mccAction -Trigger $startupTrigger -Settings $taskSettings -Principal $mccPrincipal -Description 'Managed Maintenance Command Center web application on port 4273.' -Force | Out-Null
-Register-ScheduledTask -TaskName $constants.UpdaterTaskName -Action $agentAction -Trigger $startupTrigger -Settings $taskSettings -Principal $agentPrincipal -Description 'Privileged fixed-request Maintenance Command Center updater agent.' -Force | Out-Null
-
-Start-ScheduledTask -TaskName $constants.UpdaterTaskName
-Start-ScheduledTask -TaskName $constants.MccTaskName
-if (-not (Test-MccHttpHealth -Port $constants.Port -TimeoutSeconds 120)) {
-    throw 'MCC did not pass the port 4273 health check after managed startup.'
-}
-
-$healthPath = Join-Path $updaterRoot 'status\agent-health.json'
-$agentDeadline = [DateTime]::UtcNow.AddSeconds(60)
-do {
-    if (Test-Path -LiteralPath $healthPath -PathType Leaf) {
-        $agentHealth = Read-MccJson -LiteralPath $healthPath
-        if ($agentHealth.agentHealthy -eq $true -and
-            $agentHealth.configurationValid -eq $true -and
-            $agentHealth.repositoryValid -eq $true -and
-            $agentHealth.branchValid -eq $true -and
-            $agentHealth.requestDirectoryAccessible -eq $true -and
-            $agentHealth.statusDirectoryAccessible -eq $true -and
-            $agentHealth.mccTaskInstalled -eq $true -and
-            $agentHealth.mccTaskRunning -eq $true -and
-            $agentHealth.updaterTaskInstalled -eq $true -and
-            [string]$agentHealth.deploymentMode -eq $Mode) {
-            break
+    foreach ($environmentFile in @('.env', 'backend\.env')) {
+        $environmentPath = Join-Path $applicationPath $environmentFile
+        if (Test-Path -LiteralPath $environmentPath -PathType Leaf) {
+            Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @($environmentPath, '/grant', '*S-1-5-19:R') -WorkingDirectory $applicationPath -TimeoutSeconds 60 -DetailedLogPath $installLog | Out-Null
         }
     }
-    Start-Sleep -Seconds 2
-} while ([DateTime]::UtcNow -lt $agentDeadline)
-if (-not (Test-Path -LiteralPath $healthPath -PathType Leaf) -or
-    $agentHealth.agentHealthy -ne $true -or
-    $agentHealth.mccTaskRunning -ne $true) {
-    throw 'The Windows updater agent did not publish a fully healthy deployment heartbeat.'
-}
 
-$protectedApiRejected = $false
-try {
-    Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$($constants.Port)/api/system/update/status" -Method Get -TimeoutSec 10 | Out-Null
-} catch {
-    if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) {
-        $protectedApiRejected = $true
+    $script:InstallerBootstrapStage = 'dependency installation and application build'
+    Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'ci', '--prefix', 'frontend') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
+    Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'ci', '--prefix', 'backend') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
+    Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'run', 'build') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
+
+    $script:InstallerBootstrapStage = 'scheduled-task snapshot'
+    foreach ($taskName in $taskNames) {
+        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($null -ne $existingTask) {
+            $taskSnapshots[$taskName] = [ordered]@{
+                Xml = Export-ScheduledTask -TaskName $taskName
+                WasRunning = [string]$existingTask.State -eq 'Running'
+            }
+        }
     }
-}
-if (-not $protectedApiRejected) {
-    throw 'The protected update status API did not reject the unauthenticated installer probe.'
-}
 
-Add-Content -LiteralPath $installLog -Value "[$([DateTime]::UtcNow.ToString('o'))] $environmentLabel installation on origin/$configuredBranch completed and health checks passed." -Encoding utf8
-Write-Output ''
-Write-Output 'MCC Windows updater installation complete.'
-Write-Output "Mode: $environmentLabel"
-Write-Output "Configured update branch: origin/$configuredBranch"
-Write-Output "MCC task: $($constants.MccTaskName) (LOCAL SERVICE)"
-Write-Output "Updater task: $($constants.UpdaterTaskName) (SYSTEM)"
-Write-Output "Protected updater data: $updaterRoot"
-Write-Output "Backups: $(Join-Path $updaterRoot 'backups')"
-Write-Output "MCC health: http://127.0.0.1:$($constants.Port)/"
-Write-Output 'Settings detection: protected configuration and a healthy updater-agent heartbeat were verified.'
+    $powerShellPath = Join-Path $PSHOME 'powershell.exe'
+    $managedConfigPath = Join-Path $updaterRoot 'config.json'
+    $mccScriptPath = Join-Path $updaterRoot 'scripts\Start-MccWindowsWeb.ps1'
+    $agentScriptPath = Join-Path $updaterRoot 'scripts\Start-MccWindowsAgent.ps1'
+    $mccAction = New-ScheduledTaskAction -Execute $powerShellPath -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File `"$mccScriptPath`" -ConfigurationPath `"$managedConfigPath`""
+    $agentAction = New-ScheduledTaskAction -Execute $powerShellPath -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File `"$agentScriptPath`" -ConfigurationPath `"$managedConfigPath`""
+    $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+    $taskSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 999 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -StartWhenAvailable
+    $mccPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\LOCAL SERVICE' -LogonType ServiceAccount -RunLevel Limited
+    $agentPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+
+    $script:InstallerBootstrapStage = 'scheduled-task registration after bootstrap verification'
+    $tasksChanged = $true
+    foreach ($taskName in $taskNames) {
+        if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        }
+    }
+    Register-ScheduledTask -TaskName $constants.MccTaskName -Action $mccAction -Trigger $startupTrigger -Settings $taskSettings -Principal $mccPrincipal -Description 'Managed Maintenance Command Center web application on port 4273.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $constants.UpdaterTaskName -Action $agentAction -Trigger $startupTrigger -Settings $taskSettings -Principal $agentPrincipal -Description 'Privileged fixed-request Maintenance Command Center updater agent.' -Force | Out-Null
+
+    $script:InstallerBootstrapStage = 'managed-task startup and health verification'
+    Start-ScheduledTask -TaskName $constants.UpdaterTaskName
+    Start-ScheduledTask -TaskName $constants.MccTaskName
+    if (-not (Test-MccHttpHealth -Port $constants.Port -TimeoutSeconds 120)) {
+        throw 'MCC did not pass the port 4273 health check after managed startup.'
+    }
+
+    $healthPath = Join-Path $updaterRoot 'status\agent-health.json'
+    $agentDeadline = [DateTime]::UtcNow.AddSeconds(60)
+    $agentHealth = $null
+    do {
+        if (Test-Path -LiteralPath $healthPath -PathType Leaf) {
+            $agentHealth = Read-MccJson -LiteralPath $healthPath
+            if ($agentHealth.agentHealthy -eq $true -and
+                $agentHealth.configurationValid -eq $true -and
+                $agentHealth.repositoryValid -eq $true -and
+                $agentHealth.branchValid -eq $true -and
+                $agentHealth.requestDirectoryAccessible -eq $true -and
+                $agentHealth.statusDirectoryAccessible -eq $true -and
+                $agentHealth.mccTaskInstalled -eq $true -and
+                $agentHealth.mccTaskRunning -eq $true -and
+                $agentHealth.updaterTaskInstalled -eq $true -and
+                [string]$agentHealth.deploymentMode -eq $Mode) {
+                break
+            }
+        }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $agentDeadline)
+    if ($null -eq $agentHealth -or
+        $agentHealth.agentHealthy -ne $true -or
+        $agentHealth.mccTaskRunning -ne $true) {
+        throw 'The Windows updater agent did not publish a fully healthy deployment heartbeat.'
+    }
+
+    $script:InstallerBootstrapStage = 'protected API verification'
+    $protectedApiRejected = $false
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$($constants.Port)/api/system/update/status" -Method Get -TimeoutSec 10 | Out-Null
+    } catch {
+        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) {
+            $protectedApiRejected = $true
+        }
+    }
+    if (-not $protectedApiRejected) {
+        throw 'The protected update status API did not reject the unauthenticated installer probe.'
+    }
+
+    $tasksChanged = $false
+    Write-MccInstallerLog -Message "$environmentLabel installation on origin/$configuredBranch completed and health checks passed."
+    Write-Output ''
+    Write-Output 'MCC Windows updater installation complete.'
+    Write-Output "Mode: $environmentLabel"
+    Write-Output "Configured update branch: origin/$configuredBranch"
+    Write-Output "MCC task: $($constants.MccTaskName) (LOCAL SERVICE)"
+    Write-Output "Updater task: $($constants.UpdaterTaskName) (SYSTEM)"
+    Write-Output "Protected updater data: $updaterRoot"
+    Write-Output "Backups: $(Join-Path $updaterRoot 'backups')"
+    Write-Output "MCC health: http://127.0.0.1:$($constants.Port)/"
+    Write-Output 'Settings detection: protected configuration and a healthy updater-agent heartbeat were verified.'
+} catch {
+    $originalMessage = $_.Exception.Message
+    [Console]::Error.WriteLine("MCC Windows updater failed at exact bootstrap stage '$script:InstallerBootstrapStage'.")
+    [Console]::Error.WriteLine("Original exception: $originalMessage")
+    Write-MccInstallerLog -Message "INSTALLATION FAILED at exact bootstrap stage '$script:InstallerBootstrapStage': $originalMessage"
+    if ($tasksChanged) {
+        try {
+            Restore-MccScheduledTasks -Snapshots $taskSnapshots -TaskNames $taskNames
+            [Console]::Error.WriteLine('Scheduled-task state was rolled back; no partial task installation was retained.')
+        } catch {
+            [Console]::Error.WriteLine("Scheduled-task rollback failed and requires manual inspection: $($_.Exception.Message)")
+        }
+    }
+    throw
+}

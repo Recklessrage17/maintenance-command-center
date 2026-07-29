@@ -107,28 +107,67 @@ foreach ($taskName in @($constants.MccTaskName, $constants.UpdaterTaskName)) {
 $requestDirectory = Join-Path $constants.UpdaterRoot 'request'
 $statusDirectory = Join-Path $constants.UpdaterRoot 'status'
 foreach ($entry in @(
-    [ordered]@{ Name = 'Configuration ACL'; Path = $ConfigurationPath; NeedsModify = $false; ForbidModify = $true },
-    [ordered]@{ Name = 'Request ACL'; Path = $requestDirectory; NeedsModify = $true; ForbidModify = $false },
-    [ordered]@{ Name = 'Status ACL'; Path = $statusDirectory; NeedsModify = $false; ForbidModify = $false },
-    [ordered]@{ Name = 'Scripts ACL'; Path = (Join-Path $constants.UpdaterRoot 'scripts'); NeedsModify = $false; ForbidModify = $true }
+    [ordered]@{ Name = 'Configuration ACL'; Path = $ConfigurationPath; LocalServiceRights = [Security.AccessControl.FileSystemRights]::Read },
+    [ordered]@{ Name = 'Request ACL'; Path = $requestDirectory; LocalServiceRights = [Security.AccessControl.FileSystemRights]::Modify },
+    [ordered]@{ Name = 'Status ACL'; Path = $statusDirectory; LocalServiceRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute },
+    [ordered]@{ Name = 'Scripts ACL'; Path = (Join-Path $constants.UpdaterRoot 'scripts'); LocalServiceRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute },
+    [ordered]@{ Name = 'Web logs ACL'; Path = (Join-Path $constants.UpdaterRoot 'web-logs'); LocalServiceRights = [Security.AccessControl.FileSystemRights]::Modify },
+    [ordered]@{ Name = 'Privileged logs ACL'; Path = (Join-Path $constants.UpdaterRoot 'logs'); LocalServiceRights = $null },
+    [ordered]@{ Name = 'Backups ACL'; Path = (Join-Path $constants.UpdaterRoot 'backups'); LocalServiceRights = $null }
 )) {
     try {
-        $accessRules = (Get-Acl -LiteralPath $entry.Path).Access
-        $aclText = $accessRules | ForEach-Object {
-            "$($_.IdentityReference):$($_.FileSystemRights):$($_.AccessControlType)"
-        }
-        $broadWrite = $aclText -match '(Everyone|BUILTIN\\Users).*(Write|Modify|FullControl)'
+        $acl = Get-Acl -LiteralPath $entry.Path
+        $accessRules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+        $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+            [Security.AccessControl.FileSystemRights]::AppendData -bor
+            [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+            [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+            [Security.AccessControl.FileSystemRights]::Delete -bor
+            [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+            [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+            [Security.AccessControl.FileSystemRights]::TakeOwnership
+        $broadWrite = @($accessRules | Where-Object {
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            @('S-1-1-0', 'S-1-5-32-545') -contains $_.IdentityReference.Value -and
+            ($_.FileSystemRights -band $writeMask)
+        }).Count -gt 0
+        $administratorsFullControl = @($accessRules | Where-Object {
+            $_.IdentityReference.Value -eq 'S-1-5-32-544' -and
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+                [Security.AccessControl.FileSystemRights]::FullControl
+        }).Count -gt 0
+        $systemFullControl = @($accessRules | Where-Object {
+            $_.IdentityReference.Value -eq 'S-1-5-18' -and
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+                [Security.AccessControl.FileSystemRights]::FullControl
+        }).Count -gt 0
         $localServiceRules = @($accessRules | Where-Object {
             $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-            $_.IdentityReference.Value -match 'LOCAL SERVICE|S-1-5-19'
+            $_.IdentityReference.Value -eq 'S-1-5-19'
         })
-        $localServiceCanModify = @($localServiceRules | Where-Object {
-            $_.FileSystemRights -band ([Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::FullControl)
-        }).Count -gt 0
-        $passed = -not $broadWrite -and $localServiceRules.Count -gt 0
-        if ($entry.NeedsModify) { $passed = $passed -and $localServiceCanModify }
-        if ($entry.ForbidModify) { $passed = $passed -and -not $localServiceCanModify }
-        Write-TestResult -Name $entry.Name -Passed $passed -Detail 'LOCAL SERVICE scope and no Everyone/Users write access were verified.'
+        $passed = $acl.AreAccessRulesProtected -and
+            $administratorsFullControl -and
+            $systemFullControl -and
+            -not $broadWrite
+        if ($null -ne $entry.LocalServiceRights) {
+            [long]$actualLocalServiceRights = 0
+            foreach ($localServiceRule in $localServiceRules) {
+                $actualLocalServiceRights = $actualLocalServiceRights -bor [long]$localServiceRule.FileSystemRights
+            }
+            $expectedLocalServiceRights = [long]($entry.LocalServiceRights -bor [Security.AccessControl.FileSystemRights]::Synchronize)
+            $unexpectedLocalServiceRights = $actualLocalServiceRights -band
+                [long][Security.AccessControl.FileSystemRights]::FullControl -band
+                (-bnot $expectedLocalServiceRights)
+            $passed = $passed -and
+                $localServiceRules.Count -eq 1 -and
+                ($actualLocalServiceRights -band $expectedLocalServiceRights) -eq $expectedLocalServiceRights -and
+                $unexpectedLocalServiceRights -eq 0
+        } else {
+            $passed = $passed -and $localServiceRules.Count -eq 0
+        }
+        Write-TestResult -Name $entry.Name -Passed $passed -Detail 'Protected inheritance, Administrators/SYSTEM Full Control, narrow LOCAL SERVICE scope, and no Everyone/Users write access were verified.'
     } catch {
         Write-TestResult -Name $entry.Name -Passed $false -Detail $_.Exception.Message
     }

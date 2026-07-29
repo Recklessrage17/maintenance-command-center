@@ -18,6 +18,7 @@
     "test:system-update-api": "npm run build --prefix backend && node tests/system-update-api.mjs",
     "test:system-update-runner": "node tests/system-update-runner-validation.mjs",
     "test:system-update-ui": "playwright test tests/settings-system-update.spec.ts",
+    "test:windows-updater": "node tests/windows-updater-installer-validation.mjs",
     "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
     "test:machine-documents": "playwright test tests/machine-asset-document-library.spec.ts",
     "test:machine-documents-api": "node tests/machine-asset-document-library-api.mjs",
