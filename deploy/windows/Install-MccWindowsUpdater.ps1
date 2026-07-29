@@ -293,46 +293,67 @@ function Install-MccAtomicFile {
         [Parameter(Mandatory = $true)][string]$SourcePath,
         [Parameter(Mandatory = $true)][string]$DestinationPath
     )
-    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
-        throw "Atomic installer source file is missing: $SourcePath"
+    if ([string]::IsNullOrWhiteSpace($SourcePath) -or [string]::IsNullOrWhiteSpace($DestinationPath)) {
+        throw 'Atomic installer source and destination paths must not be empty.'
     }
-    $destinationDirectory = Split-Path -Parent $DestinationPath
-    $destinationRootPrefix = "$([System.IO.Path]::GetFullPath($updaterRoot).TrimEnd('\'))\"
+    $normalizedSource = [System.IO.Path]::GetFullPath($SourcePath)
     $normalizedDestination = [System.IO.Path]::GetFullPath($DestinationPath)
+    if ([string]::IsNullOrWhiteSpace([System.IO.Path]::GetFileName($normalizedSource)) -or
+        [string]::IsNullOrWhiteSpace([System.IO.Path]::GetFileName($normalizedDestination))) {
+        throw 'Atomic installer source and destination paths must contain nonempty filenames.'
+    }
+    if (-not (Test-Path -LiteralPath $normalizedSource -PathType Leaf)) {
+        throw "Atomic installer source file is missing: $normalizedSource"
+    }
+    if ((Get-Item -LiteralPath $normalizedSource -Force -ErrorAction Stop).Length -le 0) {
+        throw "Atomic installer source file is empty: $normalizedSource"
+    }
+    if ($normalizedSource.Equals($normalizedDestination, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Atomic installer source and destination must be different paths.'
+    }
+    $destinationDirectory = [System.IO.Path]::GetDirectoryName($normalizedDestination)
+    if (-not [System.IO.Directory]::Exists($destinationDirectory)) {
+        throw "Atomic installer destination directory does not exist: $destinationDirectory"
+    }
+    if ([System.IO.Directory]::Exists($normalizedDestination)) {
+        throw "Atomic installer destination cannot be a directory: $normalizedDestination"
+    }
+    $destinationRootPrefix = "$([System.IO.Path]::GetFullPath($updaterRoot).TrimEnd('\'))\"
     if (-not $normalizedDestination.StartsWith($destinationRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Atomic installer destination attempted to leave the known updater directory.'
     }
-    $temporaryPath = Join-Path $destinationDirectory ".$([System.IO.Path]::GetFileName($DestinationPath)).install.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    $temporaryPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $destinationDirectory ".$([System.IO.Path]::GetFileName($normalizedDestination)).install.$PID.$([Guid]::NewGuid().ToString('N')).tmp")
+    )
     try {
-        Copy-Item -LiteralPath $SourcePath -Destination $temporaryPath -ErrorAction Stop
+        Copy-Item -LiteralPath $normalizedSource -Destination $temporaryPath -ErrorAction Stop
         Unblock-File -LiteralPath $temporaryPath -ErrorAction SilentlyContinue
         if ((Get-Item -LiteralPath $temporaryPath -ErrorAction Stop).Length -le 0) {
-            throw "Atomic installer validation found an empty temporary file for $DestinationPath."
+            throw "Atomic installer validation found an empty temporary file for $normalizedDestination."
         }
-        $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $sourceHash = (Get-FileHash -LiteralPath $normalizedSource -Algorithm SHA256 -ErrorAction Stop).Hash
         $temporaryHash = (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256 -ErrorAction Stop).Hash
         if ($sourceHash -cne $temporaryHash) {
-            throw "Atomic installer hash validation failed for $DestinationPath."
+            throw "Atomic installer hash validation failed for $normalizedDestination."
         }
-        if ([System.IO.Path]::GetExtension($DestinationPath) -match '^\.ps(m)?1$') {
+        if ([System.IO.Path]::GetExtension($normalizedDestination) -match '^\.ps(m)?1$') {
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile($temporaryPath, [ref]$null, [ref]$parseErrors)
             if ($parseErrors.Count -gt 0) {
-                throw "Atomic installer PowerShell validation failed for $DestinationPath."
+                throw "Atomic installer PowerShell validation failed for $normalizedDestination."
             }
         }
         Enable-MccBootstrapItemAcl -LiteralPath $temporaryPath
-        if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
-            [System.IO.File]::Replace($temporaryPath, $DestinationPath, $null, $true)
-        } else {
-            Move-Item -LiteralPath $temporaryPath -Destination $DestinationPath -ErrorAction Stop
+        $destinationVerifier = {
+            param([string]$InstalledPath, [AllowNull()][string]$BackupPath)
+            Enable-MccBootstrapItemAcl -LiteralPath $InstalledPath
+            Unblock-File -LiteralPath $InstalledPath -ErrorAction SilentlyContinue
         }
-        Enable-MccBootstrapItemAcl -LiteralPath $DestinationPath
-        $destinationHash = (Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256 -ErrorAction Stop).Hash
-        if ($destinationHash -cne $sourceHash) {
-            throw "Atomic installer destination validation failed for $DestinationPath."
-        }
-        Unblock-File -LiteralPath $DestinationPath -ErrorAction SilentlyContinue
+        [void](Invoke-MccAtomicFileReplacement `
+            -TemporaryPath $temporaryPath `
+            -DestinationPath $normalizedDestination `
+            -ExpectedSha256 $sourceHash `
+            -DestinationVerification $destinationVerifier)
     } finally {
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
             Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
@@ -345,23 +366,41 @@ function Write-MccInstallerAtomicText {
         [Parameter(Mandatory = $true)][string]$LiteralPath,
         [Parameter(Mandatory = $true)][string]$Value
     )
-    $directory = Split-Path -Parent $LiteralPath
-    $temporaryPath = Join-Path $directory ".$([System.IO.Path]::GetFileName($LiteralPath)).write.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        throw 'Atomic bootstrap destination path must not be empty.'
+    }
+    $normalizedLiteralPath = [System.IO.Path]::GetFullPath($LiteralPath)
+    if ([string]::IsNullOrWhiteSpace([System.IO.Path]::GetFileName($normalizedLiteralPath))) {
+        throw 'Atomic bootstrap destination path must contain a nonempty filename.'
+    }
+    $directory = [System.IO.Path]::GetDirectoryName($normalizedLiteralPath)
+    if (-not [System.IO.Directory]::Exists($directory)) {
+        throw "Atomic bootstrap destination directory does not exist: $directory"
+    }
+    if ([System.IO.Directory]::Exists($normalizedLiteralPath)) {
+        throw "Atomic bootstrap destination cannot be a directory: $normalizedLiteralPath"
+    }
+    $temporaryPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $directory ".$([System.IO.Path]::GetFileName($normalizedLiteralPath)).write.$PID.$([Guid]::NewGuid().ToString('N')).tmp")
+    )
     try {
         [System.IO.File]::WriteAllText($temporaryPath, $Value, [Text.UTF8Encoding]::new($false))
         if ((Get-Item -LiteralPath $temporaryPath -ErrorAction Stop).Length -le 0) {
             throw 'Atomic bootstrap verification produced an empty temporary file.'
         }
         Enable-MccBootstrapItemAcl -LiteralPath $temporaryPath
-        if (Test-Path -LiteralPath $LiteralPath -PathType Leaf) {
-            [System.IO.File]::Replace($temporaryPath, $LiteralPath, $null, $true)
-        } else {
-            Move-Item -LiteralPath $temporaryPath -Destination $LiteralPath -ErrorAction Stop
+        $expectedValue = $Value
+        $destinationVerifier = {
+            param([string]$InstalledPath, [AllowNull()][string]$BackupPath)
+            Enable-MccBootstrapItemAcl -LiteralPath $InstalledPath
+            if ([System.IO.File]::ReadAllText($InstalledPath, [Text.Encoding]::UTF8) -cne $expectedValue) {
+                throw "Atomic bootstrap verification could not read back $InstalledPath."
+            }
         }
-        Enable-MccBootstrapItemAcl -LiteralPath $LiteralPath
-        if ([System.IO.File]::ReadAllText($LiteralPath, [Text.Encoding]::UTF8) -cne $Value) {
-            throw "Atomic bootstrap verification could not read back $LiteralPath."
-        }
+        [void](Invoke-MccAtomicFileReplacement `
+            -TemporaryPath $temporaryPath `
+            -DestinationPath $normalizedLiteralPath `
+            -DestinationVerification $destinationVerifier)
     } finally {
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
             Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
@@ -374,9 +413,15 @@ function Write-MccInstallerJson {
         [Parameter(Mandatory = $true)][string]$LiteralPath,
         [Parameter(Mandatory = $true)][object]$Value
     )
-    Write-MccAtomicJson -LiteralPath $LiteralPath -Value $Value
-    Enable-MccBootstrapItemAcl -LiteralPath $LiteralPath
-    [void](Read-MccJson -LiteralPath $LiteralPath)
+    $destinationVerifier = {
+        param([string]$InstalledPath, [AllowNull()][string]$BackupPath)
+        Enable-MccBootstrapItemAcl -LiteralPath $InstalledPath
+        [void](Read-MccJson -LiteralPath $InstalledPath)
+    }
+    Write-MccAtomicJson `
+        -LiteralPath ([System.IO.Path]::GetFullPath($LiteralPath)) `
+        -Value $Value `
+        -DestinationVerification $destinationVerifier
 }
 
 function Invoke-MccBootstrapVerification {

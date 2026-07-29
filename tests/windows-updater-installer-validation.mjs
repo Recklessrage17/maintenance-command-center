@@ -6,6 +6,7 @@ const installerPath = 'deploy/windows/Install-MccWindowsUpdater.ps1';
 const commonPath = 'deploy/windows/MccWindowsUpdater.Common.psm1';
 const installedTestPath = 'deploy/windows/Test-MccWindowsUpdater.ps1';
 const readmePath = 'deploy/windows/README-Windows-Updater.md';
+const atomicReplacementTestPath = 'tests/windows-updater-atomic-replacement.ps1';
 
 const installer = fs.readFileSync(installerPath, 'utf8');
 const common = fs.readFileSync(commonPath, 'utf8');
@@ -42,8 +43,9 @@ const scenarios = [
     assert.match(bootstrapVerification, /Get-Content -LiteralPath \$installLog -Raw/);
   }],
   ['broken scripts module ACL', () => {
-    assert.match(atomicFileFunction, /File\]::Replace\(\$temporaryPath, \$DestinationPath/);
-    assert.match(atomicFileFunction, /Enable-MccBootstrapItemAcl -LiteralPath \$DestinationPath/);
+    assert.match(atomicFileFunction, /Invoke-MccAtomicFileReplacement/);
+    assert.match(atomicFileFunction, /DestinationVerification \$destinationVerifier/);
+    assert.match(atomicFileFunction, /Enable-MccBootstrapItemAcl -LiteralPath \$InstalledPath/);
     assert.ok(installFlow.indexOf('Repair-MccUpdaterAcl') < installFlow.indexOf('Install-MccAtomicFile'));
   }],
   ['inheritance disabled on child files', () => {
@@ -111,7 +113,12 @@ assert.match(atomicFileFunction, /Get-FileHash[\s\S]*SHA256/);
 assert.match(atomicFileFunction, /Parser\]::ParseFile/);
 assert.match(atomicFileFunction, /\.install\.\$PID\./);
 assert.match(common, /ConvertFrom-Json -ErrorAction Stop/);
-assert.match(common, /File\]::Replace\(\$temporaryPath, \$LiteralPath/);
+assert.match(common, /File\]::Replace\([\s\S]*\$normalizedTemporaryPath,[\s\S]*\$normalizedDestinationPath,[\s\S]*\$normalizedBackupPath,[\s\S]*\$true/);
+assert.match(common, /GetFullPath/);
+assert.match(common, /temporary source and destination must be on the same filesystem volume/);
+assert.match(common, /destination hash (verification failed|changed during verification)/);
+assert.match(common, /original destination backup is unavailable for rollback/);
+assert.doesNotMatch(common, /File\]::Replace\([^\r\n]*,\s*(?:\$null|['"]{2})\s*,/);
 assert.match(bootstrapVerification, /scripts\\\.mcc-bootstrap/);
 assert.match(bootstrapVerification, /config-[^\r\n]*\.json/);
 assert.match(bootstrapVerification, /status\\\.mcc-bootstrap-status/);
@@ -134,7 +141,35 @@ for (const preservedPolicy of [
   assert.match(installer, preservedPolicy);
 }
 
-for (const powershellPath of [installerPath, commonPath, installedTestPath]) {
+function windowsPowerShellFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return windowsPowerShellFiles(path);
+    return /\.(?:ps1|psm1)$/i.test(entry.name) ? [path] : [];
+  });
+}
+
+const updaterPowerShellFiles = [
+  ...windowsPowerShellFiles('deploy/windows'),
+  ...windowsPowerShellFiles('deployment/windows'),
+];
+for (const powershellPath of updaterPowerShellFiles) {
+  const source = fs.readFileSync(powershellPath, 'utf8');
+  const replaceCalls = source.match(/\[System\.IO\.File\]::Replace\([\s\S]*?\n\s*\)/g) ?? [];
+  for (const replaceCall of replaceCalls) {
+    assert.doesNotMatch(replaceCall, /,\s*(?:\$null|['"]{2})\s*,\s*\$true/, `${powershellPath} passes an empty/null backup to File.Replace.`);
+    assert.match(replaceCall, /normalized(?:BackupPath|RollbackDiscardPath)|rollbackDiscardPath/i, `${powershellPath} does not use a normalized legal backup path.`);
+  }
+}
+assert.equal(
+  updaterPowerShellFiles.reduce((count, powershellPath) => (
+    count + (fs.readFileSync(powershellPath, 'utf8').match(/\[System\.IO\.File\]::Replace\(/g) ?? []).length
+  ), 0),
+  2,
+  'Every Windows updater File.Replace call must remain centralized in the validated helper and rollback path.',
+);
+
+for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPath]) {
   const parser = spawnSync('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
@@ -144,5 +179,25 @@ for (const powershellPath of [installerPath, commonPath, installedTestPath]) {
   ], { encoding: 'utf8', windowsHide: true });
   assert.equal(parser.status, 0, `${powershellPath}\n${parser.stderr || parser.stdout}`);
 }
+
+const atomicReplacement = spawnSync('powershell.exe', [
+  '-NoLogo',
+  '-NoProfile',
+  '-NonInteractive',
+  '-ExecutionPolicy',
+  'RemoteSigned',
+  '-File',
+  atomicReplacementTestPath,
+  '-ModulePath',
+  commonPath,
+  '-CrossVolumeSourcePath',
+  commonPath,
+], { encoding: 'utf8', windowsHide: true });
+assert.equal(
+  atomicReplacement.status,
+  0,
+  `${atomicReplacementTestPath}\n${atomicReplacement.stderr || atomicReplacement.stdout}`,
+);
+process.stdout.write(atomicReplacement.stdout);
 
 console.log('Windows updater installer validation passed all bootstrap ACL, partial-rerun, atomic replacement, final ACL, and task-ordering scenarios.');

@@ -94,17 +94,294 @@ function Test-MccUpdateBranch {
     return $true
 }
 
+function ConvertTo-MccAtomicFullFilePath {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        throw "Atomic replacement $Description path cannot be empty."
+    }
+    try {
+        $normalizedPath = [System.IO.Path]::GetFullPath($LiteralPath)
+    } catch {
+        throw "Atomic replacement $Description path is not legal: $($_.Exception.Message)"
+    }
+    $fileName = [System.IO.Path]::GetFileName($normalizedPath)
+    if ([string]::IsNullOrWhiteSpace($fileName) -or
+        $normalizedPath.EndsWith([System.IO.Path]::DirectorySeparatorChar) -or
+        $normalizedPath.EndsWith([System.IO.Path]::AltDirectorySeparatorChar) -or
+        $normalizedPath.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or
+        $fileName.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+        throw "Atomic replacement $Description path must be a legal full file path with a nonempty filename."
+    }
+    return $normalizedPath
+}
+
+function Get-MccAtomicFileHash {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    return (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+}
+
+function Remove-MccAtomicArtifact {
+    param(
+        [AllowNull()][AllowEmptyString()][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        return
+    }
+    if ([System.IO.Directory]::Exists($LiteralPath)) {
+        throw "Atomic replacement $Description unexpectedly became a directory: $LiteralPath"
+    }
+    if ([System.IO.File]::Exists($LiteralPath)) {
+        [System.IO.File]::Delete($LiteralPath)
+    }
+    if ([System.IO.File]::Exists($LiteralPath) -or [System.IO.Directory]::Exists($LiteralPath)) {
+        throw "Atomic replacement could not clean the $Description path: $LiteralPath"
+    }
+}
+
+function New-MccAtomicSiblingPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    $directory = [System.IO.Path]::GetDirectoryName($DestinationPath)
+    $fileName = [System.IO.Path]::GetFileName($DestinationPath)
+    $candidate = Join-Path $directory ".$fileName.$Label.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    return ConvertTo-MccAtomicFullFilePath -LiteralPath $candidate -Description $Label
+}
+
+function Invoke-MccAtomicFileReplacement {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$TemporaryPath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedSha256 = '',
+        [AllowNull()][AllowEmptyString()][string]$DestinationBackupPath,
+        [AllowNull()][scriptblock]$DestinationVerification
+    )
+    $normalizedTemporaryPath = ConvertTo-MccAtomicFullFilePath -LiteralPath $TemporaryPath -Description 'temporary source'
+    $normalizedDestinationPath = ConvertTo-MccAtomicFullFilePath -LiteralPath $DestinationPath -Description 'destination'
+    if ($normalizedTemporaryPath.Equals($normalizedDestinationPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Atomic replacement temporary source and destination must be different paths.'
+    }
+
+    $normalizedBackupPath = $null
+    $rollbackDiscardPath = $null
+    $destinationExisted = $false
+    $originalHash = $null
+    $mutationAttempted = $false
+    $commitApplied = $false
+    $operationCompleted = $false
+    $originalRestored = $false
+    [Exception]$operationFailure = $null
+
+    try {
+        $requestedBackupPath = $null
+        if ($PSBoundParameters.ContainsKey('DestinationBackupPath')) {
+            $requestedBackupPath = ConvertTo-MccAtomicFullFilePath `
+                -LiteralPath $DestinationBackupPath `
+                -Description 'destination backup'
+        }
+        if (-not [System.IO.File]::Exists($normalizedTemporaryPath)) {
+            throw "Atomic replacement temporary source file is missing: $normalizedTemporaryPath"
+        }
+        if ((Get-Item -LiteralPath $normalizedTemporaryPath -Force -ErrorAction Stop).Length -le 0) {
+            throw "Atomic replacement temporary source file is empty: $normalizedTemporaryPath"
+        }
+
+        $destinationDirectory = [System.IO.Path]::GetDirectoryName($normalizedDestinationPath)
+        if ([string]::IsNullOrWhiteSpace($destinationDirectory) -or
+            -not [System.IO.Directory]::Exists($destinationDirectory)) {
+            throw "Atomic replacement destination directory does not exist: $destinationDirectory"
+        }
+        if ([System.IO.Directory]::Exists($normalizedDestinationPath)) {
+            throw "Atomic replacement destination cannot be a directory: $normalizedDestinationPath"
+        }
+
+        $temporaryRoot = [System.IO.Path]::GetPathRoot($normalizedTemporaryPath)
+        $destinationRoot = [System.IO.Path]::GetPathRoot($normalizedDestinationPath)
+        if ([string]::IsNullOrWhiteSpace($temporaryRoot) -or
+            [string]::IsNullOrWhiteSpace($destinationRoot) -or
+            -not $temporaryRoot.Equals($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Atomic replacement temporary source and destination must be on the same filesystem volume.'
+        }
+
+        $temporaryHash = Get-MccAtomicFileHash -LiteralPath $normalizedTemporaryPath
+        if ($ExpectedSha256 -and $temporaryHash -cne $ExpectedSha256.ToUpperInvariant()) {
+            throw 'Atomic replacement temporary source hash does not match the expected content.'
+        }
+        $verifiedHash = if ($ExpectedSha256) { $ExpectedSha256.ToUpperInvariant() } else { $temporaryHash }
+
+        $destinationExisted = [System.IO.File]::Exists($normalizedDestinationPath)
+        if ($destinationExisted) {
+            $originalHash = Get-MccAtomicFileHash -LiteralPath $normalizedDestinationPath
+            if ($PSBoundParameters.ContainsKey('DestinationBackupPath')) {
+                $normalizedBackupPath = $requestedBackupPath
+            } else {
+                $normalizedBackupPath = New-MccAtomicSiblingPath -DestinationPath $normalizedDestinationPath -Label 'replace-backup'
+            }
+            $backupDirectory = [System.IO.Path]::GetDirectoryName($normalizedBackupPath)
+            if (-not $backupDirectory.Equals($destinationDirectory, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Atomic replacement backup must be a sibling of the destination file.'
+            }
+            if ($normalizedBackupPath.Equals($normalizedTemporaryPath, [StringComparison]::OrdinalIgnoreCase) -or
+                $normalizedBackupPath.Equals($normalizedDestinationPath, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Atomic replacement backup must differ from the temporary source and destination paths.'
+            }
+            if ([System.IO.File]::Exists($normalizedBackupPath) -or [System.IO.Directory]::Exists($normalizedBackupPath)) {
+                throw "Atomic replacement backup path already exists: $normalizedBackupPath"
+            }
+            $backupRoot = [System.IO.Path]::GetPathRoot($normalizedBackupPath)
+            if (-not $backupRoot.Equals($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Atomic replacement backup must be on the destination filesystem volume.'
+            }
+
+            $mutationAttempted = $true
+            [System.IO.File]::Replace(
+                $normalizedTemporaryPath,
+                $normalizedDestinationPath,
+                $normalizedBackupPath,
+                $true
+            )
+            $commitApplied = $true
+        } else {
+            if ($PSBoundParameters.ContainsKey('DestinationBackupPath')) {
+                throw 'Atomic replacement does not accept a backup path when the destination does not exist.'
+            }
+            $mutationAttempted = $true
+            [System.IO.File]::Move($normalizedTemporaryPath, $normalizedDestinationPath)
+            $commitApplied = $true
+        }
+
+        if (-not [System.IO.File]::Exists($normalizedDestinationPath) -or
+            (Get-Item -LiteralPath $normalizedDestinationPath -Force -ErrorAction Stop).Length -le 0) {
+            throw 'Atomic replacement did not create a nonempty destination file.'
+        }
+        $destinationHash = Get-MccAtomicFileHash -LiteralPath $normalizedDestinationPath
+        if ($destinationHash -cne $verifiedHash) {
+            throw 'Atomic replacement destination hash verification failed.'
+        }
+        if ($null -ne $DestinationVerification) {
+            [void](& $DestinationVerification $normalizedDestinationPath $normalizedBackupPath)
+        }
+        $destinationHash = Get-MccAtomicFileHash -LiteralPath $normalizedDestinationPath
+        if ($destinationHash -cne $verifiedHash) {
+            throw 'Atomic replacement destination hash changed during verification.'
+        }
+
+        Remove-MccAtomicArtifact -LiteralPath $normalizedTemporaryPath -Description 'verified temporary source'
+        Remove-MccAtomicArtifact -LiteralPath $normalizedBackupPath -Description 'verified destination backup'
+        $operationCompleted = $true
+    } catch {
+        $operationFailure = $_.Exception
+        try {
+            if (-not $mutationAttempted) {
+                $originalRestored = $true
+            } elseif ($destinationExisted) {
+                $currentDestinationIsOriginal = (
+                    [System.IO.File]::Exists($normalizedDestinationPath) -and
+                    (Get-MccAtomicFileHash -LiteralPath $normalizedDestinationPath) -ceq $originalHash
+                )
+                if (-not $currentDestinationIsOriginal) {
+                    if ([string]::IsNullOrWhiteSpace($normalizedBackupPath) -or
+                        -not [System.IO.File]::Exists($normalizedBackupPath)) {
+                        throw 'The original destination backup is unavailable for rollback.'
+                    }
+                    if ([System.IO.File]::Exists($normalizedDestinationPath)) {
+                        $rollbackDiscardPath = New-MccAtomicSiblingPath -DestinationPath $normalizedDestinationPath -Label 'rollback-discard'
+                        [System.IO.File]::Replace(
+                            $normalizedBackupPath,
+                            $normalizedDestinationPath,
+                            $rollbackDiscardPath,
+                            $true
+                        )
+                    } else {
+                        [System.IO.File]::Move($normalizedBackupPath, $normalizedDestinationPath)
+                    }
+                    if (-not [System.IO.File]::Exists($normalizedDestinationPath) -or
+                        (Get-MccAtomicFileHash -LiteralPath $normalizedDestinationPath) -cne $originalHash) {
+                        throw 'Atomic replacement rollback could not verify the original destination content.'
+                    }
+                }
+                $originalRestored = $true
+            } else {
+                if ($commitApplied) {
+                    if ([System.IO.Directory]::Exists($normalizedDestinationPath)) {
+                        throw 'Atomic replacement rollback found a directory at the destination path.'
+                    }
+                    if ([System.IO.File]::Exists($normalizedDestinationPath)) {
+                        [System.IO.File]::Delete($normalizedDestinationPath)
+                    }
+                    if ([System.IO.File]::Exists($normalizedDestinationPath)) {
+                        throw 'Atomic replacement rollback could not restore the original absent destination.'
+                    }
+                }
+                $originalRestored = $true
+            }
+        } catch {
+            $operationFailure = [InvalidOperationException]::new(
+                "Atomic replacement failed and rollback also failed. Original failure: $($operationFailure.Message) Rollback failure: $($_.Exception.Message)",
+                $_.Exception
+            )
+        }
+    } finally {
+        foreach ($artifact in @(
+            @{ Path = $normalizedTemporaryPath; Description = 'temporary source' },
+            @{ Path = $rollbackDiscardPath; Description = 'rollback discard' }
+        )) {
+            try {
+                Remove-MccAtomicArtifact -LiteralPath $artifact.Path -Description $artifact.Description
+            } catch {
+                if ($null -eq $operationFailure) {
+                    $operationFailure = $_.Exception
+                } else {
+                    $operationFailure = [InvalidOperationException]::new(
+                        "$($operationFailure.Message) Cleanup failure: $($_.Exception.Message)",
+                        $_.Exception
+                    )
+                }
+            }
+        }
+        if ($operationCompleted -or $originalRestored) {
+            try {
+                Remove-MccAtomicArtifact -LiteralPath $normalizedBackupPath -Description 'destination backup'
+            } catch {
+                if ($null -eq $operationFailure) {
+                    $operationFailure = $_.Exception
+                } else {
+                    $operationFailure = [InvalidOperationException]::new(
+                        "$($operationFailure.Message) Cleanup failure: $($_.Exception.Message)",
+                        $_.Exception
+                    )
+                }
+            }
+        }
+    }
+
+    if ($null -ne $operationFailure) {
+        throw $operationFailure
+    }
+    return $normalizedDestinationPath
+}
+
 function Write-MccAtomicJson {
     param(
         [Parameter(Mandatory = $true)][string]$LiteralPath,
         [Parameter(Mandatory = $true)][object]$Value,
-        [ValidateRange(2, 20)][int]$Depth = 10
+        [ValidateRange(2, 20)][int]$Depth = 10,
+        [AllowNull()][scriptblock]$DestinationVerification
     )
-    $directory = Split-Path -Parent $LiteralPath
+    $normalizedLiteralPath = ConvertTo-MccAtomicFullFilePath -LiteralPath $LiteralPath -Description 'JSON destination'
+    $directory = [System.IO.Path]::GetDirectoryName($normalizedLiteralPath)
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
         [System.IO.Directory]::CreateDirectory($directory) | Out-Null
     }
-    $temporaryPath = Join-Path $directory ".$([System.IO.Path]::GetFileName($LiteralPath)).$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    $temporaryPath = ConvertTo-MccAtomicFullFilePath `
+        -LiteralPath (Join-Path $directory ".$([System.IO.Path]::GetFileName($normalizedLiteralPath)).$PID.$([Guid]::NewGuid().ToString('N')).tmp") `
+        -Description 'JSON temporary source'
     try {
         $json = $Value | ConvertTo-Json -Depth $Depth
         [System.IO.File]::WriteAllText($temporaryPath, "$json`r`n", [Text.UTF8Encoding]::new($false))
@@ -112,10 +389,15 @@ function Write-MccAtomicJson {
             throw 'Atomic JSON validation produced an empty temporary file.'
         }
         [void]([System.IO.File]::ReadAllText($temporaryPath, [Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop)
-        if (Test-Path -LiteralPath $LiteralPath -PathType Leaf) {
-            [System.IO.File]::Replace($temporaryPath, $LiteralPath, $null, $true)
+        if ($null -ne $DestinationVerification) {
+            [void](Invoke-MccAtomicFileReplacement `
+                -TemporaryPath $temporaryPath `
+                -DestinationPath $normalizedLiteralPath `
+                -DestinationVerification $DestinationVerification)
         } else {
-            Move-Item -LiteralPath $temporaryPath -Destination $LiteralPath
+            [void](Invoke-MccAtomicFileReplacement `
+                -TemporaryPath $temporaryPath `
+                -DestinationPath $normalizedLiteralPath)
         }
     } finally {
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
@@ -357,6 +639,7 @@ Export-ModuleMember -Function @(
     'Test-MccSemver',
     'Test-MccCommit',
     'Test-MccUpdateBranch',
+    'Invoke-MccAtomicFileReplacement',
     'Write-MccAtomicJson',
     'Read-MccJson',
     'Invoke-MccProcess',
