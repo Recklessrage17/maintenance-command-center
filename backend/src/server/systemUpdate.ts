@@ -519,7 +519,33 @@ function readManifestVersion(manifestText: string) {
   }
 }
 
-export function createSystemUpdateGitRunner(configuration: Pick<SystemUpdateConfiguration, 'mode' | 'gitExecutable'>): SystemUpdateGitRunner {
+function gitProcessEnvironment(configuration: Pick<SystemUpdateConfiguration, 'mode' | 'applicationDir'>) {
+  const environment = { ...process.env };
+  environment.GIT_TERMINAL_PROMPT = '0';
+  if (configuration.mode === 'windows_test' || configuration.mode === 'windows_production') {
+    for (const environmentName of Object.keys(environment)) {
+      if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/i.test(environmentName)
+        || /^GIT_CONFIG_(?:COUNT|PARAMETERS)$/i.test(environmentName)) {
+        delete environment[environmentName];
+      }
+    }
+    const applicationDir = path.win32.resolve(configuration.applicationDir);
+    const root = path.win32.parse(applicationDir).root;
+    if (!path.win32.isAbsolute(configuration.applicationDir)
+      || !applicationDir
+      || sameWindowsPath(applicationDir, root)
+      || isProtectedWindowsDevelopmentPath(applicationDir)
+      || /[*?\[\]]/.test(applicationDir)) {
+      return environment;
+    }
+    environment.GIT_CONFIG_COUNT = '1';
+    environment.GIT_CONFIG_KEY_0 = 'safe.directory';
+    environment.GIT_CONFIG_VALUE_0 = applicationDir.replaceAll('\\', '/');
+  }
+  return environment;
+}
+
+export function createSystemUpdateGitRunner(configuration: Pick<SystemUpdateConfiguration, 'mode' | 'gitExecutable' | 'applicationDir'>): SystemUpdateGitRunner {
   const executable = configuration.mode === 'windows_test' || configuration.mode === 'windows_production'
     ? configuration.gitExecutable
     : 'git';
@@ -529,7 +555,7 @@ export function createSystemUpdateGitRunner(configuration: Pick<SystemUpdateConf
     timeout: timeoutMs,
     windowsHide: true,
     maxBuffer: 2 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    env: gitProcessEnvironment(configuration),
   });
 }
 

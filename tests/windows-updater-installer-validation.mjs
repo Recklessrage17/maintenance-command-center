@@ -6,6 +6,7 @@ const installerPath = 'deploy/windows/Install-MccWindowsUpdater.ps1';
 const commonPath = 'deploy/windows/MccWindowsUpdater.Common.psm1';
 const agentPath = 'deploy/windows/Start-MccWindowsAgent.ps1';
 const launcherPath = 'deploy/windows/Start-MccWindowsWeb.ps1';
+const backendUpdatePath = 'backend/src/server/systemUpdate.ts';
 const installedTestPath = 'deploy/windows/Test-MccWindowsUpdater.ps1';
 const readmePath = 'deploy/windows/README-Windows-Updater.md';
 const atomicReplacementTestPath = 'tests/windows-updater-atomic-replacement.ps1';
@@ -15,6 +16,7 @@ const installer = fs.readFileSync(installerPath, 'utf8');
 const common = fs.readFileSync(commonPath, 'utf8');
 const agent = fs.readFileSync(agentPath, 'utf8');
 const launcher = fs.readFileSync(launcherPath, 'utf8');
+const backendUpdate = fs.readFileSync(backendUpdatePath, 'utf8');
 const installedTest = fs.readFileSync(installedTestPath, 'utf8');
 const readme = fs.readFileSync(readmePath, 'utf8');
 
@@ -35,7 +37,8 @@ const applicationAclPreparation = functionSource(installer, 'Set-MccApplicationR
 const applicationAclVerification = functionSource(installer, 'Assert-MccApplicationRuntimeAcl', 'Restore-MccScheduledTasks');
 const processTreeFallback = functionSource(common, 'Stop-MccExactProcessTreeFallback', 'Invoke-MccProcess');
 const processFunction = functionSource(common, 'Invoke-MccProcess', 'Invoke-MccGit');
-const pathBootstrapFunction = functionSource(common, 'Set-MccExecutablePathBootstrap', 'New-MccWindowsAgentHealth');
+const pathBootstrapFunction = functionSource(common, 'Set-MccExecutablePathBootstrap', 'Set-MccGitRepositoryTrustBootstrap');
+const gitTrustBootstrapFunction = functionSource(common, 'Set-MccGitRepositoryTrustBootstrap', 'New-MccWindowsAgentHealth');
 const healthPayloadFunction = functionSource(common, 'New-MccWindowsAgentHealth', 'Test-MccSemver');
 const agentHealthStart = agent.indexOf('function Write-AgentHealth {');
 const agentHealthFunction = agent.slice(agentHealthStart, agent.indexOf('\nif (-not (Test-Path', agentHealthStart));
@@ -168,6 +171,16 @@ assert.match(installer, /throw\s*\r?\n\}/);
 assert.match(pathBootstrapFunction, /StringComparer\]::OrdinalIgnoreCase/);
 assert.match(pathBootstrapFunction, /IsNullOrWhiteSpace/);
 assert.match(pathBootstrapFunction, /GIT_TERMINAL_PROMPT = '0'/);
+assert.match(gitTrustBootstrapFunction, /Assert-MccApprovedApplicationPath/);
+assert.match(gitTrustBootstrapFunction, /ConfiguredApplicationPath/);
+assert.match(gitTrustBootstrapFunction, /OrdinalIgnoreCase/);
+assert.match(gitTrustBootstrapFunction, /GIT_CONFIG_PARAMETERS/);
+assert.match(gitTrustBootstrapFunction, /GIT_CONFIG_\(\?:KEY\|VALUE\)_\\d\+/);
+assert.match(gitTrustBootstrapFunction, /GIT_CONFIG_COUNT = '1'/);
+assert.match(gitTrustBootstrapFunction, /GIT_CONFIG_KEY_0 = 'safe\.directory'/);
+assert.match(gitTrustBootstrapFunction, /GIT_CONFIG_VALUE_0 = \$gitTrustedPath/);
+assert.match(gitTrustBootstrapFunction, /\.Replace\('\\', '\/'\)/);
+assert.doesNotMatch(gitTrustBootstrapFunction, /safe\.directory[^\r\n]*['"]\*['"]|git\s+config|--global|--system/);
 assert.doesNotMatch(agentHealthFunction, /\$env:PATH|Set-MccExecutablePathBootstrap/);
 assert.equal((agent.match(/Set-MccExecutablePathBootstrap/g) ?? []).length, 1, 'The updater agent must bootstrap executable PATH exactly once.');
 assert.ok(agent.indexOf('Set-MccExecutablePathBootstrap') < agent.indexOf('while ($true)'));
@@ -187,6 +200,15 @@ assert.doesNotMatch(processTreeFallback, /ProcessName|node\.exe|Get-Process|Stop
 assert.match(launcher, /mcc-launcher-\$stamp\.log/);
 assert.match(launcher, /RedirectStandardOutput \$stdoutPath/);
 assert.doesNotMatch(launcher, /\$logPath = Join-Path \$webLogDirectory "mcc-\$stamp\.log"/);
+assert.match(launcher, /Set-MccExecutablePathBootstrap[\s\S]*Set-MccGitRepositoryTrustBootstrap[\s\S]*Assert-MccRepository[\s\S]*Start-Process/);
+assert.match(launcher, /exact process-scoped repository trust/);
+assert.doesNotMatch(launcher, /Write-WebStartupLog -Message .*\$applicationPath/);
+
+assert.match(backendUpdate, /function gitProcessEnvironment/);
+assert.match(backendUpdate, /GIT_CONFIG_COUNT = '1'/);
+assert.match(backendUpdate, /GIT_CONFIG_KEY_0 = 'safe\.directory'/);
+assert.match(backendUpdate, /GIT_CONFIG_VALUE_0 = applicationDir\.replaceAll/);
+assert.doesNotMatch(backendUpdate, /safe\.directory[^\r\n]*['"]\*['"]|git\s+config\s+--global/);
 
 const inheritanceProtection = finalAclFunction.indexOf('$acl.SetAccessRuleProtection($true, $false)');
 const replacementGrantCheck = finalAclFunction.indexOf('Final ACL replacement grants were not confirmed');
@@ -240,7 +262,19 @@ for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPa
   assert.equal(parser.status, 0, `${powershellPath}\n${parser.stderr || parser.stdout}`);
 }
 
-const agentRuntime = spawnSync('powershell.exe', [
+const managedRepositoryPath = 'C:\\MCC-Windows-Test\\MCC_V1_FINAL';
+const managedRepositoryCommit = fs.existsSync(managedRepositoryPath)
+  ? spawnSync('git', [
+      '-c',
+      `safe.directory=${managedRepositoryPath.replaceAll('\\', '/')}`,
+      '-C',
+      managedRepositoryPath,
+      'rev-parse',
+      '--short=7',
+      'HEAD',
+    ], { encoding: 'utf8', windowsHide: true }).stdout.trim()
+  : '';
+const agentRuntimeArguments = [
   '-NoLogo',
   '-NoProfile',
   '-NonInteractive',
@@ -250,7 +284,16 @@ const agentRuntime = spawnSync('powershell.exe', [
   agentRuntimeTestPath,
   '-ModulePath',
   commonPath,
-], { encoding: 'utf8', windowsHide: true, timeout: 120_000 });
+];
+if (managedRepositoryCommit) {
+  agentRuntimeArguments.push(
+    '-ManagedRepositoryPath',
+    managedRepositoryPath,
+    '-ExpectedManagedCommit',
+    managedRepositoryCommit,
+  );
+}
+const agentRuntime = spawnSync('powershell.exe', agentRuntimeArguments, { encoding: 'utf8', windowsHide: true, timeout: 180_000 });
 assert.equal(
   agentRuntime.status,
   0,

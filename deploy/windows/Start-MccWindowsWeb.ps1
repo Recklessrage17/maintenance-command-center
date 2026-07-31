@@ -53,7 +53,11 @@ try {
         throw 'The built MCC backend entry point is missing.'
     }
     Set-MccExecutablePathBootstrap -GitPath $gitPath -NodePath $nodePath
-    Write-WebStartupLog -Message 'Startup validation passed: protected configuration, Git, Node.js, backend entry point, PATH bootstrap, and noninteractive Git are ready.'
+    Set-MccGitRepositoryTrustBootstrap `
+        -ApplicationPath $applicationPath `
+        -ConfiguredApplicationPath ([string]$configuration.applicationPath)
+    Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch ([string]$configuration.branch)
+    Write-WebStartupLog -Message 'Startup validation passed: protected configuration, exact Git and Node.js executables, executable PATH bootstrap, exact process-scoped repository trust, approved repository and branch, backend entry point, and noninteractive Git are ready.'
 } catch {
     Write-WebStartupLog -Message "Startup validation failed: $(Get-MccCleanText -Value $_.Exception.Message -Maximum 240)"
     throw

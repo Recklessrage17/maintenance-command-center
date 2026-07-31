@@ -165,6 +165,8 @@ Only after all managed files and bootstrap checks succeed does the final phase r
 
 Application permissions are applied without a recursive `icacls /T` walk of the clone. The installer grants bounded inheritable read/execute access at the backend, built frontend, and Git metadata roots; applies read-only grants to package manifests and environment files; and grants Modify only at `backend\data`, `backend\uploads`, `backend\documents`, and `backend\files`. It reapplies the same idempotent profile after the build and verifies every required runtime target.
 
+The LOCAL SERVICE launcher also configures one process-scoped Git `safe.directory` entry for the exact Administrator-configured application path before Node starts. It removes inherited command-scope Git configuration entries, uses the normalized forward-slash Windows path, and validates the approved origin and protected branch. The setting is inherited only by the managed Node process and its Git children; the installer never writes global, system, or user Git configuration and never enables wildcard trust.
+
 The status directory contains only the sanitized Issue #60 state model; detailed Administrator output is written separately under `logs`. Run the test script after installation to check for broad write ACLs.
 
 ## Update behavior

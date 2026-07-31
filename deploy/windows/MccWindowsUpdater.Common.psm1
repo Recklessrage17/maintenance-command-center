@@ -103,6 +103,55 @@ function Set-MccExecutablePathBootstrap {
     $env:GIT_TERMINAL_PROMPT = '0'
 }
 
+function Set-MccGitRepositoryTrustBootstrap {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApplicationPath,
+        [Parameter(Mandatory = $true)][string]$ConfiguredApplicationPath
+    )
+    if ([string]::IsNullOrWhiteSpace($ApplicationPath) -or
+        -not [System.IO.Path]::IsPathRooted($ApplicationPath) -or
+        [WildcardPattern]::ContainsWildcardCharacters($ApplicationPath)) {
+        throw 'The protected Git repository trust path must be one absolute path without wildcards.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ConfiguredApplicationPath) -or
+        -not [System.IO.Path]::IsPathRooted($ConfiguredApplicationPath) -or
+        [WildcardPattern]::ContainsWildcardCharacters($ConfiguredApplicationPath)) {
+        throw 'The Administrator-configured Git repository trust path is invalid.'
+    }
+    $normalizedApplicationPath = Assert-MccApprovedApplicationPath -LiteralPath $ApplicationPath
+    $normalizedConfiguredPath = Assert-MccApprovedApplicationPath -LiteralPath $ConfiguredApplicationPath
+    if (-not $normalizedApplicationPath.Equals($normalizedConfiguredPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Git repository trust must match the exact Administrator-configured MCC clone.'
+    }
+    if (-not (Test-Path -LiteralPath $normalizedApplicationPath -PathType Container) -or
+        -not (Test-Path -LiteralPath (Join-Path $normalizedApplicationPath '.git') -PathType Container) -or
+        -not (Test-Path -LiteralPath (Join-Path $normalizedApplicationPath 'package.json') -PathType Leaf)) {
+        throw 'The protected Git repository trust target is not the configured MCC clone.'
+    }
+    $manifest = Read-MccJson -LiteralPath (Join-Path $normalizedApplicationPath 'package.json')
+    if ([string]$manifest.name -cne 'maintenance-command-center') {
+        throw 'The protected Git repository trust target is not the configured MCC clone.'
+    }
+
+    foreach ($environmentName in @(Get-ChildItem Env: | Where-Object {
+        $_.Name -ieq 'GIT_CONFIG_PARAMETERS' -or
+        $_.Name -ieq 'GIT_CONFIG_COUNT' -or
+        $_.Name -match '^GIT_CONFIG_(?:KEY|VALUE)_\d+$'
+    } | ForEach-Object { $_.Name })) {
+        [Environment]::SetEnvironmentVariable($environmentName, $null, [EnvironmentVariableTarget]::Process)
+    }
+
+    $gitTrustedPath = $normalizedApplicationPath.Replace('\', '/')
+    if ([string]::IsNullOrWhiteSpace($gitTrustedPath) -or
+        $gitTrustedPath -eq '*' -or
+        [WildcardPattern]::ContainsWildcardCharacters($gitTrustedPath)) {
+        throw 'Wildcard Git repository trust is forbidden.'
+    }
+    $env:GIT_CONFIG_COUNT = '1'
+    $env:GIT_CONFIG_KEY_0 = 'safe.directory'
+    $env:GIT_CONFIG_VALUE_0 = $gitTrustedPath
+}
+
 function New-MccWindowsAgentHealth {
     param(
         [Parameter(Mandatory = $true)][bool]$HeartbeatCompleted,
@@ -818,6 +867,7 @@ Export-ModuleMember -Function @(
     'Assert-MccApprovedApplicationPath',
     'Get-MccCleanText',
     'Set-MccExecutablePathBootstrap',
+    'Set-MccGitRepositoryTrustBootstrap',
     'New-MccWindowsAgentHealth',
     'Test-MccSemver',
     'Test-MccCommit',

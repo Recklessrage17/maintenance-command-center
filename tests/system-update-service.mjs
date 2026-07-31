@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -19,7 +20,7 @@ import {
 } from '../backend/dist/server/systemUpdate.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const fixtureRoot = path.join(root, 'tmp', `system-update-service-${Date.now()}-${process.pid}`);
+const fixtureRoot = path.join(os.tmpdir(), `mcc-system-update-service-${Date.now()}-${process.pid}`);
 const gitLocator = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [process.platform === 'win32' ? 'git.exe' : 'git'], {
   encoding: 'utf8',
   windowsHide: true,
@@ -307,7 +308,15 @@ try {
   const restrictedPathDirectory = path.join(restrictedPathFixture.directory, 'local-service-path');
   fs.mkdirSync(restrictedPathDirectory);
   const originalPath = process.env.PATH;
+  const originalGitConfigParameters = process.env.GIT_CONFIG_PARAMETERS;
+  const originalGitConfigCount = process.env.GIT_CONFIG_COUNT;
+  const originalGitConfigKey0 = process.env.GIT_CONFIG_KEY_0;
+  const originalGitConfigValue0 = process.env.GIT_CONFIG_VALUE_0;
   process.env.PATH = restrictedPathDirectory;
+  process.env.GIT_CONFIG_PARAMETERS = 'must-be-removed';
+  process.env.GIT_CONFIG_COUNT = '1';
+  process.env.GIT_CONFIG_KEY_0 = 'safe.directory';
+  process.env.GIT_CONFIG_VALUE_0 = '*';
   try {
     const protectedRunnerService = new SystemUpdateService(
       configuration(restrictedPathFixture),
@@ -324,8 +333,27 @@ try {
     );
     assert.equal(buildMetadata.status, 0);
     assert.match(buildMetadata.stdout.trim(), /^[0-9a-f]{7}$/i);
+    const trustMetadata = createSystemUpdateGitRunner(configuration(restrictedPathFixture))(
+      ['config', '--show-origin', '--get-all', 'safe.directory'],
+      restrictedPathFixture.installed,
+      2_000,
+    );
+    assert.equal(trustMetadata.status, 0);
+    const commandScopedTrust = trustMetadata.stdout.trim().split(/\r?\n/).filter(line => /command line:/i.test(line));
+    assert.equal(commandScopedTrust.length, 1);
+    assert.equal(commandScopedTrust[0].includes('*'), false);
+    assert.match(commandScopedTrust[0].replaceAll('\\', '/'), new RegExp(restrictedPathFixture.installed.replaceAll('\\', '/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   } finally {
     process.env.PATH = originalPath;
+    for (const [name, value] of Object.entries({
+      GIT_CONFIG_PARAMETERS: originalGitConfigParameters,
+      GIT_CONFIG_COUNT: originalGitConfigCount,
+      GIT_CONFIG_KEY_0: originalGitConfigKey0,
+      GIT_CONFIG_VALUE_0: originalGitConfigValue0,
+    })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 
   const unavailableGitFixture = makeFixture('git-unavailable');
