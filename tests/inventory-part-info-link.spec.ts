@@ -158,9 +158,10 @@ test('unlinked values stay plain and long linked values truncate without page ov
   await expect(longLink).toHaveAttribute('title',longPartNumber);
   const dimensions=await longLink.locator('.mcc-text-link__label').evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
   expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
-  const longLayout=await longLink.evaluate(element=>{const link=element.getBoundingClientRect();const cell=element.closest('td')!.getBoundingClientRect();const row=element.closest('tr')!.getBoundingClientRect();return {linkRight:link.right,cellRight:cell.right,rowHeight:row.height};});
+  const longLayout=await longLink.evaluate(element=>{const link=element.getBoundingClientRect();const cell=element.closest('td')!.getBoundingClientRect();const row=element.closest('tr')!.getBoundingClientRect();return {linkRight:link.right,cellRight:cell.right,linkHeight:link.height,rowHeight:row.height};});
   const plainRowHeight=await plain.evaluate(element=>element.closest('tr')!.getBoundingClientRect().height);
   expect(longLayout.linkRight).toBeLessThanOrEqual(longLayout.cellRight);
-  expect(longLayout.rowHeight).toBeLessThanOrEqual(plainRowHeight+1);
+  expect(longLayout.linkHeight).toBeLessThanOrEqual(30);
+  expect(longLayout.rowHeight).toBeGreaterThanOrEqual(plainRowHeight);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });

@@ -1451,9 +1451,11 @@ body {
 .mcc-shell .inventory-description-text {
   display: block;
   max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: normal;
+  text-overflow: clip;
   -webkit-line-clamp: unset;
 }
 

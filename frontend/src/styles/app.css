@@ -1617,8 +1617,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .sort-header:hover, .sort-header.active { color: #bff3ff; }
 .sort-header span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sort-marker { margin-left: auto; color: #8db9ce; font-size: .62rem; font-weight: 900; text-transform: uppercase; }
-.inventory-description-cell { color: #d9edf7; line-height: 1.35; }
-.inventory-description-text { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.inventory-description-cell { color: #d9edf7; line-height: 1.35; white-space: normal; }
+.inventory-description-text { display: block; overflow: visible; overflow-wrap: anywhere; word-break: normal; white-space: normal; text-overflow: clip; }
 .inventory-important-note, .inventory-lead-time { display: block !important; margin: 4px 0 0 !important; overflow-wrap: anywhere; font-size: .76rem !important; line-height: 1.35 !important; text-transform: none !important; }
 .inventory-important-note { color: #ff9aa8 !important; font-weight: 900 !important; }
 .inventory-important-note strong { color: #ffd1d7; font-size: inherit; text-transform: uppercase; }

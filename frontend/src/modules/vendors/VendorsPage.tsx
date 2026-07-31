@@ -649,7 +649,9 @@ function VendorCard({vendor,onView,onEdit,onDelete,onContacts,onEmailCopied}:{ve
       </div>
       <button className="vendor-contact-summary-button" type="button" onClick={onContacts} title="Open vendor contacts">
         <span className="vendor-primary-contact-line">
-          <MccContactPill className="vendor-primary-contact-name">{vendor.primaryContactName || 'No primary contact'}</MccContactPill>
+          {vendor.primaryContactName
+            ? <MccStatusPill variant="success" className="vendor-primary-contact-name">{vendor.primaryContactName}</MccStatusPill>
+            : <MccContactPill className="vendor-primary-contact-name">No primary contact</MccContactPill>}
           <span className="vendor-primary-contact-label">Primary Contact</span>
           <MccStatusPill variant="neutral" className="vendor-contact-count-badge">{contactCountText(vendor.contactCount)}</MccStatusPill>
         </span>
