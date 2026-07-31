@@ -21,6 +21,8 @@ const windowsTest = fs.readFileSync('deploy/windows/Test-MccWindowsUpdater.ps1',
 const windowsReadme = fs.readFileSync('deploy/windows/README-Windows-Updater.md', 'utf8');
 const windowsTemplate = JSON.parse(fs.readFileSync('deploy/windows/config.template.json', 'utf8'));
 const windowsConfigSchema = JSON.parse(fs.readFileSync('deploy/windows/config.schema.json', 'utf8'));
+const windowsAgentHealthStart = windowsAgent.indexOf('function Write-AgentHealth {');
+const windowsAgentHealth = windowsAgent.slice(windowsAgentHealthStart, windowsAgent.indexOf('\nif (-not (Test-Path', windowsAgentHealthStart));
 
 for (const source of [linuxRunner, windowsRunner]) {
   assert.match(source, /https:\/\/github\.com\/Recklessrage17\/maintenance-command-center\.git/);
@@ -110,9 +112,11 @@ assert.match(windowsAgent, /request\\request\.json/);
 assert.match(windowsAgent, /agent-health\.json/);
 assert.match(windowsAgent, /Update-MccWindows\.ps1/);
 assert.doesNotMatch(windowsAgent, /\$(repositoryUrl|branchName|command)\b/i);
-assert.match(windowsAgent, /ExpectedBranch \(\[string\]\$configuration\.branch\)/);
+assert.match(windowsAgent, /ExpectedBranch \(\[string\]\$script:StartupConfiguration\.branch\)/);
 assert.match(windowsAgent, /Configured update branch: origin/);
-assert.doesNotMatch(windowsAgent, /Set-MccExecutablePathBootstrap/);
+assert.equal((windowsAgent.match(/Set-MccExecutablePathBootstrap/g) ?? []).length, 1);
+assert.ok(windowsAgent.indexOf('Set-MccExecutablePathBootstrap') < windowsAgent.indexOf('while ($true)'));
+assert.doesNotMatch(windowsAgentHealth, /Set-MccExecutablePathBootstrap|\$env:PATH/);
 assert.match(windowsWeb, /\$gitPath = \[string\]\$configuration\.gitPath/);
 assert.match(windowsWeb, /Test-Path -LiteralPath \$gitPath -PathType Leaf/);
 assert.match(windowsWeb, /Test-Path -LiteralPath \$nodePath -PathType Leaf/);

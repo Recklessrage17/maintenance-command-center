@@ -163,6 +163,8 @@ Only after all managed files and bootstrap checks succeed does the final phase r
 - Normal `Users` and `Everyone`: no write/modify grant.
 - Browser clients: no filesystem access.
 
+Application permissions are applied without a recursive `icacls /T` walk of the clone. The installer grants bounded inheritable read/execute access at the backend, built frontend, and Git metadata roots; applies read-only grants to package manifests and environment files; and grants Modify only at `backend\data`, `backend\uploads`, `backend\documents`, and `backend\files`. It reapplies the same idempotent profile after the build and verifies every required runtime target.
+
 The status directory contains only the sanitized Issue #60 state model; detailed Administrator output is written separately under `logs`. Run the test script after installation to check for broad write ACLs.
 
 ## Update behavior
@@ -213,6 +215,7 @@ Administrator logs:
 - `C:\ProgramData\MCC\Updater\logs\install.log`
 - `C:\ProgramData\MCC\Updater\logs\agent.log`
 - `C:\ProgramData\MCC\Updater\logs\update-*.log`
+- `C:\ProgramData\MCC\Updater\web-logs\mcc-launcher-*.log`
 - `C:\ProgramData\MCC\Updater\web-logs\mcc-*.log`
 
 `install.log`, `agent.log`, and each `update-*.log` explicitly identify `WINDOWS TEST MODE` and `origin/<configured-test-branch>` for test deployments. Production logs identify `WINDOWS 11 PRODUCTION` and `origin/main`.

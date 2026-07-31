@@ -74,12 +74,81 @@ function Set-MccExecutablePathBootstrap {
         -not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
         throw 'The configured Node.js executable is missing or invalid.'
     }
-    $executableDirectories = @(
-        [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($GitPath))
-        [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($NodePath))
-    ) | Select-Object -Unique
-    $env:PATH = "$(($executableDirectories -join [System.IO.Path]::PathSeparator))$([System.IO.Path]::PathSeparator)$env:PATH"
+    $pathComparer = [StringComparer]::OrdinalIgnoreCase
+    $executableDirectories = [Collections.Generic.List[string]]::new()
+    $executableDirectoryKeys = [Collections.Generic.HashSet[string]]::new($pathComparer)
+    foreach ($executablePath in @($GitPath, $NodePath)) {
+        $directory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($executablePath)).TrimEnd('\', '/')
+        if ($executableDirectoryKeys.Add($directory)) {
+            $executableDirectories.Add($directory)
+        }
+    }
+
+    $preservedPathSegments = [Collections.Generic.List[string]]::new()
+    foreach ($pathSegment in @(([string]$env:PATH).Split([System.IO.Path]::PathSeparator))) {
+        if ([string]::IsNullOrWhiteSpace($pathSegment)) {
+            continue
+        }
+        $comparisonSegment = $pathSegment.Trim().Trim('"')
+        try {
+            if ([System.IO.Path]::IsPathRooted($comparisonSegment)) {
+                $comparisonSegment = [System.IO.Path]::GetFullPath($comparisonSegment).TrimEnd('\', '/')
+            }
+        } catch {}
+        if (-not $executableDirectoryKeys.Contains($comparisonSegment)) {
+            $preservedPathSegments.Add($pathSegment)
+        }
+    }
+    $env:PATH = (@($executableDirectories) + @($preservedPathSegments)) -join [System.IO.Path]::PathSeparator
     $env:GIT_TERMINAL_PROMPT = '0'
+}
+
+function New-MccWindowsAgentHealth {
+    param(
+        [Parameter(Mandatory = $true)][bool]$HeartbeatCompleted,
+        [Parameter(Mandatory = $true)][bool]$ExecutableBootstrapSucceeded,
+        [Parameter(Mandatory = $true)][bool]$ConfigurationValid,
+        [AllowEmptyString()][string]$DeploymentMode = '',
+        [Parameter(Mandatory = $true)][bool]$ApplicationPathMatches,
+        [Parameter(Mandatory = $true)][bool]$RepositoryValid,
+        [Parameter(Mandatory = $true)][bool]$BranchValid,
+        [Parameter(Mandatory = $true)][bool]$RequestDirectoryAccessible,
+        [Parameter(Mandatory = $true)][bool]$StatusDirectoryAccessible,
+        [Parameter(Mandatory = $true)][bool]$MccTaskInstalled,
+        [Parameter(Mandatory = $true)][bool]$MccTaskRunning,
+        [Parameter(Mandatory = $true)][bool]$UpdaterTaskInstalled
+    )
+    $safeDeploymentMode = if (@('WindowsTest', 'WindowsProduction') -ccontains $DeploymentMode) {
+        $DeploymentMode
+    } else {
+        ''
+    }
+    $agentHealthy = $HeartbeatCompleted -and
+        $ExecutableBootstrapSucceeded -and
+        $ConfigurationValid -and
+        $ApplicationPathMatches -and
+        $RepositoryValid -and
+        $BranchValid -and
+        $RequestDirectoryAccessible -and
+        $StatusDirectoryAccessible -and
+        $MccTaskInstalled -and
+        $MccTaskRunning -and
+        $UpdaterTaskInstalled
+    return [ordered]@{
+        schemaVersion = 1
+        checkedAt = [DateTime]::UtcNow.ToString('o')
+        agentHealthy = [bool]$agentHealthy
+        configurationValid = $ConfigurationValid
+        deploymentMode = $safeDeploymentMode
+        applicationPathMatches = $ApplicationPathMatches
+        repositoryValid = $RepositoryValid
+        branchValid = $BranchValid
+        requestDirectoryAccessible = $RequestDirectoryAccessible
+        statusDirectoryAccessible = $StatusDirectoryAccessible
+        mccTaskInstalled = $MccTaskInstalled
+        mccTaskRunning = $MccTaskRunning
+        updaterTaskInstalled = $UpdaterTaskInstalled
+    }
 }
 
 function Test-MccSemver {
@@ -471,6 +540,45 @@ function ConvertTo-MccProcessArgument {
     return $builder.ToString()
 }
 
+function Stop-MccExactProcessTreeFallback {
+    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
+    $pendingIds = [Collections.Generic.Queue[int]]::new()
+    $treeIds = [Collections.Generic.List[int]]::new()
+    $pendingIds.Enqueue($Process.Id)
+    while ($pendingIds.Count -gt 0) {
+        $parentId = $pendingIds.Dequeue()
+        foreach ($child in @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $parentId" -ErrorAction Stop)) {
+            $childId = [int]$child.ProcessId
+            if (-not $treeIds.Contains($childId)) {
+                $treeIds.Add($childId)
+                $pendingIds.Enqueue($childId)
+            }
+        }
+    }
+    $treeIds.Reverse()
+    foreach ($processId in @($treeIds) + @($Process.Id)) {
+        try {
+            $treeProcess = [Diagnostics.Process]::GetProcessById($processId)
+            try {
+                if (-not $treeProcess.HasExited) {
+                    $treeProcess.Kill()
+                    if (-not $treeProcess.WaitForExit(10000)) {
+                        return $false
+                    }
+                }
+            } finally {
+                $treeProcess.Dispose()
+            }
+        } catch [ArgumentException] {}
+    }
+    try {
+        $Process.Refresh()
+        return $Process.HasExited
+    } catch {
+        return $true
+    }
+}
+
 function Invoke-MccProcess {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -492,33 +600,85 @@ function Invoke-MccProcess {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $executableName = Get-MccCleanText -Value ([System.IO.Path]::GetFileName($resolvedExecutable)) -Maximum 120
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
-    if (-not $process.Start()) {
-        throw "The controlled process could not start: $([System.IO.Path]::GetFileName($resolvedExecutable))."
-    }
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-        try { $process.Kill() } catch {}
-        throw "The controlled process timed out: $([System.IO.Path]::GetFileName($resolvedExecutable))."
-    }
-    $stdout = $stdoutTask.GetAwaiter().GetResult()
-    $stderr = $stderrTask.GetAwaiter().GetResult()
-    if ($DetailedLogPath) {
-        $safeLog = @(
-            "[$([DateTime]::UtcNow.ToString('o'))] $([System.IO.Path]::GetFileName($resolvedExecutable)) completed with exit code $($process.ExitCode)."
-            "Captured output was withheld from the updater log (stdout characters: $($stdout.Length); stderr characters: $($stderr.Length))."
-        ) -join [Environment]::NewLine
-        Add-Content -LiteralPath $DetailedLogPath -Value $safeLog -Encoding utf8
-    }
-    if ($process.ExitCode -ne 0) {
-        throw "The controlled process failed: $([System.IO.Path]::GetFileName($resolvedExecutable)) (exit code $($process.ExitCode))."
-    }
-    return [ordered]@{
-        ExitCode = $process.ExitCode
-        StandardOutput = $stdout.Trim()
-        StandardError = $stderr.Trim()
+    try {
+        if (-not $process.Start()) {
+            throw "The controlled process could not start: $executableName."
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $cleanupOutcome = 'termination_unconfirmed'
+            try {
+                $taskkillPath = Join-Path ([Environment]::GetFolderPath('System')) 'taskkill.exe'
+                if (-not (Test-Path -LiteralPath $taskkillPath -PathType Leaf)) {
+                    throw 'The Windows process-tree termination utility is unavailable.'
+                }
+                $taskkillStartInfo = [Diagnostics.ProcessStartInfo]::new()
+                $taskkillStartInfo.FileName = $taskkillPath
+                $taskkillStartInfo.Arguments = "/PID $($process.Id) /T /F"
+                $taskkillStartInfo.UseShellExecute = $false
+                $taskkillStartInfo.CreateNoWindow = $true
+                $taskkillStartInfo.RedirectStandardOutput = $true
+                $taskkillStartInfo.RedirectStandardError = $true
+                $taskkill = [Diagnostics.Process]::new()
+                $taskkill.StartInfo = $taskkillStartInfo
+                try {
+                    if (-not $taskkill.Start()) {
+                        throw 'The exact process-tree termination command could not start.'
+                    }
+                    if (-not $taskkill.WaitForExit(30000)) {
+                        try { $taskkill.Kill() } catch {}
+                        throw 'The exact process-tree termination command timed out.'
+                    }
+                    if ($taskkill.ExitCode -ne 0) {
+                        throw 'The exact process-tree termination command failed.'
+                    }
+                } finally {
+                    $taskkill.Dispose()
+                }
+                if (-not $process.WaitForExit(15000)) {
+                    throw 'The timed-out process did not confirm termination.'
+                }
+                $cleanupOutcome = 'exact_process_tree_terminated'
+            } catch {
+                try {
+                    if (Stop-MccExactProcessTreeFallback -Process $process) {
+                        $cleanupOutcome = 'exact_process_tree_terminated_by_fallback'
+                    }
+                } catch {}
+            }
+            if ($DetailedLogPath) {
+                Add-Content -LiteralPath $DetailedLogPath -Value "[$([DateTime]::UtcNow.ToString('o'))] $executableName timed out during execution; sanitized cleanup outcome: $cleanupOutcome." -Encoding utf8
+            }
+            if (-not $process.HasExited) {
+                throw "The controlled process timed out and termination was not confirmed: $executableName."
+            }
+            throw "The controlled process timed out: $executableName."
+        }
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
+        if ($DetailedLogPath) {
+            $safeLog = @(
+                "[$([DateTime]::UtcNow.ToString('o'))] $executableName completed with exit code $exitCode."
+                "Captured output was withheld from the updater log (stdout characters: $($stdout.Length); stderr characters: $($stderr.Length))."
+            ) -join [Environment]::NewLine
+            Add-Content -LiteralPath $DetailedLogPath -Value $safeLog -Encoding utf8
+        }
+        if ($exitCode -ne 0) {
+            throw "The controlled process failed: $executableName (exit code $exitCode)."
+        }
+        return [ordered]@{
+            ExitCode = $exitCode
+            StandardOutput = $stdout.Trim()
+            StandardError = $stderr.Trim()
+        }
+    } finally {
+        $process.Dispose()
     }
 }
 
@@ -658,6 +818,7 @@ Export-ModuleMember -Function @(
     'Assert-MccApprovedApplicationPath',
     'Get-MccCleanText',
     'Set-MccExecutablePathBootstrap',
+    'New-MccWindowsAgentHealth',
     'Test-MccSemver',
     'Test-MccCommit',
     'Test-MccUpdateBranch',

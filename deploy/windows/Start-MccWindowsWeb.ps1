@@ -32,7 +32,7 @@ if (-not (Test-Path -LiteralPath $webLogDirectory -PathType Container)) {
 function Write-WebStartupLog {
     param([Parameter(Mandatory = $true)][string]$Message)
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMdd')
-    $logPath = Join-Path $webLogDirectory "mcc-$stamp.log"
+    $logPath = Join-Path $webLogDirectory "mcc-launcher-$stamp.log"
     $safeMessage = Get-MccCleanText -Value $Message -Maximum 500
     Add-Content -LiteralPath $logPath -Value "[$([DateTime]::UtcNow.ToString('o'))] $safeMessage" -Encoding utf8
 }

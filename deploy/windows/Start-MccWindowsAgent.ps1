@@ -42,19 +42,22 @@ function Write-AgentHealth {
     $deploymentMode = ''
     $mccTask = $null
     $updaterTask = $null
+    $heartbeatCompleted = $false
     try {
-        $configuration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationPath
-        $configurationValid = $true
-        $deploymentMode = [string]$configuration.deploymentMode
-        $env:PATH = "$(Split-Path -Parent ([string]$configuration.gitPath));$(Split-Path -Parent ([string]$configuration.nodePath));$env:PATH"
-        $applicationPathMatches = -not (Test-MccProtectedDevelopmentPath -LiteralPath ([string]$configuration.applicationPath))
-        try {
-            Assert-MccRepository -ApplicationPath ([string]$configuration.applicationPath) -ExpectedBranch ([string]$configuration.branch)
-            $repositoryValid = $true
-            $branchValid = $true
-        } catch {
-            $repositoryValid = $false
-            $branchValid = $false
+        if ($null -ne $script:StartupConfiguration) {
+            $configurationValid = $true
+            $deploymentMode = [string]$script:StartupConfiguration.deploymentMode
+            $applicationPathMatches = -not (Test-MccProtectedDevelopmentPath -LiteralPath ([string]$script:StartupConfiguration.applicationPath))
+            if ($script:ExecutableBootstrapSucceeded) {
+                try {
+                    Assert-MccRepository -ApplicationPath ([string]$script:StartupConfiguration.applicationPath) -ExpectedBranch ([string]$script:StartupConfiguration.branch)
+                    $repositoryValid = $true
+                    $branchValid = $true
+                } catch {
+                    $repositoryValid = $false
+                    $branchValid = $false
+                }
+            }
         }
         try {
             $probe = Join-Path (Split-Path -Parent $requestPath) ".agent-probe-$PID.tmp"
@@ -68,24 +71,24 @@ function Write-AgentHealth {
         } catch {}
         $mccTask = Get-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction SilentlyContinue
         $updaterTask = Get-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction SilentlyContinue
+        $heartbeatCompleted = $true
     } catch {
         Write-AgentLog -Message $_.Exception.Message
     }
-    Write-MccAtomicJson -LiteralPath $healthPath -Value ([ordered]@{
-        schemaVersion = 1
-        checkedAt = [DateTime]::UtcNow.ToString('o')
-        agentHealthy = $true
-        configurationValid = $configurationValid
-        deploymentMode = $deploymentMode
-        applicationPathMatches = $applicationPathMatches
-        repositoryValid = $repositoryValid
-        branchValid = $branchValid
-        requestDirectoryAccessible = $requestAccessible
-        statusDirectoryAccessible = $statusAccessible
-        mccTaskInstalled = $null -ne $mccTask
-        mccTaskRunning = $null -ne $mccTask -and [string]$mccTask.State -eq 'Running'
-        updaterTaskInstalled = $null -ne $updaterTask
-    })
+    $health = New-MccWindowsAgentHealth `
+        -HeartbeatCompleted $heartbeatCompleted `
+        -ExecutableBootstrapSucceeded $script:ExecutableBootstrapSucceeded `
+        -ConfigurationValid $configurationValid `
+        -DeploymentMode $deploymentMode `
+        -ApplicationPathMatches $applicationPathMatches `
+        -RepositoryValid $repositoryValid `
+        -BranchValid $branchValid `
+        -RequestDirectoryAccessible $requestAccessible `
+        -StatusDirectoryAccessible $statusAccessible `
+        -MccTaskInstalled ($null -ne $mccTask) `
+        -MccTaskRunning ($null -ne $mccTask -and [string]$mccTask.State -eq 'Running') `
+        -UpdaterTaskInstalled ($null -ne $updaterTask)
+    Write-MccAtomicJson -LiteralPath $healthPath -Value $health
 }
 
 if (-not (Test-Path -LiteralPath $updateScript -PathType Leaf)) {
@@ -93,10 +96,16 @@ if (-not (Test-Path -LiteralPath $updateScript -PathType Leaf)) {
 }
 
 Write-AgentLog -Message 'MaintenanceCommandCenterUpdater started.'
+$script:StartupConfiguration = $null
+$script:ExecutableBootstrapSucceeded = $false
 try {
-    $startupConfiguration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationPath
-    $startupLabel = if ([string]$startupConfiguration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
-    Write-AgentLog -Message "$startupLabel. Configured update branch: origin/$([string]$startupConfiguration.branch)."
+    $script:StartupConfiguration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationPath
+    $startupLabel = if ([string]$script:StartupConfiguration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
+    Set-MccExecutablePathBootstrap `
+        -GitPath ([string]$script:StartupConfiguration.gitPath) `
+        -NodePath ([string]$script:StartupConfiguration.nodePath)
+    $script:ExecutableBootstrapSucceeded = $true
+    Write-AgentLog -Message "$startupLabel. Configured update branch: origin/$([string]$script:StartupConfiguration.branch). Executable PATH bootstrap completed once."
 } catch {
     Write-AgentLog -Message $_.Exception.Message
 }

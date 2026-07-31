@@ -4,12 +4,17 @@ import fs from 'node:fs';
 
 const installerPath = 'deploy/windows/Install-MccWindowsUpdater.ps1';
 const commonPath = 'deploy/windows/MccWindowsUpdater.Common.psm1';
+const agentPath = 'deploy/windows/Start-MccWindowsAgent.ps1';
+const launcherPath = 'deploy/windows/Start-MccWindowsWeb.ps1';
 const installedTestPath = 'deploy/windows/Test-MccWindowsUpdater.ps1';
 const readmePath = 'deploy/windows/README-Windows-Updater.md';
 const atomicReplacementTestPath = 'tests/windows-updater-atomic-replacement.ps1';
+const agentRuntimeTestPath = 'tests/windows-updater-agent-runtime.ps1';
 
 const installer = fs.readFileSync(installerPath, 'utf8');
 const common = fs.readFileSync(commonPath, 'utf8');
+const agent = fs.readFileSync(agentPath, 'utf8');
+const launcher = fs.readFileSync(launcherPath, 'utf8');
 const installedTest = fs.readFileSync(installedTestPath, 'utf8');
 const readme = fs.readFileSync(readmePath, 'utf8');
 
@@ -25,6 +30,15 @@ const repairFunction = functionSource(installer, 'Repair-MccUpdaterAcl', 'Enable
 const atomicFileFunction = functionSource(installer, 'Install-MccAtomicFile', 'Write-MccInstallerAtomicText');
 const finalAclFunction = functionSource(installer, 'Set-MccFinalAclItem', 'Set-MccFinalAclProfile');
 const bootstrapVerification = functionSource(installer, 'Invoke-MccBootstrapVerification', 'New-MccAccessRule');
+const applicationAclGrant = functionSource(installer, 'Grant-MccLocalServiceApplicationAccess', 'Assert-MccLocalServiceApplicationAccess');
+const applicationAclPreparation = functionSource(installer, 'Set-MccApplicationRuntimeAcl', 'Assert-MccApplicationRuntimeAcl');
+const applicationAclVerification = functionSource(installer, 'Assert-MccApplicationRuntimeAcl', 'Restore-MccScheduledTasks');
+const processTreeFallback = functionSource(common, 'Stop-MccExactProcessTreeFallback', 'Invoke-MccProcess');
+const processFunction = functionSource(common, 'Invoke-MccProcess', 'Invoke-MccGit');
+const pathBootstrapFunction = functionSource(common, 'Set-MccExecutablePathBootstrap', 'New-MccWindowsAgentHealth');
+const healthPayloadFunction = functionSource(common, 'New-MccWindowsAgentHealth', 'Test-MccSemver');
+const agentHealthStart = agent.indexOf('function Write-AgentHealth {');
+const agentHealthFunction = agent.slice(agentHealthStart, agent.indexOf('\nif (-not (Test-Path', agentHealthStart));
 const installFlow = installer.slice(installer.indexOf('$tasksChanged = $false'));
 
 const scenarios = [
@@ -90,6 +104,30 @@ const scenarios = [
     assert.match(installedTest, /Privileged logs ACL.*LocalServiceRights = \$null/);
     assert.match(installedTest, /unexpectedLocalServiceRights/);
   }],
+  ['bounded application ACL preparation', () => {
+    assert.doesNotMatch(applicationAclGrant, /['"]\/T['"]|['"]\/C['"]/);
+    assert.doesNotMatch(applicationAclPreparation, /['"]\/T['"]|Get-ChildItem|Remove-Item/);
+    assert.doesNotMatch(installFlow, /@\(\$applicationPath,[\s\S]{0,160}['"]\/T['"]/);
+    assert.match(applicationAclPreparation, /Grant-MccLocalServiceApplicationAccess -LiteralPath \$applicationPath -Rights RX/);
+    assert.match(applicationAclPreparation, /backend\\dist/);
+    assert.match(applicationAclPreparation, /frontend\\dist/);
+    assert.match(applicationAclPreparation, /\.git\\(?:refs|objects)/);
+    assert.match(applicationAclPreparation, /backend\\data[\s\S]*backend\\uploads[\s\S]*backend\\documents[\s\S]*backend\\files/);
+    assert.match(applicationAclPreparation, /-Rights M -Inherit/);
+    assert.match(applicationAclPreparation, /\.env[\s\S]*backend\\\.env[\s\S]*-Rights R/);
+    assert.match(applicationAclVerification, /backend\\dist\\server\\index\.js/);
+    assert.match(applicationAclVerification, /frontend\\dist/);
+    assert.match(applicationAclVerification, /package-lock\.json/);
+    assert.match(applicationAclVerification, /\.git\\HEAD/);
+    assert.match(installFlow, /Set-MccApplicationRuntimeAcl[\s\S]*Assert-MccApplicationRuntimeAcl/);
+    assert.ok(installFlow.indexOf("@($npmCliPath, 'run', 'build')") < installFlow.indexOf('Assert-MccApplicationRuntimeAcl'));
+  }],
+  ['application ACL rerun and data preservation', () => {
+    assert.match(applicationAclGrant, /\/grant:r/);
+    assert.match(applicationAclPreparation, /Directory\]::CreateDirectory/);
+    assert.doesNotMatch(applicationAclPreparation, /Remove-Item|Delete\(|Move-Item|Copy-Item/);
+    assert.doesNotMatch(applicationAclVerification, /Remove-Item|Delete\(|Move-Item|Copy-Item/);
+  }],
   ['no Users or Everyone write access', () => {
     assert.match(installer, /S-1-1-0/);
     assert.match(installer, /S-1-5-32-545/);
@@ -127,6 +165,28 @@ assert.match(installer, /MCC Windows updater failed at exact bootstrap stage/);
 assert.match(installer, /MCC installer log unavailable/);
 assert.match(installer, /Original exception:/);
 assert.match(installer, /throw\s*\r?\n\}/);
+assert.match(pathBootstrapFunction, /StringComparer\]::OrdinalIgnoreCase/);
+assert.match(pathBootstrapFunction, /IsNullOrWhiteSpace/);
+assert.match(pathBootstrapFunction, /GIT_TERMINAL_PROMPT = '0'/);
+assert.doesNotMatch(agentHealthFunction, /\$env:PATH|Set-MccExecutablePathBootstrap/);
+assert.equal((agent.match(/Set-MccExecutablePathBootstrap/g) ?? []).length, 1, 'The updater agent must bootstrap executable PATH exactly once.');
+assert.ok(agent.indexOf('Set-MccExecutablePathBootstrap') < agent.indexOf('while ($true)'));
+assert.match(agent, /ExecutableBootstrapSucceeded = \$false[\s\S]*Set-MccExecutablePathBootstrap[\s\S]*ExecutableBootstrapSucceeded = \$true/);
+assert.match(healthPayloadFunction, /HeartbeatCompleted[\s\S]*ExecutableBootstrapSucceeded[\s\S]*agentHealthy = \[bool\]\$agentHealthy/);
+assert.doesNotMatch(healthPayloadFunction, /exception|LiteralPath|[A-Z]:\\/i);
+
+assert.match(processFunction, /taskkill\.exe/);
+assert.match(processFunction, /\/PID \$\(\$process\.Id\) \/T \/F/);
+assert.match(processFunction, /WaitForExit\(15000\)/);
+assert.match(processFunction, /exact_process_tree_terminated/);
+assert.doesNotMatch(processFunction, /Get-Process|Stop-Process|ProcessName|node\.exe/);
+assert.match(processTreeFallback, /ParentProcessId = \$parentId/);
+assert.match(processTreeFallback, /GetProcessById\(\$processId\)/);
+assert.doesNotMatch(processTreeFallback, /ProcessName|node\.exe|Get-Process|Stop-Process/);
+
+assert.match(launcher, /mcc-launcher-\$stamp\.log/);
+assert.match(launcher, /RedirectStandardOutput \$stdoutPath/);
+assert.doesNotMatch(launcher, /\$logPath = Join-Path \$webLogDirectory "mcc-\$stamp\.log"/);
 
 const inheritanceProtection = finalAclFunction.indexOf('$acl.SetAccessRuleProtection($true, $false)');
 const replacementGrantCheck = finalAclFunction.indexOf('Final ACL replacement grants were not confirmed');
@@ -169,7 +229,7 @@ assert.equal(
   'Every Windows updater File.Replace call must remain centralized in the validated helper and rollback path.',
 );
 
-for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPath]) {
+for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPath, agentRuntimeTestPath]) {
   const parser = spawnSync('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
@@ -179,6 +239,24 @@ for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPa
   ], { encoding: 'utf8', windowsHide: true });
   assert.equal(parser.status, 0, `${powershellPath}\n${parser.stderr || parser.stdout}`);
 }
+
+const agentRuntime = spawnSync('powershell.exe', [
+  '-NoLogo',
+  '-NoProfile',
+  '-NonInteractive',
+  '-ExecutionPolicy',
+  'RemoteSigned',
+  '-File',
+  agentRuntimeTestPath,
+  '-ModulePath',
+  commonPath,
+], { encoding: 'utf8', windowsHide: true, timeout: 120_000 });
+assert.equal(
+  agentRuntime.status,
+  0,
+  `${agentRuntimeTestPath}\n${agentRuntime.error ?? ''}\n${agentRuntime.stderr || agentRuntime.stdout}`,
+);
+process.stdout.write(agentRuntime.stdout);
 
 const atomicReplacement = spawnSync('powershell.exe', [
   '-NoLogo',

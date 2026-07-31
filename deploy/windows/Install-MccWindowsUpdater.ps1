@@ -628,6 +628,144 @@ function Assert-MccFinalUpdaterTree {
     }
 }
 
+function Assert-MccApplicationAclTarget {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $applicationRoot = [System.IO.Path]::GetFullPath($applicationPath).TrimEnd('\')
+    $target = [System.IO.Path]::GetFullPath($LiteralPath).TrimEnd('\')
+    if (-not $target.Equals($applicationRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $target.StartsWith("$applicationRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Application ACL preparation attempted to leave the validated MCC clone.'
+    }
+    return $target
+}
+
+function Grant-MccLocalServiceApplicationAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][ValidateSet('R', 'RX', 'M')][string]$Rights,
+        [switch]$Inherit
+    )
+    $target = Assert-MccApplicationAclTarget -LiteralPath $LiteralPath
+    if (-not (Test-Path -LiteralPath $target)) {
+        throw "A required application ACL target is missing: $([System.IO.Path]::GetFileName($target))"
+    }
+    $grant = if ($Inherit) { "*S-1-5-19:(OI)(CI)$Rights" } else { "*S-1-5-19:$Rights" }
+    Invoke-MccProcess `
+        -FilePath 'icacls.exe' `
+        -ArgumentList @($target, '/grant:r', $grant) `
+        -WorkingDirectory $applicationPath `
+        -TimeoutSeconds 60 `
+        -DetailedLogPath $installLog | Out-Null
+}
+
+function Assert-MccLocalServiceApplicationAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][Security.AccessControl.FileSystemRights]$RequiredRights
+    )
+    $target = Assert-MccApplicationAclTarget -LiteralPath $LiteralPath
+    $acl = Get-Acl -LiteralPath $target -ErrorAction Stop
+    [long]$allowedRights = 0
+    [long]$deniedRights = 0
+    foreach ($rule in @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+        $_.IdentityReference.Value -eq 'S-1-5-19'
+    })) {
+        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny) {
+            $deniedRights = $deniedRights -bor [long]$rule.FileSystemRights
+        } else {
+            $allowedRights = $allowedRights -bor [long]$rule.FileSystemRights
+        }
+    }
+    $requiredMask = [long]$RequiredRights
+    if (($allowedRights -band $requiredMask) -ne $requiredMask -or
+        ($deniedRights -band $requiredMask) -ne 0) {
+        throw "LOCAL SERVICE effective ACL verification failed for required application item: $([System.IO.Path]::GetFileName($target))"
+    }
+}
+
+function Set-MccApplicationRuntimeAcl {
+    Grant-MccLocalServiceApplicationAccess -LiteralPath $applicationPath -Rights RX
+    $readExecuteRoots = @(
+        (Join-Path $applicationPath 'backend'),
+        (Join-Path $applicationPath 'backend\dist'),
+        (Join-Path $applicationPath 'backend\dist\server'),
+        (Join-Path $applicationPath 'frontend\dist'),
+        (Join-Path $applicationPath '.git'),
+        (Join-Path $applicationPath '.git\refs'),
+        (Join-Path $applicationPath '.git\objects')
+    )
+    foreach ($readExecuteRoot in $readExecuteRoots) {
+        if (Test-Path -LiteralPath $readExecuteRoot -PathType Container) {
+            Grant-MccLocalServiceApplicationAccess -LiteralPath $readExecuteRoot -Rights RX -Inherit
+        }
+    }
+
+    $readExecuteFiles = @(
+        'backend\dist\server\index.js',
+        '.git\HEAD',
+        '.git\config',
+        '.git\index',
+        '.git\packed-refs'
+    )
+    foreach ($readExecuteFile in $readExecuteFiles) {
+        $readExecutePath = Join-Path $applicationPath $readExecuteFile
+        if (Test-Path -LiteralPath $readExecutePath -PathType Leaf) {
+            Grant-MccLocalServiceApplicationAccess -LiteralPath $readExecutePath -Rights RX
+        }
+    }
+
+    foreach ($manifest in @(
+        'package.json',
+        'package-lock.json',
+        'frontend\package.json',
+        'frontend\package-lock.json',
+        'backend\package.json',
+        'backend\package-lock.json'
+    )) {
+        Grant-MccLocalServiceApplicationAccess -LiteralPath (Join-Path $applicationPath $manifest) -Rights R
+    }
+
+    foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
+        $runtimePath = Join-Path $applicationPath $runtimeDirectory
+        [System.IO.Directory]::CreateDirectory($runtimePath) | Out-Null
+        Grant-MccLocalServiceApplicationAccess -LiteralPath $runtimePath -Rights M -Inherit
+    }
+
+    foreach ($environmentFile in @('.env', 'backend\.env')) {
+        $environmentPath = Join-Path $applicationPath $environmentFile
+        if (Test-Path -LiteralPath $environmentPath -PathType Leaf) {
+            Grant-MccLocalServiceApplicationAccess -LiteralPath $environmentPath -Rights R
+        }
+    }
+}
+
+function Assert-MccApplicationRuntimeAcl {
+    $readExecute = [Security.AccessControl.FileSystemRights]::ReadAndExecute
+    $read = [Security.AccessControl.FileSystemRights]::Read
+    $modify = [Security.AccessControl.FileSystemRights]::Modify
+    Assert-MccLocalServiceApplicationAccess -LiteralPath (Join-Path $applicationPath 'backend\dist\server\index.js') -RequiredRights $readExecute
+    Assert-MccLocalServiceApplicationAccess -LiteralPath (Join-Path $applicationPath 'frontend\dist') -RequiredRights $readExecute
+    foreach ($manifest in @(
+        'package.json',
+        'package-lock.json',
+        'frontend\package.json',
+        'frontend\package-lock.json',
+        'backend\package.json',
+        'backend\package-lock.json'
+    )) {
+        Assert-MccLocalServiceApplicationAccess -LiteralPath (Join-Path $applicationPath $manifest) -RequiredRights $read
+    }
+    foreach ($gitMetadata in @('.git', '.git\HEAD', '.git\config', '.git\index', '.git\refs', '.git\objects')) {
+        $gitMetadataPath = Join-Path $applicationPath $gitMetadata
+        if (Test-Path -LiteralPath $gitMetadataPath) {
+            Assert-MccLocalServiceApplicationAccess -LiteralPath $gitMetadataPath -RequiredRights $readExecute
+        }
+    }
+    foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
+        Assert-MccLocalServiceApplicationAccess -LiteralPath (Join-Path $applicationPath $runtimeDirectory) -RequiredRights $modify
+    }
+}
+
 function Restore-MccScheduledTasks {
     param(
         [Parameter(Mandatory = $true)][hashtable]$Snapshots,
@@ -776,24 +914,18 @@ try {
     Write-MccInstallerLog -Message 'Final exact ACL verification passed for Administrators, SYSTEM, LOCAL SERVICE, Users, and Everyone.'
 
     $script:InstallerBootstrapStage = 'application runtime directory preparation'
-    foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
-        [System.IO.Directory]::CreateDirectory((Join-Path $applicationPath $runtimeDirectory)) | Out-Null
-    }
-    Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @($applicationPath, '/grant', '*S-1-5-19:(OI)(CI)RX', '/T', '/C') -WorkingDirectory $applicationPath -TimeoutSeconds 600 -DetailedLogPath $installLog | Out-Null
-    foreach ($runtimeDirectory in @('backend\data', 'backend\uploads', 'backend\documents', 'backend\files')) {
-        Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @((Join-Path $applicationPath $runtimeDirectory), '/grant', '*S-1-5-19:(OI)(CI)M', '/T', '/C') -WorkingDirectory $applicationPath -TimeoutSeconds 300 -DetailedLogPath $installLog | Out-Null
-    }
-    foreach ($environmentFile in @('.env', 'backend\.env')) {
-        $environmentPath = Join-Path $applicationPath $environmentFile
-        if (Test-Path -LiteralPath $environmentPath -PathType Leaf) {
-            Invoke-MccProcess -FilePath 'icacls.exe' -ArgumentList @($environmentPath, '/grant', '*S-1-5-19:R') -WorkingDirectory $applicationPath -TimeoutSeconds 60 -DetailedLogPath $installLog | Out-Null
-        }
-    }
+    Set-MccApplicationRuntimeAcl
+    Write-MccInstallerLog -Message 'Bounded application ACL preparation completed without recursive repository traversal.'
 
     $script:InstallerBootstrapStage = 'dependency installation and application build'
     Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'ci', '--prefix', 'frontend') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
     Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'ci', '--prefix', 'backend') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
     Invoke-MccProcess -FilePath $nodePath -ArgumentList @($npmCliPath, 'run', 'build') -WorkingDirectory $applicationPath -TimeoutSeconds 900 -DetailedLogPath $installLog | Out-Null
+
+    $script:InstallerBootstrapStage = 'application ACL finalization and verification'
+    Set-MccApplicationRuntimeAcl
+    Assert-MccApplicationRuntimeAcl
+    Write-MccInstallerLog -Message 'Effective LOCAL SERVICE access was verified for built assets, package manifests, Git metadata, and runtime directories.'
 
     $script:InstallerBootstrapStage = 'scheduled-task snapshot'
     foreach ($taskName in $taskNames) {
