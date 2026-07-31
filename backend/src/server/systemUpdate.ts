@@ -127,6 +127,7 @@ export type SystemUpdateConfiguration = {
   windowsConfigPath: string | null;
   windowsAgentHealthPath: string | null;
   windowsShutdownPath: string | null;
+  gitExecutable: string;
   approvedRepository: typeof APPROVED_UPDATE_REPOSITORY;
   remote: typeof APPROVED_UPDATE_REMOTE;
   branch: string;
@@ -136,6 +137,7 @@ export type SystemUpdateConfiguration = {
 type GitResult = Pick<SpawnSyncReturns<string>, 'status' | 'stdout' | 'stderr' | 'error'>;
 export type SystemUpdateGitRunner = (args: string[], cwd: string, timeoutMs?: number) => GitResult;
 export type SystemUpdateTrigger = (configuration: SystemUpdateConfiguration) => void;
+export type SystemUpdateInternalDiagnostic = 'git_executable_unavailable';
 
 export interface SystemUpdateStatusStore {
   read(): SystemUpdateStatus | null;
@@ -147,6 +149,7 @@ export class SystemUpdateError extends Error {
     public readonly httpStatus: number,
     public readonly code: SystemUpdateCode,
     message: string,
+    public readonly internalDiagnostic: SystemUpdateInternalDiagnostic | null = null,
   ) {
     super(message);
   }
@@ -237,6 +240,7 @@ function disabledConfiguration(
     windowsConfigPath: null,
     windowsAgentHealthPath: null,
     windowsShutdownPath: null,
+    gitExecutable: 'git',
     approvedRepository: APPROVED_UPDATE_REPOSITORY,
     remote: APPROVED_UPDATE_REMOTE,
     branch: APPROVED_UPDATE_BRANCH,
@@ -254,6 +258,7 @@ type WindowsUpdaterConfigurationFile = {
   port?: unknown;
   mccTaskName?: unknown;
   updaterTaskName?: unknown;
+  gitPath?: unknown;
 };
 
 function readWindowsUpdaterConfiguration(
@@ -295,6 +300,19 @@ function readWindowsUpdaterConfiguration(
       ? 'WINDOWS 11 PRODUCTION'
       : 'CONFIGURATION INVALID';
   const applicationPath = typeof item.applicationPath === 'string' ? path.win32.resolve(item.applicationPath) : '';
+  const configuredGitPath = typeof item.gitPath === 'string'
+    ? path.win32.isAbsolute(item.gitPath)
+      ? path.win32.resolve(item.gitPath)
+      : testOverride && path.isAbsolute(item.gitPath)
+        ? path.resolve(item.gitPath)
+        : ''
+    : '';
+  let configuredGitIsFile = false;
+  try {
+    configuredGitIsFile = Boolean(configuredGitPath) && fs.statSync(configuredGitPath).isFile();
+  } catch {
+    configuredGitIsFile = false;
+  }
   const configuredBranch = typeof item.branch === 'string' ? item.branch : '';
   const validBranchPolicy = isSafeUpdateBranch(configuredBranch)
     && (mode !== 'windows_production' || configuredBranch === APPROVED_UPDATE_BRANCH);
@@ -305,7 +323,8 @@ function readWindowsUpdaterConfiguration(
     && validBranchPolicy
     && item.port === APPROVED_MCC_PORT
     && item.mccTaskName === 'MaintenanceCommandCenter'
-    && item.updaterTaskName === 'MaintenanceCommandCenterUpdater';
+    && item.updaterTaskName === 'MaintenanceCommandCenterUpdater'
+    && configuredGitIsFile;
   if (!validFixedConfiguration || !applicationPath || isProtectedWindowsDevelopmentPath(applicationPath)) {
     return disabledConfiguration(
       resolvedApplicationDir,
@@ -341,6 +360,7 @@ function readWindowsUpdaterConfiguration(
     windowsConfigPath: configPath,
     windowsAgentHealthPath: path.win32.join(updaterRoot, 'status', 'agent-health.json'),
     windowsShutdownPath: path.win32.join(updaterRoot, 'request', 'shutdown-request.json'),
+    gitExecutable: configuredGitPath,
     approvedRepository: APPROVED_UPDATE_REPOSITORY,
     remote: APPROVED_UPDATE_REMOTE,
     branch: configuredBranch,
@@ -383,6 +403,7 @@ export function loadSystemUpdateConfiguration(
       windowsConfigPath: null,
       windowsAgentHealthPath: null,
       windowsShutdownPath: null,
+      gitExecutable: 'git',
       approvedRepository: APPROVED_UPDATE_REPOSITORY,
       remote: APPROVED_UPDATE_REMOTE,
       branch: APPROVED_UPDATE_BRANCH,
@@ -498,13 +519,17 @@ function readManifestVersion(manifestText: string) {
   }
 }
 
-function defaultGitRunner(args: string[], cwd: string, timeoutMs = 12_000): GitResult {
-  return spawnSync('git', args, {
+export function createSystemUpdateGitRunner(configuration: Pick<SystemUpdateConfiguration, 'mode' | 'gitExecutable'>): SystemUpdateGitRunner {
+  const executable = configuration.mode === 'windows_test' || configuration.mode === 'windows_production'
+    ? configuration.gitExecutable
+    : 'git';
+  return (args: string[], cwd: string, timeoutMs = 12_000): GitResult => spawnSync(executable, args, {
     cwd,
     encoding: 'utf8',
     timeout: timeoutMs,
     windowsHide: true,
     maxBuffer: 2 * 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
   });
 }
 
@@ -586,12 +611,35 @@ export class SystemUpdateService {
   constructor(
     public readonly configuration: SystemUpdateConfiguration,
     private readonly store: SystemUpdateStatusStore,
-    private readonly git: SystemUpdateGitRunner = defaultGitRunner,
+    private readonly git: SystemUpdateGitRunner = createSystemUpdateGitRunner(configuration),
     private readonly trigger: SystemUpdateTrigger = triggerConfiguredSystemUpdate,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
   private now() { return this.clock().toISOString(); }
+
+  private runGit(args: string[], cwd: string, timeoutMs?: number) {
+    let result: GitResult;
+    try {
+      result = this.git(args, cwd, timeoutMs);
+    } catch {
+      throw new SystemUpdateError(
+        503,
+        'update_check_failed',
+        'Update check failed because the approved Git client could not be started.',
+        'git_executable_unavailable',
+      );
+    }
+    if (result.error || result.status === null) {
+      throw new SystemUpdateError(
+        503,
+        'update_check_failed',
+        'Update check failed because the approved Git client could not be started.',
+        'git_executable_unavailable',
+      );
+    }
+    return result;
+  }
 
   private localInstalledRef(): UpdateVersionRef {
     let version: string | null = null;
@@ -600,8 +648,13 @@ export class SystemUpdateService {
     } catch {
       version = null;
     }
-    const result = this.git(['rev-parse', 'HEAD'], this.configuration.applicationDir, 2_000);
-    const commit = result.status === 0 && commitPattern.test(result.stdout.trim()) ? result.stdout.trim().toLowerCase() : null;
+    let commit: string | null = null;
+    try {
+      const result = this.runGit(['rev-parse', 'HEAD'], this.configuration.applicationDir, 2_000);
+      commit = result.status === 0 && commitPattern.test(result.stdout.trim()) ? result.stdout.trim().toLowerCase() : null;
+    } catch {
+      commit = null;
+    }
     return { version, commit };
   }
 
@@ -661,12 +714,12 @@ export class SystemUpdateService {
   }
 
   private repositoryIdentity() {
-    const remoteResult = this.git(['remote', 'get-url', this.configuration.remote], this.configuration.applicationDir);
+    const remoteResult = this.runGit(['remote', 'get-url', this.configuration.remote], this.configuration.applicationDir);
     const remoteUrl = requireGitOutput(remoteResult, 'Update check failed while validating the approved repository.');
     if (canonicalRepositoryUrl(remoteUrl) !== canonicalRepositoryUrl(this.configuration.approvedRepository)) {
       throw new SystemUpdateError(409, 'update_check_failed', 'Update blocked: this MCC installation is not connected to the approved repository.');
     }
-    const branchResult = this.git(['branch', '--show-current'], this.configuration.applicationDir);
+    const branchResult = this.runGit(['branch', '--show-current'], this.configuration.applicationDir);
     const branch = requireGitOutput(branchResult, 'Update check failed while validating the installed branch.');
     if (branch !== this.configuration.branch) {
       throw new SystemUpdateError(409, 'update_check_failed', 'Update blocked: the managed Windows checkout is not on its Administrator-configured branch.');
@@ -674,7 +727,7 @@ export class SystemUpdateService {
   }
 
   private cleanWorkingTree() {
-    const result = this.git(['status', '--porcelain=v1', '--untracked-files=normal'], this.configuration.applicationDir);
+    const result = this.runGit(['status', '--porcelain=v1', '--untracked-files=normal'], this.configuration.applicationDir);
     const output = requireGitOutput(result, 'Update check failed while inspecting local changes.');
     if (output) {
       const changedItems = output.split(/\r?\n/).filter(Boolean).length;
@@ -698,7 +751,7 @@ export class SystemUpdateService {
       throw new SystemUpdateError(503, 'update_check_failed', 'Update check failed because the installed version or build metadata is unavailable.');
     }
     if (fetchRemote) {
-      const fetchResult = this.git([
+      const fetchResult = this.runGit([
         'fetch',
         '--no-tags',
         this.configuration.remote,
@@ -708,19 +761,19 @@ export class SystemUpdateService {
         throw new SystemUpdateError(503, 'network_unavailable', 'The approved GitHub update source is unavailable. Try again later.');
       }
     }
-    const targetResult = this.git(['rev-parse', `refs/remotes/${this.configuration.remote}/${this.configuration.branch}`], this.configuration.applicationDir);
+    const targetResult = this.runGit(['rev-parse', `refs/remotes/${this.configuration.remote}/${this.configuration.branch}`], this.configuration.applicationDir);
     const targetCommit = requireGitOutput(targetResult, 'Update check failed while reading the approved remote commit.').toLowerCase();
     if (!commitPattern.test(targetCommit)) {
       throw new SystemUpdateError(503, 'update_check_failed', 'Update check failed because the approved remote commit is invalid.');
     }
-    const manifestResult = this.git(['show', `${targetCommit}:package.json`], this.configuration.applicationDir);
+    const manifestResult = this.runGit(['show', `${targetCommit}:package.json`], this.configuration.applicationDir);
     const remoteManifest = requireGitOutput(manifestResult, 'Update check failed while reading remote version metadata.');
     const targetVersion = readManifestVersion(remoteManifest);
     if (!targetVersion) {
       throw new SystemUpdateError(409, 'invalid_remote_version', 'Update blocked: the approved remote version metadata is invalid.');
     }
     if (targetCommit !== installed.commit) {
-      const ancestry = this.git(['merge-base', '--is-ancestor', installed.commit, targetCommit], this.configuration.applicationDir);
+      const ancestry = this.runGit(['merge-base', '--is-ancestor', installed.commit, targetCommit], this.configuration.applicationDir);
       if (ancestry.status === 1) {
         throw new SystemUpdateError(409, 'remote_not_fast_forward', 'Update blocked: the approved update branch is not a fast-forward from the installed build.');
       }
@@ -850,7 +903,7 @@ export class SystemUpdateService {
     }
     this.repositoryIdentity();
     this.cleanWorkingTree();
-    const refreshResult = this.git([
+    const refreshResult = this.runGit([
       'fetch',
       '--no-tags',
       this.configuration.remote,
@@ -859,8 +912,8 @@ export class SystemUpdateService {
     if (refreshResult.status !== 0) {
       throw new SystemUpdateError(503, 'network_unavailable', 'The approved GitHub update source is unavailable. Check for updates again later.');
     }
-    const installedResult = this.git(['rev-parse', 'HEAD'], this.configuration.applicationDir);
-    const targetResult = this.git(['rev-parse', `refs/remotes/${this.configuration.remote}/${this.configuration.branch}`], this.configuration.applicationDir);
+    const installedResult = this.runGit(['rev-parse', 'HEAD'], this.configuration.applicationDir);
+    const targetResult = this.runGit(['rev-parse', `refs/remotes/${this.configuration.remote}/${this.configuration.branch}`], this.configuration.applicationDir);
     if (installedResult.status !== 0 || targetResult.status !== 0
       || installedResult.stdout.trim().toLowerCase() !== current.installed.commit
       || targetResult.stdout.trim().toLowerCase() !== current.target.commit) {

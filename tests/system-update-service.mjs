@@ -13,12 +13,20 @@ import {
   SystemUpdateError,
   SystemUpdateService,
   compareSemver,
+  createSystemUpdateGitRunner,
   isSafeUpdateBranch,
   loadSystemUpdateConfiguration,
 } from '../backend/dist/server/systemUpdate.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureRoot = path.join(root, 'tmp', `system-update-service-${Date.now()}-${process.pid}`);
+const gitLocator = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [process.platform === 'win32' ? 'git.exe' : 'git'], {
+  encoding: 'utf8',
+  windowsHide: true,
+});
+assert.equal(gitLocator.status, 0, gitLocator.stderr || 'Git executable discovery failed.');
+const approvedGitPath = gitLocator.stdout.split(/\r?\n/).map(value => value.trim()).find(Boolean);
+assert.ok(approvedGitPath && path.isAbsolute(approvedGitPath));
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', windowsHide: true });
@@ -82,6 +90,8 @@ function configuration(fixture) {
     windowsRunnerPath: path.join(fixture.directory, 'Invoke-MccTestUpdate.ps1'),
     windowsConfigPath: path.join(fixture.directory, 'config.json'),
     windowsAgentHealthPath: null,
+    windowsShutdownPath: null,
+    gitExecutable: approvedGitPath,
     approvedRepository: fixture.remote,
     remote: APPROVED_UPDATE_REMOTE,
     branch: fixture.branch,
@@ -151,6 +161,7 @@ try {
     port: APPROVED_MCC_PORT,
     mccTaskName: 'MaintenanceCommandCenter',
     updaterTaskName: 'MaintenanceCommandCenterUpdater',
+    gitPath: approvedGitPath,
   }, null, 2)}\n`);
   const managedWindows = loadSystemUpdateConfiguration(managedApplicationPath, {
     NODE_ENV: 'test',
@@ -165,6 +176,30 @@ try {
   assert.match(managedWindows.windowsAgentHealthPath, /agent-health\.json$/);
   assert.match(managedWindows.statusWritePath, /request[\\/]api-status\.json$/);
   assert.match(managedWindows.windowsShutdownPath, /request[\\/]shutdown-request\.json$/);
+  assert.equal(managedWindows.gitExecutable, approvedGitPath);
+
+  const validManagedDocument = JSON.parse(fs.readFileSync(managedConfigurationPath, 'utf8'));
+  delete validManagedDocument.gitPath;
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify(validManagedDocument, null, 2)}\n`);
+  const missingManagedGit = loadSystemUpdateConfiguration(managedApplicationPath, {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(missingManagedGit.enabled, false);
+  assert.equal(missingManagedGit.disabledCode, 'configuration_invalid');
+  assert.equal(JSON.stringify(missingManagedGit).includes(approvedGitPath), false);
+
+  validManagedDocument.gitPath = path.join(managedConfigurationDirectory, 'missing-git.exe');
+  fs.writeFileSync(managedConfigurationPath, `${JSON.stringify(validManagedDocument, null, 2)}\n`);
+  const invalidManagedGit = loadSystemUpdateConfiguration(managedApplicationPath, {
+    NODE_ENV: 'test',
+    MCC_UPDATE_MODE: 'windows_agent',
+    MCC_UPDATE_WINDOWS_CONFIG: managedConfigurationPath,
+  }, 'win32');
+  assert.equal(invalidManagedGit.enabled, false);
+  assert.equal(invalidManagedGit.disabledCode, 'configuration_invalid');
+  assert.equal(JSON.stringify(invalidManagedGit).includes('missing-git.exe'), false);
 
   fs.writeFileSync(managedConfigurationPath, `${JSON.stringify({
     schemaVersion: 1,
@@ -176,6 +211,7 @@ try {
     port: APPROVED_MCC_PORT,
     mccTaskName: 'MaintenanceCommandCenter',
     updaterTaskName: 'MaintenanceCommandCenterUpdater',
+    gitPath: approvedGitPath,
   }, null, 2)}\n`);
   const managedWindowsTest = loadSystemUpdateConfiguration('Z:\\MCC_V1_FINAL', {
     NODE_ENV: 'test',
@@ -197,6 +233,7 @@ try {
     port: APPROVED_MCC_PORT,
     mccTaskName: 'MaintenanceCommandCenter',
     updaterTaskName: 'MaintenanceCommandCenterUpdater',
+    gitPath: approvedGitPath,
   }, null, 2)}\n`);
   const productionBranchOverride = loadSystemUpdateConfiguration(managedApplicationPath, {
     NODE_ENV: 'test',
@@ -216,6 +253,7 @@ try {
     port: APPROVED_MCC_PORT,
     mccTaskName: 'MaintenanceCommandCenter',
     updaterTaskName: 'MaintenanceCommandCenterUpdater',
+    gitPath: approvedGitPath,
   }, null, 2)}\n`);
   const unsafeTestBranch = loadSystemUpdateConfiguration('Z:\\MCC_V1_FINAL', {
     NODE_ENV: 'test',
@@ -235,6 +273,7 @@ try {
     port: APPROVED_MCC_PORT,
     mccTaskName: 'MaintenanceCommandCenter',
     updaterTaskName: 'MaintenanceCommandCenterUpdater',
+    gitPath: approvedGitPath,
   }, null, 2)}\n`);
   const protectedManagedWindows = loadSystemUpdateConfiguration('F:\\MCC_V1_FINAL', {
     NODE_ENV: 'test',
@@ -263,6 +302,49 @@ try {
   assert.equal(currentStatus.code, 'up_to_date');
   assert.equal(currentStatus.state, 'idle');
   assert.equal(currentService.publicStatus(currentStatus).installedCommit, current.initialCommit.slice(0, 7));
+
+  const restrictedPathFixture = makeFixture('restricted-path');
+  const restrictedPathDirectory = path.join(restrictedPathFixture.directory, 'local-service-path');
+  fs.mkdirSync(restrictedPathDirectory);
+  const originalPath = process.env.PATH;
+  process.env.PATH = restrictedPathDirectory;
+  try {
+    const protectedRunnerService = new SystemUpdateService(
+      configuration(restrictedPathFixture),
+      new MemorySystemUpdateStatusStore(),
+      undefined,
+      () => undefined,
+      () => new Date('2026-07-29T12:00:00.000Z'),
+    );
+    assert.equal(protectedRunnerService.checkForUpdate({ id: 1, name: 'Owner Admin' }).code, 'up_to_date');
+    const buildMetadata = createSystemUpdateGitRunner(configuration(restrictedPathFixture))(
+      ['rev-parse', '--short=7', 'HEAD'],
+      restrictedPathFixture.installed,
+      2_000,
+    );
+    assert.equal(buildMetadata.status, 0);
+    assert.match(buildMetadata.stdout.trim(), /^[0-9a-f]{7}$/i);
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  const unavailableGitFixture = makeFixture('git-unavailable');
+  const unavailableGitService = serviceFor(unavailableGitFixture, {
+    gitRunner: () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('sensitive executable path'), { code: 'ENOENT' }) }),
+  }).service;
+  assert.throws(
+    () => unavailableGitService.checkForUpdate({ id: 1, name: 'Owner Admin' }),
+    error => error instanceof SystemUpdateError
+      && error.code === 'update_check_failed'
+      && error.internalDiagnostic === 'git_executable_unavailable'
+      && !error.message.includes('sensitive executable path'),
+  );
+  assert.equal(unavailableGitService.readStatus().code, 'update_check_failed');
+  assert.equal(unavailableGitService.readStatus().message.includes(approvedGitPath), false);
+
+  const raspberryGit = createSystemUpdateGitRunner({ mode: 'raspberry_pi', gitExecutable: path.join(fixtureRoot, 'must-not-run') });
+  const raspberryGitResult = raspberryGit(['--version'], root, 2_000);
+  assert.equal(raspberryGitResult.status, 0, raspberryGitResult.stderr);
 
   const managedHealthFixture = makeFixture('managed-health');
   const managedHealthConfiguration = {

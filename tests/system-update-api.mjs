@@ -159,10 +159,11 @@ try {
   result = await request(base, '/api/system/update/check', {
     method: 'POST',
     cookie: ownerCookie,
-    body: { branch: 'client-selected' },
+    body: { branch: 'client-selected', gitPath: 'C:\\browser-controlled\\git.exe' },
   });
   assert.equal(result.response.status, 400);
   assert.equal(result.data.code, 'invalid_request');
+  assert.equal(JSON.stringify(result.data).includes('browser-controlled'), false);
 
   result = await request(base, '/api/system/update/check', { method: 'POST', cookie: ownerCookie, body: {} });
   assert.equal(result.response.status, 503);

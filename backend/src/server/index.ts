@@ -21,6 +21,7 @@ import {
   MemorySystemUpdateStatusStore,
   SystemUpdateError,
   SystemUpdateService,
+  createSystemUpdateGitRunner,
   loadSystemUpdateConfiguration,
   type SystemUpdateStatus,
   type UpdateIdentity,
@@ -58,14 +59,9 @@ function readApplicationVersion() {
     return null;
   }
 }
-function readShortCommit() {
+function readShortCommit(git: ReturnType<typeof createSystemUpdateGitRunner>) {
   try {
-    const result = spawnSync('git', ['rev-parse', '--short=7', 'HEAD'], {
-      cwd: repoRootPath,
-      encoding: 'utf8',
-      timeout: 2_000,
-      windowsHide: true,
-    });
+    const result = git(['rev-parse', '--short=7', 'HEAD'], repoRootPath, 2_000);
     const commit = result.status === 0 ? result.stdout.trim() : '';
     return /^[0-9a-f]{7,12}$/i.test(commit) ? commit : null;
   } catch {
@@ -73,15 +69,16 @@ function readShortCommit() {
   }
 }
 const applicationVersion = readApplicationVersion();
-const applicationCommit = readShortCommit();
 const systemUpdateConfiguration = loadSystemUpdateConfiguration(repoRootPath);
+const backendGitRunner = createSystemUpdateGitRunner(systemUpdateConfiguration);
+const applicationCommit = readShortCommit(backendGitRunner);
 const systemUpdateStatusStore = systemUpdateConfiguration.statusPath
   ? new JsonSystemUpdateStatusStore(
       systemUpdateConfiguration.statusPath,
       systemUpdateConfiguration.statusWritePath??systemUpdateConfiguration.statusPath,
     )
   : new MemorySystemUpdateStatusStore();
-const systemUpdateService = new SystemUpdateService(systemUpdateConfiguration, systemUpdateStatusStore);
+const systemUpdateService = new SystemUpdateService(systemUpdateConfiguration, systemUpdateStatusStore, backendGitRunner);
 const mit3Url = 'http://localhost:4173';
 const mit3HealthUrl = `${mit3Url}/api/health`;
 const mit3AppDataUrl = `${mit3Url}/api/app-data`;
@@ -8024,6 +8021,7 @@ app.post('/api/system/update/check',requireAuth,requireSystemVersionAccess,(req:
   } catch(error) {
     const status=systemUpdateService.readStatus();
     const failure=error instanceof SystemUpdateError?error:new SystemUpdateError(503,'update_check_failed','The MCC update check failed.');
+    if(failure.internalDiagnostic)console.error(`[system-update] ${failure.internalDiagnostic}`);
     audit(req,'update check','system_update_check',status.lastUpdatedAt,{...systemUpdateAuditDetails(status),result:failure.code});
     recordSystemUpdateHistory('update_check',status,req.user!,status.message);
     res.setHeader('Cache-Control','no-store');
@@ -8048,6 +8046,7 @@ app.post('/api/system/update/install',requireAuth,requireSystemVersionAccess,(re
     res.status(202).json({...systemUpdateService.publicStatus(status),accepted:true,jobId:status.jobId,csrfToken:systemUpdateCsrfToken(req)});
   } catch(error) {
     const failure=error instanceof SystemUpdateError?error:new SystemUpdateError(503,'failed','The external MCC update runner could not be started.');
+    if(failure.internalDiagnostic)console.error(`[system-update] ${failure.internalDiagnostic}`);
     const status=systemUpdateService.readStatus();
     res.status(failure.httpStatus).json({...systemUpdateService.publicStatus(status),ok:false,error:failure.message,csrfToken:systemUpdateCsrfToken(req)});
   }

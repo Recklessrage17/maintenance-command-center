@@ -22,21 +22,41 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 Import-Module (Join-Path $PSScriptRoot 'MccWindowsUpdater.Common.psm1') -Force
-$configuration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationPath
-$applicationPath = [string]$configuration.applicationPath
-$nodePath = [string]$configuration.nodePath
-$entryPoint = Join-Path $applicationPath 'backend\dist\server\index.js'
 $webLogDirectory = 'C:\ProgramData\MCC\Updater\web-logs'
 $processStatePath = Join-Path $webLogDirectory 'mcc-process.json'
 
-if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
-    throw 'The configured Node.js executable is missing.'
-}
-if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
-    throw 'The built MCC backend entry point is missing.'
-}
 if (-not (Test-Path -LiteralPath $webLogDirectory -PathType Container)) {
     [System.IO.Directory]::CreateDirectory($webLogDirectory) | Out-Null
+}
+
+function Write-WebStartupLog {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $stamp = [DateTime]::UtcNow.ToString('yyyyMMdd')
+    $logPath = Join-Path $webLogDirectory "mcc-$stamp.log"
+    $safeMessage = Get-MccCleanText -Value $Message -Maximum 500
+    Add-Content -LiteralPath $logPath -Value "[$([DateTime]::UtcNow.ToString('o'))] $safeMessage" -Encoding utf8
+}
+
+try {
+    $configuration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationPath
+    $applicationPath = [string]$configuration.applicationPath
+    $gitPath = [string]$configuration.gitPath
+    $nodePath = [string]$configuration.nodePath
+    $entryPoint = Join-Path $applicationPath 'backend\dist\server\index.js'
+    if (-not (Test-Path -LiteralPath $gitPath -PathType Leaf)) {
+        throw 'The configured Git executable is missing.'
+    }
+    if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
+        throw 'The configured Node.js executable is missing.'
+    }
+    if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
+        throw 'The built MCC backend entry point is missing.'
+    }
+    Set-MccExecutablePathBootstrap -GitPath $gitPath -NodePath $nodePath
+    Write-WebStartupLog -Message 'Startup validation passed: protected configuration, Git, Node.js, backend entry point, PATH bootstrap, and noninteractive Git are ready.'
+} catch {
+    Write-WebStartupLog -Message "Startup validation failed: $(Get-MccCleanText -Value $_.Exception.Message -Maximum 240)"
+    throw
 }
 
 $env:PORT = '4273'

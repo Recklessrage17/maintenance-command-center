@@ -112,6 +112,14 @@ assert.match(windowsAgent, /Update-MccWindows\.ps1/);
 assert.doesNotMatch(windowsAgent, /\$(repositoryUrl|branchName|command)\b/i);
 assert.match(windowsAgent, /ExpectedBranch \(\[string\]\$configuration\.branch\)/);
 assert.match(windowsAgent, /Configured update branch: origin/);
+assert.doesNotMatch(windowsAgent, /Set-MccExecutablePathBootstrap/);
+assert.match(windowsWeb, /\$gitPath = \[string\]\$configuration\.gitPath/);
+assert.match(windowsWeb, /Test-Path -LiteralPath \$gitPath -PathType Leaf/);
+assert.match(windowsWeb, /Test-Path -LiteralPath \$nodePath -PathType Leaf/);
+assert.match(windowsWeb, /Set-MccExecutablePathBootstrap -GitPath \$gitPath -NodePath \$nodePath/);
+assert.match(windowsWeb, /Startup validation passed:/);
+assert.doesNotMatch(windowsWeb, /Write-WebStartupLog -Message .*\$gitPath/);
+assert.match(windowsCommon, /\$env:GIT_TERMINAL_PROMPT = '0'/);
 assert.match(windowsUninstaller, /Preserved the MCC installation, database, uploads, documents, files, and environment files/);
 assert.match(windowsTest, /Protected F path/);
 assert.match(windowsTest, /Request ACL/);
@@ -181,6 +189,32 @@ const pathPolicy = spawnSync('powershell.exe', [
   ].join(';'),
 ], { encoding: 'utf8', windowsHide: true });
 assert.equal(pathPolicy.status, 0, pathPolicy.stderr || pathPolicy.stdout);
+
+const webBootstrap = spawnSync('powershell.exe', [
+  '-NoLogo',
+  '-NoProfile',
+  '-NonInteractive',
+  '-Command',
+  [
+    "Import-Module (Resolve-Path 'deploy\\windows\\MccWindowsUpdater.Common.psm1') -Force",
+    "$gitPath=(Get-Command 'git.exe' -ErrorAction Stop).Source",
+    "$nodePath=(Get-Command 'node.exe' -ErrorAction Stop).Source",
+    '$restrictedPath=[System.IO.Path]::GetTempPath().TrimEnd([System.IO.Path]::DirectorySeparatorChar)',
+    '$env:PATH=$restrictedPath',
+    'Set-MccExecutablePathBootstrap -GitPath $gitPath -NodePath $nodePath',
+    '$expectedPath=@((Split-Path -Parent $gitPath),(Split-Path -Parent $nodePath),$restrictedPath) -join [System.IO.Path]::PathSeparator',
+    'if(-not $env:PATH.Equals($expectedPath,[StringComparison]::OrdinalIgnoreCase)){exit 1}',
+    "if($env:GIT_TERMINAL_PROMPT -ne '0'){exit 4}",
+    '& git.exe --version | Out-Null',
+    'if($LASTEXITCODE -ne 0){exit 5}',
+    "& $nodePath -e \"const {spawnSync}=require('node:child_process');const result=spawnSync('git',['--version']);process.exit(result.status===0?0:1)\"",
+    'if($LASTEXITCODE -ne 0){exit 8}',
+    "try{Set-MccExecutablePathBootstrap -GitPath (Join-Path $restrictedPath 'missing-git.exe') -NodePath $nodePath;exit 6}catch{}",
+    'try{Set-MccExecutablePathBootstrap -GitPath $restrictedPath -NodePath $nodePath;exit 7}catch{}',
+    'exit 0',
+  ].join(';'),
+], { encoding: 'utf8', windowsHide: true });
+assert.equal(webBootstrap.status, 0, webBootstrap.stderr || webBootstrap.stdout);
 
 const pythonSyntax = spawnSync('python', [
   '-c',

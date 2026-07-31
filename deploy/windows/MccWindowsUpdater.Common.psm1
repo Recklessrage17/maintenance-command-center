@@ -61,6 +61,27 @@ function Get-MccCleanText {
     return $text.Substring(0, [Math]::Min($text.Length, $Maximum))
 }
 
+function Set-MccExecutablePathBootstrap {
+    param(
+        [Parameter(Mandatory = $true)][string]$GitPath,
+        [Parameter(Mandatory = $true)][string]$NodePath
+    )
+    if (-not [System.IO.Path]::IsPathRooted($GitPath) -or
+        -not (Test-Path -LiteralPath $GitPath -PathType Leaf)) {
+        throw 'The configured Git executable is missing or invalid.'
+    }
+    if (-not [System.IO.Path]::IsPathRooted($NodePath) -or
+        -not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+        throw 'The configured Node.js executable is missing or invalid.'
+    }
+    $executableDirectories = @(
+        [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($GitPath))
+        [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($NodePath))
+    ) | Select-Object -Unique
+    $env:PATH = "$(($executableDirectories -join [System.IO.Path]::PathSeparator))$([System.IO.Path]::PathSeparator)$env:PATH"
+    $env:GIT_TERMINAL_PROMPT = '0'
+}
+
 function Test-MccSemver {
     param([AllowNull()][object]$Value)
     return [string]$Value -match '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
@@ -636,6 +657,7 @@ Export-ModuleMember -Function @(
     'Test-MccProtectedDevelopmentPath',
     'Assert-MccApprovedApplicationPath',
     'Get-MccCleanText',
+    'Set-MccExecutablePathBootstrap',
     'Test-MccSemver',
     'Test-MccCommit',
     'Test-MccUpdateBranch',
