@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccContactPill, MccLinkPill, MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
 import { hasPermission } from '../../permissions';
 import {
@@ -110,7 +111,7 @@ export const blankVendorForm: VendorForm = {
 };
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;

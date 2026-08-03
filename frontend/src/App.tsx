@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { withJsonRequestDefaults } from './apiRequest';
 import { MccForgotPassword } from './components/auth/MccForgotPassword';
 import { MccLogin } from './components/auth/MccLogin';
 import { MccLayout, type MccSection } from './layout/MccLayout';
@@ -36,7 +37,7 @@ class RouteModuleBoundary extends Component<{resetKey:MccSection;children:ReactN
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; canViewSystemVersion:boolean; forcePasswordChange:boolean; effectivePermissions?:string[] };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
-async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
+async function api(path:string, options:RequestInit={}) { const res=await fetch(path,withJsonRequestDefaults(options)); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
 type UpdateNoticeState={kind:'available'|'succeeded';version:string;commit:string;storageKey:string};
 function cleanNoticePart(value:unknown){return typeof value==='string'?value.replace(/[^a-zA-Z0-9._-]/g,'').slice(0,80):'';}
 function SystemUpdateNotice({user,onViewUpdate}:{user:User;onViewUpdate:()=>void}) {

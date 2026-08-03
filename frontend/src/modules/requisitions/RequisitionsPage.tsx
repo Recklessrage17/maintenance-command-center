@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusAge } from '../../components/MccStatusAge';
 import { MccSuccessBurst } from '../../components/MccSuccessBurst';
@@ -120,7 +121,7 @@ function replaceFilterLocation(filter:StatusFilter) {
 }
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;

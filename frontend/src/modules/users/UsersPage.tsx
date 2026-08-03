@@ -1,5 +1,6 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccPermissionBadgeGroup, type SpecialPermissionGrant } from '../../components/MccPermissionBadges';
 import { RoleBadge } from '../../components/RoleBadge';
 import { generateTemporaryPassword, temporaryPasswordRequirements, validateTemporaryPassword } from './passwordValidation';
@@ -23,7 +24,7 @@ class ApiError extends Error{
   constructor(payload:ApiErrorPayload){super(payload.error||'Request failed.');this.name='ApiError';this.code=payload.code;this.field=payload.field;}
 }
 async function api<T=Record<string,unknown>>(path:string,options:RequestInit={}):Promise<T>{
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json'},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({})) as ApiErrorPayload&Record<string,unknown>;
   if(!res.ok)throw new ApiError(data);
   return data as T;

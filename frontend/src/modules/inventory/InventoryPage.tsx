@@ -1,4 +1,5 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusPill, MccTextLink, type MccSemanticVariant } from '../../components/MccPills';
 import { hasPermission } from '../../permissions';
@@ -203,7 +204,7 @@ const noticeDurationMs = 5 * 60 * 1000;
 const newPartHighlightMs = 5 * 60 * 1000;
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;

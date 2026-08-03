@@ -114,6 +114,17 @@ Assert-MccFails -Action {
 } -Message 'Rollback compatibility accepted a commit that did not match the recorded backup commit.'
 Write-Output 'PASS rollback legacy verification requires the exact recorded backup commit'
 
+$validatorEvidence = New-MccValidLegacyEvidence
+$validatorEvidence.verificationContext = 'InstalledValidator'
+Assert-MccSucceeds -Action {
+    Assert-MccLegacyManagedRuntimeEvidence -Evidence $validatorEvidence
+} -Message 'The installed validator rejected a fully verified legitimate older managed build.'
+$validatorEvidence.installedVersion = '1.4.4'
+Assert-MccFails -Action {
+    Assert-MccLegacyManagedRuntimeEvidence -Evidence $validatorEvidence
+} -Message 'The installed validator accepted a readiness 404 from v1.4.4.'
+Write-Output 'PASS installed validator legacy readiness is limited to versions older than 1.4.4'
+
 $expectedCommit = '0123456789abcdef0123456789abcdef01234567'
 $validReadiness = [pscustomobject]@{
     ok = $true

@@ -209,14 +209,16 @@ if ($null -ne $configuration) {
         $expectedConfiguration = Get-MccNormalizedPath -LiteralPath $ConfigurationPath
         $actualNode = if ($null -ne $processDetails) { Get-MccNormalizedPath -LiteralPath ([string]$processDetails.ExecutablePath) } else { '' }
         $commandLine = if ($null -ne $processDetails) { ([string]$processDetails.CommandLine).Replace('"', '') } else { '' }
+        $recordLaunchId = [Guid]::Empty
         $recordValid = $validProcessId -and
             $null -ne $processDetails -and
-            [string]$processRecord.launchId -match '^[0-9a-fA-F-]{36}$' -and
+            [Guid]::TryParse([string]$processRecord.launchId, [ref]$recordLaunchId) -and
             $processRecord.applicationMatchesConfiguration -eq $true -and
             $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -and
             $commandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
             (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.applicationPath)).Equals($expectedApplication, [StringComparison]::OrdinalIgnoreCase) -and
             (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.entryPoint)).Equals($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -and
+            (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.nodePath)).Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -and
             (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.configurationPath)).Equals($expectedConfiguration, [StringComparison]::OrdinalIgnoreCase) -and
             [string]$processRecord.managedEnvironment.updateMode -ceq 'windows_agent' -and
             [string]$processRecord.managedEnvironment.nodeEnvironment -ceq 'production'
@@ -235,20 +237,82 @@ if ($null -ne $configuration) {
         })
         Write-TestResult -Name 'No detached MCC process' -Passed ($matchingApplicationProcesses.Count -eq 1 -and [int]$matchingApplicationProcesses[0].ProcessId -eq $managedProcessId) -Detail 'Exactly one configured MCC backend process exists and it is the recorded managed child.'
 
-        $runtimeHealth = Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:4273/api/system/update/managed-readiness' -TimeoutSec 10
         $expectedMode = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
         $expectedLabel = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
-        $readinessValid = $runtimeHealth.ok -eq $true -and
-            $runtimeHealth.systemUpdate.configured -eq $true -and
-            $runtimeHealth.systemUpdate.enabled -eq $true -and
-            $runtimeHealth.systemUpdate.applicationMatchesConfiguration -eq $true -and
-            $runtimeHealth.systemUpdate.repositoryApproved -eq $true -and
-            [string]$runtimeHealth.systemUpdate.mode -ceq $expectedMode -and
-            [string]$runtimeHealth.systemUpdate.environmentLabel -ceq $expectedLabel -and
-            [string]$runtimeHealth.systemUpdate.branch -ceq [string]$configuration.branch -and
-            [string]$runtimeHealth.systemUpdate.installedVersion -ceq $installedVersion -and
-            [string]$runtimeHealth.systemUpdate.installedCommit -ceq $installedCommit.ToLowerInvariant()
-        Write-TestResult -Name 'Managed updater readiness' -Passed $readinessValid -Detail 'Configured, enabled, mode, label, approved repository, branch, version, and commit match the protected installation.'
+        $installedFullCommit = (Invoke-MccGit -ApplicationPath $expectedApplication -ArgumentList @('rev-parse', 'HEAD')).StandardOutput.ToLowerInvariant()
+        $readinessProbe = Invoke-MccHttpJsonProbe `
+            -Uri 'http://127.0.0.1:4273/api/system/update/managed-readiness' `
+            -TimeoutSeconds 10 `
+            -AllowedFailureStatusCodes @(404) `
+            -RequireFailureJson
+        if ([int]$readinessProbe.statusCode -eq 200) {
+            Assert-MccManagedReadinessPayload `
+                -Payload $readinessProbe.payload `
+                -ExpectedMode $expectedMode `
+                -ExpectedEnvironmentLabel $expectedLabel `
+                -ExpectedBranch ([string]$configuration.branch) `
+                -ExpectedVersion $installedVersion `
+                -ExpectedCommit $installedFullCommit `
+                -ExpectedPort $constants.Port
+            Write-TestResult -Name 'Managed updater readiness' -Passed $true -Detail 'Strict configured, enabled, mode, label, approved repository, branch, version, and commit readiness verified.'
+        } elseif ([int]$readinessProbe.statusCode -eq 404) {
+            Assert-MccRepository -ApplicationPath $expectedApplication -ExpectedBranch ([string]$configuration.branch) -RequireClean
+            Assert-MccOriginBranch -ApplicationPath $expectedApplication -Branch ([string]$configuration.branch)
+            $mccTask = Get-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction Stop
+            $updaterTask = Get-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction Stop
+            $agentHealth = Read-MccJson -LiteralPath $healthPath
+            $agentAgeSeconds = [DateTime]::UtcNow.Subtract(([DateTime][string]$agentHealth.checkedAt).ToUniversalTime()).TotalSeconds
+            $healthProbe = Invoke-MccHttpJsonProbe -Uri 'http://127.0.0.1:4273/api/health' -TimeoutSeconds 10
+            $healthPayload = $healthProbe.payload
+            $statusProbe = Invoke-MccHttpJsonProbe `
+                -Uri 'http://127.0.0.1:4273/api/system/update/status' `
+                -TimeoutSeconds 10 `
+                -AllowedFailureStatusCodes @(401)
+            $currentLaunchId = [Guid]::Empty
+            $launchIdValid = [Guid]::TryParse([string]$processRecord.launchId, [ref]$currentLaunchId)
+            Assert-MccLegacyManagedRuntimeEvidence -Evidence ([ordered]@{
+                verificationContext = 'InstalledValidator'
+                readinessStatusCode = [int]$readinessProbe.statusCode
+                installedVersion = $installedVersion
+                configurationValid = $true
+                applicationPathMatches = $expectedApplication.Equals((Get-MccNormalizedPath -LiteralPath ([string]$configuration.applicationPath)), [StringComparison]::OrdinalIgnoreCase)
+                originMatches = $true
+                branchMatches = $true
+                packageVersionMatches = (Get-MccPackageVersion -ApplicationPath $expectedApplication) -ceq $installedVersion
+                commitMatches = $installedFullCommit.Substring(0, 7) -ceq $installedCommit.ToLowerInvariant()
+                repositoryClean = $true
+                mccTaskInstalled = $null -ne $mccTask
+                mccTaskRunning = [string]$mccTask.State -eq 'Running'
+                mccTaskIdentityMatches = Test-MccScheduledTaskIdentity -Task $mccTask -ExpectedSid 'S-1-5-19'
+                updaterTaskInstalled = $null -ne $updaterTask
+                updaterTaskRunning = [string]$updaterTask.State -eq 'Running'
+                updaterTaskIdentityMatches = Test-MccScheduledTaskIdentity -Task $updaterTask -ExpectedSid 'S-1-5-18'
+                agentHealthy = $agentHealth.agentHealthy -eq $true -and $agentAgeSeconds -le 90
+                agentConfigurationValid = $agentHealth.configurationValid -eq $true
+                agentRepositoryValid = $agentHealth.repositoryValid -eq $true
+                agentBranchValid = $agentHealth.branchValid -eq $true
+                agentApplicationPathMatches = $agentHealth.applicationPathMatches -eq $true
+                requestDirectoryAccessible = $agentHealth.requestDirectoryAccessible -eq $true -and (Test-Path -LiteralPath $requestDirectory -PathType Container)
+                statusDirectoryAccessible = $agentHealth.statusDirectoryAccessible -eq $true -and (Test-Path -LiteralPath $statusDirectory -PathType Container)
+                processRecordExists = $recordValid
+                launchIdValid = $launchIdValid
+                launchIdDistinct = $launchIdValid
+                processApplicationMatchesConfiguration = $processRecord.applicationMatchesConfiguration -eq $true
+                processUpdateModeMatches = [string]$processRecord.managedEnvironment.updateMode -ceq 'windows_agent'
+                processNodeEnvironmentMatches = [string]$processRecord.managedEnvironment.nodeEnvironment -ceq 'production'
+                pidRunning = $null -ne $processDetails -and $matchingApplicationProcesses.Count -eq 1 -and [int]$matchingApplicationProcesses[0].ProcessId -eq $managedProcessId
+                nodeExecutableMatches = $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)
+                backendCommandLineMatches = $commandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -ge 0
+                exclusivePortOwner = $portOwnerValid
+                healthOk = [int]$healthProbe.statusCode -eq 200 -and $healthPayload.ok -eq $true
+                healthApplicationMatches = [string]$healthPayload.app -ceq 'Maintenance Command Center'
+                healthPortMatches = [int]$healthPayload.port -eq $constants.Port
+                updateStatusUnauthorized = [int]$statusProbe.statusCode -eq 401
+            })
+            Write-TestResult -Name 'Managed updater readiness' -Passed $true -Detail 'Legacy managed-readiness compatibility verified every protected task, process, PID, port, repository, heartbeat, health, and API requirement.'
+        } else {
+            throw 'The managed MCC readiness endpoint returned an unsupported response.'
+        }
     } catch {
         Write-TestResult -Name 'Managed handoff verification' -Passed $false -Detail $_.Exception.Message
     }

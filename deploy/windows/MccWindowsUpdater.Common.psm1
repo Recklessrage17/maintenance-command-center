@@ -980,7 +980,7 @@ function Assert-MccManagedReadinessPayload {
 function Assert-MccLegacyManagedRuntimeEvidence {
     param([Parameter(Mandatory = $true)][Collections.IDictionary]$Evidence)
     if (-not $Evidence.Contains('verificationContext') -or
-        @('InstallerBootstrap', 'Rollback') -cnotcontains [string]$Evidence.verificationContext) {
+        @('InstallerBootstrap', 'Rollback', 'InstalledValidator') -cnotcontains [string]$Evidence.verificationContext) {
         throw 'Legacy managed-readiness compatibility is not permitted in this verification context.'
     }
     if (-not $Evidence.Contains('readinessStatusCode') -or [int]$Evidence.readinessStatusCode -ne 404) {

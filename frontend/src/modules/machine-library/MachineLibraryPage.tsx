@@ -1,5 +1,6 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { MccAccordionHeader, MccCategoryAccordion, mccCategoryAccentClass, type MccCategoryAccent } from '../../components/MccCategoryAccordion';
 import { MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
@@ -120,7 +121,7 @@ const machineDetailAccents: Record<MachineDetailSectionKey,MccCategoryAccent> = 
 };
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, { credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) }, ...options });
+  const res = await fetch(path, withJsonRequestDefaults(options));
   const data = await res.json().catch(()=>({}));
   if (!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;

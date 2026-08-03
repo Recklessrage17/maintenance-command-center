@@ -1,5 +1,6 @@
 import { type CSSProperties, type FocusEvent, type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { withJsonRequestDefaults } from '../apiRequest';
 import { MccPermissionBadgeGroup, type SpecialPermissionGrant } from './MccPermissionBadges';
 import { RoleBadge } from './RoleBadge';
 import presencePolicy from '../../../shared/presence-policy.json';
@@ -58,7 +59,7 @@ const mobileBackdropStyle:CSSProperties={
 };
 
 async function jsonRequest(path:string,options:RequestInit={}){
-  const response=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const response=await fetch(path,withJsonRequestDefaults(options));
   const data=await response.json().catch(()=>({}));
   if(!response.ok)throw new Error(data.error||'Maintenance Team is unavailable.');
   return data;

@@ -11,6 +11,7 @@ const dataDir = path.join(fixture, 'data');
 const ownerPassword = 'Owner-Update!7';
 const managerPassword = 'Manager-Update!7';
 const technicianPassword = 'Technician-Update!7';
+const boundaryAdminPassword = 'Boundary-Update!7';
 let server;
 let serverOutput = '';
 
@@ -145,6 +146,19 @@ try {
   assert.equal(result.response.status, 201, JSON.stringify(result.data));
   const technicianCookie = await login(base, 'technician@example.com', technicianPassword);
 
+  result = await request(base, '/api/users', {
+    method: 'POST',
+    cookie: ownerCookie,
+    body: {
+      fullName: 'Boundary Admin',
+      email: 'boundary@example.com',
+      role: 'Admin',
+      temporaryPassword: boundaryAdminPassword,
+    },
+  });
+  assert.equal(result.response.status, 201, JSON.stringify(result.data));
+  const boundaryAdminCookie = await login(base, 'boundary@example.com', boundaryAdminPassword);
+
   for (const [roleLabel, cookie] of [['Manager', managerCookie], ['Maintenance Tech', technicianCookie]]) {
     for (const [method, pathname] of [
       ['GET', '/api/system/update/status'],
@@ -164,6 +178,44 @@ try {
   assert.ok(result.data.csrfToken);
   assert.equal(JSON.stringify(result.data).includes(root), false);
   const csrfToken = result.data.csrfToken;
+
+  const boundaryStatus = await request(base, '/api/system/update/status', { cookie: boundaryAdminCookie });
+  assert.equal(boundaryStatus.response.status, 200);
+  const boundaryCsrfToken = boundaryStatus.data.csrfToken;
+  let boundaryResponse = await fetch(`${base}/api/system/update/install`, {
+    method: 'POST',
+    headers: {
+      Cookie: boundaryAdminCookie,
+      'X-MCC-CSRF-Token': boundaryCsrfToken,
+    },
+    body: JSON.stringify({ confirm: true, checkToken: 'exact-current-check-token' }),
+  });
+  let boundaryData = await boundaryResponse.json();
+  assert.equal(boundaryResponse.status, 400);
+  assert.equal(boundaryData.code, 'confirmation_required');
+
+  boundaryResponse = await fetch(`${base}/api/system/update/install`, {
+    method: 'POST',
+    headers: {
+      Cookie: boundaryAdminCookie,
+      'Content-Type': 'application/json',
+      'X-MCC-CSRF-Token': boundaryCsrfToken,
+      'X-MCC-Custom': 'preserved',
+    },
+    body: JSON.stringify({ confirm: true, checkToken: 'exact-current-check-token' }),
+  });
+  boundaryData = await boundaryResponse.json();
+  assert.equal(boundaryResponse.status, 503);
+  assert.equal(boundaryData.code, 'deployment_not_configured');
+
+  boundaryResponse = await fetch(`${base}/api/system/update/install`, {
+    method: 'POST',
+    headers: { Cookie: boundaryAdminCookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true, checkToken: 'exact-current-check-token' }),
+  });
+  boundaryData = await boundaryResponse.json();
+  assert.equal(boundaryResponse.status, 403);
+  assert.equal(boundaryData.code, 'csrf_rejected');
 
   result = await request(base, '/api/system/update/check', {
     method: 'POST',
@@ -251,6 +303,7 @@ try {
   assert.equal(serverOutput.includes(ownerPassword), false);
   assert.equal(serverOutput.includes(managerPassword), false);
   assert.equal(serverOutput.includes(technicianPassword), false);
+  assert.equal(serverOutput.includes(boundaryAdminPassword), false);
   console.log('System update API tests passed: 401/403 Admin/Manager/Maintenance Tech gating, sanitized status, disabled-mode safety, CSRF, explicit confirmation, and client configuration rejection.');
 } finally {
   await stopServer();

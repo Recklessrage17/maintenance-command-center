@@ -1,4 +1,5 @@
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput } from '../../components/MccDateInput';
 import { type HistorySection } from './historyRouting';
 
@@ -69,7 +70,7 @@ const emptyFilters: HistoryFilters = { q: '', action: '', user: '', startDate: '
 const exportRoles = new Set(['Admin','Manager']);
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;

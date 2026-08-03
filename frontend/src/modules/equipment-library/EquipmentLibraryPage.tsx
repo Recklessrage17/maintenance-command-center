@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccAccordionHeader, MccCategoryAccordion, type MccCategoryAccent } from '../../components/MccCategoryAccordion';
 import { MccPillCard, MccStatusPill } from '../../components/MccPills';
 import { MccSearchableCombobox } from '../../components/MccSearchableCombobox';
@@ -26,7 +27,7 @@ const standardCategories=new Set<string>(categories.filter(category=>category!==
 const emptyDraft:EquipmentDraft={assetNumber:'',equipmentName:'',category:'',customCategory:'',equipmentType:'',manufacturer:'',model:'',serialNumber:'',equipmentYear:'',location:'',department:'',status:'active',criticality:'',powerType:'',voltage:'',phase:'',amperage:'',airRequirement:'',waterRequirement:'',capacityRating:'',dimensions:'',weight:'',specificationNotes:''};
 
 async function api<T>(url:string,options:RequestInit={}){
-  const response=await fetch(url,{credentials:'include',headers:{...(options.body instanceof FormData?{}:{'Content-Type':'application/json'}),...(options.headers??{})},...options});
+  const response=await fetch(url,withJsonRequestDefaults(options));
   const data=await response.json().catch(()=>({})) as T&{error?:string};
   if(!response.ok)throw new Error(data.error||'Request failed.');
   return data;

@@ -1,6 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { withJsonRequestDefaults } from '../frontend/src/apiRequest';
 
 type UpdateState = {
   ok: boolean;
@@ -69,6 +70,7 @@ async function mockSettings(
     checkDelayMs?: number;
     checkFailure?: { status: number; headers?: Record<string,string>; json: Record<string,unknown> };
     installDelayMs?: number;
+    installFailure?: { status: number; headers?: Record<string,string>; json: Record<string,unknown> };
     onInstall?: () => UpdateState;
     onStatus?: (requestNumber: number) => UpdateState | 'abort';
   } = {},
@@ -109,7 +111,12 @@ async function mockSettings(
     installRequests += 1;
     const requestBody = route.request().postDataJSON();
     expect(requestBody).toEqual({ confirm: true, checkToken: 'verified-check-token' });
-    expect(route.request().headers()['x-mcc-csrf-token']).toBe('session-csrf-token');
+    const requestHeaders = route.request().headers();
+    expect(requestHeaders['content-type']).toBe('application/json');
+    expect(requestHeaders['x-mcc-csrf-token']).toBe('session-csrf-token');
+    expect(route.request().postData()).toBe('{"confirm":true,"checkToken":"verified-check-token"}');
+    if(options.installDelayMs)await new Promise(resolve=>setTimeout(resolve,options.installDelayMs));
+    if(options.installFailure)return route.fulfill(options.installFailure);
     const queued = options.onInstall?.() ?? {
       ...(options.initialUpdate??availableUpdate),
       state: 'queued',
@@ -121,7 +128,6 @@ async function mockSettings(
       checkExpiresAt: null,
       active: true,
     };
-    if(options.installDelayMs)await new Promise(resolve=>setTimeout(resolve,options.installDelayMs));
     return route.fulfill({ status: 202, json: { ...queued, accepted: true, jobId: 'job-1' } });
   });
   await page.route('**/api/settings/branding', route => route.fulfill({ json: { branding: {} } }));
@@ -149,6 +155,27 @@ async function captureApproval(page:Page,name:string) {
   await mkdir(approvalArtifactDirectory,{recursive:true});
   await page.screenshot({path:resolve(approvalArtifactDirectory,name),fullPage:true});
 }
+
+test('JSON request defaults merge caller headers last without weakening credentials or binary bodies', async () => {
+  const jsonInit=withJsonRequestDefaults({
+    method:'POST',
+    credentials:'omit',
+    headers:{'X-MCC-CSRF-Token':'exact-token','X-MCC-Custom':'preserved'},
+    body:JSON.stringify({confirm:true}),
+  });
+  const jsonHeaders=new Headers(jsonInit.headers);
+  expect(jsonInit.credentials).toBe('include');
+  expect(jsonHeaders.get('Content-Type')).toBe('application/json');
+  expect(jsonHeaders.get('X-MCC-CSRF-Token')).toBe('exact-token');
+  expect(jsonHeaders.get('X-MCC-Custom')).toBe('preserved');
+
+  const formData=new FormData();
+  formData.append('file',new Blob(['fixture']), 'fixture.txt');
+  const formInit=withJsonRequestDefaults({method:'POST',body:formData,headers:{'X-MCC-Custom':'form'}});
+  const formHeaders=new Headers(formInit.headers);
+  expect(formHeaders.has('Content-Type')).toBe(false);
+  expect(formHeaders.get('X-MCC-Custom')).toBe('form');
+});
 
 test('Admin sees an available update and must explicitly confirm before installation', async ({ page },testInfo) => {
   const fixture = await mockSettings(page, {
@@ -267,6 +294,18 @@ test('immediate in-flight guards reduce double clicks to one check POST and one 
   const installButton=page.getByRole('dialog',{name:'MCC Update Available'}).getByRole('button',{name:'Install Update'});
   await installButton.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});
   await expect(page.getByRole('dialog',{name:'MCC Update Progress'})).toBeVisible();
+  expect(fixture.installRequests()).toBe(1);
+});
+
+test('a failed install POST is never retried automatically', async ({ page }) => {
+  const fixture=await mockSettings(page,{
+    installFailure:{status:503,json:{ok:false,code:'failed',error:'Simulated install boundary failure.'}},
+  });
+  await page.goto('/settings');
+  await page.getByRole('button',{name:'Update to v1.3.0'}).click();
+  await page.getByRole('dialog',{name:'MCC Update Available'}).getByRole('button',{name:'Install Update'}).click();
+  await expect(page.getByRole('alert').filter({hasText:'Simulated install boundary failure.'})).toBeVisible();
+  await page.waitForTimeout(750);
   expect(fixture.installRequests()).toBe(1);
 });
 
