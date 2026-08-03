@@ -867,3 +867,340 @@
     display: none;
   }
 }
+
+/* Account recovery reuses the login atmosphere and control language in a focused smoke-glass panel. */
+.mcc-reset {
+  padding-block: clamp(18px, 5vw, 58px);
+}
+
+.mcc-reset__panel {
+  width: min(620px, 100%);
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(var(--mcc-accent-info-rgb), .13), transparent 34%),
+    radial-gradient(circle at 100% 100%, rgba(var(--mcc-accent-maintenance-rgb), .065), transparent 36%),
+    linear-gradient(145deg, rgba(20, 35, 47, .86), rgba(3, 11, 19, .94));
+  animation: mcc-reset-panel-enter var(--mcc-motion-slow) var(--mcc-motion-ease-out) both;
+}
+
+.mcc-reset__panel::after {
+  width: 36px;
+  height: 36px;
+}
+
+.mcc-reset__panel-index {
+  left: clamp(26px, 7vw, 54px);
+  right: clamp(26px, 7vw, 54px);
+}
+
+.mcc-reset__content {
+  position: relative;
+  z-index: 1;
+  padding: clamp(70px, 10vw, 86px) clamp(26px, 7vw, 54px) clamp(28px, 6vw, 42px);
+}
+
+.mcc-reset__content::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    var(--mcc-decal-pattern) center / var(--mcc-decal-scale) repeat,
+    linear-gradient(132deg, transparent 0 48%, rgba(var(--mcc-accent-info-rgb), .045) 48.2% 48.35%, transparent 48.55%);
+  opacity: .13;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,.15), #000 34%, rgba(0,0,0,.4));
+}
+
+.mcc-reset__brand {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: clamp(30px, 6vw, 42px);
+}
+
+.mcc-reset__brand-rail {
+  width: 5px;
+  flex: 0 0 auto;
+  border-radius: var(--mcc-radius-pill);
+  background: linear-gradient(180deg, var(--mcc-accent-info), var(--mcc-accent-info-strong) 62%, var(--mcc-accent-maintenance));
+  box-shadow: 0 0 18px rgba(var(--mcc-accent-info-rgb), .32);
+}
+
+.mcc-reset__brand p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.mcc-reset__brand strong {
+  color: var(--mcc-text-primary);
+  font-size: 1.35rem;
+  font-weight: 950;
+  letter-spacing: .055em;
+  line-height: 1;
+  text-shadow: 0 0 18px rgba(var(--mcc-accent-info-rgb), .2);
+}
+
+.mcc-reset__brand p span {
+  color: var(--mcc-accent-maintenance);
+  font-size: .66rem;
+  font-weight: 900;
+  letter-spacing: .105em;
+  text-transform: uppercase;
+}
+
+.mcc-reset__heading {
+  margin-bottom: 28px;
+}
+
+.mcc-reset__heading h1 {
+  font-size: clamp(2.35rem, 7vw, 3.45rem);
+  font-weight: 900;
+  letter-spacing: -.04em;
+  text-shadow: 0 0 28px rgba(var(--mcc-accent-info-rgb), .1);
+}
+
+.mcc-reset__heading > span {
+  max-width: 48ch;
+}
+
+.mcc-reset__form {
+  gap: 18px;
+}
+
+.mcc-reset__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.mcc-reset__submit {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.mcc-reset__back {
+  min-width: 0;
+  min-height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 16px;
+  border: 1px solid var(--mcc-border-strong);
+  border-radius: var(--mcc-radius-md);
+  outline: none;
+  color: var(--mcc-text-secondary);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.045), transparent 48%),
+    rgba(5, 20, 31, .72);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.065), 0 10px 22px rgba(0,0,0,.18);
+  cursor: pointer;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 850;
+  transition:
+    transform var(--mcc-motion-fast) var(--mcc-motion-ease),
+    color var(--mcc-motion-standard) var(--mcc-motion-ease),
+    border-color var(--mcc-motion-standard) var(--mcc-motion-ease),
+    background var(--mcc-motion-standard) var(--mcc-motion-ease),
+    box-shadow var(--mcc-motion-standard) var(--mcc-motion-ease);
+}
+
+.mcc-reset__back > span {
+  color: var(--mcc-accent-info);
+  font-size: 1rem;
+  transition: transform var(--mcc-motion-standard) var(--mcc-motion-ease-out);
+}
+
+.mcc-reset__back:hover:not(:disabled) {
+  color: var(--mcc-text-primary);
+  border-color: var(--mcc-border-interactive);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.07), transparent 48%),
+    rgba(8, 30, 45, .84);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 12px 25px rgba(0,0,0,.22), 0 0 18px rgba(var(--mcc-accent-info-rgb), .08);
+  transform: translateY(-1px);
+}
+
+.mcc-reset__back:hover:not(:disabled) > span {
+  transform: translateX(-2px);
+}
+
+.mcc-reset__back:focus-visible {
+  border-color: var(--mcc-focus-color);
+  box-shadow: var(--mcc-focus-ring-shadow);
+}
+
+.mcc-reset__back:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.mcc-reset__back:disabled {
+  cursor: progress;
+  opacity: .56;
+}
+
+.mcc-reset__notice {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  margin-top: 2px;
+  padding: 13px 14px;
+  border: 1px solid rgba(var(--mcc-accent-info-rgb), .3);
+  border-radius: var(--mcc-radius-md);
+  color: var(--mcc-text-secondary);
+  background:
+    linear-gradient(135deg, rgba(var(--mcc-accent-info-rgb), .105), transparent 54%),
+    rgba(3, 16, 26, .78);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.055), 0 10px 24px rgba(0,0,0,.16);
+  backdrop-filter: blur(var(--mcc-blur-card));
+}
+
+.mcc-reset__notice--success {
+  border-color: rgba(var(--mcc-status-success-rgb), .4);
+  background:
+    linear-gradient(135deg, rgba(var(--mcc-status-success-rgb), .13), transparent 58%),
+    rgba(3, 20, 22, .8);
+}
+
+.mcc-reset__notice--error {
+  border-color: rgba(var(--mcc-status-danger-rgb), .46);
+  color: color-mix(in srgb, var(--mcc-status-danger) 55%, white);
+  background:
+    linear-gradient(135deg, rgba(var(--mcc-status-danger-rgb), .13), transparent 58%),
+    rgba(23, 7, 14, .82);
+}
+
+.mcc-reset__notice-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(var(--mcc-accent-info-rgb), .42);
+  border-radius: 50%;
+  color: var(--mcc-accent-info);
+  background: rgba(var(--mcc-accent-info-rgb), .09);
+  font-size: .78rem;
+  font-weight: 950;
+  box-shadow: 0 0 14px rgba(var(--mcc-accent-info-rgb), .11);
+}
+
+.mcc-reset__notice--success .mcc-reset__notice-icon {
+  border-color: rgba(var(--mcc-status-success-rgb), .48);
+  color: var(--mcc-status-success);
+  background: rgba(var(--mcc-status-success-rgb), .1);
+}
+
+.mcc-reset__notice--error .mcc-reset__notice-icon {
+  border-color: rgba(var(--mcc-status-danger-rgb), .52);
+  color: var(--mcc-status-danger);
+  background: rgba(var(--mcc-status-danger-rgb), .1);
+}
+
+.mcc-reset__notice p {
+  margin: 2px 0 0;
+  font-size: .84rem;
+  font-weight: 720;
+  line-height: 1.5;
+}
+
+.mcc-reset__footer {
+  margin-top: 30px;
+}
+
+@keyframes mcc-reset-panel-enter {
+  from { opacity: 0; transform: translateY(10px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 560px) {
+  .mcc-reset {
+    place-items: center;
+  }
+
+  .mcc-reset__panel-index {
+    left: 20px;
+    right: 20px;
+  }
+
+  .mcc-reset__content {
+    padding: 62px 20px 24px;
+  }
+
+  .mcc-reset__brand {
+    margin-bottom: 28px;
+  }
+
+  .mcc-reset__heading h1 {
+    font-size: clamp(2.1rem, 11vw, 2.65rem);
+  }
+
+  .mcc-reset__actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcc-reset__back {
+    min-height: 50px;
+  }
+
+  .mcc-reset__footer {
+    margin-top: 24px;
+  }
+}
+
+@media (max-height: 680px) and (min-width: 561px) {
+  .mcc-reset__content {
+    padding-top: 64px;
+    padding-bottom: 26px;
+  }
+
+  .mcc-reset__brand {
+    margin-bottom: 24px;
+  }
+
+  .mcc-reset__heading {
+    margin-bottom: 22px;
+  }
+
+  .mcc-reset__footer {
+    margin-top: 22px;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mcc-reset__panel,
+  .mcc-reset__notice {
+    background-color: var(--mcc-surface-dense);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .mcc-reset__panel,
+  .mcc-reset__notice {
+    background: var(--mcc-surface-dense);
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcc-reset__panel {
+    animation: none;
+  }
+
+  .mcc-reset__back,
+  .mcc-reset__back > span {
+    transition: none;
+  }
+
+  .mcc-reset__back:hover:not(:disabled),
+  .mcc-reset__back:active:not(:disabled),
+  .mcc-reset__back:hover:not(:disabled) > span {
+    transform: none;
+  }
+}

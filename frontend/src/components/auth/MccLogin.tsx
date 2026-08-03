@@ -10,7 +10,7 @@ type MccLoginProps<TUser> = {
   onLogin: (user: TUser) => void;
 };
 
-function AccessIcon({ type }: { type: 'email' | 'password' }) {
+export function MccAccessIcon({ type }: { type: 'email' | 'password' }) {
   if (type === 'email') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -128,7 +128,7 @@ export function MccLogin<TUser>({ authenticate, onForgot, onLogin }: MccLoginPro
               <span>Email address</span>
               <span className="mcc-login__input-wrap">
                 <span className="mcc-login__field-icon">
-                  <AccessIcon type="email" />
+                  <MccAccessIcon type="email" />
                 </span>
                 <input
                   id="mcc-login-email"
@@ -145,7 +145,7 @@ export function MccLogin<TUser>({ authenticate, onForgot, onLogin }: MccLoginPro
               <span>Password</span>
               <span className="mcc-login__input-wrap">
                 <span className="mcc-login__field-icon">
-                  <AccessIcon type="password" />
+                  <MccAccessIcon type="password" />
                 </span>
                 <input
                   id="mcc-login-password"

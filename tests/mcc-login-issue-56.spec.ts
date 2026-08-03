@@ -48,6 +48,7 @@ async function mockLoginAndDashboard(page: Page) {
       return route.fulfill({ json: { user: owner } });
     }
     if (path === '/api/auth/forgot-password') {
+      await new Promise(resolveDelay => setTimeout(resolveDelay, 90));
       return route.fulfill({
         json: { message: 'If the email matches an account, password reset instructions will be sent.' },
       });
@@ -134,6 +135,31 @@ test('logon screen is contained at MCC target viewports', async ({ page }, testI
     expect(controlHeights.every(height => height >= 44)).toBe(true);
 
     await page.screenshot({ path: resolve(artifactDirectory, viewport.name), fullPage: true });
+
+    await page.getByRole('button', { name: 'Forgot Password' }).click();
+    await expect(page.locator('.mcc-reset__panel')).toBeVisible();
+    await expect(page.getByText('Secure reset', { exact: true })).toBeVisible();
+    await page.getByLabel('Email').focus();
+    const resetFocus = await page.getByLabel('Email').evaluate(element => ({
+      borderColor: getComputedStyle(element).borderColor,
+      boxShadow: getComputedStyle(element).boxShadow,
+    }));
+    expect(resetFocus.boxShadow).not.toBe('none');
+    expect(resetFocus.borderColor).not.toBe('rgba(0, 0, 0, 0)');
+    const resetButton = page.getByRole('button', { name: 'Request Reset' });
+    await resetButton.hover();
+    expect(await resetButton.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe('none');
+    const resetControlHeights = await page.locator('.mcc-reset input, .mcc-reset button').evaluateAll(elements =>
+      elements.map(element => Math.round(element.getBoundingClientRect().height)),
+    );
+    expect(resetControlHeights.every(height => height >= 44)).toBe(true);
+    await expectContained(page);
+    await page.screenshot({
+      path: resolve(artifactDirectory, `forgot-${viewport.name}`),
+      fullPage: true,
+    });
+    await page.getByRole('button', { name: 'Back to Login' }).click();
+    await expect(page.getByRole('heading', { name: 'Enter command center' })).toBeVisible();
   }
 });
 
@@ -154,7 +180,9 @@ test('invalid, recovery, keyboard login, authenticating, and dashboard flows rem
   await expect(page.getByRole('heading', { name: 'Forgot Password' })).toBeVisible();
   await page.getByLabel('Email').fill('owner@example.com');
   await page.getByRole('button', { name: 'Request Reset' }).click();
+  await expect(page.getByRole('button', { name: 'REQUESTING RESET' })).toBeDisabled();
   await expect(page.getByText('If the email matches an account, password reset instructions will be sent.')).toBeVisible();
+  await page.screenshot({ path: resolve(artifactDirectory, 'forgot-success-1366x768.png'), fullPage: true });
   await page.getByRole('button', { name: 'Back to Login' }).click();
   await expect(page.getByRole('heading', { name: 'Enter command center' })).toBeVisible();
 

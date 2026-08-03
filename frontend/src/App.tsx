@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { MccForgotPassword } from './components/auth/MccForgotPassword';
 import { MccLogin } from './components/auth/MccLogin';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/historyRouting';
@@ -88,7 +89,7 @@ function App() {
   if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;
-  if(mode==='forgot') return <Forgot onBack={()=>setMode('login')} />;
+  if(mode==='forgot') return <MccForgotPassword onBack={()=>setMode('login')} requestReset={async email=>{const data=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});return data.message;}} />;
   if(mode==='change') return <Change forced={Boolean(user?.forcePasswordChange)} onDone={refresh} />;
   return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} onPrefetchSection={prefetchSection} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} allowedSections={permissions.allowedSections} onUpdatePassword={()=>setMode('change')} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}><RouteModuleBoundary resetKey={activeSection}><Suspense fallback={<RouteLoadingState />}>{page}</Suspense></RouteModuleBoundary></MccLayout>;
 }
@@ -96,6 +97,5 @@ function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useSta
 function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) {
   return <MccLogin<User> authenticate={async(email,password)=>{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})});return data.user;}} onForgot={onForgot} onLogin={onLogin} />;
 }
-function Forgot({onBack}:{onBack:()=>void}) { const [email,setEmail]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{const d=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});setMsg(d.message);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="Forgot Password" eyebrow="Secure reset"><form onSubmit={submit} className="auth-form"><Field label="Email" value={email} onChange={setEmail}/><button className="primary-button">Request Reset</button><button type="button" className="link-button" onClick={onBack}>Back to Login</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Change({forced,onDone}:{forced:boolean;onDone:()=>void}) { const [currentPassword,setCurrent]=useState(''),[newPassword,setNew]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();try{await api('/api/auth/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword,confirmPassword})});onDone();}catch(err){setMsg((err as Error).message)}} return <AuthCard title={forced?'Change Password Required':'Update Password'} eyebrow={forced?'Temporary credential':'Account security'}><form onSubmit={submit} className="auth-form"><Field label={forced?'Temporary/current password':'Current password'} type="password" value={currentPassword} onChange={setCurrent}/><Field label="New password" type="password" value={newPassword} onChange={setNew}/><Field label="Confirm new password" type="password" value={confirmPassword} onChange={setConfirm}/><button className="primary-button">Save New Password</button>{msg&&<p className="form-message error">{msg}</p>}</form></AuthCard> }
 export default App;
