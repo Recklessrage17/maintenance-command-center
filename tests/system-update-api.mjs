@@ -88,6 +88,15 @@ try {
   server = runtime.child;
   const { base } = runtime;
 
+  let result = await request(base, '/api/health');
+  assert.equal(result.response.status, 200);
+  assert.equal('systemUpdate' in result.data, false);
+  result = await request(base, '/api/system/update/managed-readiness');
+  assert.equal(result.response.status, 200);
+  assert.equal(result.data.systemUpdate.configured, false);
+  assert.equal(result.data.systemUpdate.enabled, false);
+  assert.equal(result.data.systemUpdate.applicationMatchesConfiguration, false);
+
   for (const [method, pathname] of [
     ['GET', '/api/system/update/status'],
     ['POST', '/api/system/update/check'],
@@ -98,7 +107,7 @@ try {
     assert.equal(result.data.error, 'Login required.');
   }
 
-  let result = await request(base, '/api/auth/setup-first-admin', {
+  result = await request(base, '/api/auth/setup-first-admin', {
     method: 'POST',
     body: {
       fullName: 'Owner Admin',
@@ -226,6 +235,8 @@ try {
   });
   assert.equal(result.response.status, 429);
   assert.equal(result.data.code, 'rate_limited');
+  assert.ok(Number(result.data.retryAfterSeconds) > 0);
+  assert.equal(result.response.headers.get('retry-after'), String(result.data.retryAfterSeconds));
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     result = await request(base, '/api/system/update/check', { method: 'POST', cookie: ownerCookie, body: {} });
@@ -234,6 +245,8 @@ try {
   result = await request(base, '/api/system/update/check', { method: 'POST', cookie: ownerCookie, body: {} });
   assert.equal(result.response.status, 429);
   assert.equal(result.data.code, 'rate_limited');
+  assert.ok(Number(result.data.retryAfterSeconds) > 0);
+  assert.equal(result.response.headers.get('retry-after'), String(result.data.retryAfterSeconds));
 
   assert.equal(serverOutput.includes(ownerPassword), false);
   assert.equal(serverOutput.includes(managerPassword), false);

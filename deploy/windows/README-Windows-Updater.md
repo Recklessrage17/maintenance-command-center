@@ -21,7 +21,9 @@ The package uses tightly scoped Task Scheduler jobs, which are the supported Win
 - `MaintenanceCommandCenter` starts at boot as `NT AUTHORITY\LOCAL SERVICE`, runs only `backend\dist\server\index.js`, uses port 4273, records its exact PID, and restarts after failure.
 - `MaintenanceCommandCenterUpdater` starts at boot as `NT AUTHORITY\SYSTEM`, polls only the fixed request path, publishes a heartbeat, and invokes only the protected fixed update script.
 
-The updater requests graceful shutdown through one fixed protected ProgramData signal, waits for the verified MCC PID, and uses a targeted PID stop only as a timeout fallback. It never uses `taskkill /IM node.exe`, never stops unrelated Node.js applications, and never takes commands from HTTP.
+The updater stops the managed task, validates the exact PID recorded by the launcher against the configured Node executable and C: backend command line, requests graceful shutdown through one fixed protected ProgramData signal, and terminates only that verified process tree as a timeout fallback. It waits for port 4273 to be completely released and refuses to kill an unknown owner. It never uses `taskkill /IM node.exe`, never stops unrelated Node.js applications, and never takes commands from HTTP.
+
+Every launcher start publishes a unique launch ID, launcher PID, child PID, application/entry-point/configuration identity, and the fixed `windows_agent`/`production` environment attestation in protected `mcc-process.json`. Update success requires a different launch ID and child PID, both scheduled tasks running, the exact child command line, exclusive ownership of port 4273, the loopback-only managed-readiness API, a fresh healthy updater heartbeat, the configured mode/label/branch, and the requested version/commit. A generic 200 response from `/api/health` is never enough.
 
 ## Supported Windows 11 editions
 
@@ -116,6 +118,17 @@ For the unmerged WindowsTest branch in this workspace, the elevated retry comman
   -Confirm:$false
 ```
 
+For the C: Windows test installation used by this branch, run this exact command from an elevated PowerShell after the feature branch has been pushed and the F: development checkout is on the target commit:
+
+```powershell
+& 'F:\MCC_V1_FINAL\deploy\windows\Install-MccWindowsUpdater.ps1' `
+  -MccPath 'C:\MCC-Windows-Test\MCC_V1_FINAL' `
+  -Mode WindowsTest `
+  -TestBranch 'feature/windows-11-updater-agent' `
+  -RepairUpdaterAcl `
+  -Confirm:$false
+```
+
 ## Deployment labels
 
 - `WindowsTest` displays `WINDOWS TEST MODE`.
@@ -123,7 +136,7 @@ For the unmerged WindowsTest branch in this workspace, the elevated retry comman
 - Raspberry Pi production continues to display `RASPBERRY PI PRODUCTION`.
 - An ordinary Windows clone without this installer displays `UPDATER NOT CONFIGURED`.
 
-The Settings card also supports `UPDATER AGENT OFFLINE`, `CONFIGURATION INVALID`, `MCC SERVICE NOT RUNNING`, update progress, `UPDATE COMPLETE`, `UPDATE FAILED — PREVIOUS VERSION RESTORED`, and `CRITICAL UPDATE FAILURE — MANUAL RECOVERY REQUIRED`.
+The Settings card also supports `MCC IS UP TO DATE` with `No new updates are available.`, `UPDATER AGENT OFFLINE`, `CONFIGURATION INVALID`, `MCC SERVICE NOT RUNNING`, update progress, `UPDATE COMPLETE`, `UPDATE FAILED — PREVIOUS VERSION RESTORED`, and `CRITICAL UPDATE FAILURE — MANUAL RECOVERY REQUIRED`.
 
 ## ProgramData layout
 
@@ -177,16 +190,20 @@ The updater:
 
 1. Acquires `updater.lock`.
 2. Revalidates configuration, the target, origin, the exact configured branch, cleanliness, versions, commits, and fast-forward ancestry.
-3. Stops only `MaintenanceCommandCenter`.
+3. Records and validates the old managed child, stops only `MaintenanceCommandCenter`, terminates only that exact child/tree if it remains detached, and proves port 4273 is released.
 4. creates and verifies an external runtime backup.
 5. fast-forwards to the approved commit.
 6. runs `npm ci` for frontend and backend.
 7. builds frontend and backend.
-8. starts only `MaintenanceCommandCenter`.
-9. health-checks port 4273 and verifies commit/version.
-10. records sanitized success and retains the backup.
+8. starts only `MaintenanceCommandCenter` through its scheduled task and protected launcher.
+9. waits for a distinct launch ID and PID, verifies the exact C: backend command line and exclusive port owner, checks the loopback managed-readiness response (`configured:true`), and refreshes/verifies the updater-agent heartbeat.
+10. verifies the requested commit/version, records sanitized success, and retains the backup.
 
 A dirty tracked or untracked worktree blocks the update. Nothing is stashed, reset, cleaned, restored, or discarded.
+
+The Settings client applies one immediate in-flight guard to check and install actions, disables the initiating control before yielding to React, and never retries the install POST. Server-side rate limits, CSRF validation, and the verified check token remain authoritative; a 429 response includes a bounded retry delay for the UI.
+
+After login, an authorized user may see one non-blocking smoke-glass notice only for `update_available` or `same_version_different_commit`. Dismissal is stored per user plus target version/commit, so route navigation does not repeat it and a newer build appears normally. **View update** opens and focuses the Settings updater. Unauthorized users, healthy up-to-date systems, offline/not-configured agents, and active installations never show the notice. A successful installed version/build may produce one similarly keyed success notice.
 
 ## Manual update fallback
 
@@ -226,7 +243,19 @@ Normal History UI records only sanitized update/audit fields and never raw Power
 
 ## Rollback and recovery
 
-After installed code changes, any dependency, build, start, health, commit, or version failure records `rolling_back`, restores the previous commit and verified runtime backup, reinstalls the previous locked dependencies, rebuilds, restarts, and health-checks. Success records `rolled_back` and the Settings card shows `UPDATE FAILED — PREVIOUS VERSION RESTORED`.
+After installed code changes, any dependency, build, managed-handoff, task, process identity, port owner, updater readiness, heartbeat, commit, or version failure records `rolling_back`, stops only the verified managed child, restores the previous commit and verified runtime backup, reinstalls the previous locked dependencies, rebuilds, and restarts through the same scheduled task and protected launcher. The restored version/commit, launcher attestation, process identity, port ownership, tasks, and heartbeat must pass before `rolled_back` is published. No detached Node process is intentionally left behind.
+
+## Live end-to-end WindowsTest procedure
+
+1. Confirm `feature/windows-11-updater-agent` is pushed and the C: target is a clean older commit of that same configured branch. Do not copy files into C: manually.
+2. Run the exact elevated F: installer command above. It safely replaces the protected scripts/configuration and recreates both tasks.
+3. Run `& 'C:\ProgramData\MCC\Updater\scripts\Test-MccWindowsUpdater.ps1'` and require every check to pass.
+4. Sign in at `http://localhost:4273` as an authorized Admin, open Settings, and confirm `WINDOWS TEST MODE`, the older installed version/build, and updater availability.
+5. Select **Check for updates** once, confirm the target version/build, then select **Install Update** once. Do not refresh while the progress panel is reconnecting.
+6. After success, rerun `Test-MccWindowsUpdater.ps1`. Confirm both tasks are `Running`, `mcc-process.json` contains a new PID/launch ID, the C: backend exclusively owns 4273, managed readiness reports `configured:true`, and the heartbeat is healthy.
+7. Refresh Settings and run one further check. Require `MCC IS UP TO DATE` and `No new updates are available.` The authenticated status response must remain `configured:true`, `mode:windows_test`, and `environmentLabel:WINDOWS TEST MODE`.
+8. Sign out and back in with an authorized account to verify the one-time update-success notice. Verify Manager/Maintenance Tech accounts do not receive updater metadata or a popup.
+9. For an approved rollback drill on a disposable older C: test clone, force the target backend readiness endpoint to fail after build, run the same update, and require `rolled_back`; then rerun the installed validation and confirm the prior version/commit and managed task/PID are restored. Restore the clean test branch before any further update check.
 
 After a Windows restart, the agent safely continues a request that had not changed code. If the verified target commit is already checked out while the same job remains active, it locates that job’s verified backup and enters rollback instead of guessing that the update succeeded.
 

@@ -35,6 +35,7 @@ const bootstrapVerification = functionSource(installer, 'Invoke-MccBootstrapVeri
 const applicationAclGrant = functionSource(installer, 'Grant-MccLocalServiceApplicationAccess', 'Assert-MccLocalServiceApplicationAccess');
 const applicationAclPreparation = functionSource(installer, 'Set-MccApplicationRuntimeAcl', 'Assert-MccApplicationRuntimeAcl');
 const applicationAclVerification = functionSource(installer, 'Assert-MccApplicationRuntimeAcl', 'Restore-MccScheduledTasks');
+const installerManagedStop = functionSource(installer, 'Stop-MccInstallerManagedRuntime');
 const processTreeFallback = functionSource(common, 'Stop-MccExactProcessTreeFallback', 'Invoke-MccProcess');
 const processFunction = functionSource(common, 'Invoke-MccProcess', 'Invoke-MccGit');
 const pathBootstrapFunction = functionSource(common, 'Set-MccExecutablePathBootstrap', 'Set-MccGitRepositoryTrustBootstrap');
@@ -186,6 +187,7 @@ assert.equal((agent.match(/Set-MccExecutablePathBootstrap/g) ?? []).length, 1, '
 assert.ok(agent.indexOf('Set-MccExecutablePathBootstrap') < agent.indexOf('while ($true)'));
 assert.match(agent, /ExecutableBootstrapSucceeded = \$false[\s\S]*Set-MccExecutablePathBootstrap[\s\S]*ExecutableBootstrapSucceeded = \$true/);
 assert.match(healthPayloadFunction, /HeartbeatCompleted[\s\S]*ExecutableBootstrapSucceeded[\s\S]*agentHealthy = \[bool\]\$agentHealthy/);
+assert.match(healthPayloadFunction, /UpdaterTaskRunning/);
 assert.doesNotMatch(healthPayloadFunction, /exception|LiteralPath|[A-Z]:\\/i);
 
 assert.match(processFunction, /taskkill\.exe/);
@@ -203,6 +205,12 @@ assert.doesNotMatch(launcher, /\$logPath = Join-Path \$webLogDirectory "mcc-\$st
 assert.match(launcher, /Set-MccExecutablePathBootstrap[\s\S]*Set-MccGitRepositoryTrustBootstrap[\s\S]*Assert-MccRepository[\s\S]*Start-Process/);
 assert.match(launcher, /exact process-scoped repository trust/);
 assert.doesNotMatch(launcher, /Write-WebStartupLog -Message .*\$applicationPath/);
+assert.match(installerManagedStop, /Stop-ScheduledTask[\s\S]*shutdown-request\.json[\s\S]*Stop-MccExactProcessTreeFallback[\s\S]*Get-NetTCPConnection/);
+assert.match(installerManagedStop, /configured MCC backend/);
+assert.doesNotMatch(installerManagedStop, /Get-Process[^\r\n]*-Name|Stop-Process[^\r\n]*-Name|taskkill[^\r\n]*\/IM/i);
+assert.match(installFlow, /managed launcher identity and updater readiness verification/);
+assert.match(installFlow, /managed-readiness/);
+assert.match(installFlow, /OwningProcess/);
 
 assert.match(backendUpdate, /function gitProcessEnvironment/);
 assert.match(backendUpdate, /GIT_CONFIG_COUNT = '1'/);

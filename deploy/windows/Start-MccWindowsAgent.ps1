@@ -87,7 +87,8 @@ function Write-AgentHealth {
         -StatusDirectoryAccessible $statusAccessible `
         -MccTaskInstalled ($null -ne $mccTask) `
         -MccTaskRunning ($null -ne $mccTask -and [string]$mccTask.State -eq 'Running') `
-        -UpdaterTaskInstalled ($null -ne $updaterTask)
+        -UpdaterTaskInstalled ($null -ne $updaterTask) `
+        -UpdaterTaskRunning ($null -ne $updaterTask -and [string]$updaterTask.State -eq 'Running')
     Write-MccAtomicJson -LiteralPath $healthPath -Value $health
 }
 

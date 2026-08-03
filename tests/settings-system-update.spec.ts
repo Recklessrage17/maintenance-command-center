@@ -66,6 +66,9 @@ async function mockSettings(
     canViewSystemVersion?: boolean;
     initialUpdate?: UpdateState;
     checkUpdate?: UpdateState;
+    checkDelayMs?: number;
+    checkFailure?: { status: number; headers?: Record<string,string>; json: Record<string,unknown> };
+    installDelayMs?: number;
     onInstall?: () => UpdateState;
     onStatus?: (requestNumber: number) => UpdateState | 'abort';
   } = {},
@@ -98,7 +101,9 @@ async function mockSettings(
   });
   await page.route('**/api/system/update/check', route => {
     checkRequests += 1;
-    return route.fulfill({ json: options.checkUpdate ?? availableUpdate });
+    return new Promise<void>(resolve=>setTimeout(resolve,options.checkDelayMs??0)).then(()=>options.checkFailure
+      ? route.fulfill(options.checkFailure)
+      : route.fulfill({ json: options.checkUpdate ?? availableUpdate }));
   });
   await page.route('**/api/system/update/install', async route => {
     installRequests += 1;
@@ -116,6 +121,7 @@ async function mockSettings(
       checkExpiresAt: null,
       active: true,
     };
+    if(options.installDelayMs)await new Promise(resolve=>setTimeout(resolve,options.installDelayMs));
     return route.fulfill({ status: 202, json: { ...queued, accepted: true, jobId: 'job-1' } });
   });
   await page.route('**/api/settings/branding', route => route.fulfill({ json: { branding: {} } }));
@@ -232,14 +238,89 @@ test('up-to-date and failed-check states never claim success without a completed
   });
   await page.goto('/settings');
   const panel = page.getByRole('complementary', { name: 'MCC system version' });
-  await expect(panel).toContainText('✓ UP TO DATE');
+  await expect(panel).toContainText('MCC IS UP TO DATE');
+  await expect(panel).toContainText('No new updates are available.');
+  await expect(panel).toContainText('Installed v1.2.1 · Build abc1234');
+  await expect(panel).toContainText('Last checked');
   if(testInfo.project.name==='desktop-chromium')await captureApproval(page,'04-up-to-date-pi-production.png');
   await page.getByRole('button', { name: 'Check for updates' }).click();
   await expect(panel).toContainText('UPDATE AVAILABLE');
   expect(fixture.checkRequests()).toBe(1);
 
   await page.reload();
-  await expect(panel).toContainText('✓ UP TO DATE');
+  await expect(panel).toContainText('MCC IS UP TO DATE');
+});
+
+test('immediate in-flight guards reduce double clicks to one check POST and one install POST', async ({ page }) => {
+  const fixture=await mockSettings(page,{
+    initialUpdate:update({state:'idle',code:'not_checked',message:'Check for updates.',targetVersion:null,targetCommit:null,checkToken:null,checkExpiresAt:null}),
+    checkUpdate:availableUpdate,
+    checkDelayMs:250,
+    installDelayMs:250,
+  });
+  await page.goto('/settings');
+  const checkButton=page.getByRole('button',{name:'Check for updates'});
+  await checkButton.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});
+  await expect(page.getByRole('button',{name:'Update to v1.3.0'})).toBeVisible();
+  expect(fixture.checkRequests()).toBe(1);
+  await page.getByRole('button',{name:'Update to v1.3.0'}).click();
+  const installButton=page.getByRole('dialog',{name:'MCC Update Available'}).getByRole('button',{name:'Install Update'});
+  await installButton.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});
+  await expect(page.getByRole('dialog',{name:'MCC Update Progress'})).toBeVisible();
+  expect(fixture.installRequests()).toBe(1);
+});
+
+test('rate-limit response shows a safe retry delay', async ({ page }) => {
+  await mockSettings(page,{
+    initialUpdate:update({state:'idle',code:'not_checked',message:'Check for updates.',targetVersion:null,targetCommit:null,checkToken:null,checkExpiresAt:null}),
+    checkFailure:{status:429,headers:{'Retry-After':'120'},json:{ok:false,code:'rate_limited',error:'Too many update checks.',retryAfterSeconds:120}},
+  });
+  await page.goto('/settings');
+  await page.getByRole('button',{name:'Check for updates'}).click();
+  await expect(page.getByRole('complementary',{name:'MCC system version'})).toContainText('Try again in 2 minutes.');
+});
+
+test('authorized login update notice persists dismissal per build and View update focuses Settings', async ({ page }) => {
+  let targetVersion='1.3.0';
+  let targetCommit='def5678';
+  await mockSettings(page,{onStatus:()=>update({targetVersion,targetCommit})});
+  await page.goto('/');
+  const notice=page.getByRole('status',{name:'MCC update available'});
+  await expect(notice).toContainText('v1.3.0 is ready to install.');
+  await notice.getByRole('button',{name:'View update'}).click();
+  await expect(page).toHaveURL(/\/settings#system-update$/);
+  await expect(page.getByRole('complementary',{name:'MCC system version'})).toBeFocused();
+  await page.reload();
+  await expect(notice).toHaveCount(0);
+  targetVersion='1.3.1';
+  targetCommit='fedcba9';
+  await page.reload();
+  await expect(notice).toContainText('v1.3.1 is ready to install.');
+  await notice.getByRole('button',{name:'Dismiss update notification'}).click();
+  await page.reload();
+  await expect(notice).toHaveCount(0);
+});
+
+test('login update notice stays hidden when up to date or unauthorized', async ({ page }) => {
+  const upToDate=await mockSettings(page,{initialUpdate:update({state:'idle',code:'up_to_date',message:'No new updates are available.',targetVersion:'1.2.1',targetCommit:'abc1234',checkToken:null,checkExpiresAt:null})});
+  await page.goto('/');
+  await expect(page.getByRole('status',{name:'MCC update available'})).toHaveCount(0);
+  expect(upToDate.statusRequests()).toBe(1);
+});
+
+test('unauthorized login does not request or render update notification', async ({ page }) => {
+  const fixture=await mockSettings(page,{role:'Manager',canViewSystemVersion:false});
+  await page.goto('/');
+  await expect(page.getByRole('status',{name:'MCC update available'})).toHaveCount(0);
+  expect(fixture.statusRequests()).toBe(0);
+});
+
+test('post-update success notice appears once for an installed build', async ({ page }) => {
+  await mockSettings(page,{initialUpdate:update({state:'succeeded',code:'succeeded',message:'Update complete.',installedVersion:'1.3.0',installedCommit:'def5678',targetVersion:'1.3.0',targetCommit:'def5678',outcome:'succeeded',checkToken:null,checkExpiresAt:null})});
+  await page.goto('/');
+  await expect(page.getByRole('status',{name:'MCC updated'})).toContainText('MCC was updated successfully to v1.3.0.');
+  await page.reload();
+  await expect(page.getByRole('status',{name:'MCC updated'})).toHaveCount(0);
 });
 
 test('browser tolerates restart failure, reconnects, and displays the installed target build', async ({ page },testInfo) => {

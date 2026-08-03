@@ -769,8 +769,12 @@ function Assert-MccApplicationRuntimeAcl {
 function Restore-MccScheduledTasks {
     param(
         [Parameter(Mandatory = $true)][hashtable]$Snapshots,
-        [Parameter(Mandatory = $true)][string[]]$TaskNames
+        [Parameter(Mandatory = $true)][string[]]$TaskNames,
+        [Parameter(Mandatory = $true)][string]$ApplicationPath,
+        [Parameter(Mandatory = $true)][string]$NodePath,
+        [Parameter(Mandatory = $true)][string]$UpdaterRoot
     )
+    Stop-MccInstallerManagedRuntime -ApplicationPath $ApplicationPath -NodePath $NodePath -UpdaterRoot $UpdaterRoot -TaskName $constants.MccTaskName -Port $constants.Port
     foreach ($taskName in $TaskNames) {
         if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
             Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -784,6 +788,111 @@ function Restore-MccScheduledTasks {
                 Start-ScheduledTask -TaskName $taskName
             }
         }
+    }
+}
+
+function Stop-MccInstallerManagedRuntime {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApplicationPath,
+        [Parameter(Mandatory = $true)][string]$NodePath,
+        [Parameter(Mandatory = $true)][string]$UpdaterRoot,
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [ValidateRange(1, 65535)][int]$Port = 4273
+    )
+    $processStatePath = Join-Path $UpdaterRoot 'web-logs\mcc-process.json'
+    $record = $null
+    $managedProcessId = 0
+    if (Test-Path -LiteralPath $processStatePath -PathType Leaf) {
+        try {
+            $record = Read-MccJson -LiteralPath $processStatePath
+            [void][int]::TryParse([string]$record.processId, [ref]$managedProcessId)
+        } catch {
+            $record = $null
+            $managedProcessId = 0
+        }
+    }
+    $expectedNode = Get-MccNormalizedPath -LiteralPath $NodePath
+    $expectedEntryPoint = Get-MccNormalizedPath -LiteralPath (Join-Path $ApplicationPath 'backend\dist\server\index.js')
+    if ($managedProcessId -gt 0) {
+        $processDetails = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $managedProcessId" -ErrorAction SilentlyContinue
+        if ($null -ne $processDetails) {
+            $actualNode = Get-MccNormalizedPath -LiteralPath ([string]$processDetails.ExecutablePath)
+            $commandLine = ([string]$processDetails.CommandLine).Replace('"', '')
+            if (-not $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -or
+                $commandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                throw 'Installer refused to stop a recorded PID that is not the configured MCC backend.'
+            }
+        }
+    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($null -ne $task -and [string]$task.State -eq 'Running') {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    }
+    $taskDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $taskDeadline) {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($null -eq $task -or [string]$task.State -ne 'Running') { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($null -ne $task -and [string]$task.State -eq 'Running') {
+        throw 'The existing managed MCC scheduled task did not stop before reinstall.'
+    }
+    if (Test-Path -LiteralPath $processStatePath -PathType Leaf) {
+        try {
+            $finalRecord = Read-MccJson -LiteralPath $processStatePath
+            $finalRecordedProcessId = 0
+            if ([int]::TryParse([string]$finalRecord.processId, [ref]$finalRecordedProcessId) -and
+                $finalRecordedProcessId -gt 0 -and
+                $finalRecordedProcessId -ne $managedProcessId) {
+                $finalProcessDetails = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $finalRecordedProcessId" -ErrorAction SilentlyContinue
+                if ($null -ne $finalProcessDetails) {
+                    $finalNode = Get-MccNormalizedPath -LiteralPath ([string]$finalProcessDetails.ExecutablePath)
+                    $finalCommandLine = ([string]$finalProcessDetails.CommandLine).Replace('"', '')
+                    if (-not $finalNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -or
+                        $finalCommandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                        throw 'Installer refused to stop a final recorded PID that is not the configured MCC backend.'
+                    }
+                    $record = $finalRecord
+                    $managedProcessId = $finalRecordedProcessId
+                }
+            }
+        } catch {
+            if ($_.Exception.Message -match 'refused to stop') { throw }
+        }
+    }
+    if ($managedProcessId -gt 0 -and $null -ne (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $managedProcessId" -ErrorAction SilentlyContinue)) {
+        Write-MccAtomicJson -LiteralPath (Join-Path $UpdaterRoot 'request\shutdown-request.json') -Value ([ordered]@{
+            schemaVersion = 1
+            processId = $managedProcessId
+            requestedAt = [DateTime]::UtcNow.ToString('o')
+        })
+        $processDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        while ([DateTime]::UtcNow -lt $processDeadline -and
+            $null -ne (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $managedProcessId" -ErrorAction SilentlyContinue)) {
+            Start-Sleep -Milliseconds 500
+        }
+        if ($null -ne (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $managedProcessId" -ErrorAction SilentlyContinue)) {
+            $exactProcess = [Diagnostics.Process]::GetProcessById($managedProcessId)
+            try {
+                if (-not (Stop-MccExactProcessTreeFallback -Process $exactProcess)) {
+                    throw 'The exact recorded MCC process tree did not confirm termination during reinstall.'
+                }
+            } finally {
+                $exactProcess.Dispose()
+            }
+        }
+    }
+    $portDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+        if ($listeners.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $portDeadline)
+    if ($listeners.Count -ne 0) {
+        throw 'Installer found an unverified process still owning port 4273 and did not terminate it.'
+    }
+    if (Test-Path -LiteralPath $processStatePath -PathType Leaf) {
+        Remove-Item -LiteralPath $processStatePath -Force
     }
 }
 
@@ -958,9 +1067,22 @@ try {
 
     $script:InstallerBootstrapStage = 'scheduled-task registration after bootstrap verification'
     $tasksChanged = $true
-    foreach ($taskName in $taskNames) {
-        if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Stop-MccInstallerManagedRuntime `
+        -ApplicationPath $applicationPath `
+        -NodePath $nodePath `
+        -UpdaterRoot $updaterRoot `
+        -TaskName $constants.MccTaskName `
+        -Port $constants.Port
+    if (Get-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction Stop
+        $updaterStopDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            $existingUpdaterTask = Get-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction SilentlyContinue
+            if ($null -eq $existingUpdaterTask -or [string]$existingUpdaterTask.State -ne 'Running') { break }
+            Start-Sleep -Milliseconds 500
+        } while ([DateTime]::UtcNow -lt $updaterStopDeadline)
+        if ($null -ne $existingUpdaterTask -and [string]$existingUpdaterTask.State -eq 'Running') {
+            throw 'The existing MCC updater scheduled task did not stop before reinstall.'
         }
     }
     Register-ScheduledTask -TaskName $constants.MccTaskName -Action $mccAction -Trigger $startupTrigger -Settings $taskSettings -Principal $mccPrincipal -Description 'Managed Maintenance Command Center web application on port 4273.' -Force | Out-Null
@@ -988,6 +1110,7 @@ try {
                 $agentHealth.mccTaskInstalled -eq $true -and
                 $agentHealth.mccTaskRunning -eq $true -and
                 $agentHealth.updaterTaskInstalled -eq $true -and
+                $agentHealth.updaterTaskRunning -eq $true -and
                 [string]$agentHealth.deploymentMode -eq $Mode) {
                 break
             }
@@ -1013,6 +1136,36 @@ try {
         throw 'The protected update status API did not reject the unauthenticated installer probe.'
     }
 
+    $script:InstallerBootstrapStage = 'managed launcher identity and updater readiness verification'
+    $processRecord = Read-MccJson -LiteralPath (Join-Path $updaterRoot 'web-logs\mcc-process.json')
+    $managedProcessId = 0
+    if (-not [int]::TryParse([string]$processRecord.processId, [ref]$managedProcessId) -or $managedProcessId -le 0 -or
+        $processRecord.applicationMatchesConfiguration -ne $true -or
+        [string]$processRecord.managedEnvironment.updateMode -cne 'windows_agent' -or
+        [string]$processRecord.managedEnvironment.nodeEnvironment -cne 'production') {
+        throw 'The managed launcher did not publish a valid protected process record after installation.'
+    }
+    $listeners = @(Get-NetTCPConnection -LocalPort $constants.Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne $managedProcessId) {
+        throw 'The recorded managed MCC process does not exclusively own port 4273 after installation.'
+    }
+    $readiness = Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:$($constants.Port)/api/system/update/managed-readiness" -TimeoutSec 10
+    $expectedMode = if ($Mode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
+    $expectedVersion = Get-MccPackageVersion -ApplicationPath $applicationPath
+    $expectedCommit = (Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', '--short=7', 'HEAD')).StandardOutput.ToLowerInvariant()
+    if ($readiness.ok -ne $true -or
+        $readiness.systemUpdate.configured -ne $true -or
+        $readiness.systemUpdate.enabled -ne $true -or
+        $readiness.systemUpdate.applicationMatchesConfiguration -ne $true -or
+        $readiness.systemUpdate.repositoryApproved -ne $true -or
+        [string]$readiness.systemUpdate.mode -cne $expectedMode -or
+        [string]$readiness.systemUpdate.environmentLabel -cne $environmentLabel -or
+        [string]$readiness.systemUpdate.branch -cne $configuredBranch -or
+        [string]$readiness.systemUpdate.installedVersion -cne $expectedVersion -or
+        [string]$readiness.systemUpdate.installedCommit -cne $expectedCommit) {
+        throw 'The managed MCC updater readiness payload does not match the protected installation.'
+    }
+
     $tasksChanged = $false
     Write-MccInstallerLog -Message "$environmentLabel installation on origin/$configuredBranch completed and health checks passed."
     Write-Output ''
@@ -1032,7 +1185,7 @@ try {
     Write-MccInstallerLog -Message "INSTALLATION FAILED at exact bootstrap stage '$script:InstallerBootstrapStage': $originalMessage"
     if ($tasksChanged) {
         try {
-            Restore-MccScheduledTasks -Snapshots $taskSnapshots -TaskNames $taskNames
+            Restore-MccScheduledTasks -Snapshots $taskSnapshots -TaskNames $taskNames -ApplicationPath $applicationPath -NodePath $nodePath -UpdaterRoot $updaterRoot
             [Console]::Error.WriteLine('Scheduled-task state was rolled back; no partial task installation was retained.')
         } catch {
             [Console]::Error.WriteLine("Scheduled-task rollback failed and requires manual inspection: $($_.Exception.Message)")

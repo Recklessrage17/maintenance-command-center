@@ -106,6 +106,7 @@ try {
     [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
     $actualGitPath = (Get-Command 'git.exe' -ErrorAction Stop).Source
     $actualNodePath = (Get-Command 'node.exe' -ErrorAction Stop).Source
+    $usingFallbackRepository = [string]::IsNullOrWhiteSpace($ManagedRepositoryPath)
     if ([string]::IsNullOrWhiteSpace($ManagedRepositoryPath)) {
         $sourceRepositoryPath = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $normalizedModulePath) '..\..'))
         $ManagedRepositoryPath = Join-Path $testRoot 'Managed Repository Clone'
@@ -163,7 +164,8 @@ try {
         Assert-MccTest -Condition ($resolvedCommit -ceq $ExpectedManagedCommit) -Message "The installed build resolved $resolvedCommit instead of $ExpectedManagedCommit."
     }
     $origin = (& $actualGitPath -C $ManagedRepositoryPath remote get-url origin).Trim()
-    Assert-MccTest -Condition ($LASTEXITCODE -eq 0 -and $origin -match 'maintenance-command-center') -Message 'Process-scoped trust did not allow remote get-url origin.'
+    $originMatchesFixture = if ($usingFallbackRepository) { -not [string]::IsNullOrWhiteSpace($origin) } else { $origin -match 'maintenance-command-center' }
+    Assert-MccTest -Condition ($LASTEXITCODE -eq 0 -and $originMatchesFixture) -Message 'Process-scoped trust did not allow remote get-url origin.'
     $branch = (& $actualGitPath -C $ManagedRepositoryPath branch --show-current).Trim()
     Assert-MccTest -Condition ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($branch)) -Message 'Process-scoped trust did not allow branch --show-current.'
     $statusOutput = & $actualGitPath -C $ManagedRepositoryPath status --porcelain=v1
@@ -260,7 +262,8 @@ process.exit(passed ? 0 : 1);
             -StatusDirectoryAccessible $true `
             -MccTaskInstalled $true `
             -MccTaskRunning $true `
-            -UpdaterTaskInstalled $true)
+            -UpdaterTaskInstalled $true `
+            -UpdaterTaskRunning $true)
     }
     Assert-MccTest -Condition ($env:PATH -ceq $stablePath) -Message 'PATH contents changed during 1,000 heartbeat state iterations.'
     Assert-MccTest -Condition ($env:PATH.Length -eq $stableLength) -Message 'PATH length changed during 1,000 heartbeat state iterations.'
@@ -313,7 +316,8 @@ process.exit(passed ? 0 : 1);
         -StatusDirectoryAccessible $true `
         -MccTaskInstalled $true `
         -MccTaskRunning $true `
-        -UpdaterTaskInstalled $true
+        -UpdaterTaskInstalled $true `
+        -UpdaterTaskRunning $true
     Assert-MccTest -Condition ($failedBootstrapHealth.agentHealthy -eq $false) -Message 'Bootstrap failure incorrectly published agentHealthy true.'
     Assert-MccTest -Condition ($failedBootstrapHealth.configurationValid -eq $true) -Message 'Successful protected configuration validation was not retained.'
     Assert-MccTest -Condition ($failedBootstrapHealth.deploymentMode -ceq 'WindowsTest') -Message 'Deployment mode was not retained after bootstrap failure.'
@@ -331,7 +335,8 @@ process.exit(passed ? 0 : 1);
         -StatusDirectoryAccessible $true `
         -MccTaskInstalled $true `
         -MccTaskRunning $true `
-        -UpdaterTaskInstalled $true
+        -UpdaterTaskInstalled $true `
+        -UpdaterTaskRunning $true
     Assert-MccTest -Condition ($failedHeartbeatHealth.agentHealthy -eq $false) -Message 'Top-level heartbeat failure incorrectly published agentHealthy true.'
     Assert-MccTest -Condition ($failedHeartbeatHealth.deploymentMode -ceq 'WindowsProduction') -Message 'Deployment mode was not retained after heartbeat failure.'
     Write-Output 'PASS truthful sanitized health after bootstrap and top-level heartbeat failures'

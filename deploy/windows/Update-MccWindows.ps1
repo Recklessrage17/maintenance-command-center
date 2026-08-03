@@ -42,8 +42,11 @@ $configuration = Read-MccWindowsConfiguration -ConfigurationPath $ConfigurationP
 $applicationPath = [string]$configuration.applicationPath
 $configuredBranch = [string]$configuration.branch
 $environmentLabel = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
-$env:PATH = "$(Split-Path -Parent ([string]$configuration.gitPath));$(Split-Path -Parent ([string]$configuration.nodePath));$env:PATH"
+Set-MccExecutablePathBootstrap -GitPath ([string]$configuration.gitPath) -NodePath ([string]$configuration.nodePath)
+Set-MccGitRepositoryTrustBootstrap -ApplicationPath $applicationPath -ConfiguredApplicationPath ([string]$configuration.applicationPath)
 $statusPath = Join-Path $constants.UpdaterRoot 'status\status.json'
+$agentHealthPath = Join-Path $constants.UpdaterRoot 'status\agent-health.json'
+$processStatePath = Join-Path $constants.UpdaterRoot 'web-logs\mcc-process.json'
 $fixedRequestPath = Join-Path $constants.UpdaterRoot 'request\request.json'
 $lockPath = Join-Path $constants.UpdaterRoot 'updater.lock'
 $backupRoot = Join-Path $constants.UpdaterRoot 'backups'
@@ -66,6 +69,8 @@ $script:TargetCommit = $null
 $script:BackupDirectory = $null
 $script:CodeChanged = $false
 $script:MccStopped = $false
+$script:PreviousManagedProcessId = 0
+$script:PreviousManagedLaunchId = ''
 $lockStream = $null
 
 function Write-UpdateLog {
@@ -143,50 +148,244 @@ function Get-RemotePackageVersion {
     return [string]$manifest.version
 }
 
-function Stop-MccManagedTask {
-    $task = Get-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction SilentlyContinue
-    if ($null -eq $task) {
-        throw 'The managed MCC background task is not installed.'
-    }
-    $processStatePath = Join-Path $constants.UpdaterRoot 'web-logs\mcc-process.json'
+function Get-MccManagedProcessRecord {
+    if (-not (Test-Path -LiteralPath $processStatePath -PathType Leaf)) { return $null }
+    try { return Read-MccJson -LiteralPath $processStatePath } catch { return $null }
+}
+
+function Get-MccManagedWin32Process {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
+    return Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+}
+
+function Assert-MccManagedProcessIdentity {
+    param(
+        [Parameter(Mandatory = $true)][object]$Record,
+        [switch]$RequireLauncherAttestation
+    )
     $managedProcessId = 0
-    if (Test-Path -LiteralPath $processStatePath -PathType Leaf) {
-        try {
-            $processState = Read-MccJson -LiteralPath $processStatePath
-            $processId = 0
-            if ([int]::TryParse([string]$processState.processId, [ref]$processId) -and $processId -gt 0) {
-                $managedProcess = Get-Process -Id $processId -ErrorAction SilentlyContinue
-                if ($null -ne $managedProcess) {
-                    $expectedNode = Get-MccNormalizedPath -LiteralPath ([string]$configuration.nodePath)
-                    $actualNode = Get-MccNormalizedPath -LiteralPath ([string]$managedProcess.Path)
-                    if (-not $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)) {
-                        throw 'The stored MCC PID does not identify the configured Node.js process.'
-                    }
-                    $managedProcessId = $processId
-                    Write-MccAtomicJson -LiteralPath (Join-Path $constants.UpdaterRoot 'request\shutdown-request.json') -Value ([ordered]@{
-                        schemaVersion = 1
-                        processId = $managedProcessId
-                        requestedAt = [DateTime]::UtcNow.ToString('o')
-                    })
-                    Wait-Process -Id $managedProcessId -Timeout 20 -ErrorAction SilentlyContinue
-                }
-            }
-        } catch {
-            if ($_.Exception.Message -match 'stored MCC PID') { throw }
-            Write-UpdateLog -Message 'The managed MCC task stopped without a readable child PID.'
+    if (-not [int]::TryParse([string]$Record.processId, [ref]$managedProcessId) -or $managedProcessId -le 0) {
+        throw 'The managed launcher did not publish a valid MCC child PID.'
+    }
+    $processDetails = Get-MccManagedWin32Process -ProcessId $managedProcessId
+    if ($null -eq $processDetails) { return $null }
+    $expectedNode = Get-MccNormalizedPath -LiteralPath ([string]$configuration.nodePath)
+    $expectedEntryPoint = Get-MccNormalizedPath -LiteralPath (Join-Path $applicationPath 'backend\dist\server\index.js')
+    $actualNode = Get-MccNormalizedPath -LiteralPath ([string]$processDetails.ExecutablePath)
+    $commandLine = ([string]$processDetails.CommandLine).Replace('"', '')
+    if (-not $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -or
+        $commandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw 'The stored MCC PID does not identify the configured managed backend process.'
+    }
+    if ($RequireLauncherAttestation) {
+        $recordApplicationPath = Get-MccNormalizedPath -LiteralPath ([string]$Record.applicationPath)
+        $recordEntryPoint = Get-MccNormalizedPath -LiteralPath ([string]$Record.entryPoint)
+        $recordNodePath = Get-MccNormalizedPath -LiteralPath ([string]$Record.nodePath)
+        $recordConfigurationPath = Get-MccNormalizedPath -LiteralPath ([string]$Record.configurationPath)
+        if ($Record.applicationMatchesConfiguration -ne $true -or
+            -not $recordApplicationPath.Equals($applicationPath, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $recordEntryPoint.Equals($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $recordNodePath.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $recordConfigurationPath.Equals((Get-MccNormalizedPath -LiteralPath $ConfigurationPath), [StringComparison]::OrdinalIgnoreCase) -or
+            [string]$Record.managedEnvironment.updateMode -cne 'windows_agent' -or
+            [string]$Record.managedEnvironment.nodeEnvironment -cne 'production') {
+            throw 'The managed launcher attestation does not match the protected updater configuration.'
         }
     }
-    Stop-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction SilentlyContinue
+    return $processDetails
+}
+
+function Wait-MccScheduledTaskNotRunning {
+    param([Parameter(Mandatory = $true)][string]$TaskName, [ValidateRange(1, 120)][int]$TimeoutSeconds = 30)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($null -eq $task) { throw 'A required managed MCC scheduled task is not installed.' }
+        if ([string]$task.State -ne 'Running') { return }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'The managed MCC scheduled task did not stop within the allowed time.'
+}
+
+function Wait-MccPortReleased {
+    param([ValidateRange(1, 120)][int]$TimeoutSeconds = 30)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $listeners = @(Get-NetTCPConnection -LocalPort $constants.Port -State Listen -ErrorAction SilentlyContinue)
+        if ($listeners.Count -eq 0) { return }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'Port 4273 is still owned after the managed MCC task stopped. No unrelated process was terminated.'
+}
+
+function Stop-MccManagedTask {
+    $task = Get-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) { throw 'The managed MCC background task is not installed.' }
+    $record = Get-MccManagedProcessRecord
+    $managedProcessId = 0
+    $managedProcess = $null
+    if ($null -ne $record) {
+        [void][int]::TryParse([string]$record.processId, [ref]$managedProcessId)
+        $script:PreviousManagedProcessId = $managedProcessId
+        $script:PreviousManagedLaunchId = [string]$record.launchId
+        if ($managedProcessId -gt 0) {
+            $managedProcess = Assert-MccManagedProcessIdentity -Record $record
+        }
+    }
+    if ([string]$task.State -eq 'Running') {
+        Stop-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction Stop
+    }
     $script:MccStopped = $true
-    if ($managedProcessId -gt 0 -and $null -ne (Get-Process -Id $managedProcessId -ErrorAction SilentlyContinue)) {
-        Write-UpdateLog -Message 'The graceful shutdown timed out; stopping only the verified configured MCC Node.js PID.'
-        Stop-Process -Id $managedProcessId -Force -ErrorAction Stop
-        Wait-Process -Id $managedProcessId -Timeout 10 -ErrorAction SilentlyContinue
+    Wait-MccScheduledTaskNotRunning -TaskName $constants.MccTaskName
+    $finalRecord = Get-MccManagedProcessRecord
+    $finalRecordedProcessId = 0
+    if ($null -ne $finalRecord -and
+        [int]::TryParse([string]$finalRecord.processId, [ref]$finalRecordedProcessId) -and
+        $finalRecordedProcessId -gt 0 -and
+        $finalRecordedProcessId -ne $managedProcessId -and
+        $null -ne (Get-MccManagedWin32Process -ProcessId $finalRecordedProcessId)) {
+        [void](Assert-MccManagedProcessIdentity -Record $finalRecord)
+        $record = $finalRecord
+        $managedProcessId = $finalRecordedProcessId
+        $script:PreviousManagedProcessId = $managedProcessId
+        $script:PreviousManagedLaunchId = [string]$record.launchId
+        Write-UpdateLog -Message 'The launcher recorded one final verified MCC child during task shutdown; that exact child will be stopped.'
+    }
+    if ($managedProcessId -gt 0 -and $null -ne (Get-MccManagedWin32Process -ProcessId $managedProcessId)) {
+        [void](Assert-MccManagedProcessIdentity -Record $record)
+        Write-MccAtomicJson -LiteralPath (Join-Path $constants.UpdaterRoot 'request\shutdown-request.json') -Value ([ordered]@{
+            schemaVersion = 1
+            processId = $managedProcessId
+            requestedAt = [DateTime]::UtcNow.ToString('o')
+        })
+        $gracefulDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        while ($null -ne (Get-MccManagedWin32Process -ProcessId $managedProcessId) -and [DateTime]::UtcNow -lt $gracefulDeadline) {
+            Start-Sleep -Milliseconds 500
+        }
+        if ($null -ne (Get-MccManagedWin32Process -ProcessId $managedProcessId)) {
+            Write-UpdateLog -Message 'The graceful shutdown timed out; terminating only the verified recorded MCC child process tree.'
+            $exactProcess = [Diagnostics.Process]::GetProcessById($managedProcessId)
+            try {
+                if (-not (Stop-MccExactProcessTreeFallback -Process $exactProcess)) {
+                    throw 'The exact managed MCC process tree did not confirm termination.'
+                }
+            } finally {
+                $exactProcess.Dispose()
+            }
+        }
+    }
+    Wait-MccPortReleased
+    if (Test-Path -LiteralPath $processStatePath -PathType Leaf) {
+        Remove-Item -LiteralPath $processStatePath -Force
     }
 }
 
+function Write-MccUpdaterHealthSnapshot {
+    $mccTask = Get-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction SilentlyContinue
+    $updaterTask = Get-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction SilentlyContinue
+    $repositoryValid = $false
+    $branchValid = $false
+    try {
+        Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch $configuredBranch
+        $repositoryValid = $true
+        $branchValid = $true
+    } catch {}
+    $health = New-MccWindowsAgentHealth `
+        -HeartbeatCompleted $true `
+        -ExecutableBootstrapSucceeded $true `
+        -ConfigurationValid $true `
+        -DeploymentMode ([string]$configuration.deploymentMode) `
+        -ApplicationPathMatches (-not (Test-MccProtectedDevelopmentPath -LiteralPath $applicationPath)) `
+        -RepositoryValid $repositoryValid `
+        -BranchValid $branchValid `
+        -RequestDirectoryAccessible (Test-Path -LiteralPath (Split-Path -Parent $fixedRequestPath) -PathType Container) `
+        -StatusDirectoryAccessible (Test-Path -LiteralPath (Split-Path -Parent $statusPath) -PathType Container) `
+        -MccTaskInstalled ($null -ne $mccTask) `
+        -MccTaskRunning ($null -ne $mccTask -and [string]$mccTask.State -eq 'Running') `
+        -UpdaterTaskInstalled ($null -ne $updaterTask) `
+        -UpdaterTaskRunning ($null -ne $updaterTask -and [string]$updaterTask.State -eq 'Running')
+    Write-MccAtomicJson -LiteralPath $agentHealthPath -Value $health
+}
+
 function Start-MccManagedTask {
-    Start-ScheduledTask -TaskName $constants.MccTaskName
+    param(
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+        [Parameter(Mandatory = $true)][string]$ExpectedCommit,
+        [switch]$AllowLegacyHealthPayload
+    )
+    Wait-MccScheduledTaskNotRunning -TaskName $constants.MccTaskName
+    $startupRequestedAt = [DateTime]::UtcNow
+    Start-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction Stop
+    $expectedMode = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
+    $expectedShortCommit = $ExpectedCommit.Substring(0, 7).ToLowerInvariant()
+    $deadline = [DateTime]::UtcNow.AddSeconds(180)
+    $lastFailure = 'The managed launcher has not published a new process yet.'
+    do {
+        try {
+            $mccTask = Get-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction Stop
+            $updaterTask = Get-ScheduledTask -TaskName $constants.UpdaterTaskName -ErrorAction Stop
+            if ([string]$mccTask.State -ne 'Running' -or [string]$updaterTask.State -ne 'Running') {
+                throw 'Both managed MCC scheduled tasks must be running.'
+            }
+            $record = Get-MccManagedProcessRecord
+            if ($null -eq $record) { throw 'The managed launcher process record is not available.' }
+            $newProcessId = 0
+            if (-not [int]::TryParse([string]$record.processId, [ref]$newProcessId) -or $newProcessId -le 0) {
+                throw 'The managed launcher process record does not contain a running child PID.'
+            }
+            if ($newProcessId -eq $script:PreviousManagedProcessId -or
+                ([string]$record.launchId -and [string]$record.launchId -eq $script:PreviousManagedLaunchId)) {
+                throw 'The managed launcher has not published a distinct replacement process.'
+            }
+            $startedAt = [DateTime]::MinValue
+            if (-not [DateTime]::TryParse([string]$record.startedAt, [ref]$startedAt) -or $startedAt.ToUniversalTime() -lt $startupRequestedAt.AddSeconds(-2)) {
+                throw 'The managed launcher process record is stale.'
+            }
+            [void](Assert-MccManagedProcessIdentity -Record $record -RequireLauncherAttestation)
+            $listeners = @(Get-NetTCPConnection -LocalPort $constants.Port -State Listen -ErrorAction SilentlyContinue)
+            if ($listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne $newProcessId) {
+                throw 'Port 4273 is not owned by the newly recorded managed MCC process.'
+            }
+            $healthUri = if ($AllowLegacyHealthPayload) {
+                "http://127.0.0.1:$($constants.Port)/api/health"
+            } else {
+                "http://127.0.0.1:$($constants.Port)/api/system/update/managed-readiness"
+            }
+            $health = Invoke-RestMethod -Method Get -Uri $healthUri -TimeoutSec 5
+            if ($health.ok -ne $true) { throw 'The managed MCC health endpoint did not report healthy.' }
+            if (-not $AllowLegacyHealthPayload) {
+                if ($health.systemUpdate.configured -ne $true -or
+                    $health.systemUpdate.enabled -ne $true -or
+                    $health.systemUpdate.applicationMatchesConfiguration -ne $true -or
+                    $health.systemUpdate.repositoryApproved -ne $true -or
+                    [string]$health.systemUpdate.mode -cne $expectedMode -or
+                    [string]$health.systemUpdate.environmentLabel -cne $environmentLabel -or
+                    [string]$health.systemUpdate.branch -cne $configuredBranch -or
+                    [string]$health.systemUpdate.installedVersion -cne $ExpectedVersion -or
+                    ([string]$health.systemUpdate.installedCommit).ToLowerInvariant() -cne $expectedShortCommit) {
+                    throw 'The protected updater readiness payload does not match the managed target.'
+                }
+            }
+            Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch $configuredBranch
+            Write-MccUpdaterHealthSnapshot
+            $agentHealth = Read-MccJson -LiteralPath $agentHealthPath
+            if ($agentHealth.agentHealthy -ne $true -or
+                $agentHealth.configurationValid -ne $true -or
+                $agentHealth.applicationPathMatches -ne $true -or
+                $agentHealth.repositoryValid -ne $true -or
+                $agentHealth.branchValid -ne $true -or
+                $agentHealth.mccTaskRunning -ne $true -or
+                $agentHealth.updaterTaskRunning -ne $true -or
+                [string]$agentHealth.deploymentMode -cne [string]$configuration.deploymentMode) {
+                throw 'The protected updater-agent heartbeat is not healthy after managed startup.'
+            }
+            return $record
+        } catch {
+            $lastFailure = Get-MccCleanText -Value $_.Exception.Message -Maximum 500
+        }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Managed MCC restart verification failed. $lastFailure"
 }
 
 function New-MccRuntimeBackup {
@@ -422,19 +621,15 @@ try {
     Build-Mcc
 
     Write-UpdateStatus -State 'starting' -Message 'Starting the managed Maintenance Command Center background task.'
-    Start-MccManagedTask
-
-    Write-UpdateStatus -State 'health_check' -Message 'Health-checking the managed MCC application on port 4273.'
-    if (-not (Test-MccHttpHealth -Port $constants.Port -TimeoutSeconds 120)) {
-        throw 'The updated MCC health check failed on port 4273.'
-    }
+    Write-UpdateStatus -State 'health_check' -Message 'Verifying the scheduled-task handoff, new managed PID, protected updater configuration, port owner, target build, and updater-agent heartbeat.'
+    Start-MccManagedTask -ExpectedVersion $script:TargetVersion -ExpectedCommit $script:TargetCommit | Out-Null
     $installedAfter = (Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', 'HEAD') -DetailedLogPath $detailedLogPath).StandardOutput.ToLowerInvariant()
     if ($installedAfter -ne $script:TargetCommit -or (Get-MccPackageVersion -ApplicationPath $applicationPath) -ne $script:TargetVersion) {
         throw 'The running MCC commit or application version does not match the approved target.'
     }
     $script:InstalledCommit = $script:TargetCommit
     $script:InstalledVersion = $script:TargetVersion
-    Write-UpdateStatus -State 'succeeded' -Message 'The Windows MCC update completed and passed commit, version, and port 4273 health verification.' -Outcome 'succeeded'
+    Write-UpdateStatus -State 'succeeded' -Message 'The Windows MCC update completed through the protected managed launcher and passed identity, configuration, task, port, heartbeat, version, and commit verification.' -Outcome 'succeeded'
     if (-not $Manual -and (Test-Path -LiteralPath $fixedRequestPath -PathType Leaf)) {
         Remove-Item -LiteralPath $fixedRequestPath -Force
     }
@@ -478,10 +673,7 @@ try {
             }
             Install-MccLockedDependencies
             Build-Mcc
-            Start-MccManagedTask
-            if (-not (Test-MccHttpHealth -Port $constants.Port -TimeoutSeconds 120)) {
-                throw 'The previous MCC version did not pass its rollback health check.'
-            }
+            Start-MccManagedTask -ExpectedVersion $script:InstalledVersion -ExpectedCommit $script:InstalledCommit -AllowLegacyHealthPayload | Out-Null
             if ((Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', 'HEAD') -DetailedLogPath $detailedLogPath).StandardOutput.ToLowerInvariant() -ne $script:InstalledCommit -or
                 (Get-MccPackageVersion -ApplicationPath $applicationPath) -ne $script:InstalledVersion) {
                 throw 'Rollback commit or version verification failed.'

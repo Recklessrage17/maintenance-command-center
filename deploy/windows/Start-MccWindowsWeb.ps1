@@ -69,6 +69,7 @@ $env:MCC_UPDATE_WINDOWS_CONFIG = $ConfigurationPath
 $env:NODE_ENV = 'production'
 
 while ($true) {
+    $launchId = [Guid]::NewGuid().ToString()
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMdd')
     $stdoutPath = Join-Path $webLogDirectory "mcc-$stamp.log"
     $stderrPath = Join-Path $webLogDirectory "mcc-$stamp-error.log"
@@ -81,18 +82,38 @@ while ($true) {
         -PassThru
     Write-MccAtomicJson -LiteralPath $processStatePath -Value ([ordered]@{
         schemaVersion = 1
+        launchId = $launchId
+        launcherProcessId = $PID
         processId = $process.Id
         startedAt = [DateTime]::UtcNow.ToString('o')
         applicationMatchesConfiguration = $true
+        applicationPath = $applicationPath
+        entryPoint = $entryPoint
+        nodePath = $nodePath
+        configurationPath = $ConfigurationPath
+        managedEnvironment = [ordered]@{
+            updateMode = $env:MCC_UPDATE_MODE
+            nodeEnvironment = $env:NODE_ENV
+        }
     })
     $process.WaitForExit()
     Write-MccAtomicJson -LiteralPath $processStatePath -Value ([ordered]@{
         schemaVersion = 1
+        launchId = $launchId
+        launcherProcessId = $PID
         processId = $null
         startedAt = $null
         stoppedAt = [DateTime]::UtcNow.ToString('o')
         lastExitCode = $process.ExitCode
         applicationMatchesConfiguration = $true
+        applicationPath = $applicationPath
+        entryPoint = $entryPoint
+        nodePath = $nodePath
+        configurationPath = $ConfigurationPath
+        managedEnvironment = [ordered]@{
+            updateMode = $env:MCC_UPDATE_MODE
+            nodeEnvironment = $env:NODE_ENV
+        }
     })
     Start-Sleep -Seconds 5
 }

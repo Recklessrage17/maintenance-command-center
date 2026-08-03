@@ -405,6 +405,7 @@ try {
     mccTaskInstalled: true,
     mccTaskRunning: false,
     updaterTaskInstalled: true,
+    updaterTaskRunning: true,
   })}\n`);
   assert.equal(managedHealthService.publicStatus().code, 'mcc_service_not_running');
   fs.writeFileSync(managedHealthConfiguration.windowsAgentHealthPath, `${JSON.stringify({
@@ -421,6 +422,7 @@ try {
     mccTaskInstalled: true,
     mccTaskRunning: true,
     updaterTaskInstalled: true,
+    updaterTaskRunning: true,
   })}\n`);
   assert.equal(managedHealthService.publicStatus().available, true);
   assert.equal(managedHealthService.publicStatus().environmentLabel, 'WINDOWS 11 PRODUCTION');

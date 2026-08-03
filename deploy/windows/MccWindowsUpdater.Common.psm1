@@ -165,7 +165,8 @@ function New-MccWindowsAgentHealth {
         [Parameter(Mandatory = $true)][bool]$StatusDirectoryAccessible,
         [Parameter(Mandatory = $true)][bool]$MccTaskInstalled,
         [Parameter(Mandatory = $true)][bool]$MccTaskRunning,
-        [Parameter(Mandatory = $true)][bool]$UpdaterTaskInstalled
+        [Parameter(Mandatory = $true)][bool]$UpdaterTaskInstalled,
+        [Parameter(Mandatory = $true)][bool]$UpdaterTaskRunning
     )
     $safeDeploymentMode = if (@('WindowsTest', 'WindowsProduction') -ccontains $DeploymentMode) {
         $DeploymentMode
@@ -182,7 +183,8 @@ function New-MccWindowsAgentHealth {
         $StatusDirectoryAccessible -and
         $MccTaskInstalled -and
         $MccTaskRunning -and
-        $UpdaterTaskInstalled
+        $UpdaterTaskInstalled -and
+        $UpdaterTaskRunning
     return [ordered]@{
         schemaVersion = 1
         checkedAt = [DateTime]::UtcNow.ToString('o')
@@ -197,6 +199,7 @@ function New-MccWindowsAgentHealth {
         mccTaskInstalled = $MccTaskInstalled
         mccTaskRunning = $MccTaskRunning
         updaterTaskInstalled = $UpdaterTaskInstalled
+        updaterTaskRunning = $UpdaterTaskRunning
     }
 }
 
@@ -876,6 +879,7 @@ Export-ModuleMember -Function @(
     'Write-MccAtomicJson',
     'Read-MccJson',
     'Invoke-MccProcess',
+    'Stop-MccExactProcessTreeFallback',
     'Invoke-MccGit',
     'Get-MccPackageVersion',
     'Read-MccWindowsConfiguration',

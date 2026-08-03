@@ -23,6 +23,8 @@ $ProgressPreference = 'SilentlyContinue'
 Import-Module (Join-Path $PSScriptRoot 'MccWindowsUpdater.Common.psm1') -Force
 $constants = Get-MccUpdaterConstants
 $script:FailureCount = 0
+$installedVersion = ''
+$installedCommit = ''
 
 function Write-TestResult {
     param(
@@ -91,9 +93,9 @@ if ($null -ne $configuration) {
         Write-TestResult -Name 'npm' -Passed $false -Detail $_.Exception.Message
     }
     try {
-        $version = Get-MccPackageVersion -ApplicationPath $applicationPath
-        $commit = (Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', '--short=7', 'HEAD')).StandardOutput
-        Write-TestResult -Name 'Installed build' -Passed ($commit -match '^[0-9a-fA-F]{7}$') -Detail "v$version / $commit"
+        $installedVersion = Get-MccPackageVersion -ApplicationPath $applicationPath
+        $installedCommit = (Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', '--short=7', 'HEAD')).StandardOutput
+        Write-TestResult -Name 'Installed build' -Passed ($installedCommit -match '^[0-9a-fA-F]{7}$') -Detail "v$installedVersion / $installedCommit"
     } catch {
         Write-TestResult -Name 'Installed build' -Passed $false -Detail $_.Exception.Message
     }
@@ -194,6 +196,63 @@ try {
 }
 
 Write-TestResult -Name 'Port 4273 health' -Passed (Test-MccHttpHealth -Port 4273 -TimeoutSeconds 10) -Detail 'GET /api/health'
+if ($null -ne $configuration) {
+    try {
+        $processRecordPath = Join-Path $constants.UpdaterRoot 'web-logs\mcc-process.json'
+        $processRecord = Read-MccJson -LiteralPath $processRecordPath
+        $managedProcessId = 0
+        $validProcessId = [int]::TryParse([string]$processRecord.processId, [ref]$managedProcessId) -and $managedProcessId -gt 0
+        $processDetails = if ($validProcessId) { Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $managedProcessId" -ErrorAction SilentlyContinue } else { $null }
+        $expectedNode = Get-MccNormalizedPath -LiteralPath ([string]$configuration.nodePath)
+        $expectedApplication = Get-MccNormalizedPath -LiteralPath ([string]$configuration.applicationPath)
+        $expectedEntryPoint = Get-MccNormalizedPath -LiteralPath (Join-Path $expectedApplication 'backend\dist\server\index.js')
+        $expectedConfiguration = Get-MccNormalizedPath -LiteralPath $ConfigurationPath
+        $actualNode = if ($null -ne $processDetails) { Get-MccNormalizedPath -LiteralPath ([string]$processDetails.ExecutablePath) } else { '' }
+        $commandLine = if ($null -ne $processDetails) { ([string]$processDetails.CommandLine).Replace('"', '') } else { '' }
+        $recordValid = $validProcessId -and
+            $null -ne $processDetails -and
+            [string]$processRecord.launchId -match '^[0-9a-fA-F-]{36}$' -and
+            $processRecord.applicationMatchesConfiguration -eq $true -and
+            $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -and
+            $commandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.applicationPath)).Equals($expectedApplication, [StringComparison]::OrdinalIgnoreCase) -and
+            (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.entryPoint)).Equals($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -and
+            (Get-MccNormalizedPath -LiteralPath ([string]$processRecord.configurationPath)).Equals($expectedConfiguration, [StringComparison]::OrdinalIgnoreCase) -and
+            [string]$processRecord.managedEnvironment.updateMode -ceq 'windows_agent' -and
+            [string]$processRecord.managedEnvironment.nodeEnvironment -ceq 'production'
+        Write-TestResult -Name 'Managed launcher process' -Passed $recordValid -Detail 'New launcher record, exact Node executable, configured C: backend entry point, and managed environment attestation verified.'
+
+        $listeners = @(Get-NetTCPConnection -LocalPort 4273 -State Listen -ErrorAction SilentlyContinue)
+        $portOwnerValid = $listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $managedProcessId
+        Write-TestResult -Name 'Managed port owner' -Passed $portOwnerValid -Detail 'Port 4273 has one listener owned by the recorded managed MCC PID.'
+
+        $matchingApplicationProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object {
+            if ([string]::IsNullOrWhiteSpace([string]$_.ExecutablePath) -or [string]::IsNullOrWhiteSpace([string]$_.CommandLine)) { return $false }
+            try {
+                return (Get-MccNormalizedPath -LiteralPath ([string]$_.ExecutablePath)).Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase) -and
+                    ([string]$_.CommandLine).Replace('"', '').IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -ge 0
+            } catch { return $false }
+        })
+        Write-TestResult -Name 'No detached MCC process' -Passed ($matchingApplicationProcesses.Count -eq 1 -and [int]$matchingApplicationProcesses[0].ProcessId -eq $managedProcessId) -Detail 'Exactly one configured MCC backend process exists and it is the recorded managed child.'
+
+        $runtimeHealth = Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:4273/api/system/update/managed-readiness' -TimeoutSec 10
+        $expectedMode = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
+        $expectedLabel = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'WINDOWS TEST MODE' } else { 'WINDOWS 11 PRODUCTION' }
+        $readinessValid = $runtimeHealth.ok -eq $true -and
+            $runtimeHealth.systemUpdate.configured -eq $true -and
+            $runtimeHealth.systemUpdate.enabled -eq $true -and
+            $runtimeHealth.systemUpdate.applicationMatchesConfiguration -eq $true -and
+            $runtimeHealth.systemUpdate.repositoryApproved -eq $true -and
+            [string]$runtimeHealth.systemUpdate.mode -ceq $expectedMode -and
+            [string]$runtimeHealth.systemUpdate.environmentLabel -ceq $expectedLabel -and
+            [string]$runtimeHealth.systemUpdate.branch -ceq [string]$configuration.branch -and
+            [string]$runtimeHealth.systemUpdate.installedVersion -ceq $installedVersion -and
+            [string]$runtimeHealth.systemUpdate.installedCommit -ceq $installedCommit.ToLowerInvariant()
+        Write-TestResult -Name 'Managed updater readiness' -Passed $readinessValid -Detail 'Configured, enabled, mode, label, approved repository, branch, version, and commit match the protected installation.'
+    } catch {
+        Write-TestResult -Name 'Managed handoff verification' -Passed $false -Detail $_.Exception.Message
+    }
+}
 try {
     $apiProtected = $false
     try {

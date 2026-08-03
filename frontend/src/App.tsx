@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MccForgotPassword } from './components/auth/MccForgotPassword';
 import { MccLogin } from './components/auth/MccLogin';
 import { MccLayout, type MccSection } from './layout/MccLayout';
@@ -36,6 +37,53 @@ class RouteModuleBoundary extends Component<{resetKey:MccSection;children:ReactN
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; canViewSystemVersion:boolean; forcePasswordChange:boolean; effectivePermissions?:string[] };
 type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
+type UpdateNoticeState={kind:'available'|'succeeded';version:string;commit:string;storageKey:string};
+function cleanNoticePart(value:unknown){return typeof value==='string'?value.replace(/[^a-zA-Z0-9._-]/g,'').slice(0,80):'';}
+function SystemUpdateNotice({user,onViewUpdate}:{user:User;onViewUpdate:()=>void}) {
+  const [notice,setNotice]=useState<UpdateNoticeState|null>(null);
+  useEffect(()=>{
+    if(!user.canViewSystemVersion||user.forcePasswordChange){setNotice(null);return;}
+    let cancelled=false;
+    api('/api/system/update/status').then(data=>{
+      if(cancelled||data?.active===true)return;
+      const code=String(data?.code??'');
+      const state=String(data?.state??'');
+      if(state==='update_available'&&['update_available','same_version_different_commit'].includes(code)) {
+        const version=cleanNoticePart(data.targetVersion);
+        const commit=cleanNoticePart(data.targetCommit);
+        if(!version||!commit)return;
+        const storageKey=`mcc:update-notice:dismissed:${user.id}:${version}:${commit}`;
+        if(window.localStorage.getItem(storageKey)!=='1')setNotice({kind:'available',version,commit,storageKey});
+        return;
+      }
+      if(state==='succeeded'&&code==='succeeded') {
+        const version=cleanNoticePart(data.installedVersion??data.targetVersion);
+        const commit=cleanNoticePart(data.installedCommit??data.targetCommit);
+        if(!version||!commit)return;
+        const storageKey=`mcc:update-notice:success-seen:${user.id}:${version}:${commit}`;
+        if(window.localStorage.getItem(storageKey)==='1')return;
+        window.localStorage.setItem(storageKey,'1');
+        setNotice({kind:'succeeded',version,commit,storageKey});
+      }
+    }).catch(()=>undefined);
+    return()=>{cancelled=true;};
+  },[user.id,user.canViewSystemVersion,user.forcePasswordChange]);
+  if(!notice)return null;
+  const dismiss=()=>{
+    if(notice.kind==='available')window.localStorage.setItem(notice.storageKey,'1');
+    setNotice(null);
+  };
+  return createPortal(<aside className={`mcc-update-notice ${notice.kind}`} role="status" aria-live="polite" aria-label={notice.kind==='available'?'MCC update available':'MCC updated'}>
+    <button className="mcc-update-notice-dismiss" type="button" aria-label="Dismiss update notification" onClick={dismiss}>×</button>
+    <span className="mcc-update-notice-kicker">{notice.kind==='available'?'MCC UPDATE AVAILABLE':'MCC UPDATED'}</span>
+    <strong>{notice.kind==='available'?`v${notice.version} is ready to install.`:`MCC was updated successfully to v${notice.version}.`}</strong>
+    <small>Build {notice.commit.slice(0,7)}</small>
+    {notice.kind==='available'&&<div className="mcc-update-notice-actions">
+      <button className="primary-button compact-button" type="button" onClick={()=>{dismiss();onViewUpdate();}}>View update</button>
+      <button className="link-button compact-button" type="button" onClick={dismiss}>Dismiss</button>
+    </div>}
+  </aside>,document.body);
+}
 function AuthCard({title,eyebrow,children}:{title:string;eyebrow:string;children:ReactNode}) { return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>; }
 function Field({label,type='text',value,onChange,autoComplete}:{label:string;type?:string;value:string;onChange:(v:string)=>void;autoComplete?:string}) { return <label className="form-field"><span>{label}</span><input type={type} value={value} autoComplete={autoComplete} onChange={e=>onChange(e.target.value)} /></label>; }
 function routeFromPath(pathname: string): { section: MccSection; historySection: HistorySection | null } {
@@ -85,13 +133,18 @@ function App() {
     setHistorySection(null);
     window.history.pushState(null,'',`/requisitions?view=${view}`);
   }
+  function navigateToSystemUpdate() {
+    setActiveSection('settings');
+    setHistorySection(null);
+    window.history.pushState(null,'','/settings#system-update');
+  }
   const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} userFullName={user?.fullName ?? ''} onBackToDashboard={()=>navigate('dashboard')} onOpenRequisitions={()=>navigate('requisitions')} /> : activeSection === 'vendors' ? <VendorsPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} /> : activeSection === 'machine-library' ? <MachineLibraryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'history' ? (permissions.canViewHistory ? <HistoryPage userRole={user?.role ?? ''} selectedSection={historySection} onSectionChange={section=>navigate('history',section)} onBackToLanding={()=>navigate('history')} /> : <div className="page-stack"><div className="page-heading"><p className="eyebrow">Not Authorized</p><h2>History Logs locked</h2><p>History Logs permission is required.</p></div></div>) : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} userFullName={user?.fullName ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage isOwnerAdmin={Boolean(user?.isOwnerAdmin)} canViewSystemVersion={Boolean(user?.canViewSystemVersion)} /> : <DashboardPage onOpenRequisitions={navigateToRequisitions} />;
   if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;
   if(mode==='forgot') return <MccForgotPassword onBack={()=>setMode('login')} requestReset={async email=>{const data=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});return data.message;}} />;
   if(mode==='change') return <Change forced={Boolean(user?.forcePasswordChange)} onDone={refresh} />;
-  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} onPrefetchSection={prefetchSection} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} allowedSections={permissions.allowedSections} onUpdatePassword={()=>setMode('change')} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}><RouteModuleBoundary resetKey={activeSection}><Suspense fallback={<RouteLoadingState />}>{page}</Suspense></RouteModuleBoundary></MccLayout>;
+  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} onPrefetchSection={prefetchSection} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} allowedSections={permissions.allowedSections} onUpdatePassword={()=>setMode('change')} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}><SystemUpdateNotice user={user!} onViewUpdate={navigateToSystemUpdate}/><RouteModuleBoundary resetKey={activeSection}><Suspense fallback={<RouteLoadingState />}>{page}</Suspense></RouteModuleBoundary></MccLayout>;
 }
 function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{await api('/api/auth/setup-first-admin',{method:'POST',body:JSON.stringify({fullName,email,password,confirmPassword})});setMsg('First Admin created. Please log in.'); setTimeout(onDone,800);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="First Admin Setup" eyebrow="MCC security foundation"><form onSubmit={submit} className="auth-form"><Field label="Full name" value={fullName} onChange={setFullName}/><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword}/><Field label="Confirm password" type="password" value={confirmPassword} onChange={setConfirm}/><p className="form-help">Minimum 10 characters with uppercase, lowercase, number, and special character.</p><button className="primary-button">Create First Admin</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) {

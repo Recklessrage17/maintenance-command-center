@@ -619,11 +619,14 @@ function windowsAgentAvailability(configuration: SystemUpdateConfiguration, nowM
       || cleanText(health.deploymentMode, 40) !== (configuration.mode === 'windows_test' ? 'WindowsTest' : 'WindowsProduction')) {
       return { available: false, code: 'configuration_invalid', message: 'The protected Windows updater configuration is invalid.' };
     }
-    if (health.updaterTaskInstalled !== true || health.agentHealthy !== true) {
+    if (health.updaterTaskInstalled !== true || health.updaterTaskRunning !== true) {
       return { available: false, code: 'updater_agent_offline', message: 'The Windows updater agent is offline.' };
     }
     if (health.mccTaskInstalled !== true || health.mccTaskRunning !== true) {
       return { available: false, code: 'mcc_service_not_running', message: 'The managed MCC background task is not running.' };
+    }
+    if (health.agentHealthy !== true) {
+      return { available: false, code: 'updater_agent_offline', message: 'The Windows updater agent is offline.' };
     }
     return { available: true, code: 'not_checked', message: '' };
   } catch {
@@ -840,7 +843,7 @@ export class SystemUpdateService {
           ...this.readStatus(),
           state: 'idle',
           code: 'up_to_date',
-          message: 'MCC is up to date with the approved update branch.',
+          message: 'No new updates are available.',
           installed: comparison.installed,
           target: comparison.target,
           requester,

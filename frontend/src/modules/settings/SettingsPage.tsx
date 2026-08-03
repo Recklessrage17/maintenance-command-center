@@ -262,7 +262,7 @@ async function api(path:string, options:RequestInit={}) {
 }
 
 class SystemUpdateRequestError extends Error {
-  constructor(message:string,public readonly data:Record<string,unknown>) {
+  constructor(message:string,public readonly data:Record<string,unknown>,public readonly retryAfterSeconds:number|null) {
     super(message);
   }
 }
@@ -270,7 +270,15 @@ class SystemUpdateRequestError extends Error {
 async function systemUpdateApi(path:string,options:RequestInit={}) {
   const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
   const data=await res.json().catch(()=>({})) as Record<string,unknown>;
-  if(!res.ok)throw new SystemUpdateRequestError(String(data.error??'Update request failed.'),data);
+  if(!res.ok){
+    const headerRetry=Number(res.headers.get('Retry-After'));
+    const bodyRetry=Number(data.retryAfterSeconds);
+    const retryAfterSeconds=Number.isFinite(bodyRetry)&&bodyRetry>0?Math.ceil(bodyRetry):Number.isFinite(headerRetry)&&headerRetry>0?Math.ceil(headerRetry):null;
+    const baseMessage=String(data.error??'Update request failed.');
+    const retryMinutes=retryAfterSeconds?Math.ceil(retryAfterSeconds/60):0;
+    const retryMessage=retryAfterSeconds?` Try again in ${retryAfterSeconds>=60?`${retryMinutes} minute${retryMinutes===1?'':'s'}`:`${retryAfterSeconds} seconds`}.`:'';
+    throw new SystemUpdateRequestError(`${baseMessage.replace(/\s*Try again later\.?$/i,'')}${retryMessage}`,data,retryAfterSeconds);
+  }
   return data;
 }
 
@@ -333,7 +341,7 @@ function updateStateLabel(update:SystemUpdateStatus|null) {
   if(update.state==='rolled_back')return 'UPDATE FAILED — PREVIOUS VERSION RESTORED';
   if(update.state==='failed')return 'CRITICAL UPDATE FAILURE — MANUAL RECOVERY REQUIRED';
   if(['update_available','same_version_different_commit'].includes(update.code))return 'UPDATE AVAILABLE';
-  if(update.code==='up_to_date')return '✓ UP TO DATE';
+  if(update.code==='up_to_date')return 'MCC IS UP TO DATE';
   if(update.code==='not_checked')return 'READY TO CHECK';
   if(update.code==='deployment_not_configured')return 'UPDATER NOT CONFIGURED';
   if(update.code==='updater_agent_offline')return 'UPDATER AGENT OFFLINE';
@@ -554,6 +562,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [systemUpdateProgressOpen,setSystemUpdateProgressOpen]=useState(false);
   const [systemUpdateReconnectMessage,setSystemUpdateReconnectMessage]=useState('');
   const updateCompletionHandled=useRef('');
+  const systemUpdateRequestInFlight=useRef<'check'|'install'|null>(null);
+  const systemUpdatePanelRef=useRef<HTMLElement|null>(null);
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
@@ -643,7 +653,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   }
 
   async function checkForSystemUpdate() {
-    if(systemUpdateLoading||systemUpdateInstalling||systemUpdate?.active)return;
+    if(systemUpdateRequestInFlight.current||systemUpdateLoading||systemUpdateInstalling||systemUpdate?.active)return;
+    systemUpdateRequestInFlight.current='check';
     setSystemUpdateLoading(true);
     setSystemUpdateReconnectMessage('');
     try {
@@ -653,12 +664,14 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
       if(error instanceof SystemUpdateRequestError)applySystemUpdateResponse(error.data);
       setSystemUpdateReconnectMessage((error as Error).message||'The MCC update check failed.');
     } finally {
+      systemUpdateRequestInFlight.current=null;
       setSystemUpdateLoading(false);
     }
   }
 
   async function installSystemUpdate() {
-    if(systemUpdateInstalling||!systemUpdate?.checkToken||!systemUpdate.csrfToken)return;
+    if(systemUpdateRequestInFlight.current||systemUpdateInstalling||!systemUpdate?.checkToken||!systemUpdate.csrfToken)return;
+    systemUpdateRequestInFlight.current='install';
     setSystemUpdateInstalling(true);
     setSystemUpdateReconnectMessage('');
     try {
@@ -674,6 +687,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
       if(error instanceof SystemUpdateRequestError)applySystemUpdateResponse(error.data);
       setSystemUpdateReconnectMessage((error as Error).message||'The MCC update request was not accepted.');
     } finally {
+      systemUpdateRequestInFlight.current=null;
       setSystemUpdateInstalling(false);
     }
   }
@@ -851,6 +865,14 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     loadBackupStatus();
     if (isOwnerAdmin) void loadResetStatus();
   },[isOwnerAdmin,canViewSystemVersion]);
+  useEffect(()=>{
+    if(!canViewSystemVersion||window.location.hash!=='#system-update')return;
+    const timer=window.setTimeout(()=>{
+      systemUpdatePanelRef.current?.scrollIntoView({behavior:'smooth',block:'center'});
+      systemUpdatePanelRef.current?.focus({preventScroll:true});
+    },50);
+    return()=>window.clearTimeout(timer);
+  },[canViewSystemVersion]);
   const updatePollingActive=Boolean(systemUpdate&&activeSystemUpdateStates.has(systemUpdate.state));
   useEffect(()=>{
     if(!canViewSystemVersion||!updatePollingActive)return;
@@ -919,7 +941,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   return (
     <div className="page-stack settings-page">
       {canViewSystemVersion&&(
-        <aside className="mcc-card system-version-panel" aria-label="MCC system version">
+        <aside id="system-update" ref={systemUpdatePanelRef} tabIndex={-1} className="mcc-card system-version-panel" aria-label="MCC system version">
           <div className="system-version-installed">
             <span className="system-version-label"><i aria-hidden="true" />System Version</span>
             <strong>{systemVersion?.displayVersion ? `MCC ${systemVersion.displayVersion}` : systemVersionLoading ? 'MCC loading…' : 'MCC version unavailable'}</strong>
@@ -931,7 +953,12 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
               <em>{systemUpdate?.environmentLabel??'UPDATE STATUS LOADING'}</em>
             </div>
             {systemUpdate?.active&&<p>Backup → Pull → Build → Restart</p>}
-            {!systemUpdate?.active&&systemUpdate?.message&&<p>{systemUpdate.message}</p>}
+            {!systemUpdate?.active&&systemUpdate?.code==='up_to_date'&&<div className="system-update-up-to-date" aria-live="polite">
+              <strong>No new updates are available.</strong>
+              <span>Installed v{systemUpdate.installedVersion??systemVersion?.version??'unavailable'} · Build {systemUpdate.installedCommit??systemVersion?.commit??'unavailable'}</span>
+              <small>Last checked {formatDateTime(systemUpdate.lastUpdatedAt)}</small>
+            </div>}
+            {!systemUpdate?.active&&systemUpdate?.code!=='up_to_date'&&systemUpdate?.message&&<p>{systemUpdate.message}</p>}
             {systemUpdateReconnectMessage&&<p className="system-update-reconnect" role="status">{systemUpdateReconnectMessage}</p>}
             <button
               className={updateAvailable?'primary-button compact-button':'secondary-button compact-button'}

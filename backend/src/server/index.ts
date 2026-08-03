@@ -17,6 +17,7 @@ import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpe
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
 import {
+  APPROVED_UPDATE_REPOSITORY,
   JsonSystemUpdateStatusStore,
   MemorySystemUpdateStatusStore,
   SystemUpdateError,
@@ -1018,6 +1019,10 @@ const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, numb
 const systemUpdateCheckHits = new Map<string, number[]>(), systemUpdateInstallHits = new Map<string, number[]>();
 let lastSystemUpdateAvailabilityCode = '';
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
+function updateRateLimitRetryAfter(map:Map<string,number[]>,key:string,windowMs:number){
+  const hits=map.get(key)??[];
+  return Math.max(1,Math.ceil((windowMs-(Date.now()-(hits[0]??Date.now())))/1000));
+}
 function systemUpdateIdentity(user:User):UpdateIdentity {
   return {id:user.id,name:user.full_name.replace(/\s+/g,' ').trim().slice(0,120)};
 }
@@ -7974,7 +7979,30 @@ facilityInfoService=createFacilityInfoService({
   now,
 });
 
+function requireLoopbackUpdateProbe(req:Request,res:Response,next:NextFunction){
+  const remoteAddress=String(req.socket.remoteAddress??'').toLowerCase();
+  if(['127.0.0.1','::1','::ffff:127.0.0.1'].includes(remoteAddress))return next();
+  return res.status(403).json({ok:false,error:'Local managed updater verification is required.'});
+}
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
+app.get('/api/system/update/managed-readiness',requireLoopbackUpdateProbe,(_req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    port,
+    systemUpdate:{
+      configured:systemUpdateConfiguration.configured,
+      enabled:systemUpdateConfiguration.enabled,
+      mode:systemUpdateConfiguration.mode,
+      environmentLabel:systemUpdateConfiguration.environmentLabel,
+      applicationMatchesConfiguration:systemUpdateConfiguration.enabled&&path.resolve(systemUpdateConfiguration.applicationDir)===path.resolve(process.cwd()),
+      repositoryApproved:systemUpdateConfiguration.approvedRepository===APPROVED_UPDATE_REPOSITORY,
+      branch:systemUpdateConfiguration.branch,
+      installedVersion:applicationVersion,
+      installedCommit:applicationCommit,
+    },
+  });
+});
 app.get('/api/version', requireAuth, requireSystemVersionAccess, (_req,res)=>res.json({
   version:applicationVersion,
   displayVersion:applicationVersion ? `v${applicationVersion}` : 'Version unavailable',
@@ -8004,7 +8032,11 @@ app.get('/api/system/update/status',requireAuth,requireSystemVersionAccess,(req:
 });
 app.post('/api/system/update/check',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
   const rateKey=`${req.user!.id}:${req.ip}`;
-  if(limited(systemUpdateCheckHits,rateKey,6,10*60*1000))return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update checks. Try again later.'});
+  if(limited(systemUpdateCheckHits,rateKey,6,10*60*1000)){
+    const retryAfterSeconds=updateRateLimitRetryAfter(systemUpdateCheckHits,rateKey,10*60*1000);
+    res.setHeader('Retry-After',String(retryAfterSeconds));
+    return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update checks.',retryAfterSeconds});
+  }
   const body=isRecord(req.body)?req.body:{};
   if(Object.keys(body).length)return res.status(400).json({ok:false,code:'invalid_request',error:'The update check does not accept deployment configuration.'});
   try {
@@ -8030,7 +8062,11 @@ app.post('/api/system/update/check',requireAuth,requireSystemVersionAccess,(req:
 });
 app.post('/api/system/update/install',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
   const rateKey=`${req.user!.id}:${req.ip}`;
-  if(limited(systemUpdateInstallHits,rateKey,5,15*60*1000))return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update installation attempts. Try again later.'});
+  if(limited(systemUpdateInstallHits,rateKey,5,15*60*1000)){
+    const retryAfterSeconds=updateRateLimitRetryAfter(systemUpdateInstallHits,rateKey,15*60*1000);
+    res.setHeader('Retry-After',String(retryAfterSeconds));
+    return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update installation attempts.',retryAfterSeconds});
+  }
   if(!validateSystemUpdateCsrf(req))return res.status(403).json({ok:false,code:'csrf_rejected',error:'Update confirmation could not be verified. Refresh Settings and try again.'});
   const body=isRecord(req.body)?req.body:{};
   const unexpectedKeys=Object.keys(body).filter(key=>!['confirm','checkToken'].includes(key));
