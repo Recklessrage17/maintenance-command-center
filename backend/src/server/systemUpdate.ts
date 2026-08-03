@@ -270,10 +270,14 @@ function readWindowsUpdaterConfiguration(
     return disabledConfiguration(resolvedApplicationDir, 'The Windows updater requires Windows.', 'configuration_invalid', true);
   }
   const programData = environment.ProgramData || 'C:\\ProgramData';
-  const configPath = path.win32.resolve(environment.MCC_UPDATE_WINDOWS_CONFIG || path.win32.join(programData, 'MCC', 'Updater', 'config.json'));
+  const testOverride = environment.NODE_ENV === 'test';
+  const requestedConfigPath = environment.MCC_UPDATE_WINDOWS_CONFIG
+    || path.win32.join(programData, 'MCC', 'Updater', 'config.json');
+  const configPath = testOverride && path.isAbsolute(requestedConfigPath)
+    ? path.resolve(requestedConfigPath)
+    : path.win32.resolve(requestedConfigPath);
   const updaterRoot = path.win32.dirname(configPath);
   const expectedRoot = path.win32.resolve(programData, 'MCC', 'Updater');
-  const testOverride = environment.NODE_ENV === 'test';
   if (path.win32.basename(configPath).toLowerCase() !== 'config.json'
     || (!testOverride && !sameWindowsPath(updaterRoot, expectedRoot))) {
     return disabledConfiguration(resolvedApplicationDir, 'The protected Windows updater configuration location is invalid.', 'configuration_invalid', true);
@@ -301,10 +305,10 @@ function readWindowsUpdaterConfiguration(
       : 'CONFIGURATION INVALID';
   const applicationPath = typeof item.applicationPath === 'string' ? path.win32.resolve(item.applicationPath) : '';
   const configuredGitPath = typeof item.gitPath === 'string'
-    ? path.win32.isAbsolute(item.gitPath)
-      ? path.win32.resolve(item.gitPath)
-      : testOverride && path.isAbsolute(item.gitPath)
-        ? path.resolve(item.gitPath)
+    ? testOverride && path.isAbsolute(item.gitPath)
+      ? path.resolve(item.gitPath)
+      : path.win32.isAbsolute(item.gitPath)
+        ? path.win32.resolve(item.gitPath)
         : ''
     : '';
   let configuredGitIsFile = false;
@@ -373,7 +377,9 @@ export function loadSystemUpdateConfiguration(
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): SystemUpdateConfiguration {
-  const resolvedApplicationDir = path.resolve(applicationDir);
+  const resolvedApplicationDir = platform === 'win32'
+    ? path.win32.resolve(applicationDir)
+    : path.resolve(applicationDir);
   const requestedMode = cleanText(environment.MCC_UPDATE_MODE, 40).toLowerCase();
   if (!requestedMode) return disabledConfiguration(resolvedApplicationDir, 'The updater is not configured in this environment.');
 

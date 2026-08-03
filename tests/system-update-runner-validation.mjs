@@ -182,6 +182,8 @@ for (const requiredText of [
   'Raspberry Pi',
 ]) assert.ok(windowsReadme.toLowerCase().includes(requiredText.toLowerCase()), `Windows updater README is missing: ${requiredText}`);
 
+if (process.platform === 'win32') {
+
 const powershellFiles = [
   'deployment/windows/Invoke-MccTestUpdate.ps1',
   ...fs.readdirSync('deploy/windows')
@@ -243,6 +245,9 @@ const webBootstrap = spawnSync('powershell.exe', [
   ].join(';'),
 ], { encoding: 'utf8', windowsHide: true });
 assert.equal(webBootstrap.status, 0, webBootstrap.stderr || webBootstrap.stdout);
+} else {
+  console.log('Skipping Windows PowerShell execution checks on non-Windows host; static Windows updater validation still ran.');
+}
 
 const pythonSyntax = spawnSync('python', [
   '-c',
