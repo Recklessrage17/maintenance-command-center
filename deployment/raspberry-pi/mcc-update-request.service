@@ -1,0 +1,16 @@
+[Unit]
+Description=Accept one fixed MCC update request
+ConditionPathExists=/var/lib/mcc-update/request.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/systemctl start --no-block mcc-update-runner.service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

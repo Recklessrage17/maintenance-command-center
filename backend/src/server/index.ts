@@ -6,12 +6,37 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { ZipArchive, type Archiver } from 'archiver';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import ExcelJS from 'exceljs';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import XlsxPopulate from 'xlsx-populate';
+import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
+import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
+import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
+import {
+  APPROVED_UPDATE_REPOSITORY,
+  JsonSystemUpdateStatusStore,
+  MemorySystemUpdateStatusStore,
+  SystemUpdateError,
+  SystemUpdateService,
+  createSystemUpdateGitRunner,
+  loadSystemUpdateConfiguration,
+  type SystemUpdateStatus,
+  type UpdateIdentity,
+} from './systemUpdate.js';
+import {
+  inheritedPermissions,
+  isPermissionKey,
+  permissionByKey,
+  permissionCatalog,
+  permissionModules,
+  roleBasePermissions,
+  type PermissionKey,
+  type PermissionRole,
+} from './permissions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,20 +47,53 @@ if (fs.existsSync(rootEnvPath)) {
 }
 
 const app = express();
-const port = 4273;
+const configuredPort = Number(process.env.PORT ?? 4273);
+const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 4273;
 const appName = 'Maintenance Command Center';
-const version = '0.1.0';
+function readApplicationVersion() {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(repoRootPath, 'package.json'), 'utf8')) as { version?: unknown };
+    return typeof manifest.version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(manifest.version)
+      ? manifest.version
+      : null;
+  } catch {
+    return null;
+  }
+}
+function readShortCommit(git: ReturnType<typeof createSystemUpdateGitRunner>) {
+  try {
+    const result = git(['rev-parse', '--short=7', 'HEAD'], repoRootPath, 2_000);
+    const commit = result.status === 0 ? result.stdout.trim() : '';
+    return /^[0-9a-f]{7,12}$/i.test(commit) ? commit : null;
+  } catch {
+    return null;
+  }
+}
+const applicationVersion = readApplicationVersion();
+const systemUpdateConfiguration = loadSystemUpdateConfiguration(repoRootPath);
+const backendGitRunner = createSystemUpdateGitRunner(systemUpdateConfiguration);
+const applicationCommit = readShortCommit(backendGitRunner);
+const systemUpdateStatusStore = systemUpdateConfiguration.statusPath
+  ? new JsonSystemUpdateStatusStore(
+      systemUpdateConfiguration.statusPath,
+      systemUpdateConfiguration.statusWritePath??systemUpdateConfiguration.statusPath,
+    )
+  : new MemorySystemUpdateStatusStore();
+const systemUpdateService = new SystemUpdateService(systemUpdateConfiguration, systemUpdateStatusStore, backendGitRunner);
 const mit3Url = 'http://localhost:4173';
 const mit3HealthUrl = `${mit3Url}/api/health`;
 const mit3AppDataUrl = `${mit3Url}/api/app-data`;
 const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
-const dataDir = path.resolve(__dirname, '../../data');
-const backupsDir = path.resolve(__dirname, '../../backups');
-const uploadsDir = path.resolve(__dirname, '../../uploads');
+const dataDir = path.resolve(process.env.MCC_DATA_DIR || path.resolve(__dirname, '../../data'));
+const backupsDir = path.resolve(process.env.MCC_BACKUPS_DIR || path.resolve(__dirname, '../../backups'));
+const uploadsDir = path.resolve(process.env.MCC_UPLOADS_DIR || path.resolve(__dirname, '../../uploads'));
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
 const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
 const machineAssetNotesDir = path.join(uploadsDir, 'machine-asset-notes');
+const machineDocumentLibraryDir = path.join(uploadsDir, 'machine-library');
+const equipmentAssetNotesDir = path.join(uploadsDir, 'equipment-asset-notes');
+const equipmentDocumentLibraryDir = path.join(uploadsDir, 'equipment-library');
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -47,11 +105,15 @@ fs.mkdirSync(brandingUploadsDir, { recursive: true });
 fs.mkdirSync(machineComponentImagesDir, { recursive: true });
 fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
 fs.mkdirSync(machineAssetNotesDir, { recursive: true });
+fs.mkdirSync(machineDocumentLibraryDir, { recursive: true });
+fs.mkdirSync(equipmentAssetNotesDir, { recursive: true });
+fs.mkdirSync(equipmentDocumentLibraryDir, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
 const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
-const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 25 * 1024 * 1024 } });
+const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
+const machineDocumentUpload = multer({ storage: multer.memoryStorage(), limits: { files: 20, fileSize: 50 * 1024 * 1024 } });
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
@@ -61,16 +123,39 @@ app.use('/uploads/branding', express.static(brandingUploadsDir, {
   },
 }));
 
-type Role = 'Admin' | 'Manager' | 'Maintenance Tech 3' | 'Maintenance Tech 2' | 'Maintenance Tech 1';
+type Role = PermissionRole;
 const roles: Role[] = ['Maintenance Tech 1', 'Maintenance Tech 2', 'Maintenance Tech 3', 'Manager', 'Admin'];
 const roleRank = (role: Role) => roles.indexOf(role);
 const canManageRole = (actor: Role, target: Role) => roleRank(actor) >= roleRank(target);
-const passwordOk = (p: string) => p.length >= 10 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[^A-Za-z0-9]/.test(p);
+const passwordRequirements = { minLength:10, uppercase:true, lowercase:true, number:true, symbol:true } as const;
+const passwordComplexityError = 'Temporary password must be at least 10 characters and include an uppercase letter, lowercase letter, number, and symbol.';
+const passwordOk = (p: unknown): p is string => typeof p === 'string' && p.length >= passwordRequirements.minLength && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[^A-Za-z0-9]/.test(p);
 const now = () => new Date().toISOString();
 const tempExpiry = () => new Date(Date.now() + 30 * 60 * 1000).toISOString();
+const serverStartedAt = now();
+type PresencePolicy = {
+  heartbeatIntervalMs:number;
+  rosterRefreshIntervalMs:number;
+  onlineTimeoutMs:number;
+  awayAfterMs:number;
+  writeThrottleMs:number;
+};
+function readPresencePolicy(): PresencePolicy {
+  const raw = JSON.parse(fs.readFileSync(path.join(repoRootPath, 'shared', 'presence-policy.json'), 'utf8')) as Partial<PresencePolicy>;
+  const keys: Array<keyof PresencePolicy> = ['heartbeatIntervalMs','rosterRefreshIntervalMs','onlineTimeoutMs','awayAfterMs','writeThrottleMs'];
+  for (const key of keys) {
+    if (!Number.isInteger(raw[key]) || Number(raw[key]) <= 0) throw new Error(`Invalid shared presence policy value: ${key}`);
+  }
+  if (Number(raw.heartbeatIntervalMs) >= Number(raw.onlineTimeoutMs)) throw new Error('Presence heartbeat interval must be shorter than the online timeout.');
+  if (Number(raw.writeThrottleMs) > Number(raw.heartbeatIntervalMs)) throw new Error('Presence write throttle cannot exceed the heartbeat interval.');
+  return raw as PresencePolicy;
+}
+const presencePolicy = Object.freeze(readPresencePolicy());
 
 let db = new DatabaseSync(dbPath);
+let facilityInfoService: FacilityInfoService | null = null;
 db.exec('PRAGMA journal_mode=WAL;');
+db.exec('PRAGMA foreign_keys=ON;');
 
 type SqlParam = string | number | bigint | Buffer | null;
 function all<T>(sql: string, params: SqlParam[] = []): T[] { return db.prepare(sql).all(...params) as T[]; }
@@ -80,9 +165,12 @@ function initDb() {
   db.exec(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, password_hash TEXT NOT NULL, force_password_change INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, is_owner_admin INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, temp_password_expires_at TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_login_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, actor_email TEXT, action TEXT NOT NULL, target_type TEXT, target_id TEXT, details_json TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, auth_session_ref_hash TEXT, visibility TEXT NOT NULL DEFAULT 'visible', disconnected_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, previous_role TEXT, new_role TEXT NOT NULL, assigned_by_user_id INTEGER, assigned_at TEXT NOT NULL, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(assigned_by_user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by_user_id INTEGER, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', website_url TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
-CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS inventory_vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_normalized TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', website_url TEXT NOT NULL DEFAULT '', address_line1 TEXT NOT NULL DEFAULT '', address_line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', postal_code TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT 'USA', contact_name TEXT NOT NULL DEFAULT '', contact_title TEXT NOT NULL DEFAULT '', contact_phone_type TEXT NOT NULL DEFAULT '', contact_phone_number TEXT NOT NULL DEFAULT '', contact_phone_normalized TEXT NOT NULL DEFAULT '', contact_phone_ext TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_normalized TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS inventory_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, mit3_item_id TEXT, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', location_id INTEGER, vendor_id INTEGER, quantity REAL NOT NULL DEFAULT 0, min_quantity REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', requisition TEXT NOT NULL DEFAULT '', part_info_url TEXT NOT NULL DEFAULT '', manufacturer_brand TEXT NOT NULL DEFAULT '', unit_cost REAL NOT NULL DEFAULT 0, supplier_part_number TEXT NOT NULL DEFAULT '', lead_time TEXT NOT NULL DEFAULT '', important_note TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'mcc', imported_from_mit3_at TEXT, created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS inventory_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
@@ -91,11 +179,20 @@ CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY A
 CREATE TABLE IF NOT EXISTS requisition_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Open', is_general INTEGER NOT NULL DEFAULT 0, created_by_user_id INTEGER, updated_by_user_id INTEGER, converted_at TEXT, closed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS requisition_batch_requisitions (batch_id INTEGER NOT NULL, requisition_id INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (batch_id,requisition_id));
 CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER, inventory_part_id INTEGER, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', supplier_part_number TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, location_name TEXT NOT NULL DEFAULT '', asset_machine TEXT NOT NULL DEFAULT '', work_order_number TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'Normal', notes TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL DEFAULT '', date_added TEXT NOT NULL, needed_by_date TEXT, status TEXT NOT NULL DEFAULT 'Need to Order', created_requisition_id INTEGER, created_requisition_number TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, removed_by_user_id INTEGER, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', setup_type TEXT NOT NULL DEFAULT 'Standard Injection', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS machine_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES machine_document_folders(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS equipment_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, equipment_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', equipment_type TEXT NOT NULL DEFAULT '', manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', equipment_year TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', criticality TEXT NOT NULL DEFAULT '', power_type TEXT NOT NULL DEFAULT '', voltage TEXT NOT NULL DEFAULT '', phase TEXT NOT NULL DEFAULT '', amperage TEXT NOT NULL DEFAULT '', air_requirement TEXT NOT NULL DEFAULT '', water_requirement TEXT NOT NULL DEFAULT '', capacity_rating TEXT NOT NULL DEFAULT '', dimensions TEXT NOT NULL DEFAULT '', weight TEXT NOT NULL DEFAULT '', specification_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS equipment_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS equipment_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS equipment_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS equipment_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES equipment_document_folders(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
@@ -121,6 +218,22 @@ CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_compone
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);
+CREATE INDEX IF NOT EXISTS idx_machine_document_folders_asset ON machine_document_folders (asset_id,name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_asset_folder ON machine_documents (asset_id,folder_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_documents_unique_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_asset_number ON equipment_assets (asset_number COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_category ON equipment_assets (category COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_status ON equipment_assets (status,deleted);
+CREATE INDEX IF NOT EXISTS idx_equipment_asset_notes_asset_date ON equipment_asset_notes (asset_id,note_date DESC,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_equipment_asset_note_attachments_note ON equipment_asset_note_attachments (note_id);
+CREATE INDEX IF NOT EXISTS idx_equipment_document_folders_asset ON equipment_document_folders (asset_id,name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_equipment_documents_asset_folder ON equipment_documents (asset_id,folder_id,updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_documents_unique_display_name ON equipment_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_library,asset_id,active,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
+CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
 CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
 CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
@@ -130,9 +243,30 @@ CREATE INDEX IF NOT EXISTS idx_history_logs_part_number ON history_logs (part_nu
 CREATE INDEX IF NOT EXISTS idx_history_logs_requisition_number ON history_logs (requisition_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_history_logs_asset_id ON history_logs (asset_id COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_history_logs_entity_label ON history_logs (entity_label COLLATE NOCASE);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_presence_user ON user_presence_sessions (user_id,logged_out_at,last_heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user ON user_role_assignments (user_id,assigned_at DESC,id DESC);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
 }
 initDb();
 function migrateDb() {
+  db.exec(`CREATE TABLE IF NOT EXISTS user_presence_sessions (session_ref_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, last_heartbeat_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, logged_out_at TEXT, created_at TEXT NOT NULL, auth_session_ref_hash TEXT, visibility TEXT NOT NULL DEFAULT 'visible', disconnected_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, previous_role TEXT, new_role TEXT NOT NULL, assigned_by_user_id INTEGER, assigned_at TEXT NOT NULL, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(assigned_by_user_id) REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS user_permission_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, permission_key TEXT NOT NULL, granted_by_user_id INTEGER NOT NULL, granted_at TEXT NOT NULL, expires_at TEXT, revoked_at TEXT, revoked_by_user_id INTEGER, reason TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(granted_by_user_id) REFERENCES users(id), FOREIGN KEY(revoked_by_user_id) REFERENCES users(id));
+CREATE INDEX IF NOT EXISTS idx_user_presence_user ON user_presence_sessions (user_id,logged_out_at,last_heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user ON user_role_assignments (user_id,assigned_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_permission_grants_user ON user_permission_grants (user_id,revoked_at,expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_permission_grants (user_id,permission_key) WHERE revoked_at IS NULL;`);
+  const presenceColumns = new Set(all<{ name: string }>('PRAGMA table_info(user_presence_sessions)').map(column => column.name));
+  if (!presenceColumns.has('auth_session_ref_hash')) run('ALTER TABLE user_presence_sessions ADD COLUMN auth_session_ref_hash TEXT');
+  if (!presenceColumns.has('visibility')) run("ALTER TABLE user_presence_sessions ADD COLUMN visibility TEXT NOT NULL DEFAULT 'visible'");
+  if (!presenceColumns.has('disconnected_at')) run('ALTER TABLE user_presence_sessions ADD COLUMN disconnected_at TEXT');
+  run("UPDATE user_presence_sessions SET auth_session_ref_hash=session_ref_hash WHERE auth_session_ref_hash IS NULL OR auth_session_ref_hash=''");
+  run("UPDATE user_presence_sessions SET visibility='visible' WHERE visibility IS NULL OR visibility NOT IN ('visible','hidden')");
+  db.exec('CREATE INDEX IF NOT EXISTS idx_user_presence_auth_session ON user_presence_sessions (auth_session_ref_hash,user_id,logged_out_at,disconnected_at,last_heartbeat_at)');
+  // Live state cannot survive a process restart or database restore. A still-valid
+  // browser session becomes live again only after its next authenticated heartbeat.
+  run('UPDATE user_presence_sessions SET logged_out_at=? WHERE logged_out_at IS NULL', [serverStartedAt]);
   const userColumns = new Set(all<{ name: string }>('PRAGMA table_info(users)').map(column => column.name));
   if (!userColumns.has('is_owner_admin')) run('ALTER TABLE users ADD COLUMN is_owner_admin INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.has('deleted')) run('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
@@ -151,6 +285,7 @@ function migrateDb() {
   const vendorTextColumns = [
     'phone_type',
     'phone_number',
+    'phone_normalized',
     'phone_ext',
     'website_url',
     'address_line1',
@@ -162,6 +297,7 @@ function migrateDb() {
     'contact_title',
     'contact_phone_type',
     'contact_phone_number',
+    'contact_phone_normalized',
     'contact_phone_ext',
     'contact_email',
     'notes',
@@ -177,10 +313,10 @@ function migrateDb() {
   if (!inventoryVendorColumns.has('deleted_by_user_id')) run('ALTER TABLE inventory_vendors ADD COLUMN deleted_by_user_id INTEGER');
   run("UPDATE inventory_vendors SET country='USA' WHERE country IS NULL OR country=''");
   run('UPDATE inventory_vendors SET is_active=1 WHERE is_active IS NULL');
-  db.exec(`CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
+  db.exec(`CREATE TABLE IF NOT EXISTS vendor_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER NOT NULL, contact_name TEXT NOT NULL, contact_title TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone_type TEXT NOT NULL DEFAULT '', phone_number TEXT NOT NULL DEFAULT '', phone_normalized TEXT NOT NULL DEFAULT '', phone_ext TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', is_primary INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_vendor_contacts_vendor ON vendor_contacts (vendor_id,deleted,is_primary);`);
   const vendorContactColumns = new Set(all<{ name: string }>('PRAGMA table_info(vendor_contacts)').map(column => column.name));
-  const vendorContactTextColumns = ['contact_title','email','phone_type','phone_number','phone_ext','notes'];
+  const vendorContactTextColumns = ['contact_title','email','phone_type','phone_number','phone_normalized','phone_ext','notes'];
   for (const column of vendorContactTextColumns) {
     if (!vendorContactColumns.has(column)) run(`ALTER TABLE vendor_contacts ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
   }
@@ -198,8 +334,18 @@ SELECT v.id,v.contact_name,v.contact_title,v.contact_email,CASE WHEN v.contact_p
 FROM inventory_vendors v
 WHERE (trim(COALESCE(v.contact_name,''))<>'' OR trim(COALESCE(v.contact_email,''))<>'' OR trim(COALESCE(v.contact_phone_number,''))<>'')
 AND NOT EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=v.id)`, [vendorContactMigrationTime,vendorContactMigrationTime]);
+  for (const vendor of all<{id:number;phone_number:string;contact_phone_number:string;country:string}>('SELECT id,phone_number,contact_phone_number,country FROM inventory_vendors')) {
+    run('UPDATE inventory_vendors SET phone_normalized=?, contact_phone_normalized=? WHERE id=?', [normalizePhoneForStorage(vendor.phone_number,vendor.country),normalizePhoneForStorage(vendor.contact_phone_number,vendor.country),vendor.id]);
+  }
+  for (const contact of all<{id:number;phone_number:string;country:string}>(`SELECT vc.id,vc.phone_number,v.country FROM vendor_contacts vc JOIN inventory_vendors v ON v.id=vc.vendor_id`)) {
+    run('UPDATE vendor_contacts SET phone_normalized=? WHERE id=?', [normalizePhoneForStorage(contact.phone_number,contact.country),contact.id]);
+  }
 
   const requisitionColumns = new Set(all<{ name: string }>('PRAGMA table_info(inventory_requisitions)').map(column => column.name));
+  if (!requisitionColumns.has('requested_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN requested_at TEXT');
+  if (!requisitionColumns.has('ordered_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN ordered_at TEXT');
+  if (!requisitionColumns.has('received_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN received_at TEXT');
+  if (!requisitionColumns.has('canceled_at')) run('ALTER TABLE inventory_requisitions ADD COLUMN canceled_at TEXT');
   if (!requisitionColumns.has('unit_cost')) run('ALTER TABLE inventory_requisitions ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0');
   if (!requisitionColumns.has('po_initiator')) run("ALTER TABLE inventory_requisitions ADD COLUMN po_initiator TEXT NOT NULL DEFAULT ''");
   if (!requisitionColumns.has('requisitioned_by_name')) run("ALTER TABLE inventory_requisitions ADD COLUMN requisitioned_by_name TEXT NOT NULL DEFAULT ''");
@@ -213,6 +359,32 @@ AND NOT EXISTS (SELECT 1 FROM vendor_contacts c WHERE c.vendor_id=v.id)`, [vendo
   run("UPDATE inventory_requisitions SET tax_exempt='No' WHERE tax_exempt IS NULL OR tax_exempt=''");
   run("UPDATE inventory_requisitions SET material_cert='No' WHERE material_cert IS NULL OR material_cert=''");
   run("UPDATE inventory_requisitions SET fob='Destination' WHERE fob IS NULL OR fob=''");
+  // Older databases use the earliest reliable matching history event. Creation time is
+  // the conservative final fallback: it can overstate an age, but never invents a newer clock.
+  run(`UPDATE inventory_requisitions AS requisition SET requested_at=COALESCE(
+    NULLIF(requested_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('requested','requested_from_staging','passed','requisition active create') OR new_value_json LIKE '%"status":"Requested"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE requested_at IS NULL OR requested_at=''`);
+  run(`UPDATE inventory_requisitions AS requisition SET ordered_at=COALESCE(
+    NULLIF(ordered_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('ordered','requisition ordered') OR new_value_json LIKE '%"status":"Ordered"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE status IN ('Ordered','Received') AND (ordered_at IS NULL OR ordered_at='')`);
+  run(`UPDATE inventory_requisitions AS requisition SET received_at=COALESCE(
+    NULLIF(received_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('received','requisition received') OR new_value_json LIKE '%"status":"Received"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE status='Received' AND (received_at IS NULL OR received_at='')`);
+  run(`UPDATE inventory_requisitions AS requisition SET canceled_at=COALESCE(
+    NULLIF(canceled_at,''),
+    (SELECT MIN(created_at) FROM history_logs WHERE section='requisitions' AND entity_id=CAST(requisition.id AS TEXT) AND (lower(action) IN ('canceled','requisition canceled') OR new_value_json LIKE '%"status":"Canceled"%')),
+    NULLIF(created_at,''),
+    NULLIF(updated_at,'')
+  ) WHERE status='Canceled' AND (canceled_at IS NULL OR canceled_at='')`);
   db.exec(`CREATE TABLE IF NOT EXISTS inventory_requisition_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, requisition_id INTEGER NOT NULL, inventory_part_id INTEGER NOT NULL, part_number TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', vendor_name TEXT NOT NULL DEFAULT '', location_name TEXT NOT NULL DEFAULT '', quantity_requested REAL NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0, unit_of_measure TEXT NOT NULL DEFAULT 'EA', item_number TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_req ON inventory_requisition_lines (requisition_id,deleted);
 CREATE INDEX IF NOT EXISTS idx_inventory_requisition_lines_part ON inventory_requisition_lines (inventory_part_id,deleted);`);
@@ -235,12 +407,16 @@ CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition
   }
   run('UPDATE requisition_staging_items SET batch_id=? WHERE batch_id IS NULL', [generalBatch.id]);
 
-  db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
+  db.exec(`CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', setup_type TEXT NOT NULL DEFAULT 'Standard Injection', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS machine_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES machine_document_folders(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_asset_number ON machine_assets (asset_number COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_brand ON machine_assets (brand COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_machine_assets_status ON machine_assets (status,deleted);
@@ -248,13 +424,30 @@ CREATE INDEX IF NOT EXISTS idx_machine_component_images_asset ON machine_compone
 CREATE INDEX IF NOT EXISTS idx_machine_inspection_records_asset_date ON machine_inspection_records (asset_id,record_date DESC,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_asset_date ON machine_asset_notes (asset_id,note_date DESC,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_asset_note_attachments (note_id);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_machine_document_folders_asset ON machine_document_folders (asset_id,name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_asset_folder ON machine_documents (asset_id,folder_id,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_machine_documents_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_documents_unique_display_name ON machine_documents (asset_id,folder_id,display_filename COLLATE NOCASE);`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
+CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);`);
+  const pmTaskColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_tasks)').map(column => column.name));
+  if (!pmTaskColumns.has('hold')) run('ALTER TABLE pm_tasks ADD COLUMN hold INTEGER NOT NULL DEFAULT 0');
+  if (!pmTaskColumns.has('client_request_id')) run('ALTER TABLE pm_tasks ADD COLUMN client_request_id TEXT');
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_tasks_client_request ON pm_tasks (client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id<>'';");
+  run('UPDATE pm_tasks SET hold=0 WHERE hold IS NULL');
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
+  if (!pmTaskColumns.has('asset_library')) run("ALTER TABLE pm_tasks ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
+  const pmHistoryColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_history)').map(column => column.name));
+  if (!pmHistoryColumns.has('asset_library')) run("ALTER TABLE pm_history ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('barrel_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('screw_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN screw_condition_status TEXT NOT NULL DEFAULT 'new'");
   if (!machineAssetColumns.has('barrel_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN barrel_condition_status TEXT NOT NULL DEFAULT 'new'");
   const machineInjectionColumns: Array<{ name: string; definition: string }> = [
+    { name: 'setup_type', definition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'has_double_shot_injection', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'has_plunger_injection', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'screw2_type', definition: "TEXT NOT NULL DEFAULT ''" },
@@ -297,6 +490,13 @@ CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_as
   for (const column of ['screw2_condition_status','barrel2_condition_status','plunger_condition_status','plunger_barrel_condition_status']) {
     run(`UPDATE machine_assets SET ${column}='new' WHERE ${column} IS NULL OR ${column}='' OR ${column} NOT IN ('new','used','worn','rebuilt_repaired')`);
   }
+  run(`UPDATE machine_assets
+    SET setup_type=CASE
+      WHEN has_double_shot_injection=1 THEN 'Two-Shot / 2K Injection'
+      WHEN has_plunger_injection=1 THEN 'Plunger Injection'
+      ELSE 'Standard Injection'
+    END
+    WHERE setup_type IS NULL OR trim(setup_type)='' OR setup_type='Other / Custom'`);
 
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
@@ -311,8 +511,88 @@ CREATE INDEX IF NOT EXISTS idx_machine_asset_note_attachments_note ON machine_as
 migrateDb();
 
 interface User { id:number; full_name:string; email:string; role:Role; password_hash:string; force_password_change:number; disabled:number; is_owner_admin:number; deleted:number; deleted_at?:string; deleted_by_user_id?:number; temp_password_expires_at?:string; created_by_user_id?:number; created_at:string; updated_at:string; last_login_at?:string }
+const canViewSystemVersion = (user: User) => user.role === 'Admin';
+interface PermissionGrantRow {
+  id:number;
+  user_id:number;
+  permission_key:string;
+  granted_by_user_id:number;
+  granted_by_name:string;
+  granted_at:string;
+  expires_at:string|null;
+  revoked_at:string|null;
+  revoked_by_user_id:number|null;
+  reason:string|null;
+}
+interface PresenceSessionRow {
+  session_ref_hash:string;
+  user_id:number;
+  last_heartbeat_at:string;
+  last_activity_at:string;
+  logged_out_at:string|null;
+  created_at:string;
+  auth_session_ref_hash:string|null;
+  visibility:'visible'|'hidden';
+  disconnected_at:string|null;
+}
+interface RoleAssignmentRow {
+  id:number;
+  user_id:number;
+  previous_role:Role|null;
+  new_role:Role;
+  assigned_by_user_id:number|null;
+  assigned_by_name:string|null;
+  assigned_at:string;
+  reason:string|null;
+}
 interface AuthRequest extends Request { user?: User; sessionId?: string }
-const publicUser = (u: User) => ({ id:u.id, fullName:u.full_name, email:u.email, role:u.role, isOwnerAdmin:!!u.is_owner_admin, forcePasswordChange:!!u.force_password_change, disabled:!!u.disabled, createdByUserId:u.created_by_user_id ?? null, createdAt:u.created_at, updatedAt:u.updated_at, lastLoginAt:u.last_login_at ?? null });
+function activeSpecialGrants(userId:number) {
+  return all<PermissionGrantRow>(`SELECT g.*,COALESCE(grantor.full_name,'Unknown user') AS granted_by_name
+    FROM user_permission_grants g
+    LEFT JOIN users grantor ON grantor.id=g.granted_by_user_id
+    WHERE g.user_id=? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>?)
+    ORDER BY g.permission_key,g.granted_at`,[userId,now()])
+    .filter(grant=>isPermissionKey(grant.permission_key));
+}
+function publicPermissionGrant(grant:PermissionGrantRow) {
+  const definition=permissionByKey.get(grant.permission_key as PermissionKey)!;
+  return {
+    id:grant.id,
+    permissionKey:grant.permission_key as PermissionKey,
+    label:definition.label,
+    module:definition.module,
+    moduleLabel:definition.moduleLabel,
+    moduleShortLabel:definition.moduleShortLabel,
+    grantedByUserId:grant.granted_by_user_id,
+    grantedBy:grant.granted_by_name,
+    grantedAt:grant.granted_at,
+    expiresAt:grant.expires_at,
+    reason:grant.reason,
+  };
+}
+function getEffectivePermissions(user:User) {
+  const permissions=new Set<PermissionKey>(roleBasePermissions[user.role]);
+  for(const grant of activeSpecialGrants(user.id)) permissions.add(grant.permission_key as PermissionKey);
+  return permissions;
+}
+function hasPermission(user:User,permission:PermissionKey) {
+  return getEffectivePermissions(user).has(permission);
+}
+const publicUser = (u: User) => ({
+  id:u.id,
+  fullName:u.full_name,
+  email:u.email,
+  role:u.role,
+  isOwnerAdmin:!!u.is_owner_admin,
+  canViewSystemVersion:canViewSystemVersion(u),
+  forcePasswordChange:!!u.force_password_change,
+  disabled:!!u.disabled,
+  createdByUserId:u.created_by_user_id ?? null,
+  createdAt:u.created_at,
+  updatedAt:u.updated_at,
+  lastLoginAt:u.last_login_at ?? null,
+  effectivePermissions:[...getEffectivePermissions(u)],
+});
 const userCount = () => one<{count:number}>('SELECT COUNT(*) as count FROM users WHERE deleted=0')?.count ?? 0;
 const findUserByEmail = (email: string) => one<User>('SELECT * FROM users WHERE deleted=0 AND lower(email)=lower(?)', [email.trim()]);
 const findUserById = (id: number) => one<User>('SELECT * FROM users WHERE deleted=0 AND id=?', [Number(id)]);
@@ -322,8 +602,72 @@ function verifyPassword(password: string, stored: string) { const [, salt, hash]
 function sign(id: string) { return `${id}.${crypto.createHmac('sha256', sessionSecret).update(id).digest('hex')}`; }
 function unsign(cookie?: string) { if (!cookie) return; const [id, sig] = cookie.split('.'); if (!id || !sig) return; return sign(id) === cookie ? id : undefined; }
 function cookie(req: Request, name: string) { return req.headers.cookie?.split(';').map(x=>x.trim()).find(x=>x.startsWith(`${name}=`))?.split('=').slice(1).join('='); }
-function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run('INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES (?,?,?,?)', [id,userId,exp,now()]); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); }
-function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) run('DELETE FROM sessions WHERE id=?', [req.sessionId]); res.clearCookie('mcc_session', { path: '/' }); }
+function presenceSessionHash(sessionId:string) {
+  return crypto.createHmac('sha256',sessionSecret).update(`mcc-presence:${sessionId}`).digest('hex');
+}
+function presenceClientHash(sessionId:string,clientInstanceId:string) {
+  return crypto.createHmac('sha256',sessionSecret).update(`mcc-presence:${sessionId}:${clientInstanceId}`).digest('hex');
+}
+const presenceClientIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function validatePresenceClientId(value:unknown) {
+  if(typeof value!=='string'||!presenceClientIdPattern.test(value)) throw new Error('Presence client identifier is invalid.');
+  return value.toLowerCase();
+}
+function validatePresenceBodyKeys(body:Record<string,unknown>,allowed:string[]) {
+  const unexpected=Object.keys(body).filter(key=>!allowed.includes(key));
+  if(unexpected.length) throw new Error('Presence requests cannot submit user, session, or unsupported fields.');
+}
+function validatedPresenceHeartbeat(value:unknown) {
+  if(!isRecord(value)) throw new Error('Presence heartbeat body is required.');
+  validatePresenceBodyKeys(value,['clientInstanceId','visibility','activitySinceLastHeartbeat','lastActivityAt']);
+  const clientInstanceId=validatePresenceClientId(value.clientInstanceId);
+  const visibility=value.visibility;
+  if(visibility!=='visible'&&visibility!=='hidden') throw new Error('Presence visibility must be visible or hidden.');
+  if(typeof value.activitySinceLastHeartbeat!=='boolean') throw new Error('Presence activity flag must be boolean.');
+  if(typeof value.lastActivityAt!=='string'||value.lastActivityAt.length>40) throw new Error('Presence last activity time is invalid.');
+  const lastActivityDate=new Date(value.lastActivityAt);
+  if(Number.isNaN(lastActivityDate.getTime())||lastActivityDate.toISOString()!==value.lastActivityAt) throw new Error('Presence last activity time must be an ISO timestamp.');
+  return {clientInstanceId,visibility:visibility as 'visible'|'hidden',activitySinceLastHeartbeat:value.activitySinceLastHeartbeat,lastActivityAt:value.lastActivityAt};
+}
+function validatedPresenceDisconnect(value:unknown) {
+  if(!isRecord(value)) throw new Error('Presence disconnect body is required.');
+  validatePresenceBodyKeys(value,['clientInstanceId']);
+  return validatePresenceClientId(value.clientInstanceId);
+}
+function recordPresenceHeartbeat(sessionId:string,userId:number,clientInstanceId:string,visibility:'visible'|'hidden',activity:boolean) {
+  const timestamp=now();
+  const authSessionRefHash=presenceSessionHash(sessionId);
+  const sessionRefHash=presenceClientHash(sessionId,clientInstanceId);
+  const existing=one<PresenceSessionRow>('SELECT * FROM user_presence_sessions WHERE session_ref_hash=?',[sessionRefHash]);
+  const heartbeatAge=existing?Date.now()-Date.parse(existing.last_heartbeat_at):Number.POSITIVE_INFINITY;
+  const activityAge=existing?Date.now()-Date.parse(existing.last_activity_at):Number.POSITIVE_INFINITY;
+  const shouldWrite=!existing||Boolean(existing.logged_out_at)||Boolean(existing.disconnected_at)||existing.visibility!==visibility||heartbeatAge>=presencePolicy.writeThrottleMs||(activity&&activityAge>=presencePolicy.writeThrottleMs);
+  if(shouldWrite) {
+    run(`INSERT INTO user_presence_sessions (session_ref_hash,user_id,last_heartbeat_at,last_activity_at,logged_out_at,created_at,auth_session_ref_hash,visibility,disconnected_at)
+      VALUES (?,?,?,?,NULL,?,?,?,NULL)
+      ON CONFLICT(session_ref_hash) DO UPDATE SET user_id=excluded.user_id,auth_session_ref_hash=excluded.auth_session_ref_hash,
+      last_heartbeat_at=excluded.last_heartbeat_at,last_activity_at=CASE WHEN ?=1 THEN excluded.last_activity_at ELSE user_presence_sessions.last_activity_at END,
+      logged_out_at=NULL,visibility=excluded.visibility,disconnected_at=NULL`,
+    [sessionRefHash,userId,timestamp,timestamp,timestamp,authSessionRefHash,visibility,activity?1:0]);
+  }
+  return {serverTime:timestamp,written:shouldWrite};
+}
+function markPresenceClientDisconnected(sessionId:string,clientInstanceId:string) {
+  const result=run(`UPDATE user_presence_sessions SET disconnected_at=COALESCE(disconnected_at,?)
+    WHERE session_ref_hash=? AND auth_session_ref_hash=?`,[now(),presenceClientHash(sessionId,clientInstanceId),presenceSessionHash(sessionId)]);
+  return Number(result.changes)>0;
+}
+function markPresenceSessionOffline(sessionId:string) {
+  const authSessionRefHash=presenceSessionHash(sessionId);
+  run(`UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?)
+    WHERE auth_session_ref_hash=? OR (auth_session_ref_hash IS NULL AND session_ref_hash=?)`,[now(),authSessionRefHash,authSessionRefHash]);
+}
+function invalidateUserSessions(userId:number) {
+  run('UPDATE user_presence_sessions SET logged_out_at=COALESCE(logged_out_at,?) WHERE user_id=?',[now(),userId]);
+  return Number(run('DELETE FROM sessions WHERE user_id=?',[userId]).changes);
+}
+function setSession(res: Response, userId: number) { const id = crypto.randomBytes(32).toString('hex'); const exp = new Date(Date.now()+8*60*60*1000).toISOString(); run('INSERT INTO sessions (id,user_id,expires_at,created_at) VALUES (?,?,?,?)', [id,userId,exp,now()]); res.cookie('mcc_session', sign(id), { httpOnly:true, sameSite:'lax', secure:isProd, maxAge:8*60*60*1000, path:'/' }); return id; }
+function clearSession(req: AuthRequest, res: Response) { if (req.sessionId) { markPresenceSessionOffline(req.sessionId); run('DELETE FROM sessions WHERE id=?', [req.sessionId]); } res.clearCookie('mcc_session', { path: '/' }); }
 function audit(req: Request, action: string, targetType?: string, targetId?: string|number, details: Record<string, unknown> = {}) { const u = (req as AuthRequest).user; run('INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [u?.id ?? null,u?.email ?? '',action,targetType ?? '',String(targetId ?? ''),JSON.stringify(details),req.ip ?? '',req.get('user-agent') ?? '',now()]); auditWriteBackup(req, action); }
 function shouldScheduleDailyBackupFromAudit(action: string) {
   const value = action.toLowerCase();
@@ -549,19 +893,261 @@ function safeBrandingFileName(originalName: string, extension: string) {
   const base = path.basename(originalName, path.extname(originalName)).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || 'company-logo';
   return `${base}-${crypto.randomBytes(8).toString('hex')}${extension}`;
 }
-function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
+function createUser(input: {fullName:string; email:string; role:Role; password:string; force?: boolean; owner?: boolean; createdBy?: number|null}) { const t=now(); const result = run('INSERT INTO users (full_name,email,role,password_hash,force_password_change,is_owner_admin,temp_password_expires_at,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [input.fullName,input.email,input.role,hashPassword(input.password),input.force?1:0,input.owner?1:0,input.force?tempExpiry():null,input.createdBy ?? null,t,t]); return Number(result.lastInsertRowid); }
+function recordRoleAssignment(input:{userId:number;previousRole:Role|null;newRole:Role;assignedByUserId:number|null;assignedAt?:string;reason?:string|null}) {
+  run('INSERT INTO user_role_assignments (user_id,previous_role,new_role,assigned_by_user_id,assigned_at,reason) VALUES (?,?,?,?,?,?)',[
+    input.userId,input.previousRole,input.newRole,input.assignedByUserId,input.assignedAt??now(),input.reason?.trim().slice(0,500)||null,
+  ]);
+}
+function roleProvenance(user:User) {
+  const assignment=one<RoleAssignmentRow>(`SELECT assignment.*,assigner.full_name AS assigned_by_name
+    FROM user_role_assignments assignment
+    LEFT JOIN users assigner ON assigner.id=assignment.assigned_by_user_id
+    WHERE assignment.user_id=? AND assignment.new_role=?
+    ORDER BY assignment.assigned_at DESC,assignment.id DESC LIMIT 1`,[user.id,user.role]);
+  if(assignment) {
+    const sourceAvailable=Boolean(assignment.assigned_by_name);
+    return {
+      currentRank:user.is_owner_admin?'Owner Admin':user.role,
+      assignedBy:assignment.assigned_by_name,
+      assignedAt:assignment.assigned_at,
+      previousRank:assignment.previous_role,
+      reason:assignment.reason,
+      assignmentSourceAvailable:sourceAvailable,
+      source:sourceAvailable?'role_assignment_history':'unavailable',
+    };
+  }
+  if(user.is_owner_admin) {
+    return {
+      currentRank:'Owner Admin',
+      assignedBy:'System bootstrap',
+      assignedAt:user.created_at,
+      previousRank:null,
+      reason:null,
+      assignmentSourceAvailable:true,
+      source:'system_bootstrap',
+    };
+  }
+  return {
+    currentRank:user.role,
+    assignedBy:null,
+    assignedAt:null,
+    previousRank:null,
+    reason:null,
+    assignmentSourceAvailable:false,
+    source:'unavailable',
+  };
+}
+type PresenceState='Online'|'Away'|'Offline';
+type UserPresenceSummary={presence:PresenceState;lastSeenAt:string|null};
+function latestPresenceTimestamp(values:Array<string|null|undefined>) {
+  return values.filter((value):value is string=>Boolean(value)).sort((left,right)=>right.localeCompare(left))[0]??null;
+}
+function presenceByUser(users:User[],serverTime=now()) {
+  const serverMillis=Date.parse(serverTime);
+  const validSessions=all<{id:string;user_id:number}>('SELECT id,user_id FROM sessions WHERE expires_at>?',[serverTime]);
+  const validPresenceHashes=new Map(validSessions.map(session=>[presenceSessionHash(session.id),session.user_id]));
+  const presenceRows=all<PresenceSessionRow>('SELECT * FROM user_presence_sessions ORDER BY last_heartbeat_at DESC');
+  const rowsByUser=new Map<number,PresenceSessionRow[]>();
+  for(const row of presenceRows) rowsByUser.set(row.user_id,[...(rowsByUser.get(row.user_id)??[]),row]);
+  const summaries=new Map<number,UserPresenceSummary>();
+  for(const user of users) {
+    const userRows=rowsByUser.get(user.id)??[];
+    const liveRows=user.disabled?[]:userRows.filter(row=>{
+      const heartbeatMillis=Date.parse(row.last_heartbeat_at);
+      const heartbeatAge=serverMillis-heartbeatMillis;
+      const authSessionRefHash=row.auth_session_ref_hash||row.session_ref_hash;
+      return !row.logged_out_at&&!row.disconnected_at
+        &&validPresenceHashes.get(authSessionRefHash)===user.id
+        &&Number.isFinite(heartbeatAge)&&heartbeatAge>=0&&heartbeatAge<=presencePolicy.onlineTimeoutMs;
+    });
+    const hasOnlineSession=liveRows.some(row=>{
+      const activityAge=serverMillis-Date.parse(row.last_activity_at);
+      return row.visibility==='visible'&&Number.isFinite(activityAge)&&activityAge>=0&&activityAge<=presencePolicy.awayAfterMs;
+    });
+    const presence:PresenceState=hasOnlineSession?'Online':liveRows.length?'Away':'Offline';
+    const lastSeenAt=presence==='Online'
+      ?latestPresenceTimestamp(liveRows.filter(row=>row.visibility==='visible').map(row=>row.last_activity_at))
+      :presence==='Away'
+        ?latestPresenceTimestamp(liveRows.map(row=>row.last_activity_at))
+        :latestPresenceTimestamp(userRows.map(row=>row.last_heartbeat_at));
+    summaries.set(user.id,{presence,lastSeenAt});
+  }
+  return summaries;
+}
+function maintenanceTeamRoster(currentUser:User) {
+  const serverTime=now();
+  const users=all<User>('SELECT * FROM users WHERE deleted=0 ORDER BY full_name COLLATE NOCASE,id');
+  const summaries=presenceByUser(users,serverTime);
+  const stateOrder={Online:0,Away:1,Offline:2} as const;
+  const roster=users.map(user=>{
+    const summary=summaries.get(user.id)??{presence:'Offline' as const,lastSeenAt:null};
+    return {
+      id:user.id,
+      fullName:user.full_name,
+      role:user.role,
+      isOwnerAdmin:Boolean(user.is_owner_admin),
+      disabled:Boolean(user.disabled),
+      isCurrentUser:user.id===currentUser.id,
+      presence:summary.presence,
+      lastSeenAt:summary.lastSeenAt,
+      rankProvenance:roleProvenance(user),
+      specialPermissionGrants:activeSpecialGrants(user.id).map(publicPermissionGrant),
+    };
+  }).sort((left,right)=>{
+    if(left.isCurrentUser!==right.isCurrentUser)return left.isCurrentUser?-1:1;
+    if(left.disabled!==right.disabled)return left.disabled?1:-1;
+    const stateDifference=stateOrder[left.presence]-stateOrder[right.presence];
+    if(stateDifference)return stateDifference;
+    if(left.presence==='Offline'&&left.lastSeenAt!==right.lastSeenAt)return String(right.lastSeenAt??'').localeCompare(String(left.lastSeenAt??''));
+    return left.fullName.localeCompare(right.fullName,undefined,{sensitivity:'base'});
+  });
+  const activeRoster=roster.filter(user=>!user.disabled);
+  return {
+    serverTime,
+    policy:presencePolicy,
+    totalUsers:roster.length,
+    activeUsers:activeRoster.length,
+    onlineCount:activeRoster.filter(user=>user.presence==='Online').length,
+    awayCount:activeRoster.filter(user=>user.presence==='Away').length,
+    offlineCount:activeRoster.filter(user=>user.presence==='Offline').length,
+    disabledCount:roster.filter(user=>user.disabled).length,
+    users:roster,
+  };
+}
 const loginHits = new Map<string, number[]>(), forgotHits = new Map<string, number[]>();
+const systemUpdateCheckHits = new Map<string, number[]>(), systemUpdateInstallHits = new Map<string, number[]>();
+let lastSystemUpdateAvailabilityCode = '';
 function limited(map: Map<string, number[]>, key: string, max: number, windowMs: number) { const t=Date.now(); const a=(map.get(key)??[]).filter(x=>t-x<windowMs); a.push(t); map.set(key,a); return a.length>max; }
+function updateRateLimitRetryAfter(map:Map<string,number[]>,key:string,windowMs:number){
+  const hits=map.get(key)??[];
+  return Math.max(1,Math.ceil((windowMs-(Date.now()-(hits[0]??Date.now())))/1000));
+}
+function systemUpdateIdentity(user:User):UpdateIdentity {
+  return {id:user.id,name:user.full_name.replace(/\s+/g,' ').trim().slice(0,120)};
+}
+function systemUpdateCsrfToken(req:AuthRequest) {
+  if(!req.sessionId) return '';
+  return crypto.createHmac('sha256',sessionSecret).update(`mcc-system-update:${req.sessionId}`).digest('base64url');
+}
+function safeTokenEqual(left:string,right:string) {
+  const leftBuffer=Buffer.from(left);
+  const rightBuffer=Buffer.from(right);
+  return leftBuffer.length===rightBuffer.length&&crypto.timingSafeEqual(leftBuffer,rightBuffer);
+}
+function validateSystemUpdateCsrf(req:AuthRequest) {
+  const fetchSite=String(req.get('sec-fetch-site')??'').toLowerCase();
+  if(fetchSite==='cross-site') return false;
+  const origin=req.get('origin');
+  if(origin) {
+    try {
+      const parsed=new URL(origin);
+      if(parsed.host!==req.get('host')) return false;
+      const expectedProtocol=req.secure?'https:':'http:';
+      if(parsed.protocol!==expectedProtocol) return false;
+    } catch {
+      return false;
+    }
+  }
+  const supplied=String(req.get('x-mcc-csrf-token')??'');
+  const expected=systemUpdateCsrfToken(req);
+  return Boolean(supplied&&expected&&safeTokenEqual(supplied,expected));
+}
+function systemUpdateAuditDetails(status:SystemUpdateStatus) {
+  return {
+    jobId:status.jobId,
+    requester:status.requester,
+    deploymentMode:status.mode,
+    installedVersion:status.installed.version,
+    installedCommit:status.installed.commit?.slice(0,7)??null,
+    targetVersion:status.target.version,
+    targetCommit:status.target.commit?.slice(0,7)??null,
+    requestedAt:status.requestedAt,
+    timestamp:status.lastUpdatedAt,
+    finalResult:status.outcome,
+  };
+}
+function recordSystemUpdateHistory(action:string,status:SystemUpdateStatus,actor:User|null,reasonNote:string) {
+  recordHistoryLog({
+    section:'settings',
+    action,
+    entityType:'system_update_job',
+    entityId:status.jobId??status.lastUpdatedAt,
+    entityLabel:status.target.version?`MCC v${status.target.version}`:'MCC system update',
+    newValue:systemUpdateAuditDetails(status),
+    reasonNote,
+    actor,
+    createdAt:status.lastUpdatedAt,
+  });
+}
+function reconcileExternalSystemUpdateEvents(status:SystemUpdateStatus) {
+  if(!status.jobId||!status.events.length)return;
+  const sawRollback=status.events.some(event=>event.state==='rolling_back');
+  const actions:Array<{eventId:string;auditAction:string;historyAction:string;message:string;at:string}>=[];
+  for(const event of status.events) {
+    if(event.state==='backing_up')actions.push({eventId:event.id,auditAction:'update started',historyAction:'update_started',message:event.message,at:event.at});
+    if(event.state==='succeeded')actions.push({eventId:event.id,auditAction:'update succeeded',historyAction:'update_succeeded',message:event.message,at:event.at});
+    if(event.state==='rolling_back') {
+      actions.push({eventId:`${event.id}:update_failed`,auditAction:'update failed',historyAction:'update_failed',message:'The new MCC build did not pass deployment verification.',at:event.at});
+      actions.push({eventId:event.id,auditAction:'rollback started',historyAction:'rollback_started',message:event.message,at:event.at});
+    }
+    if(event.state==='rolled_back')actions.push({eventId:event.id,auditAction:'rollback succeeded',historyAction:'rollback_succeeded',message:event.message,at:event.at});
+    if(event.state==='failed')actions.push({
+      eventId:event.id,
+      auditAction:sawRollback?'rollback failed':'update failed',
+      historyAction:sawRollback?'rollback_failed':'update_failed',
+      message:event.message,
+      at:event.at,
+    });
+  }
+  const actor=status.requester?findUserById(status.requester.id)??null:null;
+  for(const item of actions) {
+    if(one<{id:number}>('SELECT id FROM audit_log WHERE target_type=? AND target_id=? AND action=? LIMIT 1',['system_update_event',item.eventId,item.auditAction]))continue;
+    const eventStatus={...status,lastUpdatedAt:item.at};
+    const details={...systemUpdateAuditDetails(eventStatus),eventId:item.eventId,message:item.message};
+    run('INSERT INTO audit_log (actor_user_id,actor_email,action,target_type,target_id,details_json,ip_address,user_agent,created_at) VALUES (?,?,?,?,?,?,?,?,?)',[
+      actor?.id??status.requester?.id??null,
+      actor?.email??'',
+      item.auditAction,
+      'system_update_event',
+      item.eventId,
+      JSON.stringify(details),
+      '',
+      'external mcc update runner',
+      item.at,
+    ]);
+    recordSystemUpdateHistory(item.historyAction,eventStatus,actor,item.message);
+  }
+}
 function canUserManage(actor: User) { return actor.role !== 'Maintenance Tech 1'; }
 function canEditTarget(actor: User, target: User) { return canUserManage(actor) && !target.is_owner_admin && !target.deleted && canManageRole(actor.role, target.role); }
 function canToggleDisabledTarget(actor: User, target: User) { return canEditTarget(actor, target) && actor.id !== target.id; }
 function canDeleteTarget(actor: User, target: User) { return canEditTarget(actor, target) && actor.id !== target.id; }
-function publicUserForActor(u: User, actor: User) {
+function canResetPasswordTarget(actor:User,target:User) {
+  if(target.deleted||actor.id===target.id) return false;
+  if(!['Manager','Admin'].includes(actor.role)&&!actor.is_owner_admin) return false;
+  if(target.is_owner_admin) return Boolean(actor.is_owner_admin)&&actor.id!==target.id;
+  return actor.is_owner_admin||roleRank(actor.role)>roleRank(target.role);
+}
+function canDelegatePermissions(actor:User) {
+  return actor.is_owner_admin||roleRank(actor.role)>=roleRank('Maintenance Tech 3');
+}
+function canManagePermissionTarget(actor:User,target:User) {
+  if(!canDelegatePermissions(actor)||target.deleted||target.is_owner_admin||actor.id===target.id) return false;
+  if(actor.is_owner_admin) return true;
+  if(actor.role==='Maintenance Tech 3') return ['Maintenance Tech 1','Maintenance Tech 2'].includes(target.role);
+  return roleRank(actor.role)>roleRank(target.role);
+}
+function publicUserForActor(u: User, actor: User, presence?:UserPresenceSummary) {
   return {
     ...publicUser(u),
     canEdit: canEditTarget(actor, u),
     canDisable: canToggleDisabledTarget(actor, u),
     canDelete: canDeleteTarget(actor, u),
+    canResetPassword: canResetPasswordTarget(actor,u),
+    canManagePermissions: canManagePermissionTarget(actor,u),
+    specialPermissionGrants: activeSpecialGrants(u.id).map(publicPermissionGrant),
+    ...(presence?{presence:presence.presence,lastSeenAt:presence.lastSeenAt}:{}),
   };
 }
 function safeErrorMessage(error: unknown, extraSecrets: string[] = [], fallback = 'Unknown error.') {
@@ -873,6 +1459,7 @@ interface VendorRow {
   name: string;
   phone_type: string;
   phone_number: string;
+  phone_normalized: string;
   phone_ext: string;
   website_url: string;
   address_line1: string;
@@ -885,6 +1472,7 @@ interface VendorRow {
   contact_title: string;
   contact_phone_type: string;
   contact_phone_number: string;
+  contact_phone_normalized: string;
   contact_phone_ext: string;
   contact_email: string;
   notes: string;
@@ -907,6 +1495,7 @@ interface VendorContactRow {
   email: string;
   phone_type: string;
   phone_number: string;
+  phone_normalized: string;
   phone_ext: string;
   notes: string;
   is_primary: number;
@@ -920,6 +1509,56 @@ interface VendorContactRow {
 }
 const vendorPhoneTypes = new Set(['Mobile','Work','Cell','Office','Main','Other','']);
 const vendorContactPhoneTypes = new Set(['Cell','Mobile','Work','Office','Other','']);
+const usVendorStates = new Map<string,string>([
+  ['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['FL','Florida'],['GA','Georgia'],['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],['IN','Indiana'],['IA','Iowa'],['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],['ME','Maine'],['MD','Maryland'],['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],['MS','Mississippi'],['MO','Missouri'],['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],['NH','New Hampshire'],['NJ','New Jersey'],['NM','New Mexico'],['NY','New York'],['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],['OK','Oklahoma'],['OR','Oregon'],['PA','Pennsylvania'],['RI','Rhode Island'],['SC','South Carolina'],['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming'],['DC','District of Columbia'],
+]);
+function normalizeVendorCountry(value: string) {
+  const clean = value.trim();
+  if (!clean) return 'United States';
+  const normalized = clean.toLowerCase().replace(/\./g,'').replace(/\s+/g,' ');
+  if (['us','usa','united states','united states of america'].includes(normalized)) return 'United States';
+  return clean.slice(0,80);
+}
+function isUnitedStatesVendorCountry(value: string) {
+  return normalizeVendorCountry(value) === 'United States';
+}
+function normalizeVendorState(value: string, country: string) {
+  const clean=value.trim().slice(0,80);
+  if (!clean || !isUnitedStatesVendorCountry(country)) return clean;
+  const codeMatch=usVendorStates.get(clean.toUpperCase());
+  if (codeMatch) return codeMatch;
+  return [...usVendorStates.values()].find(name=>name.toLowerCase()===clean.toLowerCase()) ?? clean;
+}
+function normalizePhoneForStorage(value: string, country: string) {
+  const clean = String(value ?? '').trim();
+  const digits = clean.replace(/\D/g,'');
+  if (!digits) return '';
+  if (clean.startsWith('+')) return `+${digits}`;
+  if (isUnitedStatesVendorCountry(country)) {
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  }
+  return digits;
+}
+function formatUnitedStatesPhone(digits: string) {
+  const local = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  const formatted = `${local.slice(0,3)}-${local.slice(3,6)}-${local.slice(6,10)}`;
+  return digits.length === 11 ? `+1 ${formatted}` : formatted;
+}
+function validateAndNormalizeVendorPhone(value: string, country: string, label: string) {
+  const clean = value.trim();
+  if (!clean) return { display: '', normalized: '' };
+  if (clean.length > 80) throw new Error(`${label} must be 80 characters or less.`);
+  const digits = clean.replace(/\D/g,'');
+  if (isUnitedStatesVendorCountry(country)) {
+    const valid = digits.length === 10 || (digits.length === 11 && digits.startsWith('1'));
+    if (!valid) throw new Error(`${label} must contain a 10-digit United States number, with optional +1.`);
+    if (clean.startsWith('+') && !digits.startsWith('1')) throw new Error(`${label} must use the +1 country code for United States.`);
+    return { display: formatUnitedStatesPhone(digits), normalized: digits.length === 10 ? `+1${digits}` : `+${digits}` };
+  }
+  if (digits.length < 6 || digits.length > 15) throw new Error(`${label} must contain 6 to 15 digits for the selected country.`);
+  return { display: clean, normalized: clean.startsWith('+') ? `+${digits}` : digits };
+}
 function normalizePhoneType(value: string) {
   const clean = value.trim();
   if (!clean) return '';
@@ -956,16 +1595,16 @@ function cleanVendorWebsiteUrl(input: Record<string, unknown>) {
     throw new Error('Website URL must start with http:// or https://.');
   }
 }
-function validateVendorContactInput(body: unknown, requireName = true) {
+function validateVendorContactInput(body: unknown, requireName = true, country = 'United States') {
   const input = isRecord(body) ? body : {};
   const contactName = textField(input, ['contactName','contact_name','name']).replace(/\s+/g, ' ').trim();
   const contactTitle = textField(input, ['contactTitle','contact_title','title']).slice(0, 160);
   const email = textField(input, ['email','contactEmail','contact_email']).slice(0, 180);
   const phoneType = normalizeVendorContactPhoneType(textField(input, ['phoneType','phone_type','contactPhoneType','contact_phone_type']));
-  const phoneNumber = textField(input, ['phoneNumber','phone_number','phone','contactPhoneNumber','contact_phone_number']).slice(0, 80);
+  const phone = validateAndNormalizeVendorPhone(textField(input, ['phoneNumber','phone_number','phone','contactPhoneNumber','contact_phone_number']),country,'Contact Phone Number');
   const phoneExt = textField(input, ['phoneExt','phone_ext','ext','contactPhoneExt','contact_phone_ext']).slice(0, 20);
   const notes = textField(input, ['notes','contactNotes','contact_notes']).slice(0, 1200);
-  const hasAnyValue = Boolean(contactName || contactTitle || email || phoneType || phoneNumber || phoneExt || notes);
+  const hasAnyValue = Boolean(contactName || contactTitle || email || phoneType || phone.display || phoneExt || notes);
   if (!hasAnyValue && !requireName) return null;
   if (!contactName) throw new Error('Contact Name is required.');
   if (contactName.length > 160) throw new Error('Contact Name must be 160 characters or less.');
@@ -976,7 +1615,8 @@ function validateVendorContactInput(body: unknown, requireName = true) {
     contactTitle,
     email,
     phoneType,
-    phoneNumber,
+    phoneNumber: phone.display,
+    phoneNormalized: phone.normalized,
     phoneExt,
     notes,
     isPrimary: input.isPrimary === true || input.is_primary === 1 || String(input.isPrimary ?? input.is_primary).toLowerCase() === 'true' || String(input.isPrimary ?? input.is_primary).toLowerCase() === 'yes',
@@ -984,13 +1624,15 @@ function validateVendorContactInput(body: unknown, requireName = true) {
   };
 }
 type VendorContactInput = NonNullable<ReturnType<typeof validateVendorContactInput>>;
-function validateVendorContactInputs(body: unknown) {
+function validateVendorContactInputs(body: unknown, country: string) {
   if (!isRecord(body) || !Array.isArray(body.contacts)) return [];
-  return body.contacts.map(contact => validateVendorContactInput(contact, false)).filter(Boolean) as VendorContactInput[];
+  return body.contacts.map(contact => validateVendorContactInput(contact, false, country)).filter(Boolean) as VendorContactInput[];
 }
 function validateVendorInput(body: unknown) {
   const input = isRecord(body) ? body : {};
   const companyName = cleanVendorCompanyName(input);
+  const country = normalizeVendorCountry(textField(input, ['country'], 'United States'));
+  const phone = validateAndNormalizeVendorPhone(textField(input, ['phoneNumber','phone_number','phone']),country,'Company Phone #');
   const contactEmail = textField(input, ['contactEmail','contact_email']).slice(0, 180);
   if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new Error('Contact Email must be a valid email address.');
   const phoneExt = textField(input, ['phoneExt','phone_ext','ext']).slice(0, 20);
@@ -998,25 +1640,27 @@ function validateVendorInput(body: unknown) {
   return {
     companyName,
     phoneType: normalizePhoneType(textField(input, ['phoneType','phone_type'])),
-    phoneNumber: textField(input, ['phoneNumber','phone_number','phone']).slice(0, 80),
+    phoneNumber: phone.display,
+    phoneNormalized: phone.normalized,
     phoneExt,
     websiteUrl: cleanVendorWebsiteUrl(input),
     addressLine1: textField(input, ['addressLine1','address_line1','address']).slice(0, 180),
     addressLine2: textField(input, ['addressLine2','address_line2']).slice(0, 180),
     city: textField(input, ['city']).slice(0, 120),
-    state: textField(input, ['state']).slice(0, 80),
+    state: normalizeVendorState(textField(input, ['state']),country),
     postalCode: textField(input, ['postalCode','postal_code','zip']).slice(0, 40),
-    country: textField(input, ['country'], 'USA').slice(0, 80) || 'USA',
+    country,
     contactName: textField(input, ['contactName','contact_name']).slice(0, 160),
     contactTitle: textField(input, ['contactTitle','contact_title']).slice(0, 160),
     contactPhoneType: normalizePhoneType(textField(input, ['contactPhoneType','contact_phone_type'])),
     contactPhoneNumber: textField(input, ['contactPhoneNumber','contact_phone_number','contactPhone']).slice(0, 80),
+    contactPhoneNormalized: normalizePhoneForStorage(textField(input, ['contactPhoneNumber','contact_phone_number','contactPhone']),country),
     contactPhoneExt,
     contactEmail,
     notes: textField(input, ['notes']).slice(0, 2000),
     isActive: input.isActive === undefined && input.is_active === undefined ? true : !(input.isActive === false || input.isActive === 0 || String(input.isActive ?? input.is_active).toLowerCase() === 'false' || String(input.isActive ?? input.is_active).toLowerCase() === 'disabled'),
     reasonNote: textField(input, ['reasonNote','reason']).slice(0, 1200),
-    contacts: validateVendorContactInputs(input),
+    contacts: validateVendorContactInputs(input,country),
   };
 }
 type VendorInput = ReturnType<typeof validateVendorInput>;
@@ -1043,6 +1687,7 @@ function publicVendorContact(row: VendorContactRow) {
     email: row.email ?? '',
     phoneType: row.phone_type ?? '',
     phoneNumber: row.phone_number ?? '',
+    phoneNormalized: row.phone_normalized ?? '',
     phoneExt: row.phone_ext ?? '',
     notes: row.notes ?? '',
     isPrimary: Boolean(row.is_primary),
@@ -1059,6 +1704,7 @@ function vendorContactHistoryValue(row: VendorContactRow | VendorContactInput) {
     email: row.email,
     phoneType: row.phoneType,
     phoneNumber: row.phoneNumber,
+    phoneNormalized: row.phoneNormalized,
     phoneExt: row.phoneExt,
     notes: row.notes,
     isPrimary: row.isPrimary,
@@ -1081,6 +1727,7 @@ function publicVendor(row: VendorRow) {
     companyName: row.name,
     phoneType: row.phone_type ?? '',
     phoneNumber: row.phone_number ?? '',
+    phoneNormalized: row.phone_normalized ?? '',
     phoneExt: row.phone_ext ?? '',
     websiteUrl: row.website_url ?? '',
     addressLine1: row.address_line1 ?? '',
@@ -1093,6 +1740,7 @@ function publicVendor(row: VendorRow) {
     contactTitle: row.contact_title ?? '',
     contactPhoneType: row.contact_phone_type ?? '',
     contactPhoneNumber: row.contact_phone_number ?? '',
+    contactPhoneNormalized: row.contact_phone_normalized ?? '',
     contactPhoneExt: row.contact_phone_ext ?? '',
     contactEmail: row.contact_email ?? '',
     notes: row.notes ?? '',
@@ -1112,6 +1760,7 @@ function vendorHistoryValue(row: VendorRow | VendorInput) {
     companyName: row.companyName,
     phoneType: row.phoneType,
     phoneNumber: row.phoneNumber,
+    phoneNormalized: row.phoneNormalized,
     phoneExt: row.phoneExt,
     websiteUrl: row.websiteUrl,
     addressLine1: row.addressLine1,
@@ -1124,6 +1773,7 @@ function vendorHistoryValue(row: VendorRow | VendorInput) {
     contactTitle: row.contactTitle,
     contactPhoneType: row.contactPhoneType,
     contactPhoneNumber: row.contactPhoneNumber,
+    contactPhoneNormalized: row.contactPhoneNormalized,
     contactPhoneExt: row.contactPhoneExt,
     contactEmail: row.contactEmail,
     notes: row.notes,
@@ -1159,13 +1809,13 @@ function recordVendorContactHistory(input: { action: string; actor: User; vendor
   });
 }
 function updateVendorRow(id: number, input: VendorInput, actor: User, timestamp: string) {
-  run(`UPDATE inventory_vendors SET name=?, phone_type=?, phone_number=?, phone_ext=?, website_url=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_ext=?, contact_email=?, notes=?, is_active=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
-    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.websiteUrl,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,actor.id,timestamp,id,
+  run(`UPDATE inventory_vendors SET name=?, phone_type=?, phone_number=?, phone_normalized=?, phone_ext=?, website_url=?, address_line1=?, address_line2=?, city=?, state=?, postal_code=?, country=?, contact_name=?, contact_title=?, contact_phone_type=?, contact_phone_number=?, contact_phone_normalized=?, contact_phone_ext=?, contact_email=?, notes=?, is_active=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, source='mcc', updated_by_user_id=?, updated_at=? WHERE id=?`, [
+    input.companyName,input.phoneType,input.phoneNumber,input.phoneNormalized,input.phoneExt,input.websiteUrl,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneNormalized,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,input.isActive ? 1 : 0,actor.id,timestamp,id,
   ]);
 }
 function insertVendorRow(input: VendorInput, actor: User, timestamp: string) {
-  const result = run(`INSERT INTO inventory_vendors (name,phone_type,phone_number,phone_ext,website_url,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_ext,contact_email,notes,is_active,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
-    input.companyName,input.phoneType,input.phoneNumber,input.phoneExt,input.websiteUrl,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,null,actor.id,actor.id,timestamp,timestamp,
+  const result = run(`INSERT INTO inventory_vendors (name,phone_type,phone_number,phone_normalized,phone_ext,website_url,address_line1,address_line2,city,state,postal_code,country,contact_name,contact_title,contact_phone_type,contact_phone_number,contact_phone_normalized,contact_phone_ext,contact_email,notes,is_active,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'mcc',?,?,?,?,?,0)`, [
+    input.companyName,input.phoneType,input.phoneNumber,input.phoneNormalized,input.phoneExt,input.websiteUrl,input.addressLine1,input.addressLine2,input.city,input.state,input.postalCode,input.country,input.contactName,input.contactTitle,input.contactPhoneType,input.contactPhoneNumber,input.contactPhoneNormalized,input.contactPhoneExt,input.contactEmail,input.notes,input.isActive ? 1 : 0,null,actor.id,actor.id,timestamp,timestamp,
   ]);
   return Number(result.lastInsertRowid);
 }
@@ -1193,16 +1843,16 @@ function ensureSinglePrimaryContact(vendorId: number, primaryContactId: number) 
   run('UPDATE vendor_contacts SET is_primary=0 WHERE vendor_id=? AND id<>?', [vendorId,primaryContactId]);
 }
 function insertVendorContact(vendorId: number, input: VendorContactInput, actor: User, timestamp: string) {
-  const result = run(`INSERT INTO vendor_contacts (vendor_id,contact_name,contact_title,email,phone_type,phone_number,phone_ext,notes,is_primary,deleted,created_at,updated_at,created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?)`, [
-    vendorId,input.contactName,input.contactTitle,input.email,input.phoneType,input.phoneNumber,input.phoneExt,input.notes,input.isPrimary ? 1 : 0,timestamp,timestamp,actor.id,actor.id,
+  const result = run(`INSERT INTO vendor_contacts (vendor_id,contact_name,contact_title,email,phone_type,phone_number,phone_normalized,phone_ext,notes,is_primary,deleted,created_at,updated_at,created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)`, [
+    vendorId,input.contactName,input.contactTitle,input.email,input.phoneType,input.phoneNumber,input.phoneNormalized,input.phoneExt,input.notes,input.isPrimary ? 1 : 0,timestamp,timestamp,actor.id,actor.id,
   ]);
   const contactId = Number(result.lastInsertRowid);
   if (input.isPrimary) ensureSinglePrimaryContact(vendorId, contactId);
   return contactId;
 }
 function updateVendorContact(vendorId: number, contactId: number, input: VendorContactInput, actor: User, timestamp: string) {
-  run(`UPDATE vendor_contacts SET contact_name=?, contact_title=?, email=?, phone_type=?, phone_number=?, phone_ext=?, notes=?, is_primary=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, updated_by_user_id=?, updated_at=? WHERE vendor_id=? AND id=?`, [
-    input.contactName,input.contactTitle,input.email,input.phoneType,input.phoneNumber,input.phoneExt,input.notes,input.isPrimary ? 1 : 0,input.deleted ? 0 : 1,input.deleted ? 0 : 1,input.deleted ? 0 : 1,actor.id,timestamp,vendorId,contactId,
+  run(`UPDATE vendor_contacts SET contact_name=?, contact_title=?, email=?, phone_type=?, phone_number=?, phone_normalized=?, phone_ext=?, notes=?, is_primary=?, deleted=CASE WHEN ?=1 THEN 0 ELSE deleted END, deleted_at=CASE WHEN ?=1 THEN NULL ELSE deleted_at END, deleted_by_user_id=CASE WHEN ?=1 THEN NULL ELSE deleted_by_user_id END, updated_by_user_id=?, updated_at=? WHERE vendor_id=? AND id=?`, [
+    input.contactName,input.contactTitle,input.email,input.phoneType,input.phoneNumber,input.phoneNormalized,input.phoneExt,input.notes,input.isPrimary ? 1 : 0,input.deleted ? 0 : 1,input.deleted ? 0 : 1,input.deleted ? 0 : 1,actor.id,timestamp,vendorId,contactId,
   ]);
   if (input.isPrimary) ensureSinglePrimaryContact(vendorId, contactId);
 }
@@ -1281,6 +1931,7 @@ function vendorImportRecordsFromCsv(buffer: Buffer) {
       return '';
     };
     const status = value('Status','Vendor Status','Active').toLowerCase();
+    const importCountry = value('Country') || 'United States';
     const contact = validateVendorContactInput({
       contactName: value('Contact Name'),
       contactTitle: value('Contact Title'),
@@ -1290,7 +1941,7 @@ function vendorImportRecordsFromCsv(buffer: Buffer) {
       phoneExt: value('Contact EXT #','Contact Ext'),
       notes: value('Contact Notes','Contact Note'),
       isPrimary: value('Primary Contact','Primary').toLowerCase() === 'yes' || value('Primary Contact','Primary').toLowerCase() === 'true' || value('Primary Contact','Primary') === '1',
-    }, false);
+    }, false, importCountry);
     return {
       rowNumber: rowIndex + 2,
       input: validateVendorInput({
@@ -1304,7 +1955,7 @@ function vendorImportRecordsFromCsv(buffer: Buffer) {
         city: value('City'),
         state: value('State'),
         postalCode: value('Postal Code','Zip'),
-        country: value('Country') || 'USA',
+        country: importCountry,
         contactName: value('Contact Name'),
         contactTitle: value('Contact Title'),
         contactPhoneType: value('Contact Phone Type'),
@@ -1702,7 +2353,9 @@ type BackupManifest = {
   includedPaths: string[];
   includedFolders: string[];
   recordCounts: Record<string, number>;
+  documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
+  fileChecksums?: Record<string,string>;
   notes: string;
 };
 type BackupSummary = {
@@ -1718,6 +2371,7 @@ type BackupSummary = {
   includedPaths: string[];
   includedFolders: string[];
   recordCounts: Record<string, number>;
+  documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
   notes: string;
   restorable: boolean;
@@ -1795,9 +2449,9 @@ const backupDataAreaDefinitions = [
   { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_batches','requisition_batch_requisitions','requisition_staging_items'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
   { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
-  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machines','machine_library','machine_pms'] },
-  { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment','equipment_library','equipment_pms'] },
-  { key: 'facilityRecords', label: 'Facility', tables: ['facility_documents','facility_info','building_prints','facility_pms'] },
+  { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms'] },
+  { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment_asset_notes','equipment_asset_note_attachments','equipment_document_folders','equipment_documents','equipment','equipment_library','equipment_pms'] },
+  { key: 'facilityRecords', label: 'Facility', tables: ['facility_areas','facility_folders','facility_items','facility_documents','facility_info','building_prints','facility_pms'] },
   { key: 'users', label: 'Users/Roles', tables: ['users'] },
   { key: 'settingsBranding', label: 'Settings/Branding', tables: ['app_settings'] },
 ] as const;
@@ -1839,6 +2493,18 @@ function sqliteLiteral(value: string) {
 function sha256File(filePath: string) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
+function backupFileChecksums(rootPath: string) {
+  const checksums: Record<string,string> = {};
+  function visit(currentPath: string) {
+    for (const entry of fs.readdirSync(currentPath,{withFileTypes:true}).sort((left,right)=>left.name.localeCompare(right.name))) {
+      const entryPath=path.join(currentPath,entry.name);
+      if (entry.isDirectory()) visit(entryPath);
+      else if (entry.isFile()&&entry.name!=='manifest.json') checksums[path.relative(rootPath,entryPath).split(path.sep).join('/')]=sha256File(entryPath);
+    }
+  }
+  visit(rootPath);
+  return checksums;
+}
 function safeFolderStamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
@@ -1876,11 +2542,26 @@ function masterBackupRecordCounts() {
     requisitionBatches: tableCount('requisition_batches'),
     requisitionStagingItems: tableCount('requisition_staging_items'),
     historyLogs: tableCount('history_logs'),
-    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machines','machine_library','machine_pms']),
-    equipmentRecords: tableGroupCount(['equipment_assets','equipment','equipment_library','equipment_pms']),
-    facilityRecords: tableGroupCount(['facility_documents','facility_info','building_prints','facility_pms']),
+    machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms']),
+    equipmentRecords: tableGroupCount(['equipment_assets','equipment_asset_notes','equipment_asset_note_attachments','equipment_document_folders','equipment_documents','equipment','equipment_library','equipment_pms']),
+    facilityRecords: tableGroupCount(['facility_areas','facility_folders','facility_items','facility_documents','facility_info','building_prints','facility_pms']),
     preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
   };
+}
+function machineDocumentLibraryBackupStats() {
+  const documentCount = tableCount('machine_documents');
+  const folderCount = tableCount('machine_document_folders');
+  let fileCount = 0;
+  function countFiles(folderPath: string) {
+    if (!fs.existsSync(folderPath)) return;
+    for (const entry of fs.readdirSync(folderPath,{withFileTypes:true})) {
+      const entryPath=path.join(folderPath,entry.name);
+      if (entry.isDirectory()) countFiles(entryPath);
+      else if (entry.isFile()) fileCount+=1;
+    }
+  }
+  countFiles(machineDocumentLibraryDir);
+  return { folderCount,documentCount,fileCount,sizeBytes:folderSizeBytes(machineDocumentLibraryDir) };
 }
 function masterBackupProtectedAreas(): ProtectedBackupArea[] {
   const counts = masterBackupRecordCounts();
@@ -1983,6 +2664,7 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     includedPaths: manifest?.includedPaths ?? (fs.existsSync(dbFile) ? ['mcc.sqlite'] : []),
     includedFolders: manifest?.includedFolders ?? (manifest?.includedPaths ?? []).filter(value=>value.endsWith('/')),
     recordCounts: manifest?.recordCounts ?? {},
+    documentLibrary: manifest?.documentLibrary,
     checksumSha256: manifest?.checksumSha256 ?? '',
     notes: manifest?.notes ?? '',
     restorable: fs.existsSync(dbFile),
@@ -2038,6 +2720,8 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
   const category = input.category;
   const type = input.type ?? defaultManualBackupType(category);
   try {
+    refreshMachineDocumentRecoveryMetadata();
+    facilityInfoService?.refreshRecoveryMetadata();
     ensureBackupCategoryDir(category);
     const createdAt = now();
     const folderName = `${backupPrefix(category)}${safeFolderStamp()}_${type}`;
@@ -2050,7 +2734,7 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
     const includedFolders: string[] = [];
     const fileTargetRoot = path.join(targetDir, 'files');
     for (const includedFolder of masterBackupFolderCandidates) {
-      const sourcePath = path.resolve(__dirname, '../../', includedFolder);
+      const sourcePath = appDataFolderPath(includedFolder);
       if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder))) {
         includedPaths.push(`${includedFolder}/`);
         includedFolders.push(`${includedFolder}/`);
@@ -2063,13 +2747,15 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
       backupType: type,
       createdAt,
       createdBy: actorForManifest(input.actor),
-      appVersion: version,
+      appVersion: applicationVersion ?? 'unavailable',
       databaseFile: 'mcc.sqlite',
       databaseSizeBytes,
       includedPaths,
       includedFolders,
       recordCounts: masterBackupRecordCounts(),
+      documentLibrary: machineDocumentLibraryBackupStats(),
       checksumSha256: sha256File(backupDbPath),
+      fileChecksums: backupFileChecksums(targetDir),
       notes: input.notes ?? '',
     };
     fs.writeFileSync(path.join(targetDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
@@ -2121,13 +2807,20 @@ function verifyBackup(category: BackupCategory, id: unknown) {
   const manifest = readBackupManifest(folderPath);
   const checksumSha256 = sha256File(dbFile);
   const checksumMatches = !manifest?.checksumSha256 || manifest.checksumSha256 === checksumSha256;
-  return { ok: checksumMatches, backup: summary, checksumSha256, message: checksumMatches ? 'Backup verified.' : 'Backup checksum does not match the manifest.' };
+  const missingOrChangedFiles=Object.entries(manifest?.fileChecksums??{}).filter(([relativePath,expected])=>{
+    const candidate=path.resolve(folderPath,...relativePath.split('/'));
+    return !candidate.startsWith(`${path.resolve(folderPath)}${path.sep}`)||!fs.existsSync(candidate)||!fs.statSync(candidate).isFile()||sha256File(candidate)!==expected;
+  }).map(([relativePath])=>relativePath);
+  const ok=checksumMatches&&!missingOrChangedFiles.length;
+  const message=!checksumMatches?'Backup database checksum does not match the manifest.':missingOrChangedFiles.length?`Backup file verification failed for ${missingOrChangedFiles.length} file${missingOrChangedFiles.length===1?'':'s'}.`:'Backup verified.';
+  return { ok, backup: summary, checksumSha256, missingOrChangedFiles, message };
 }
 function verifyMasterBackup(id: unknown) {
   return verifyBackup('master', id);
 }
 function appDataFolderPath(folderName: string) {
   if (!masterBackupFolderCandidates.includes(folderName)) throw new Error('Unsafe restore folder.');
+  if (folderName === 'uploads') return uploadsDir;
   const backendRoot = path.resolve(__dirname, '../../');
   const resolved = path.resolve(backendRoot, folderName);
   if (!resolved.startsWith(`${backendRoot}${path.sep}`)) throw new Error('Unsafe restore folder.');
@@ -2151,6 +2844,8 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
   fs.mkdirSync(machineComponentImagesDir, { recursive: true });
   fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
   fs.mkdirSync(machineAssetNotesDir, { recursive: true });
+  fs.mkdirSync(machineDocumentLibraryDir, { recursive: true });
+  facilityInfoService?.ensureSchema();
   return restoredFolders;
 }
 function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
@@ -2171,9 +2866,14 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
     fs.copyFileSync(backupDbPath, dbPath);
     db = new DatabaseSync(dbPath);
     db.exec('PRAGMA journal_mode=WAL;');
+    db.exec('PRAGMA foreign_keys=ON;');
     initDb();
     migrateDb();
     restoredFolders = restoreWhitelistedFoldersFromBackup(backupFolderPath, { removeMissing: true });
+    validateMachineDocumentStorageIntegrity();
+    refreshMachineDocumentRecoveryMetadata();
+    facilityInfoService?.validateStorage();
+    facilityInfoService?.refreshRecoveryMetadata();
     try { audit({ user: input.actor, ip: '', get: () => '' } as unknown as Request, 'backup restore completed', 'backup', verification.backup.id, { preRestoreBackupId: preRestoreBackup.id, category: input.category, restoredFolders }); } catch {}
     lastBackupResult = { ok: true, category: input.category, type: verification.backup.type, backupId: verification.backup.id, createdAt: now(), message: `Restored ${verification.backup.name}.` };
     return { restoredBackup: verification.backup, preRestoreBackup, restoredFolders };
@@ -2185,12 +2885,16 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
       }
       if (fs.existsSync(preRestoreDbPath)) fs.copyFileSync(preRestoreDbPath, dbPath);
       if (fs.existsSync(dbPath)) {
-        db = new DatabaseSync(dbPath);
-        db.exec('PRAGMA journal_mode=WAL;');
-        initDb();
+      db = new DatabaseSync(dbPath);
+      db.exec('PRAGMA journal_mode=WAL;');
+      db.exec('PRAGMA foreign_keys=ON;');
+      initDb();
         migrateDb();
       }
       restoreWhitelistedFoldersFromBackup(preRestoreFolderPath, { removeMissing: true });
+      refreshMachineDocumentRecoveryMetadata();
+      facilityInfoService?.ensureSchema();
+      facilityInfoService?.refreshRecoveryMetadata();
     } catch (rollbackError) {
       console.log(`MCC pre-restore rollback failed: ${safeErrorMessage(rollbackError)}`);
     }
@@ -4007,6 +4711,21 @@ function officialShiftUnder100TitleRight(sheet: XlsxSheet, type: RequisitionTemp
   }
 }
 
+function officialUseCompactQuantityHeader(sheet: XlsxSheet, type: RequisitionTemplateKind) {
+  const headerCell = sheet.cell(type === 'under-100' ? 'A20' : 'B21');
+  if (typeof headerCell.formula === 'function') headerCell.formula(undefined);
+  headerCell.value('QTY');
+  try {
+    headerCell.style?.({
+      horizontalAlignment: 'center',
+      verticalAlignment: 'center',
+      wrapText: false,
+    });
+  } catch {
+    // Keep template styling if style update is not supported.
+  }
+}
+
 async function officialWorkbookBuffer(input: { header: Record<string, unknown>; items: RequisitionPdfItem[]; notes: string; requestedBy: string; total: number; type: RequisitionTemplateKind; vendor: string }) {
   const map = officialTemplateMaps[input.type];
   if (!fs.existsSync(map.templatePath)) throw new Error(`Official requisition workbook template is missing: ${path.basename(map.templatePath)}`);
@@ -4021,6 +4740,7 @@ async function officialWorkbookBuffer(input: { header: Record<string, unknown>; 
   officialWriteGrandTotal(sheet, map.grandTotal, input.total);
   officialSetPrintArea(sheet, map);
   officialShiftUnder100TitleRight(sheet, input.type);
+  officialUseCompactQuantityHeader(sheet, input.type);
   return workbookOutputToBuffer(await workbook.outputAsync());
 }
 
@@ -5237,7 +5957,7 @@ function sendRequisitionError(req: Request, res: Response, operation: string, ta
   res.status(status).json({ok:false,error:message,activeRequisitionExists:/already exists/i.test(message)});
 }
 function canDeleteRequisitions(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager';
+  return hasPermission(actor,'requisitions.delete');
 }
 async function writeMit3AppData(data: Record<string, unknown>) {
   const response = await fetch(mit3AppDataUrl, {
@@ -5254,19 +5974,19 @@ async function writeMit3AppData(data: Record<string, unknown>) {
   return response.json().catch(() => ({}));
 }
 function canInventoryWrite(actor: User) {
-  return roleRank(actor.role) >= roleRank('Maintenance Tech 2');
+  return ['inventory.create','inventory.edit','inventory.requisition_stage','requisitions.create','requisitions.edit'].some(permission=>hasPermission(actor,permission as PermissionKey));
 }
 function canManageRequisitionBatches(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager' || actor.role === 'Maintenance Tech 3';
+  return hasPermission(actor,'requisitions.manage_batches');
 }
 function canInventoryImport(actor: User) {
-  return roleRank(actor.role) >= roleRank('Maintenance Tech 3');
+  return hasPermission(actor,'inventory.import');
 }
 function canViewHistory(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager';
+  return hasPermission(actor,'history.view');
 }
 function canExportHistory(actor: User) {
-  return actor.role === 'Admin' || actor.role === 'Manager';
+  return hasPermission(actor,'history.export');
 }
 function isOwnerAdmin(actor: User) {
   return Boolean(actor.is_owner_admin);
@@ -5362,9 +6082,9 @@ const resetSections = new Set<ResetSection>([
   'preventive_maintenance',
 ]);
 const resetTableAllowlists: Record<'machine_library' | 'equipment_library' | 'facility_info' | 'preventive_maintenance', string[]> = {
-  machine_library: ['machine_assets','machine_brand_settings','machines','machine_library','machine_pms'],
-  equipment_library: ['equipment_assets','equipment','equipment_library','equipment_pms'],
-  facility_info: ['facility_documents','facility_info','building_prints','facility_pms'],
+  machine_library: ['machine_documents','machine_document_folders','machine_assets','machine_brand_settings','machines','machine_library','machine_pms'],
+  equipment_library: ['equipment_asset_note_attachments','equipment_asset_notes','equipment_documents','equipment_document_folders','equipment_assets','equipment','equipment_library','equipment_pms'],
+  facility_info: ['facility_items','facility_folders','facility_areas','facility_documents','facility_info','building_prints','facility_pms'],
   preventive_maintenance: ['pm_tasks','pm_history','preventive_maintenance'],
 };
 const resetHistorySectionByReset: Partial<Record<ResetSection, HistorySection>> = {
@@ -5427,6 +6147,10 @@ function validateResetRequest(body: unknown): ResetRequest {
 }
 function resetTableGroup(section: keyof typeof resetTableAllowlists, deletedCounts: Record<string, number>) {
   let existingTableCount = 0;
+  if (section === 'equipment_library') {
+    deletedCounts.equipmentPmHistory = deleteRows('pm_history'," WHERE asset_library='equipment'");
+    deletedCounts.equipmentPmTasks = deleteRows('pm_tasks'," WHERE asset_library='equipment'");
+  }
   for (const tableName of resetTableAllowlists[section]) {
     if (!tableExists(tableName)) continue;
     existingTableCount += 1;
@@ -6072,12 +6796,39 @@ type MachineComponentImageRow = { id:number; asset_id:number; component_type:Mac
 type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
 type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; created_by_name?:string };
 type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string };
+type MachineDocumentFolderRow = { id:number; asset_id:number; name:string; description:string; created_at:string; updated_at:string; created_by_user_id:number|null; updated_by_user_id:number|null; document_count?:number; library_updated_at?:string };
+type MachineDocumentRow = { id:number; asset_id:number; folder_id:number; original_filename:string; display_filename:string; stored_filename:string; extension:string; mime_type:string; size_bytes:number; description:string; revision:string; uploaded_at:string; updated_at:string; uploaded_by_user_id:number|null; updated_by_user_id:number|null; uploaded_by_name?:string; folder_name?:string };
+type PmIntervalType = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | 'quarterly' | 'bi_annual' | 'annual' | 'cycles';
+type PmScheduleStatus = 'active' | 'hold' | 'inactive';
+type AssetLibrary = 'machine' | 'equipment';
+type PmTaskRow = { id:number; asset_id:number; asset_library:AssetLibrary; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; hold:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
+type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; asset_library:AssetLibrary; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; completion_notes:string; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
 type MachineAssetRow = {
-  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
+  id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; setup_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
 const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
 const machineConditionStatuses: MachineConditionStatus[] = ['new','used','worn','rebuilt_repaired'];
 const machineComponentImageTypes: MachineComponentImageType[] = ['screw','screw-tip','barrel','barrel-end-cap','screw-2','screw-2-tip','barrel-2','barrel-2-end-cap','plunger','plunger-barrel','plunger-barrel-end-cap'];
+const machineSetupTypes = [
+  'Standard Injection',
+  'Two-Shot / 2K Injection',
+  'Multi-Component / Multi-Material',
+  'Insert Molding / Overmolding',
+  'Vertical Insert Molding',
+  'Rotary Table / Shuttle Insert Molding',
+  'Plunger Injection',
+  'Liquid Silicone Rubber (LSR)',
+  'Thermoset Injection',
+  'Micro Injection Molding',
+  'Gas-Assist Injection',
+  'Water-Assist Injection',
+  'Structural Foam / Low-Pressure Injection',
+  'Co-Injection / Sandwich Molding',
+  'Injection Compression Molding',
+  'Metal Injection Molding (MIM)',
+  'Ceramic Injection Molding (CIM)',
+  'Other / Custom',
+] as const;
 const voltageTypes = new Set(['AC','DC','']);
 const machineRequiredDefaultBrandColors: Record<string, string> = { Toyo: '#1E6BFF', Engel: '#FFFFFF' };
 const machineDefaultBrandColors: Record<string, string> = { ...machineRequiredDefaultBrandColors, Arburg: '#38D7B3', Husky: '#FFD45A', Sodick: '#8C7CFF', Default: '#44D7FF', Unknown: '#44D7FF' };
@@ -6092,10 +6843,10 @@ const machineRequiredImportHeaderGroups = [
   ['Model #','Model','Model Number'],
   ['Equip Serial #','Serial Number','Equip Serial Number'],
 ] as const;
-const machineImportHeaders = ['Asset Number','Brand','Model','Serial Number','Shot Size (oz)','Tonnage','Power Type','Barrel/Screw Diameter','Machine Year','Machine Type','Screw Type','Screw Tip Type','Screw Rebuild / Repaired','Screw Condition Status','Screw Installed Date','Screw Tip Installed Date','Screw Length','Barrel Rebuild / Repaired','Barrel Condition Status','Barrel Installed Date','Barrel End Cap Installed Date','Barrel Length','Machine Length','Machine Width','Machine Height','Full Die Height Length / Range','Notes','Critical Notes','Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
+const machineImportHeaders = ['Asset Number','Brand','Model','Serial Number','Shot Size (oz)','Tonnage','Power Type','Setup Type','Barrel/Screw Diameter','Machine Year','Machine Type','Screw Type','Screw Tip Type','Screw Rebuild / Repaired','Screw Condition Status','Screw Installed Date','Screw Tip Installed Date','Screw Length','Barrel Rebuild / Repaired','Barrel Condition Status','Barrel Installed Date','Barrel End Cap Installed Date','Barrel Length','Machine Length','Machine Width','Machine Height','Full Die Height Length / Range','Notes','Critical Notes','Double Shot Injection','Plunger Injection','Screw 2 Type','Screw 2 Tip Type','Screw 2 Rebuild / Repaired','Screw 2 Condition Status','Screw 2 Installed Date','Screw 2 Tip Installed Date','Screw 2 Length','Barrel 2 Diameter','Barrel 2 Rebuild / Repaired','Barrel 2 Condition Status','Barrel 2 Installed Date','Barrel 2 End Cap Installed Date','Barrel 2 Length','Plunger Type','Plunger Rebuild / Repaired','Plunger Condition Status','Plunger Installed Date','Plunger Length','Plunger Diameter','Plunger Barrel Type','Plunger Barrel Rebuild / Repaired','Plunger Barrel Condition Status','Plunger Barrel Installed Date','Plunger Barrel End Cap Installed Date','Plunger Barrel Length','Plunger Barrel Diameter'] as const;
 type MachineAssetInput = ReturnType<typeof validateMachineAssetInput>;
-function canMachineWrite(actor: User) { return roleRank(actor.role) >= roleRank('Maintenance Tech 3'); }
-function canMachineDelete(actor: User) { return roleRank(actor.role) >= roleRank('Manager'); }
+function canMachineWrite(actor: User) { return ['machine.create','machine.edit','machine.pm_manage','machine.documents_upload','machine.documents_manage','machine.notes_manage','machine.import_export'].some(permission=>hasPermission(actor,permission as PermissionKey)); }
+function canMachineDelete(actor: User) { return hasPermission(actor,'machine.delete'); }
 function safeHexColor(value: unknown, fallback = '#44D7FF') {
   const clean = String(value ?? '').trim();
   return /^#[0-9A-Fa-f]{6}$/.test(clean) ? clean.toUpperCase() : fallback;
@@ -6159,10 +6910,20 @@ function machineConditionInput(input: Record<string, unknown>, keys: string[], r
 function normalizeMachinePowerType(value: string) {
   const clean = value.trim();
   const lower = clean.toLowerCase();
+  if (/servo[\s-]*hyd/.test(lower)) return 'Servo Hydraulic';
   if (/hyb/.test(lower)) return 'Hybrid';
   if (/elec/.test(lower)) return 'Electric';
   if (/hyd/.test(lower)) return 'Hydraulic';
   return clean ? 'Other' : '';
+}
+function normalizeMachineSetupType(value: string, hasDoubleShotInjection: boolean, hasPlungerInjection: boolean) {
+  const fallback = hasDoubleShotInjection ? 'Two-Shot / 2K Injection' : hasPlungerInjection ? 'Plunger Injection' : 'Standard Injection';
+  if (!value.trim()) return fallback;
+  if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error('Setup Type contains unsafe characters.');
+  const clean = value.trim().replace(/\s+/g, ' ');
+  if (clean.length > 160) throw new Error('Setup Type must be 160 characters or fewer.');
+  if (clean === 'Other / Custom') throw new Error('Custom Setup Type is required when Other / Custom is selected.');
+  return machineSetupTypes.find(option => option !== 'Other / Custom' && option.toLowerCase() === clean.toLowerCase()) ?? clean;
 }
 function validateMachineAssetInput(body: unknown) {
   const input = isRecord(body) ? body : {};
@@ -6180,6 +6941,7 @@ function validateMachineAssetInput(body: unknown) {
   const barrelConditionStatus = machineConditionInput(input, ['barrelConditionStatus','barrel_condition_status'], barrelRebuildRepaired);
   const hasDoubleShotInjection = machineBooleanInput(input, ['hasDoubleShotInjection','has_double_shot_injection','doubleShotInjection','Double Shot Injection']);
   const hasPlungerInjection = machineBooleanInput(input, ['hasPlungerInjection','has_plunger_injection','plungerInjection','Plunger Injection']);
+  const setupType = normalizeMachineSetupType(machineText(input, ['setupType','setup_type','Setup Type'], 200), hasDoubleShotInjection, hasPlungerInjection);
   const screw2RebuildRepaired = machineBooleanInput(input, ['screw2RebuildRepaired','screw2_rebuild_repaired','Screw 2 Rebuild / Repaired']);
   const barrel2RebuildRepaired = machineBooleanInput(input, ['barrel2RebuildRepaired','barrel2_rebuild_repaired','Barrel 2 Rebuild / Repaired']);
   const plungerRebuildRepaired = machineBooleanInput(input, ['plungerRebuildRepaired','plunger_rebuild_repaired','Plunger Rebuild / Repaired']);
@@ -6192,7 +6954,7 @@ function validateMachineAssetInput(body: unknown) {
     assetNumber, assetName: machineText(input, ['assetName','asset_name','name'], 160, assetNumber), brand,
     model: machineText(input, ['model','modelNumber','model_number'], 160), serialNumber: machineText(input, ['serialNumber','serial_number','equipSerialNumber'], 160),
     machineYear: machineText(input, ['machineYear','machine_year','year'], 40), machineType: machineText(input, ['machineType','machine_type'], 120, 'Injection Molding Machine') || 'Injection Molding Machine',
-    powerType: normalizeMachinePowerType(machineText(input, ['powerType','power_type','he'])), shotSizeOz: machineNumericInput(input, ['shotSizeOz','shot_size_oz','shot'], 'Shot Size', 0), tonnage: machineNumericInput(input, ['tonnage','ton'], 'Tonnage', 0),
+    powerType: normalizeMachinePowerType(machineText(input, ['powerType','power_type','he'])), setupType, shotSizeOz: machineNumericInput(input, ['shotSizeOz','shot_size_oz','shot'], 'Shot Size', 0), tonnage: machineNumericInput(input, ['tonnage','ton'], 'Tonnage', 0),
     barrelDiameter: machineText(input, ['barrelDiameter','barrel_diameter','barrel'], 120), location: machineText(input, ['location'], 120), department: machineText(input, ['department'], 120), status,
     voltageValue: machineText(input, ['voltageValue','voltage_value','voltage'], 80), voltageType, fullLoadAmp: machineText(input, ['fullLoadAmp','full_load_amp'], 80),
     machineLength: machineText(input, ['machineLength','machine_length'], 80), machineWidth: machineText(input, ['machineWidth','machine_width'], 80), machineHeight: machineText(input, ['machineHeight','machine_height'], 80), fullDieHeightLength: machineText(input, ['fullDieHeightLength','full_die_height_length'], 120),
@@ -6209,7 +6971,7 @@ function validateMachineAssetInput(body: unknown) {
 }
 function publicMachineAsset(row: MachineAssetRow) {
   return {
-    id: row.id, assetNumber: row.asset_number, assetName: row.asset_name, brand: row.brand, model: row.model, serialNumber: row.serial_number, machineYear: row.machine_year, machineType: row.machine_type, powerType: row.power_type,
+    id: row.id, assetNumber: row.asset_number, assetName: row.asset_name, brand: row.brand, model: row.model, serialNumber: row.serial_number, machineYear: row.machine_year, machineType: row.machine_type, powerType: row.power_type, setupType: row.setup_type || (row.has_double_shot_injection ? 'Two-Shot / 2K Injection' : row.has_plunger_injection ? 'Plunger Injection' : 'Standard Injection'),
     shotSizeOz: Number(row.shot_size_oz ?? 0), tonnage: Number(row.tonnage ?? 0), barrelDiameter: row.barrel_diameter, location: row.location, department: row.department, status: row.status, voltageValue: row.voltage_value, voltageType: row.voltage_type, fullLoadAmp: row.full_load_amp,
     machineLength: row.machine_length, machineWidth: row.machine_width, machineHeight: row.machine_height, fullDieHeightLength: row.full_die_height_length, screwType: row.screw_type, screwTipType: row.screw_tip_type, screwTipInstalledDate: row.screw_tip_installed_date, screwInstalledDate: row.screw_installed_date,
     barrelInstalledDate: row.barrel_installed_date, barrelEndCapInstalledDate: row.barrel_end_cap_installed_date, barrelLength: row.barrel_length, screwLength: row.screw_length,
@@ -6381,7 +7143,7 @@ function publicMachineAssetNote(row: MachineAssetNoteRow) {
 function receiveMachineAssetNote(req: Request,res:Response,next:NextFunction) {
   machineAssetNoteUpload.array('attachments',10)(req,res,error=>{
     if (!error) return next();
-    const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Each attachment must be 25 MB or smaller.' : safeErrorMessage(error,[],'Asset note upload failed.');
+    const message = error instanceof multer.MulterError && error.code==='LIMIT_FILE_SIZE' ? 'Each attachment must be 50 MB or smaller.' : safeErrorMessage(error,[],'Asset note upload failed.');
     res.status(400).json({ok:false,error:message});
   });
 }
@@ -6510,6 +7272,360 @@ function receiveMachineInspectionRecord(req: Request,res:Response,next:NextFunct
 function machineAssetById(id: number, includeDeleted = false) {
   return one<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE a.id=? ${includeDeleted ? '' : 'AND a.deleted=0'}`, [machineDefaultBrandColors.Default,id]);
 }
+const machineDocumentTypes = sharedDocumentMimeTypes;
+const maxMachineDocumentBytes = 50 * 1024 * 1024;
+function validateMachineDocumentFolderName(value: unknown) {
+  const name=String(value ?? '').trim().replace(/\s+/g,' ');
+  if (!name) throw new Error('Folder Name is required.');
+  if (name.length>120) throw new Error('Folder Name must be 120 characters or fewer.');
+  if (name==='.'||name==='..'||/[\x00-\x1f\x7f<>:"/\\|?*]/.test(name)) throw new Error('Folder Name contains unsafe characters.');
+  return name;
+}
+function validateMachineDocumentDescription(value: unknown) { return String(value ?? '').replace(/\r/g,'').trim().slice(0,2000); }
+function validateMachineDocumentRevision(value: unknown) { return String(value ?? '').replace(/[\x00-\x1f\x7f]/g,'').trim().slice(0,80); }
+function safeMachineDocumentDisplayName(value: unknown, requiredExtension?: string) {
+  return safeDocumentDisplayName(value,requiredExtension);
+}
+function validatedMachineDocument(file: Express.Multer.File) {
+  return validateDocumentFile({originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size,bytes:file.buffer,maxBytes:maxMachineDocumentBytes,maxMb:50});
+}
+function receiveMachineDocuments(req: Request,res:Response,next:NextFunction) {
+  machineDocumentUpload.array('documents',20)(req,res,error=>{
+    if (!error) return next();
+    const message=error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE'?'Each document must be 50 MB or smaller.':safeErrorMessage(error,[],'Document upload failed.');
+    res.status(400).json({ok:false,error:message});
+  });
+}
+function machineDocumentFolderById(assetId:number,folderId:number) {
+  return one<MachineDocumentFolderRow>('SELECT * FROM machine_document_folders WHERE id=? AND asset_id=?',[folderId,assetId]);
+}
+function machineDocumentById(assetId:number,documentId:number) {
+  return one<MachineDocumentRow>(`SELECT d.*,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name,f.name AS folder_name FROM machine_documents d JOIN machine_document_folders f ON f.id=d.folder_id AND f.asset_id=d.asset_id LEFT JOIN users u ON u.id=d.uploaded_by_user_id WHERE d.id=? AND d.asset_id=?`,[documentId,assetId]);
+}
+function machineDocumentAssetRoot(assetId:number) {
+  if (!Number.isInteger(assetId)||assetId<=0) throw new Error('Machine asset is invalid.');
+  const root=path.resolve(machineDocumentLibraryDir);
+  const resolved=path.resolve(root,`asset-${assetId}`);
+  if (path.dirname(resolved)!==root) throw new Error('Machine document path is invalid.');
+  return resolved;
+}
+function machineDocumentAssetDirectory(assetId:number) {
+  return path.join(machineDocumentAssetRoot(assetId),'documents');
+}
+function machineDocumentFilePath(assetId:number,storedFilename:string) {
+  const extension=path.extname(storedFilename).toLowerCase();
+  const id=path.basename(storedFilename,extension);
+  if (!machineDocumentTypes.has(extension)||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)||storedFilename!==path.basename(storedFilename)) throw new Error('Machine document file reference is invalid.');
+  const root=machineDocumentAssetDirectory(assetId);
+  const resolved=path.resolve(root,storedFilename);
+  if (path.dirname(resolved)!==root) throw new Error('Machine document file reference is invalid.');
+  return resolved;
+}
+type MachineDocumentRecoveryManifest = {
+  schemaVersion: 1;
+  generatedAt: string;
+  storageDirectory: string;
+  asset: { internalAssetId:number; assetNumber:string; assetName:string; brand:string; model:string; serialNumber:string; status:string; deleted:boolean };
+  summary: { folderCount:number; documentCount:number; totalBytes:number };
+  folders: Array<{ id:number; name:string; description:string; documentCount:number; createdAt:string; updatedAt:string }>;
+  documents: Array<{ id:number; folderId:number; folderName:string; visibleFilename:string; originalFilename:string; storedFilename:string; extension:string; mimeType:string; sizeBytes:number; description:string; revision:string; uploadedAt:string; updatedAt:string; uploadedBy:string }>;
+};
+function atomicWriteText(filePath:string,content:string) {
+  fs.mkdirSync(path.dirname(filePath),{recursive:true});
+  const temporaryPath=path.join(path.dirname(filePath),`.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(5).toString('hex')}.tmp`);
+  try { fs.writeFileSync(temporaryPath,content,{encoding:'utf8',flag:'wx'});fs.renameSync(temporaryPath,filePath); }
+  finally { if(fs.existsSync(temporaryPath))fs.rmSync(temporaryPath,{force:true}); }
+}
+function recoveryManifestForAsset(asset:MachineAssetRow):MachineDocumentRecoveryManifest {
+  const folders=machineDocumentFolders(asset.id);
+  const documents=machineDocuments(asset.id,'','name');
+  return {
+    schemaVersion:1,
+    generatedAt:now(),
+    storageDirectory:`asset-${asset.id}`,
+    asset:{internalAssetId:asset.id,assetNumber:asset.asset_number,assetName:asset.asset_name,brand:asset.brand,model:asset.model,serialNumber:asset.serial_number,status:asset.status,deleted:Boolean(asset.deleted)},
+    summary:{folderCount:folders.length,documentCount:documents.length,totalBytes:documents.reduce((total,document)=>total+Number(document.size_bytes),0)},
+    folders:folders.map(folder=>({id:folder.id,name:folder.name,description:folder.description,documentCount:Number(folder.document_count??0),createdAt:folder.created_at,updatedAt:folder.library_updated_at??folder.updated_at})),
+    documents:documents.map(document=>({id:document.id,folderId:document.folder_id,folderName:document.folder_name??'',visibleFilename:document.display_filename,originalFilename:document.original_filename,storedFilename:document.stored_filename,extension:document.extension,mimeType:document.mime_type,sizeBytes:Number(document.size_bytes),description:document.description,revision:document.revision,uploadedAt:document.uploaded_at,updatedAt:document.updated_at,uploadedBy:document.uploaded_by_name??'Unknown user'})),
+  };
+}
+function recoveryAssetIds() {
+  const ids=new Set<number>();
+  for(const row of all<{id:number}>('SELECT id FROM machine_assets'))ids.add(row.id);
+  for(const entry of fs.readdirSync(machineDocumentLibraryDir,{withFileTypes:true})){
+    const match=entry.isDirectory()?/^asset-(\d+)$/.exec(entry.name):null;
+    if(match)ids.add(Number(match[1]));
+  }
+  return [...ids].filter(id=>Number.isInteger(id)&&id>0).sort((left,right)=>left-right);
+}
+function recoveryCsvCell(value:unknown){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;}
+function refreshMachineDocumentRecoveryMetadata(assetId?:number) {
+  fs.mkdirSync(machineDocumentLibraryDir,{recursive:true});
+  const manifests:MachineDocumentRecoveryManifest[]=[];
+  for(const id of recoveryAssetIds()){
+    const asset=machineAssetById(id,true);
+    if(!asset)continue;
+    const root=machineDocumentAssetRoot(id);
+    const hasDocumentData=Boolean(one<{count:number}>('SELECT COUNT(*) AS count FROM machine_document_folders WHERE asset_id=?',[id])?.count)||Boolean(one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=?',[id])?.count);
+    if(!fs.existsSync(root)&&!hasDocumentData)continue;
+    const manifest=recoveryManifestForAsset(asset);
+    manifests.push(manifest);
+    if(assetId===undefined||assetId===id)atomicWriteText(path.join(root,'asset-info.json'),`${JSON.stringify(manifest,null,2)}\n`);
+  }
+  const generatedAt=now();
+  const index={schemaVersion:1,generatedAt,storageRoot:'uploads/machine-library',assets:manifests.map(manifest=>({storageDirectory:manifest.storageDirectory,...manifest.asset,...manifest.summary,manifestPath:`${manifest.storageDirectory}/asset-info.json`}))};
+  atomicWriteText(path.join(machineDocumentLibraryDir,'machine-library-index.json'),`${JSON.stringify(index,null,2)}\n`);
+  const headers=['storageDirectory','internalAssetId','assetNumber','assetName','brand','model','serialNumber','status','deleted','folderCount','documentCount','totalBytes','manifestPath'];
+  const lines=[headers.join(','),...index.assets.map(entry=>headers.map(header=>recoveryCsvCell(entry[header as keyof typeof entry])).join(','))];
+  atomicWriteText(path.join(machineDocumentLibraryDir,'machine-library-index.csv'),`${lines.join('\r\n')}\r\n`);
+  return {generatedAt,manifests,index};
+}
+function safeArchiveSegment(value:unknown,fallback:string) {
+  const clean=String(value??'').replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g,'_').replace(/[. ]+$/g,'').trim();
+  return (clean||fallback).slice(0,180);
+}
+function uniqueArchivePath(candidate:string,used:Set<string>) {
+  const normalized=candidate.split('\\').join('/');
+  if(!used.has(normalized.toLowerCase())){used.add(normalized.toLowerCase());return normalized;}
+  const extension=path.posix.extname(normalized);const base=normalized.slice(0,-extension.length);
+  for(let number=2;number<10000;number+=1){const next=`${base} (${number})${extension}`;if(!used.has(next.toLowerCase())){used.add(next.toLowerCase());return next;}}
+  throw new Error('Archive entry name could not be made unique.');
+}
+function appendAssetRecoveryArchive(archive:Archiver,manifest:MachineDocumentRecoveryManifest,prefix='') {
+  const used=new Set<string>();
+  const root=prefix?`${prefix.replace(/\/$/,'')}/`:'';
+  archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:`${root}asset-info.json`});
+  archive.append(`MCC Machine Asset Document Library\n\nVisible Asset Number: ${manifest.asset.assetNumber}\nAsset Name: ${manifest.asset.assetName}\nInternal Storage ID: ${manifest.asset.internalAssetId}\nStorage Directory: ${manifest.storageDirectory}\n\nDocuments are exported with their visible filenames inside their custom folder names. The asset-info.json manifest maps each readable name to its original UUID physical filename.\n`,{name:`${root}README.txt`});
+  for(const document of manifest.documents){
+    const source=machineDocumentFilePath(manifest.asset.internalAssetId,document.storedFilename);
+    if(!fs.existsSync(source)||!fs.statSync(source).isFile())throw new Error(`Stored document is missing: ${document.visibleFilename}`);
+    const folder=safeArchiveSegment(document.folderName,'Unfiled');
+    const filename=safeArchiveSegment(document.visibleFilename,`document-${document.id}${document.extension}`);
+    archive.file(source,{name:uniqueArchivePath(`${root}${folder}/${filename}`,used)});
+  }
+}
+function streamRecoveryArchive(res:Response,fileName:string,build:(archive:Archiver)=>void) {
+  const archive=new ZipArchive({zlib:{level:6}});
+  archive.on('warning',(error:Error&{code?:string})=>{if(error.code!=='ENOENT')res.destroy(error);});
+  archive.on('error',(error:Error)=>res.destroy(error));
+  res.setHeader('Content-Type','application/zip');
+  res.setHeader('Content-Disposition',`attachment; filename="${fileName.replace(/["\\]/g,'_')}"`);
+  res.setHeader('Cache-Control','private, no-store');
+  archive.pipe(res);build(archive);void archive.finalize();
+}
+function validateMachineDocumentStorageIntegrity() {
+  const missing:string[]=[];
+  for (const row of all<Pick<MachineDocumentRow,'id'|'asset_id'|'stored_filename'|'size_bytes'>>('SELECT id,asset_id,stored_filename,size_bytes FROM machine_documents')) {
+    try { const filePath=machineDocumentFilePath(row.asset_id,row.stored_filename); if (!fs.existsSync(filePath)||!fs.statSync(filePath).isFile()||fs.statSync(filePath).size!==Number(row.size_bytes)) missing.push(String(row.id)); }
+    catch { missing.push(String(row.id)); }
+  }
+  if (missing.length) throw new Error(`Backup restore is missing ${missing.length} machine document file${missing.length===1?'':'s'}.`);
+}
+function publicMachineDocumentFolder(row:MachineDocumentFolderRow) {
+  return {id:row.id,assetId:row.asset_id,name:row.name,description:row.description,documentCount:Number(row.document_count??0),createdAt:row.created_at,updatedAt:row.library_updated_at??row.updated_at};
+}
+function publicMachineDocument(row:MachineDocumentRow) {
+  const base=`/api/machine-library/assets/${row.asset_id}/documents/${row.id}`;
+  return {id:row.id,assetId:row.asset_id,folderId:row.folder_id,folderName:row.folder_name??'',originalFilename:row.original_filename,displayFilename:row.display_filename,extension:row.extension,mimeType:row.mime_type,sizeBytes:Number(row.size_bytes),description:row.description,revision:row.revision,uploadedAt:row.uploaded_at,updatedAt:row.updated_at,uploadedBy:row.uploaded_by_name??'Unknown user',openUrl:`${base}/open`,downloadUrl:`${base}/download`,canPrint:row.extension==='.pdf'};
+}
+function machineDocumentFolders(assetId:number) {
+  return all<MachineDocumentFolderRow>(`SELECT f.*,COUNT(d.id) AS document_count,CASE WHEN MAX(d.updated_at)>f.updated_at THEN MAX(d.updated_at) ELSE f.updated_at END AS library_updated_at FROM machine_document_folders f LEFT JOIN machine_documents d ON d.folder_id=f.id AND d.asset_id=f.asset_id WHERE f.asset_id=? GROUP BY f.id ORDER BY f.name COLLATE NOCASE`,[assetId]);
+}
+function machineDocuments(assetId:number,search:string,sort:string) {
+  const params:SqlParam[]=[assetId];
+  let where='d.asset_id=?';
+  if (search) { const like=`%${escapeLike(search)}%`; where+=` AND (d.display_filename LIKE ? ESCAPE '\\' COLLATE NOCASE OR d.description LIKE ? ESCAPE '\\' COLLATE NOCASE OR d.revision LIKE ? ESCAPE '\\' COLLATE NOCASE OR COALESCE(u.full_name,'') LIKE ? ESCAPE '\\' COLLATE NOCASE)`; params.push(like,like,like,like); }
+  const order=sort==='newest'?'d.uploaded_at DESC,d.id DESC':sort==='oldest'?'d.uploaded_at ASC,d.id ASC':sort==='file_type'?'d.extension COLLATE NOCASE,d.display_filename COLLATE NOCASE':'d.display_filename COLLATE NOCASE,d.id';
+  return all<MachineDocumentRow>(`SELECT d.*,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name,f.name AS folder_name FROM machine_documents d JOIN machine_document_folders f ON f.id=d.folder_id AND f.asset_id=d.asset_id LEFT JOIN users u ON u.id=d.uploaded_by_user_id WHERE ${where} ORDER BY ${order}`,params);
+}
+function duplicateMachineDocument(assetId:number,folderId:number,displayFilename:string,excludeId?:number) {
+  return one<MachineDocumentRow>(`SELECT * FROM machine_documents WHERE asset_id=? AND folder_id=? AND lower(display_filename)=lower(?) ${excludeId?'AND id<>?':''} ORDER BY id LIMIT 1`,excludeId?[assetId,folderId,displayFilename,excludeId]:[assetId,folderId,displayFilename]);
+}
+function uniqueMachineDocumentName(assetId:number,folderId:number,displayFilename:string,excludeId?:number) {
+  if (!duplicateMachineDocument(assetId,folderId,displayFilename,excludeId)) return displayFilename;
+  const extension=path.extname(displayFilename);const base=path.basename(displayFilename,extension);
+  for (let number=2;number<10000;number+=1) { const candidate=`${base} (${number})${extension}`; if (!duplicateMachineDocument(assetId,folderId,candidate,excludeId)) return candidate; }
+  throw new Error('A unique document filename could not be created.');
+}
+function recordMachineDocumentHistory(action:string,actor:User,asset:MachineAssetRow,details:Record<string,unknown>,reasonNote='') {
+  recordMachineAssetHistory({action,actor,row:asset,newValue:details,reasonNote});
+}
+const pmIntervalLabels: Record<PmIntervalType,string> = { hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles' };
+const pmIntervalTypes = Object.keys(pmIntervalLabels) as PmIntervalType[];
+const pmMeterIntervals = new Set<PmIntervalType>(['hourly','cycles']);
+const pmCalendarDueSoonDays = 14;
+const pmMeterDueSoonRatio = 0.1;
+const pmFixedCalendarIntervals: Partial<Record<PmIntervalType,{days?:number;months?:number;intervalValue:number}>> = {
+  bi_weekly:{days:14,intervalValue:14}, quarterly:{months:3,intervalValue:3}, bi_annual:{months:6,intervalValue:6}, annual:{months:12,intervalValue:12},
+};
+function validPmDate(value:unknown, label:string, required=false) {
+  const clean=String(value ?? '').trim();
+  if (!clean && !required) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) throw new Error(`Enter a valid ${label}.`);
+  const parsed=new Date(`${clean}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10)!==clean) throw new Error(`Enter a valid ${label}.`);
+  return clean;
+}
+function optionalPmNumber(value:unknown, label:string) {
+  if (value===null || value===undefined || String(value).trim()==='') return null;
+  const parsed=Number(value);
+  if (!Number.isFinite(parsed) || parsed<0) throw new Error(`${label} must be zero or greater.`);
+  return parsed;
+}
+function addPmDays(date:string, days:number) {
+  const parsed=new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate()+days);
+  return parsed.toISOString().slice(0,10);
+}
+function addPmMonths(date:string, months:number) {
+  const parsed=new Date(`${date}T12:00:00Z`);
+  const day=parsed.getUTCDate();
+  parsed.setUTCDate(1);
+  parsed.setUTCMonth(parsed.getUTCMonth()+months);
+  const lastDay=new Date(Date.UTC(parsed.getUTCFullYear(),parsed.getUTCMonth()+1,0,12)).getUTCDate();
+  parsed.setUTCDate(Math.min(day,lastDay));
+  return parsed.toISOString().slice(0,10);
+}
+function pmDueValues(intervalType:PmIntervalType, intervalValue:number, completedDate:string|null, completedMeter:number|null) {
+  if (pmMeterIntervals.has(intervalType)) return { nextDueDate:null,nextDueMeter:completedMeter===null?null:completedMeter+intervalValue };
+  if (!completedDate) return { nextDueDate:null,nextDueMeter:null };
+  if (intervalType==='days') return { nextDueDate:addPmDays(completedDate,intervalValue),nextDueMeter:null };
+  if (intervalType==='weekly') return { nextDueDate:addPmDays(completedDate,intervalValue*7),nextDueMeter:null };
+  if (intervalType==='monthly') return { nextDueDate:addPmMonths(completedDate,intervalValue),nextDueMeter:null };
+  const fixed=pmFixedCalendarIntervals[intervalType];
+  if (fixed?.days) return { nextDueDate:addPmDays(completedDate,fixed.days),nextDueMeter:null };
+  if (fixed?.months) return { nextDueDate:addPmMonths(completedDate,fixed.months),nextDueMeter:null };
+  return { nextDueDate:null,nextDueMeter:null };
+}
+function validatePmTaskInput(value:unknown) {
+  const input=isRecord(value) ? value : {};
+  const title=String(input.title ?? '').replace(/\s+/g,' ').trim().slice(0,180);
+  if (!title) throw new Error('PM title is required.');
+  const intervalType=String(input.intervalType ?? '').trim() as PmIntervalType;
+  if (!pmIntervalTypes.includes(intervalType)) throw new Error('Choose a valid PM interval type.');
+  const fixedCadence=pmFixedCalendarIntervals[intervalType];
+  const requestedInterval=Number(input.intervalValue);
+  if (!fixedCadence && (!Number.isFinite(requestedInterval) || requestedInterval<=0)) throw new Error('How long is the interval must be greater than zero.');
+  const intervalValue=fixedCadence?.intervalValue ?? requestedInterval;
+  if (['cycles','days','weekly','monthly'].includes(intervalType) && !Number.isInteger(intervalValue)) throw new Error(`${pmIntervalLabels[intervalType]} intervals must use a whole number.`);
+  const lastCompletedDate=validPmDate(input.lastCompletedDate,'last completed date / starting date',Boolean(fixedCadence));
+  const lastCompletedMeter=optionalPmNumber(input.lastCompletedMeter,'Last completed meter');
+  const currentMeter=optionalPmNumber(input.currentMeter,'Current meter');
+  if (intervalType==='cycles' && ((lastCompletedMeter!==null&&!Number.isInteger(lastCompletedMeter)) || (currentMeter!==null&&!Number.isInteger(currentMeter)))) throw new Error('Cycle values must use whole numbers.');
+  const requestedStatus=String(input.scheduleStatus ?? input.status ?? '').trim().toLowerCase();
+  const legacyActive=!(input.active===false || input.active===0 || String(input.active).toLowerCase()==='false' || String(input.active)==='0');
+  const scheduleStatus:PmScheduleStatus=requestedStatus===''?(legacyActive?'active':'inactive'):requestedStatus==='active'||requestedStatus==='hold'||requestedStatus==='inactive'?requestedStatus as PmScheduleStatus:(()=>{throw new Error('Choose Active, Hold, or Inactive status.');})();
+  const active=scheduleStatus!=='inactive';
+  const hold=scheduleStatus==='hold';
+  const due=pmDueValues(intervalType,intervalValue,lastCompletedDate,lastCompletedMeter);
+  return {
+    title,
+    instructions:String(input.instructions ?? '').replace(/\r/g,'').trim().slice(0,12000),
+    intervalType,intervalValue,lastCompletedDate,lastCompletedMeter,currentMeter,
+    active,hold,scheduleStatus,
+    notes:String(input.notes ?? '').replace(/\r/g,'').trim().slice(0,12000),
+    ...due,
+  };
+}
+function pmTaskById(id:number,library:AssetLibrary='machine') { return one<PmTaskRow>('SELECT * FROM pm_tasks WHERE id=? AND asset_library=?',[id,library]); }
+function pmQuantityUnit(value:number,singular:string,plural=`${singular}s`){return Math.abs(value)===1?singular:plural;}
+function pmCalendarPastDueText(row:PmTaskRow,today:string,daysPastDue:number){
+  if (row.next_due_date && ['monthly','quarterly','bi_annual','annual'].includes(row.interval_type)) {
+    const due=new Date(`${row.next_due_date}T12:00:00Z`);const current=new Date(`${today}T12:00:00Z`);let months=(current.getUTCFullYear()-due.getUTCFullYear())*12+current.getUTCMonth()-due.getUTCMonth();if(current.getUTCDate()<due.getUTCDate())months-=1;
+    if (months>=1) return `Past due by ${months.toLocaleString()} ${pmQuantityUnit(months,'month')}`;
+  }
+  return `Past due by ${daysPastDue.toLocaleString()} ${pmQuantityUnit(daysPastDue,'day')}`;
+}
+function pmTaskStatus(row:PmTaskRow) {
+  if (!row.active) return {status:'Inactive',countdown:'Inactive — PM tracking paused'};
+  if (row.hold) return {status:'Hold',countdown:'Schedule on hold - due tracking is paused'};
+  if (pmMeterIntervals.has(row.interval_type)) {
+    if (row.next_due_meter===null || row.current_meter===null) return {status:'Setup incomplete',countdown:'Add completed and current meter values'};
+    const remaining=row.next_due_meter-row.current_meter;
+    const meterUnit=(value:number)=>pmQuantityUnit(value,row.interval_type==='hourly'?'hour':'cycle');
+    if (remaining<0) return {status:'Overdue',countdown:`Past due by ${Math.abs(remaining).toLocaleString()} ${meterUnit(remaining)}`};
+    if (remaining===0) return {status:'Due Now',countdown:'Due Now — perform maintenance now'};
+    if (remaining<=Math.max(1,row.interval_value*pmMeterDueSoonRatio)) return {status:'Due Soon',countdown:`${remaining.toLocaleString()} ${meterUnit(remaining)} remaining`};
+    return {status:'Current',countdown:`${remaining.toLocaleString()} ${meterUnit(remaining)} remaining`};
+  }
+  if (!row.next_due_date) return {status:'Setup incomplete',countdown:'Add a last completed date'};
+  const today=new Date().toISOString().slice(0,10);
+  const days=Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
+  if (days<0) return {status:'Overdue',countdown:pmCalendarPastDueText(row,today,Math.abs(days))};
+  if (days===0) return {status:'Due Now',countdown:'Due Now — perform maintenance today'};
+  if (days<=pmCalendarDueSoonDays) return {status:'Due Soon',countdown:`Due in ${days} day${days===1?'':'s'}`};
+  return {status:'Current',countdown:`Due in ${days} days`};
+}
+function publicPmTask(row:PmTaskRow) {
+  const state=pmTaskStatus(row);
+  const historyCount=one<{count:number}>('SELECT COUNT(*) AS count FROM pm_history WHERE pm_task_id=?',[row.id])?.count ?? 0;
+  const scheduleStatus:PmScheduleStatus=row.hold?'hold':row.active?'active':'inactive';
+  return { id:row.id,assetId:row.asset_id,title:row.title,instructions:row.instructions,intervalType:row.interval_type,intervalLabel:pmIntervalLabels[row.interval_type],intervalValue:Number(row.interval_value),lastCompletedDate:row.last_completed_date,lastCompletedMeter:row.last_completed_meter,currentMeter:row.current_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,scheduleStatus,active:Boolean(row.active),notes:row.notes,status:state.status,countdown:state.countdown,historyCount,createdAt:row.created_at,updatedAt:row.updated_at };
+}
+function dashboardPmSortDistance(row:PmTaskRow) {
+  if (pmMeterIntervals.has(row.interval_type) && row.next_due_meter!==null && row.current_meter!==null) return row.next_due_meter-row.current_meter;
+  if (row.next_due_date) {
+    const today=new Date().toISOString().slice(0,10);
+    return Math.round((Date.parse(`${row.next_due_date}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`))/86400000);
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+function dashboardPmAlerts() {
+  type DashboardPmRow=PmTaskRow&{asset_number:string;asset_name:string;brand:string;model:string;serial_number:string};
+  const statusRank:Record<string,number>={Overdue:0,'Due Now':1,'Due Soon':2};
+  const machineRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number
+    FROM pm_tasks p JOIN machine_assets a ON a.id=p.asset_id
+    WHERE p.asset_library='machine' AND a.deleted=0 ORDER BY p.id`);
+  const equipmentRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number
+    FROM pm_tasks p JOIN equipment_assets a ON a.id=p.asset_id
+    WHERE p.asset_library='equipment' AND a.deleted=0 ORDER BY p.id`);
+  return [...machineRows,...equipmentRows].map(row=>({row,state:pmTaskStatus(row)}))
+    .filter(item=>item.state.status==='Overdue'||item.state.status==='Due Now'||item.state.status==='Due Soon')
+    .sort((left,right)=>statusRank[left.state.status]-statusRank[right.state.status]
+      || dashboardPmSortDistance(left.row)-dashboardPmSortDistance(right.row)
+      || left.row.asset_number.localeCompare(right.row.asset_number,undefined,{numeric:true,sensitivity:'base'})
+      || left.row.title.localeCompare(right.row.title,undefined,{sensitivity:'base'}))
+    .map(({row,state})=>({
+      ...publicPmTask(row),
+      status:state.status==='Overdue'?'Past Due':state.status,
+      relativeMessage:state.countdown,
+      assetNumber:row.asset_number,
+      assetName:row.asset_name,
+      brand:row.brand,
+      model:row.model,
+      serialNumber:row.serial_number,
+      assetLibrary:row.asset_library,
+    }));
+}
+function publicPmHistory(row:PmHistoryRow) {
+  return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
+}
+function machineAssetPmCardSummary(tasks:PmTaskRow[]) {
+  if (!tasks.length) return null;
+  const counts={overdue:0,dueNow:0,dueSoon:0,hold:0,inactive:0,current:0,incomplete:0};
+  for (const task of tasks) {
+    const status=pmTaskStatus(task).status;
+    if (status==='Overdue') counts.overdue+=1;
+    else if (status==='Due Now') counts.dueNow+=1;
+    else if (status==='Due Soon') counts.dueSoon+=1;
+    else if (status==='Hold') counts.hold+=1;
+    else if (status==='Inactive') counts.inactive+=1;
+    else if (status==='Current') counts.current+=1;
+    else counts.incomplete+=1;
+  }
+  if (counts.overdue) return {total:tasks.length,status:'overdue',label:`PM: ${counts.overdue} Overdue`};
+  if (counts.dueNow) return {total:tasks.length,status:'due-now',label:`PM: ${counts.dueNow} Due Now`};
+  if (counts.dueSoon) return {total:tasks.length,status:'due-soon',label:`PM: ${counts.dueSoon} Due Soon`};
+  if (counts.hold) return {total:tasks.length,status:'hold',label:'PM: On Hold'};
+  if (counts.current) return {total:tasks.length,status:'current',label:'PM: Current'};
+  if (counts.inactive===tasks.length) return {total:tasks.length,status:'inactive',label:'PM: Inactive'};
+  return {total:tasks.length,status:'incomplete',label:'PM: Setup Incomplete'};
+}
+function pmHistoryValue(row:PmTaskRow) { return publicPmTask(row) as Record<string,unknown>; }
+function recordPmAudit(input:{action:string;task:PmTaskRow;asset:{id:number;asset_number:string;equipment_name?:string};actor:User;oldValue?:Record<string,unknown>|null;newValue?:Record<string,unknown>|null;reasonNote?:string}) {
+  const equipment=input.task.asset_library==='equipment';
+  recordHistoryLog({section:'preventive_maintenance',action:input.action,entityType:'pm_task',entityId:input.task.id,entityLabel:input.task.title,assetId:String(input.asset.id),machineName:equipment?'':input.asset.asset_number,equipmentName:equipment?(input.asset.equipment_name||input.asset.asset_number):'',oldValue:input.oldValue,newValue:input.newValue,reasonNote:input.reasonNote,actor:input.actor});
+}
 function normalizedMachineAssetNumber(value: string) {
   return value.trim().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').toLowerCase();
 }
@@ -6533,7 +7649,7 @@ function recordMachineAssetHistory(input: { action: string; actor: User; row: Ma
 }
 function machineAssetDbValues(input: MachineAssetInput) {
   return {
-    asset_number: input.assetNumber, asset_name: input.assetName, brand: input.brand, model: input.model, serial_number: input.serialNumber, machine_year: input.machineYear, machine_type: input.machineType, power_type: input.powerType, shot_size_oz: input.shotSizeOz, tonnage: input.tonnage,
+    asset_number: input.assetNumber, asset_name: input.assetName, brand: input.brand, model: input.model, serial_number: input.serialNumber, machine_year: input.machineYear, machine_type: input.machineType, power_type: input.powerType, setup_type: input.setupType, shot_size_oz: input.shotSizeOz, tonnage: input.tonnage,
     barrel_diameter: input.barrelDiameter, location: input.location, department: input.department, status: input.status, voltage_value: input.voltageValue, voltage_type: input.voltageType, full_load_amp: input.fullLoadAmp, machine_length: input.machineLength, machine_width: input.machineWidth, machine_height: input.machineHeight, full_die_height_length: input.fullDieHeightLength,
     screw_type: input.screwType, screw_tip_type: input.screwTipType, screw_tip_installed_date: input.screwTipInstalledDate, screw_installed_date: input.screwInstalledDate, barrel_installed_date: input.barrelInstalledDate, barrel_end_cap_installed_date: input.barrelEndCapInstalledDate, barrel_length: input.barrelLength, screw_length: input.screwLength,
     screw_rebuild_repaired: input.screwRebuildRepaired ? 1 : 0, barrel_rebuild_repaired: input.barrelRebuildRepaired ? 1 : 0, screw_condition_status: input.screwConditionStatus, barrel_condition_status: input.barrelConditionStatus, has_double_shot_injection: input.hasDoubleShotInjection ? 1 : 0, has_plunger_injection: input.hasPlungerInjection ? 1 : 0,
@@ -6581,7 +7697,7 @@ function machineImportRecordFromRow(record: Record<string, string>, rowNumber: n
   };
   const press = value('Press','Asset Number','Asset Number / Press Number');
   return {
-    rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz','Shot Size (oz)'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter','Barrel Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number'), machineType: value('Machine Type'),
+    rowNumber, assetNumber: press ? (/^press\s+/i.test(press) ? press : `Press ${press}`) : '', shotSizeOz: value('Shot (oz)','Shot','Shot Size Oz','Shot Size (oz)'), tonnage: value('Ton','Tonnage'), powerType: value('H&E','Power Type'), setupType: value('Setup Type','Injection Setup'), brand: value('Mfg','Brand','Manufacturer'), barrelDiameter: value('Barrel','Barrel/Screw Diameter','Barrel Diameter'), machineYear: value('Year','Machine Year'), model: value('Model #','Model','Model Number'), serialNumber: value('Equip Serial #','Serial Number','Equip Serial Number'), machineType: value('Machine Type'),
     screwType: value('Screw Type'), screwTipType: value('Screw Tip Type'), screwRebuildRepaired: value('Screw Rebuild / Repaired'), screwConditionStatus: value('Screw Condition Status'), screwInstalledDate: value('Screw Installed Date'), screwTipInstalledDate: value('Screw Tip Installed Date'), screwLength: value('Screw Length'),
     barrelRebuildRepaired: value('Barrel Rebuild / Repaired'), barrelConditionStatus: value('Barrel Condition Status'), barrelInstalledDate: value('Barrel Installed Date'), barrelEndCapInstalledDate: value('Barrel End Cap Installed Date'), barrelLength: value('Barrel Length'),
     machineLength: value('Machine Length'), machineWidth: value('Machine Width'), machineHeight: value('Machine Height'), fullDieHeightLength: value('Full Die Height Length / Range'), notes: value('Notes'), criticalNotes: value('Critical Notes'),
@@ -6622,8 +7738,8 @@ async function parseMachineImportFile(file: Express.Multer.File | undefined) {
   }
   throw new Error('Machine import file must be CSV or .xlsx Excel format.');
 }
-function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>) {
-  return validateMachineAssetInput({ ...row, assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
+function machineInputFromImport(row: ReturnType<typeof machineImportRecordFromRow>, existing?: MachineAssetRow) {
+  return validateMachineAssetInput({ ...row, setupType: row.setupType || existing?.setup_type || '', assetNumber: row.assetNumber, assetName: row.assetNumber, brand: row.brand || 'Unknown', model: row.model, serialNumber: row.serialNumber, machineYear: row.machineYear, machineType: 'Injection Molding Machine', powerType: row.powerType, shotSizeOz: row.shotSizeOz, tonnage: row.tonnage, barrelDiameter: row.barrelDiameter, status: 'active' });
 }
 type MachineImportMode = 'add_new_only' | 'upsert';
 type MachineImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
@@ -6658,7 +7774,6 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
       }
       const dbMatches = dbAssetsByKey.get(key) ?? [];
       try {
-        const input = machineInputFromImport(row);
         seen.add(key);
         if (dbMatches.length > 1) {
           rejectDuplicate(row.rowNumber, assetNumber, 'Duplicate Asset Number already exists in MCC. Clean existing records first.');
@@ -6669,6 +7784,7 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
           continue;
         }
         const existing = mode === 'upsert' && dbMatches.length === 1 ? dbMatches[0] : undefined;
+        const input = machineInputFromImport(row, existing);
         if (existing) {
           const oldValue = machineAssetHistoryValue(existing);
           updateMachineAsset(existing.id, input, actor, timestamp);
@@ -6699,6 +7815,98 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
   if (summary.addedCount + summary.updatedCount > 0) scheduleAutoBackup('machine asset import', actor);
   return summary;
 }
+
+type EquipmentAssetStatus = 'active' | 'down' | 'disabled' | 'removed';
+type EquipmentAssetRow = {
+  id:number;asset_number:string;equipment_name:string;category:string;equipment_type:string;manufacturer:string;model:string;serial_number:string;equipment_year:string;location:string;department:string;status:EquipmentAssetStatus;criticality:string;
+  power_type:string;voltage:string;phase:string;amperage:string;air_requirement:string;water_requirement:string;capacity_rating:string;dimensions:string;weight:string;specification_notes:string;
+  created_at:string;updated_at:string;created_by_user_id:number|null;updated_by_user_id:number|null;deleted:number;deleted_at:string|null;deleted_by_user_id:number|null;
+};
+const equipmentCategories = [
+  'Dryer','Chiller','Air Compressor','Vacuum Pump','Blender','Material Loader','Granulator / Grinder','Mold Temperature Controller','Cooling Tower','Robot / Picker','Conveyor','Vision System','Leak Tester','Welder','Packaging Equipment','Water Treatment / Filtration','Electrical Panel / Transformer','HVAC','Toolroom Equipment','Forklift / Material Handling','Other / Custom',
+] as const;
+const equipmentStatuses:EquipmentAssetStatus[]=['active','down','disabled','removed'];
+const equipmentCriticalities=['','low','medium','high','critical'];
+const equipmentImportHeaders=['Equipment Asset Number','Equipment Name','Category','Equipment Type','Manufacturer / Brand','Model','Serial Number','Year','Location','Department / Area','Status','Criticality','Power Type','Voltage','Phase','Amperage','Air Requirement','Water Requirement','Capacity / Rating','Dimensions','Weight','Specification Notes'] as const;
+type EquipmentAssetInput=ReturnType<typeof validateEquipmentAssetInput>;
+function equipmentText(input:Record<string,unknown>,keys:string[],maxLength=240,fallback=''){return machineText(input,keys,maxLength,fallback);}
+function normalizeEquipmentCategory(value:string,customValue:string){
+  const requested=value.trim().replace(/\s+/g,' ');
+  const custom=customValue.trim().replace(/\s+/g,' ');
+  if(/[\u0000-\u001f\u007f]/.test(requested)||/[\u0000-\u001f\u007f]/.test(custom))throw new Error('Equipment Category contains unsafe characters.');
+  if(requested==='Other / Custom'&&!custom)throw new Error('Custom Category is required when Other / Custom is selected.');
+  const result=requested==='Other / Custom'?custom:(equipmentCategories.find(option=>option!=='Other / Custom'&&option.toLowerCase()===requested.toLowerCase())??requested);
+  if(!result)throw new Error('Equipment Category is required.');
+  if(result.length>160)throw new Error('Equipment Category must be 160 characters or fewer.');
+  return result;
+}
+function validateEquipmentAssetInput(body:unknown){
+  const input=isRecord(body)?body:{};
+  const assetNumber=equipmentText(input,['assetNumber','asset_number','equipmentAssetNumber','Equipment Asset Number'],120).replace(/\s+/g,' ').trim();
+  if(!assetNumber)throw new Error('Equipment Asset Number is required.');
+  const equipmentName=equipmentText(input,['equipmentName','equipment_name','name','Equipment Name'],180).replace(/\s+/g,' ').trim();
+  if(!equipmentName)throw new Error('Equipment Name is required.');
+  const category=normalizeEquipmentCategory(equipmentText(input,['category','Category'],180),equipmentText(input,['customCategory','custom_category'],180));
+  const requestedStatus=equipmentText(input,['status','Status'],40,'active').toLowerCase() as EquipmentAssetStatus;
+  const status=equipmentStatuses.includes(requestedStatus)?requestedStatus:'active';
+  const requestedCriticality=equipmentText(input,['criticality','Criticality'],40).toLowerCase();
+  const criticality=equipmentCriticalities.includes(requestedCriticality)?requestedCriticality:'';
+  return {
+    assetNumber,equipmentName,category,
+    equipmentType:equipmentText(input,['equipmentType','equipment_type','type','Equipment Type'],160),
+    manufacturer:equipmentText(input,['manufacturer','brand','manufacturerBrand','Manufacturer / Brand'],160),
+    model:equipmentText(input,['model','Model'],160),serialNumber:equipmentText(input,['serialNumber','serial_number','Serial Number'],160),
+    equipmentYear:equipmentText(input,['equipmentYear','equipment_year','year','Year'],12),location:equipmentText(input,['location','Location'],160),
+    department:equipmentText(input,['department','departmentArea','Department / Area'],160),status,criticality,
+    powerType:equipmentText(input,['powerType','power_type','Power Type'],120),voltage:equipmentText(input,['voltage','Voltage'],80),
+    phase:equipmentText(input,['phase','Phase'],80),amperage:equipmentText(input,['amperage','Amperage'],80),
+    airRequirement:equipmentText(input,['airRequirement','air_requirement','Air Requirement'],240),waterRequirement:equipmentText(input,['waterRequirement','water_requirement','Water Requirement'],240),
+    capacityRating:equipmentText(input,['capacityRating','capacity_rating','Capacity / Rating'],240),dimensions:equipmentText(input,['dimensions','Dimensions'],240),
+    weight:equipmentText(input,['weight','Weight'],120),specificationNotes:equipmentText(input,['specificationNotes','specification_notes','Specification Notes'],12000),
+  };
+}
+function publicEquipmentAsset(row:EquipmentAssetRow){
+  return {id:row.id,assetNumber:row.asset_number,equipmentName:row.equipment_name,assetName:row.equipment_name,category:row.category,equipmentType:row.equipment_type,manufacturer:row.manufacturer,brand:row.manufacturer,model:row.model,serialNumber:row.serial_number,equipmentYear:row.equipment_year,year:row.equipment_year,location:row.location,department:row.department,status:row.status,criticality:row.criticality,powerType:row.power_type,voltage:row.voltage,phase:row.phase,amperage:row.amperage,airRequirement:row.air_requirement,waterRequirement:row.water_requirement,capacityRating:row.capacity_rating,dimensions:row.dimensions,weight:row.weight,specificationNotes:row.specification_notes,createdAt:row.created_at,updatedAt:row.updated_at,deleted:Boolean(row.deleted)};
+}
+function equipmentAssetById(id:number,includeDeleted=false){return one<EquipmentAssetRow>(`SELECT * FROM equipment_assets WHERE id=?${includeDeleted?'':' AND deleted=0'}`,[id]);}
+function equipmentAssetByNumber(value:string){return one<EquipmentAssetRow>('SELECT * FROM equipment_assets WHERE lower(trim(asset_number))=lower(?) ORDER BY deleted ASC,id LIMIT 1',[value.trim()]);}
+function equipmentAssetValues(input:EquipmentAssetInput){
+  return {asset_number:input.assetNumber,equipment_name:input.equipmentName,category:input.category,equipment_type:input.equipmentType,manufacturer:input.manufacturer,model:input.model,serial_number:input.serialNumber,equipment_year:input.equipmentYear,location:input.location,department:input.department,status:input.status,criticality:input.criticality,power_type:input.powerType,voltage:input.voltage,phase:input.phase,amperage:input.amperage,air_requirement:input.airRequirement,water_requirement:input.waterRequirement,capacity_rating:input.capacityRating,dimensions:input.dimensions,weight:input.weight,specification_notes:input.specificationNotes} as Record<string,SqlParam>;
+}
+function insertEquipmentAsset(input:EquipmentAssetInput,actor:User,timestamp:string){
+  const values=equipmentAssetValues(input);values.created_at=timestamp;values.updated_at=timestamp;values.created_by_user_id=actor.id;values.updated_by_user_id=actor.id;values.deleted=0;
+  const columns=Object.keys(values);const result=run(`INSERT INTO equipment_assets (${columns.join(',')}) VALUES (${columns.map(()=>'?').join(',')})`,columns.map(column=>values[column]));return Number(result.lastInsertRowid);
+}
+function updateEquipmentAsset(id:number,input:EquipmentAssetInput,actor:User,timestamp:string){
+  const values=equipmentAssetValues(input);values.updated_at=timestamp;values.updated_by_user_id=actor.id;const columns=Object.keys(values);
+  run(`UPDATE equipment_assets SET ${columns.map(column=>`${column}=?`).join(',')},deleted=0,deleted_at=NULL,deleted_by_user_id=NULL WHERE id=?`,[...columns.map(column=>values[column]),id]);
+}
+function equipmentHistoryValue(row:EquipmentAssetRow|EquipmentAssetInput){return 'asset_number' in row?publicEquipmentAsset(row):row;}
+function recordEquipmentHistory(input:{action:string;actor:User;row:EquipmentAssetRow;oldValue?:Record<string,unknown>|null;newValue?:Record<string,unknown>|null;reasonNote?:string}){
+  recordHistoryLog({section:'equipment_library',action:input.action,entityType:'equipment_asset',entityId:input.row.id,entityLabel:input.row.asset_number,assetId:String(input.row.id),equipmentName:input.row.equipment_name||input.row.asset_number,locationName:input.row.location,oldValue:input.oldValue,newValue:input.newValue,reasonNote:input.reasonNote,actor:input.actor});
+}
+function equipmentImportRowsFromTable(rows:string[][]){
+  const [headers=[],...dataRows]=rows;const normalized=headers.map(normalizeImportHeader);
+  for(const required of ['Equipment Asset Number','Equipment Name','Category'])if(!normalized.includes(normalizeImportHeader(required)))throw new Error('Equipment import must include Equipment Asset Number, Equipment Name, and Category headers.');
+  return dataRows.map((row,index)=>{const values:Record<string,string>={};headers.forEach((header,column)=>{values[normalizeImportHeader(header)]=String(row[column]??'').trim();});return {rowNumber:index+2,values};});
+}
+async function parseEquipmentImportFile(file:Express.Multer.File|undefined){
+  if(!file)throw new Error('Choose a CSV or Excel file to import.');
+  const extension=path.extname(file.originalname).toLowerCase();let rows:string[][]=[];
+  if(extension==='.csv'||file.mimetype.includes('csv'))rows=parseCsvRows(file.buffer.toString('utf8'));
+  else if(extension==='.xlsx'){const workbook=new ExcelJS.Workbook();const arrayBuffer=file.buffer.buffer.slice(file.buffer.byteOffset,file.buffer.byteOffset+file.buffer.byteLength) as ArrayBuffer;await workbook.xlsx.load(arrayBuffer);const sheet=workbook.worksheets[0];if(!sheet)throw new Error('Excel import file is empty.');sheet.eachRow({includeEmpty:false},row=>{const values:string[]=[];for(let column=1;column<=Math.max(row.cellCount,equipmentImportHeaders.length);column+=1)values.push(excelCellText(row.getCell(column)).trim());if(values.some(Boolean))rows.push(values);});}
+  else throw new Error('Equipment import file must be CSV or .xlsx Excel format.');
+  return equipmentImportRowsFromTable(rows);
+}
+function equipmentInputFromImport(values:Record<string,string>,existing?:EquipmentAssetRow){
+  const get=(header:string)=>values[normalizeImportHeader(header)]??'';
+  return validateEquipmentAssetInput({assetNumber:get('Equipment Asset Number'),equipmentName:get('Equipment Name'),category:get('Category'),customCategory:get('Category'),equipmentType:get('Equipment Type'),manufacturer:get('Manufacturer / Brand'),model:get('Model'),serialNumber:get('Serial Number'),equipmentYear:get('Year'),location:get('Location'),department:get('Department / Area'),status:get('Status')||existing?.status||'active',criticality:get('Criticality'),powerType:get('Power Type'),voltage:get('Voltage'),phase:get('Phase'),amperage:get('Amperage'),airRequirement:get('Air Requirement'),waterRequirement:get('Water Requirement'),capacityRating:get('Capacity / Rating'),dimensions:get('Dimensions'),weight:get('Weight'),specificationNotes:get('Specification Notes')});
+}
+function importEquipmentRows(req:AuthRequest,rows:ReturnType<typeof equipmentImportRowsFromTable>,mode:MachineImportMode){
+  const actor=req.user!;const timestamp=now();const summary={ok:true,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:0,errors:[] as string[],changedAssetNumbers:[] as string[]};const seen=new Set<string>();
+  db.exec('BEGIN IMMEDIATE');try{for(const row of rows){const assetNumber=(row.values[normalizeImportHeader('Equipment Asset Number')]??'').trim();const key=assetNumber.toLowerCase();try{if(!key)throw new Error('Equipment Asset Number is required.');if(seen.has(key)){summary.rejectedDuplicateCount+=1;summary.skippedCount+=1;continue;}seen.add(key);const existing=equipmentAssetByNumber(assetNumber);if(existing&&!existing.deleted&&mode==='add_new_only'){summary.rejectedDuplicateCount+=1;summary.skippedCount+=1;continue;}const input=equipmentInputFromImport(row.values,existing);if(existing){const oldValue=equipmentHistoryValue(existing);updateEquipmentAsset(existing.id,input,actor,timestamp);const updated=equipmentAssetById(existing.id,true)!;recordEquipmentHistory({action:'equipment_edited',actor,row:updated,oldValue,newValue:equipmentHistoryValue(updated),reasonNote:'Imported from CSV/XLSX.'});summary.updatedCount+=1;}else{const id=insertEquipmentAsset(input,actor,timestamp);const created=equipmentAssetById(id)!;recordEquipmentHistory({action:'equipment_created',actor,row:created,newValue:equipmentHistoryValue(created),reasonNote:'Imported from CSV/XLSX.'});summary.addedCount+=1;}summary.changedAssetNumbers.push(input.assetNumber);}catch(error){summary.skippedCount+=1;summary.errorCount+=1;summary.errors.push(`Row ${row.rowNumber}: ${safeErrorMessage(error)}`);}}db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+  audit(req,'equipment asset import','equipment_asset','bulk',summary);if(summary.addedCount+summary.updatedCount)scheduleAutoBackup('equipment asset import',actor);return summary;
+}
 const replacementFields: Record<MachineReplacementField, { column: keyof MachineAssetRow; action: string; label: string }> = {
   screw: { column: 'screw_installed_date', action: 'new_screw_installed', label: 'Screw' },
   screw_tip: { column: 'screw_tip_installed_date', action: 'new_screw_tip_installed', label: 'Screw Tip' },
@@ -6713,16 +7921,196 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
   plunger_barrel_end_cap: { column: 'plunger_barrel_end_cap_installed_date', action: 'new_plunger_barrel_end_cap_installed', label: 'Plunger Barrel End Cap' },
 };
 
-function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; req.sessionId=sid; next(); }
+function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); req.sessionId=sid; if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
-function requirePermission(permission: string) { return (req: AuthRequest,res:Response,next:NextFunction) => { const role=req.user!.role; const userMgmt=role !== 'Maintenance Tech 1'; const ok = ['dashboard.view','inventory.view','settings.view','machine.view'].includes(permission) || (permission==='inventory.write'&&canInventoryWrite(req.user!)) || (permission==='requisition-batch.manage'&&canManageRequisitionBatches(req.user!)) || (permission==='inventory.import'&&canInventoryImport(req.user!)) || (permission==='machine.write'&&canMachineWrite(req.user!)) || (permission==='machine.delete'&&canMachineDelete(req.user!)) || (permission==='history.view'&&canViewHistory(req.user!)) || (permission==='history.export'&&canExportHistory(req.user!)) || (['users.view','users.create','users.edit','users.disable','users.delete','users.resetPassword'].includes(permission)&&userMgmt) || (permission==='audit.view'&&['Admin','Manager'].includes(role)); return ok ? next() : res.status(403).json({error:'Permission denied.'}); }; }
+function requireSystemVersionAccess(req: AuthRequest, res: Response, next: NextFunction) { return req.user && canViewSystemVersion(req.user) ? next() : res.status(403).json({ok:false,error:'Admin access required.'}); }
+function permissionAliasAllowed(user:User,permission:string) {
+  if(isPermissionKey(permission)) return hasPermission(user,permission);
+  if(['dashboard.view','settings.view'].includes(permission)) return true;
+  if(permission==='inventory.write') return canInventoryWrite(user);
+  if(permission==='requisition-batch.manage') return hasPermission(user,'requisitions.manage_batches');
+  if(permission==='machine.write') return canMachineWrite(user);
+  if(permission==='equipment.write') return ['equipment.create','equipment.edit','equipment.pm_manage','equipment.documents_upload','equipment.documents_manage','equipment.notes_manage','equipment.import_export'].some(key=>hasPermission(user,key as PermissionKey));
+  if(permission==='equipment.delete') return hasPermission(user,'equipment.delete');
+  if(permission==='facility.write') return ['facility.create','facility.edit','facility.delete','facility.folders_manage','facility.upload','facility.rename_move','facility.content_delete'].some(key=>hasPermission(user,key as PermissionKey));
+  if(permission==='users.view') return canUserManage(user);
+  if(['users.create','users.edit','users.disable','users.delete'].includes(permission)) return canUserManage(user);
+  if(permission==='users.resetPassword') return user.is_owner_admin||['Manager','Admin'].includes(user.role);
+  if(permission==='users.permissions') return canDelegatePermissions(user);
+  if(permission==='audit.view') return ['Admin','Manager'].includes(user.role);
+  return false;
+}
+function resolvePermissionForRequest(permission:string,req:AuthRequest):string {
+  if(permission!=='equipment.write') return permission;
+  const route=req.path;
+  if(route.includes('/preventive-maintenance')) return 'equipment.pm_manage';
+  if(route.includes('/asset-notes')||route.endsWith('/notes')) return 'equipment.notes_manage';
+  if(route.includes('/document-folders')||route.includes('/documents/')) {
+    return req.method==='POST'&&route.endsWith('/documents')?'equipment.documents_upload':'equipment.documents_manage';
+  }
+  if(route.includes('/import')||route.includes('/export')) return 'equipment.import_export';
+  return req.method==='POST'?'equipment.create':'equipment.edit';
+}
+function requirePermission(permission:string) {
+  return (req:AuthRequest,res:Response,next:NextFunction)=>{
+    const resolved=resolvePermissionForRequest(permission,req);
+    if(permissionAliasAllowed(req.user!,resolved)) return next();
+    const definition=isPermissionKey(resolved)?permissionByKey.get(resolved):undefined;
+    return res.status(403).json({
+      error:definition?`You do not have permission to ${definition.label.toLowerCase()}.`:'Permission denied.',
+      code:'PERMISSION_REQUIRED',
+      permission:resolved,
+    });
+  };
+}
 
+facilityInfoService=createFacilityInfoService({
+  app,
+  uploadsDir,
+  requireAuth,
+  requirePermission,
+  hasPermission:(user,permission)=>isPermissionKey(permission)&&hasPermission(user as User,permission),
+  all,
+  one,
+  run,
+  exec:sql=>db.exec(sql),
+  recordHistory:input=>recordHistoryLog(input as HistoryLogInput),
+  scheduleBackup:(reason,actor)=>scheduleAutoBackup(reason,actor as User|null|undefined),
+  now,
+});
+
+function requireLoopbackUpdateProbe(req:Request,res:Response,next:NextFunction){
+  const remoteAddress=String(req.socket.remoteAddress??'').toLowerCase();
+  if(['127.0.0.1','::1','::ffff:127.0.0.1'].includes(remoteAddress))return next();
+  return res.status(403).json({ok:false,error:'Local managed updater verification is required.'});
+}
 app.get('/api/health', (_req,res)=>res.json({ok:true,app:appName,port}));
-app.get('/api/version', (_req,res)=>res.json({app:appName,version,environment:process.env.NODE_ENV??'local'}));
+app.get('/api/system/update/managed-readiness',requireLoopbackUpdateProbe,(_req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    port,
+    systemUpdate:{
+      configured:systemUpdateConfiguration.configured,
+      enabled:systemUpdateConfiguration.enabled,
+      mode:systemUpdateConfiguration.mode,
+      environmentLabel:systemUpdateConfiguration.environmentLabel,
+      applicationMatchesConfiguration:systemUpdateConfiguration.enabled&&path.resolve(systemUpdateConfiguration.applicationDir)===path.resolve(process.cwd()),
+      repositoryApproved:systemUpdateConfiguration.approvedRepository===APPROVED_UPDATE_REPOSITORY,
+      branch:systemUpdateConfiguration.branch,
+      installedVersion:applicationVersion,
+      installedCommit:applicationCommit,
+    },
+  });
+});
+app.get('/api/version', requireAuth, requireSystemVersionAccess, (_req,res)=>res.json({
+  version:applicationVersion,
+  displayVersion:applicationVersion ? `v${applicationVersion}` : 'Version unavailable',
+  commit:applicationCommit,
+  buildDate:null,
+}));
+app.get('/api/system/update/status',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
+  const status=systemUpdateService.readStatus();
+  reconcileExternalSystemUpdateEvents(status);
+  const publicStatus=systemUpdateService.publicStatus(status);
+  if(systemUpdateConfiguration.configured&&!one<{id:number}>('SELECT id FROM audit_log WHERE action=? AND target_type=? AND target_id=? LIMIT 1',[
+    'updater configured','system_update_configuration',systemUpdateConfiguration.mode,
+  ])){
+    const configuredStatus={...status,mode:systemUpdateConfiguration.mode,environmentLabel:systemUpdateConfiguration.environmentLabel,lastUpdatedAt:now()};
+    audit(req,'updater configured','system_update_configuration',systemUpdateConfiguration.mode,systemUpdateAuditDetails(configuredStatus));
+    recordSystemUpdateHistory('updater_configured',configuredStatus,req.user!,'The protected Windows updater configuration was detected by MCC.');
+  }
+  if(['updater_agent_offline','configuration_invalid','mcc_service_not_running'].includes(publicStatus.code)
+    && publicStatus.code!==lastSystemUpdateAvailabilityCode){
+    const unavailableStatus={...status,code:publicStatus.code,message:publicStatus.message,lastUpdatedAt:now()};
+    audit(req,'updater-agent unavailable','system_update_configuration',systemUpdateConfiguration.mode,systemUpdateAuditDetails(unavailableStatus));
+    recordSystemUpdateHistory('updater_agent_unavailable',unavailableStatus,req.user!,publicStatus.message);
+  }
+  lastSystemUpdateAvailabilityCode=publicStatus.code;
+  res.setHeader('Cache-Control','no-store');
+  res.json({...publicStatus,csrfToken:systemUpdateCsrfToken(req)});
+});
+app.post('/api/system/update/check',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
+  const rateKey=`${req.user!.id}:${req.ip}`;
+  if(limited(systemUpdateCheckHits,rateKey,6,10*60*1000)){
+    const retryAfterSeconds=updateRateLimitRetryAfter(systemUpdateCheckHits,rateKey,10*60*1000);
+    res.setHeader('Retry-After',String(retryAfterSeconds));
+    return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update checks.',retryAfterSeconds});
+  }
+  const body=isRecord(req.body)?req.body:{};
+  if(Object.keys(body).length)return res.status(400).json({ok:false,code:'invalid_request',error:'The update check does not accept deployment configuration.'});
+  try {
+    const status=systemUpdateService.checkForUpdate(systemUpdateIdentity(req.user!));
+    const details=systemUpdateAuditDetails(status);
+    audit(req,'update check','system_update_check',status.lastUpdatedAt,details);
+    recordSystemUpdateHistory('update_check',status,req.user!,status.message);
+    if(['update_available','same_version_different_commit'].includes(status.code)) {
+      audit(req,'update available','system_update_check',status.lastUpdatedAt,details);
+      recordSystemUpdateHistory('update_available',status,req.user!,status.message);
+    }
+    res.setHeader('Cache-Control','no-store');
+    res.json({...systemUpdateService.publicStatus(status),csrfToken:systemUpdateCsrfToken(req)});
+  } catch(error) {
+    const status=systemUpdateService.readStatus();
+    const failure=error instanceof SystemUpdateError?error:new SystemUpdateError(503,'update_check_failed','The MCC update check failed.');
+    if(failure.internalDiagnostic)console.error(`[system-update] ${failure.internalDiagnostic}`);
+    audit(req,'update check','system_update_check',status.lastUpdatedAt,{...systemUpdateAuditDetails(status),result:failure.code});
+    recordSystemUpdateHistory('update_check',status,req.user!,status.message);
+    res.setHeader('Cache-Control','no-store');
+    res.status(failure.httpStatus).json({...systemUpdateService.publicStatus(status),ok:false,error:failure.message,csrfToken:systemUpdateCsrfToken(req)});
+  }
+});
+app.post('/api/system/update/install',requireAuth,requireSystemVersionAccess,(req:AuthRequest,res)=>{
+  const rateKey=`${req.user!.id}:${req.ip}`;
+  if(limited(systemUpdateInstallHits,rateKey,5,15*60*1000)){
+    const retryAfterSeconds=updateRateLimitRetryAfter(systemUpdateInstallHits,rateKey,15*60*1000);
+    res.setHeader('Retry-After',String(retryAfterSeconds));
+    return res.status(429).json({ok:false,code:'rate_limited',error:'Too many update installation attempts.',retryAfterSeconds});
+  }
+  if(!validateSystemUpdateCsrf(req))return res.status(403).json({ok:false,code:'csrf_rejected',error:'Update confirmation could not be verified. Refresh Settings and try again.'});
+  const body=isRecord(req.body)?req.body:{};
+  const unexpectedKeys=Object.keys(body).filter(key=>!['confirm','checkToken'].includes(key));
+  if(unexpectedKeys.length)return res.status(400).json({ok:false,code:'invalid_request',error:'The update request contains unsupported fields.'});
+  if(body.confirm!==true)return res.status(400).json({ok:false,code:'confirmation_required',error:'Explicit update confirmation is required.'});
+  if(typeof body.checkToken!=='string'||!body.checkToken)return res.status(409).json({ok:false,code:'stale_update_check',error:'Run a successful update check before installing.'});
+  try {
+    const status=systemUpdateService.queueInstall(systemUpdateIdentity(req.user!),body.checkToken);
+    const details=systemUpdateAuditDetails(status);
+    audit(req,'update requested','system_update_job',status.jobId??'',details);
+    recordSystemUpdateHistory('update_requested',status,req.user!,'The Admin confirmed installation of the verified approved update.');
+    res.setHeader('Cache-Control','no-store');
+    res.status(202).json({...systemUpdateService.publicStatus(status),accepted:true,jobId:status.jobId,csrfToken:systemUpdateCsrfToken(req)});
+  } catch(error) {
+    const failure=error instanceof SystemUpdateError?error:new SystemUpdateError(503,'failed','The external MCC update runner could not be started.');
+    if(failure.internalDiagnostic)console.error(`[system-update] ${failure.internalDiagnostic}`);
+    const status=systemUpdateService.readStatus();
+    res.status(failure.httpStatus).json({...systemUpdateService.publicStatus(status),ok:false,error:failure.message,csrfToken:systemUpdateCsrfToken(req)});
+  }
+});
 app.get('/api/auth/status', (req: AuthRequest,res)=> { const sid=unsign(cookie(req,'mcc_session')); const u=sid ? one<User>('SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.deleted=0 AND s.id=? AND s.expires_at > ?', [sid,now()]) : undefined; res.json({ setupRequired:userCount()===0, user: u && !u.disabled ? publicUser(u) : null }); });
 app.post('/api/auth/setup-first-admin',(req,res)=>{ if(userCount()>0) return res.status(409).json({error:'Setup is already complete.'}); const {fullName,email,password,confirmPassword}=req.body; if(!fullName||!email||password!==confirmPassword||!passwordOk(password)) return res.status(400).json({error:'Enter a full name, email, and matching strong passwords.'}); const id=createUser({fullName,email,role:'Admin',password,owner:true,createdBy:null}); (req as AuthRequest).user=findUserById(id); audit(req,'user create','user',id,{firstAdmin:true,ownerAdmin:true}); res.json({ok:true}); });
-app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [now(),u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:now()})}); });
+app.post('/api/auth/login',(req:AuthRequest,res)=>{ const key=`${req.ip}:${String(req.body.email??'').toLowerCase()}`; if(limited(loginHits,key,5,15*60*1000)) return res.status(429).json({error:'Too many login attempts. Try again later.'}); const u=findUserByEmail(req.body.email??''); if(!u||!verifyPassword(req.body.password??'',u.password_hash)) { audit(req,'failed login','user','',{email:req.body.email??''}); return res.status(401).json({error:'Invalid email or password.'}); } if(u.disabled) { audit(req,'failed login','user',u.id,{reason:'disabled'}); return res.status(403).json({error:'Account disabled. Contact an administrator.'}); } if(u.temp_password_expires_at && u.force_password_change && u.temp_password_expires_at < now()) return res.status(401).json({error:'Temporary password expired. Request another password reset.'}); setSession(res,u.id); const loggedInAt=now(); run('UPDATE users SET last_login_at=?, updated_at=updated_at WHERE id=?', [loggedInAt,u.id]); req.user=u; audit(req,'login','user',u.id); res.json({user:publicUser({...u,last_login_at:loggedInAt})}); });
 app.post('/api/auth/logout', requireAuth, (req:AuthRequest,res)=>{ audit(req,'logout','user',req.user!.id); clearSession(req,res); res.json({ok:true}); });
+app.post('/api/presence/heartbeat',requireAuth,(req:AuthRequest,res)=>{
+  try{
+    const input=validatedPresenceHeartbeat(req.body);
+    const heartbeat=recordPresenceHeartbeat(req.sessionId!,req.user!.id,input.clientInstanceId,input.visibility,input.activitySinceLastHeartbeat);
+    res.setHeader('Cache-Control','no-store');
+    res.json({ok:true,...heartbeat,policy:presencePolicy});
+  }catch(error){res.status(400).json({ok:false,code:'INVALID_PRESENCE_HEARTBEAT',error:error instanceof Error?error.message:'Presence heartbeat is invalid.'});}
+});
+app.post('/api/presence/disconnect',requireAuth,(req:AuthRequest,res)=>{
+  try{
+    const clientInstanceId=validatedPresenceDisconnect(req.body);
+    const disconnected=markPresenceClientDisconnected(req.sessionId!,clientInstanceId);
+    res.setHeader('Cache-Control','no-store');
+    res.json({ok:true,disconnected,serverTime:now()});
+  }catch(error){res.status(400).json({ok:false,code:'INVALID_PRESENCE_DISCONNECT',error:error instanceof Error?error.message:'Presence disconnect is invalid.'});}
+});
+app.get('/api/presence/team',requireAuth,(req:AuthRequest,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json(maintenanceTeamRoster(req.user!));
+});
 app.post('/api/auth/forgot-password', async (req,res)=>{
   const requestedEmail = String(req.body.email ?? '').trim();
   const key=`${req.ip}:${requestedEmail.toLowerCase()}`;
@@ -6739,11 +8127,12 @@ app.post('/api/auth/forgot-password', async (req,res)=>{
     const temp=`Mcc-${crypto.randomBytes(9).toString('base64url')}!9a`;
     const expiresAt=tempExpiry();
     run('UPDATE users SET password_hash=?, force_password_change=1, temp_password_expires_at=?, updated_at=? WHERE id=?', [hashPassword(temp),expiresAt,now(),u!.id]);
+    const sessionsInvalidated=invalidateUserSessions(u!.id);
     console.log('MCC reset email send attempted.');
     try {
       const messageId = await sendResetEmail(u!, temp, expiresAt);
       console.log(`MCC reset email sent successfully. messageId: ${messageId ?? 'unknown'}`);
-      audit(req,'password reset email sent','user',u!.id,{messageId: messageId ?? null});
+      audit(req,'password reset email sent','user',u!.id,{messageId: messageId ?? null,sessionsInvalidated});
     } catch (error) {
       const safeMessage = safeErrorMessage(error, [temp], 'Unknown SMTP error.');
       console.log(`MCC reset email failed: ${safeMessage}`);
@@ -6754,33 +8143,170 @@ app.post('/api/auth/forgot-password', async (req,res)=>{
   res.json({ok:true,message:'If the email matches an account, password reset instructions will be sent.'});
 });
 app.post('/api/auth/change-password', requireAuth, (req:AuthRequest,res)=>{ const {currentPassword,newPassword,confirmPassword}=req.body; const u=req.user!; if(!verifyPassword(currentPassword??'',u.password_hash)) return res.status(400).json({error:'Current password is incorrect.'}); if(newPassword!==confirmPassword||!passwordOk(newPassword)) return res.status(400).json({error:'New password must match and meet complexity rules.'}); if(verifyPassword(newPassword,u.password_hash)) return res.status(400).json({error:'New password cannot match the temporary/current password.'}); run('UPDATE users SET password_hash=?, force_password_change=0, temp_password_expires_at=NULL, updated_at=? WHERE id=?', [hashPassword(newPassword),now(),u.id]); audit(req,'password change','user',u.id); res.json({ok:true}); });
-app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{ const max=roleRank(req.user!.role); const manageableRoles = roles.slice(0,max+1); const placeholders = manageableRoles.map(() => '?').join(','); res.json({users: all<User>(`SELECT * FROM users WHERE deleted=0 AND (?=4 OR role IN (${placeholders})) ORDER BY is_owner_admin DESC, full_name`, [max,...manageableRoles]).map(user => publicUserForActor(user, req.user!))}); });
-app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{ const role=req.body.role as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot create that role.'}); if(!passwordOk(req.body.temporaryPassword??'')) return res.status(400).json({error:'Temporary password must meet complexity rules.'}); const id=createUser({fullName:req.body.fullName,email:req.body.email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id}); audit(req,'user create','user',id,{role}); res.status(201).json({user:publicUser(findUserById(id)!)}); });
-app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canEditTarget(req.user!,target)) return res.status(403).json({error:'Cannot edit that user.'}); const role=(req.body.role??target.role) as Role; if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'}); run('UPDATE users SET full_name=?, email=?, role=?, updated_at=? WHERE id=?', [req.body.fullName??target.full_name,req.body.email??target.email,role,now(),target.id]); audit(req,'user update','user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
-for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); audit(req,`user ${action}`,'user',target.id); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
-app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); run('DELETE FROM sessions WHERE user_id=?', [target.id]); audit(req,'user delete','user',target.id,{softDelete:true}); res.json({ok:true}); });
+app.get('/api/users', requireAuth, requirePermission('users.view'), (req:AuthRequest,res)=>{
+  const max=roleRank(req.user!.role);
+  const manageableRoles=roles.slice(0,max+1);
+  const placeholders=manageableRoles.map(()=>'?').join(',');
+  const users=all<User>(`SELECT * FROM users WHERE deleted=0 AND (?=4 OR role IN (${placeholders})) ORDER BY is_owner_admin DESC, full_name`,[max,...manageableRoles]);
+  const presence=presenceByUser(users);
+  res.setHeader('Cache-Control','no-store');
+  res.json({users:users.map(user=>publicUserForActor(user,req.user!,presence.get(user.id))),presencePolicy});
+});
+app.post('/api/users', requireAuth, requirePermission('users.create'), (req:AuthRequest,res)=>{
+  const fullName=String(req.body.fullName??'').trim();
+  const email=String(req.body.email??'').trim();
+  const role=req.body.role as Role;
+  if(!fullName) return res.status(400).json({error:'Full name is required.',code:'FULL_NAME_REQUIRED',field:'fullName'});
+  if(!email) return res.status(400).json({error:'Email is required.',code:'EMAIL_REQUIRED',field:'email'});
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({error:'Enter a valid email address.',code:'EMAIL_INVALID',field:'email'});
+  if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot create that role.',code:'ROLE_NOT_ALLOWED',field:'role'});
+  if(!passwordOk(req.body.temporaryPassword)) return res.status(400).json({error:passwordComplexityError,code:'PASSWORD_COMPLEXITY',field:'temporaryPassword',requirements:passwordRequirements});
+  if(one<{id:number}>('SELECT id FROM users WHERE lower(email)=lower(?)',[email])) return res.status(409).json({error:'A user with this email already exists.',code:'EMAIL_EXISTS',field:'email'});
+  const id=createUser({fullName,email,role,password:req.body.temporaryPassword,force:true,createdBy:req.user!.id});
+  recordRoleAssignment({userId:id,previousRole:null,newRole:role,assignedByUserId:req.user!.id,reason:'Initial rank assignment'});
+  audit(req,'user create','user',id,{role});
+  res.status(201).json({user:publicUser(findUserById(id)!)});
+});
+app.post('/api/users/:id/reset-password',requireAuth,requirePermission('users.resetPassword'),(req:AuthRequest,res)=>{
+  const targetId=Number(req.params.id);
+  const target=Number.isInteger(targetId)&&targetId>0?one<User>('SELECT * FROM users WHERE id=?',[targetId]):undefined;
+  if(!target||target.deleted) return res.status(404).json({error:'User not found.',code:'USER_NOT_FOUND'});
+  if(!canResetPasswordTarget(req.user!,target)) return res.status(403).json({error:'You cannot reset that user password.',code:'PASSWORD_RESET_NOT_ALLOWED'});
+  const temporaryPassword=req.body.temporaryPassword;
+  const confirmTemporaryPassword=req.body.confirmTemporaryPassword;
+  if(temporaryPassword!==confirmTemporaryPassword) return res.status(400).json({error:'Temporary password confirmation does not match.',code:'PASSWORD_CONFIRMATION_MISMATCH',field:'confirmTemporaryPassword'});
+  if(!passwordOk(temporaryPassword)) return res.status(400).json({error:passwordComplexityError,code:'PASSWORD_COMPLEXITY',field:'temporaryPassword',requirements:passwordRequirements});
+  const expiresAt=tempExpiry();
+  const timestamp=now();
+  run('UPDATE users SET password_hash=?,force_password_change=1,temp_password_expires_at=?,updated_at=? WHERE id=?',[hashPassword(temporaryPassword),expiresAt,timestamp,target.id]);
+  const invalidated=invalidateUserSessions(target.id);
+  audit(req,'password reset performed','user',target.id,{targetUser:target.full_name,targetEmail:target.email,administrator:req.user!.email,forcedPasswordChangeEnabled:true,tempPasswordExpiresAt:expiresAt,sessionsInvalidated:invalidated});
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,message:'Temporary password created successfully',temporaryPassword,tempPasswordExpiresAt:expiresAt,forcePasswordChange:true,sessionsInvalidated:invalidated});
+});
+function permissionDetailsForUser(target:User,actor:User) {
+  const inherited=new Set(inheritedPermissions(target.role));
+  const grants=activeSpecialGrants(target.id).map(publicPermissionGrant);
+  const grantedKeys=new Set(grants.map(grant=>grant.permissionKey));
+  return {
+    user:publicUserForActor(target,actor),
+    catalog:permissionModules.map(module=>({
+      key:module.key,
+      label:module.label,
+      shortLabel:module.shortLabel,
+      permissions:module.permissions.map(([key,label])=>({
+        key,
+        label,
+        state:inherited.has(key)?'inherited':grantedKeys.has(key)?'granted':'not_allowed',
+        inherited:inherited.has(key),
+        speciallyGranted:grantedKeys.has(key),
+        grant:grants.find(grant=>grant.permissionKey===key)??null,
+      })),
+    })),
+    inheritedPermissions:[...inherited],
+    specialPermissionGrants:grants,
+    effectivePermissions:[...getEffectivePermissions(target)],
+    canManage:canManagePermissionTarget(actor,target),
+  };
+}
+app.get('/api/permissions/catalog',requireAuth,(_req,res)=>res.json({modules:permissionModules,permissions:permissionCatalog}));
+app.get('/api/users/:id/permissions',requireAuth,requirePermission('users.permissions'),(req:AuthRequest,res)=>{
+  const target=findUserById(Number(req.params.id));
+  if(!target) return res.status(404).json({error:'User not found.',code:'USER_NOT_FOUND'});
+  if(!canManagePermissionTarget(req.user!,target)) return res.status(403).json({error:'You cannot manage permissions for that user.',code:'PERMISSION_DELEGATION_NOT_ALLOWED'});
+  res.json(permissionDetailsForUser(target,req.user!));
+});
+app.put('/api/users/:id/permissions',requireAuth,requirePermission('users.permissions'),(req:AuthRequest,res)=>{
+  const target=findUserById(Number(req.params.id));
+  if(!target) return res.status(404).json({error:'User not found.',code:'USER_NOT_FOUND'});
+  const actor=req.user!;
+  if(!canManagePermissionTarget(actor,target)) return res.status(403).json({error:'You cannot manage permissions for that user.',code:'PERMISSION_DELEGATION_NOT_ALLOWED'});
+  const requested=Array.isArray(req.body.permissionKeys)?req.body.permissionKeys:[];
+  if(requested.some((key:unknown)=>!isPermissionKey(key))) return res.status(400).json({error:'One or more permission keys are invalid.',code:'INVALID_PERMISSION_KEY'});
+  const desired=new Set<PermissionKey>(requested as PermissionKey[]);
+  const inherited=new Set(inheritedPermissions(target.role));
+  for(const key of desired) {
+    if(inherited.has(key)) return res.status(400).json({error:'Inherited permissions cannot be stored as special grants.',code:'INHERITED_PERMISSION',permission:key});
+    if(!hasPermission(actor,key)) return res.status(403).json({error:'You cannot grant a permission you do not possess.',code:'PERMISSION_DELEGATION_NOT_ALLOWED',permission:key});
+  }
+  const timestamp=now();
+  const expiresAtByPermission=isRecord(req.body.expiresAtByPermission)?req.body.expiresAtByPermission:{};
+  const reason=String(req.body.reason??'').trim().slice(0,500)||null;
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    run('UPDATE user_permission_grants SET revoked_at=?,revoked_by_user_id=? WHERE user_id=? AND revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at<=?',[timestamp,actor.id,target.id,timestamp]);
+    const current=activeSpecialGrants(target.id);
+    const currentKeys=new Set(current.map(grant=>grant.permission_key as PermissionKey));
+    for(const grant of current) {
+      const key=grant.permission_key as PermissionKey;
+      if(desired.has(key)) continue;
+      run('UPDATE user_permission_grants SET revoked_at=?,revoked_by_user_id=? WHERE id=?',[timestamp,actor.id,grant.id]);
+      const definition=permissionByKey.get(key)!;
+      audit(req,'permission revoked','user',target.id,{targetUser:target.full_name,permissionKey:key,permissionLabel:definition.label,revokedBy:actor.email});
+    }
+    for(const key of desired) {
+      if(currentKeys.has(key)) continue;
+      const rawExpiration=String(expiresAtByPermission[key]??'').trim();
+      const expiresAt=rawExpiration&&Number.isFinite(Date.parse(rawExpiration))?new Date(rawExpiration).toISOString():null;
+      if(expiresAt&&expiresAt<=timestamp) throw new Error('Permission expiration must be in the future.');
+      run('INSERT INTO user_permission_grants (user_id,permission_key,granted_by_user_id,granted_at,expires_at,reason) VALUES (?,?,?,?,?,?)',[target.id,key,actor.id,timestamp,expiresAt,reason]);
+      const definition=permissionByKey.get(key)!;
+      audit(req,'permission granted','user',target.id,{targetUser:target.full_name,permissionKey:key,permissionLabel:definition.label,grantedBy:actor.email,expiresAt,reason});
+    }
+    db.exec('COMMIT');
+  }catch(error){
+    db.exec('ROLLBACK');
+    const message=safeErrorMessage(error);
+    return res.status(/future/i.test(message)?400:500).json({error:message});
+  }
+  res.json({ok:true,...permissionDetailsForUser(findUserById(target.id)!,actor)});
+});
+app.patch('/api/users/:id', requireAuth, requirePermission('users.edit'), (req:AuthRequest,res)=>{
+  const target=findUserById(Number(req.params.id));
+  if(!target) return res.status(404).json({error:'User not found.'});
+  if(!canEditTarget(req.user!,target)) return res.status(403).json({error:'Cannot edit that user.'});
+  const role=(req.body.role??target.role) as Role;
+  if(!roles.includes(role)||!canManageRole(req.user!.role,role)) return res.status(403).json({error:'Cannot assign that role.'});
+  const timestamp=now();
+  const roleChanged=role!==target.role;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    run('UPDATE users SET full_name=?, email=?, role=?, updated_at=? WHERE id=?', [req.body.fullName??target.full_name,req.body.email??target.email,role,timestamp,target.id]);
+    if(roleChanged) recordRoleAssignment({userId:target.id,previousRole:target.role,newRole:role,assignedByUserId:req.user!.id,assignedAt:timestamp,reason:String(req.body.roleChangeReason??'').trim()||null});
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  audit(req,'user update','user',target.id,roleChanged?{previousRole:target.role,newRole:role,roleAssignedBy:req.user!.email,roleAssignedAt:timestamp}:{});
+  res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)});
+});
+for (const action of ['disable','enable'] as const) app.post(`/api/users/:id/${action}`, requireAuth, requirePermission('users.disable'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canToggleDisabledTarget(req.user!,target)) return res.status(403).json({error:`Cannot ${action} that user.`}); run('UPDATE users SET disabled=?, updated_at=? WHERE id=?', [action==='disable'?1:0,now(),target.id]); const sessionsInvalidated=action==='disable'?invalidateUserSessions(target.id):0; audit(req,`user ${action}`,'user',target.id,{sessionsInvalidated}); res.json({user:publicUserForActor(findUserById(target.id)!, req.user!)}); });
+app.delete('/api/users/:id', requireAuth, requirePermission('users.delete'), (req:AuthRequest,res)=>{ const target=findUserById(Number(req.params.id)); if(!target) return res.status(404).json({error:'User not found.'}); if(!canDeleteTarget(req.user!,target)) return res.status(403).json({error:'Cannot delete that user.'}); run('UPDATE users SET deleted=1, disabled=1, deleted_at=?, deleted_by_user_id=?, updated_at=? WHERE id=?', [now(),req.user!.id,now(),target.id]); const sessionsInvalidated=invalidateUserSessions(target.id); audit(req,'user delete','user',target.id,{softDelete:true,sessionsInvalidated}); res.json({ok:true}); });
 app.get('/api/audit', requireAuth, requirePermission('audit.view'), (_req,res)=>res.json({audit:all('SELECT * FROM audit_log ORDER BY id DESC LIMIT 200')}));
-app.get('/api/vendors', requireAuth, (req,res)=>{
+app.get('/api/vendors', requireAuth, requirePermission('vendors.view'), (req,res)=>{
   const q = queryText(req.query.q);
   const includeDeleted = String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
   const where = includeDeleted ? ['1=1'] : ['deleted=0'];
   const params: SqlParam[] = [];
   if (q) {
     const like = `%${escapeLike(q)}%`;
-    where.push('(name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line1 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line2 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR city LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR state LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR postal_code LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR website_url LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR EXISTS (SELECT 1 FROM vendor_contacts vc WHERE vc.vendor_id=inventory_vendors.id AND vc.deleted=0 AND (vc.contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.contact_title LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE)))');
-    params.push(like,like,like,like,like,like,like,like,like,like,like,like,like,like,like);
+    const phoneDigits = q.replace(/\D/g,'');
+    const phoneLike = phoneDigits ? `%${escapeLike(phoneDigits)}%` : like;
+    where.push('(name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR phone_normalized LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_phone_normalized LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR contact_email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line1 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR address_line2 LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR city LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR state LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR postal_code LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR website_url LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR EXISTS (SELECT 1 FROM vendor_contacts vc WHERE vc.vendor_id=inventory_vendors.id AND vc.deleted=0 AND (vc.contact_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.contact_title LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.email LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.phone_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR vc.phone_normalized LIKE ? ESCAPE \'\\\' COLLATE NOCASE)))');
+    params.push(like,like,phoneLike,like,like,phoneLike,like,like,like,like,like,like,like,like,like,like,like,phoneLike);
   }
   const vendors = all<VendorRow>(`SELECT * FROM inventory_vendors WHERE ${where.join(' AND ')} ORDER BY name COLLATE NOCASE, id`, params).map(publicVendor);
   res.json({ok:true,vendors});
 });
-app.get('/api/vendors/options', requireAuth, (_req,res)=>{
+app.get('/api/vendors/options', requireAuth, requirePermission('vendors.view'), (_req,res)=>{
   const options = all<{ id: number; name: string; is_active: number; deleted: number }>('SELECT id, name, is_active, deleted FROM inventory_vendors WHERE deleted=0 AND is_active=1 ORDER BY name COLLATE NOCASE, id').map(row=>({id:row.id,companyName:row.name,isActive:Boolean(row.is_active),deleted:Boolean(row.deleted)}));
   res.json({ok:true,options});
 });
-app.get('/api/vendors/export/template', requireAuth, requirePermission('inventory.write'), (_req,res)=>{
+app.get('/api/vendors/export/template', requireAuth, requirePermission('vendors.import_export'), (_req,res)=>{
   sendDownload(res, `MCC_Vendors_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', vendorCsvFromRows([]));
 });
-app.get('/api/vendors/export/csv', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.get('/api/vendors/export/csv', requireAuth, requirePermission('vendors.import_export'), (req,res)=>{
   const rows = all<VendorRow>('SELECT * FROM inventory_vendors WHERE deleted=0 ORDER BY name COLLATE NOCASE, id').flatMap(vendor => {
     const contacts = vendorContacts(vendor.id);
     return contacts.length ? contacts.map(contact => vendorExportRecord(vendor, contact)) : [vendorExportRecord(vendor)];
@@ -6788,7 +8314,7 @@ app.get('/api/vendors/export/csv', requireAuth, requirePermission('inventory.wri
   audit(req,'vendor export CSV','vendor','bulk',{rowCount:rows.length});
   sendDownload(res, `MCC_Vendors_Export_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', vendorCsvFromRows(rows));
 });
-app.post('/api/vendors/import', requireAuth, requirePermission('inventory.write'), upload.single('file'), async (req:AuthRequest,res)=>{
+app.post('/api/vendors/import', requireAuth, requirePermission('vendors.import_export'), upload.single('file'), async (req:AuthRequest,res)=>{
   try {
     const file = req.file;
     if (!file) throw new Error('Choose a CSV file to import.');
@@ -6799,23 +8325,23 @@ app.post('/api/vendors/import', requireAuth, requirePermission('inventory.write'
     res.json({ok:true,...summary});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/choose|must include|must be CSV|required|valid|120|20|phone type|Website URL/i.test(message) ? 400 : 500).json({ok:false,error:message,vendorsAdded:0,vendorsUpdated:0,contactsAdded:0,contactsUpdated:0,duplicateContactsSkipped:0,skippedCount:0,errorCount:1,errors:[message]});
+    res.status(/choose|must include|must be CSV|required|valid|120|20|80|15|phone|digit|country|Website URL/i.test(message) ? 400 : 500).json({ok:false,error:message,vendorsAdded:0,vendorsUpdated:0,contactsAdded:0,contactsUpdated:0,duplicateContactsSkipped:0,skippedCount:0,errorCount:1,errors:[message]});
   }
 });
-app.get('/api/vendors/:id/contacts', requireAuth, (req:AuthRequest,res)=>{
+app.get('/api/vendors/:id/contacts', requireAuth, requirePermission('vendors.view'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
   if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
-  const includeDeleted = (String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true') && roleRank(req.user!.role) >= roleRank('Manager');
+  const includeDeleted = (String(req.query.includeDeleted ?? '').toLowerCase() === '1' || String(req.query.includeDeleted ?? '').toLowerCase() === 'true') && hasPermission(req.user!,'vendors.delete');
   res.json({ok:true,vendor:publicVendor(vendor),contacts:vendorContacts(vendorId, includeDeleted).map(publicVendorContact)});
 });
-app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   try {
     const actor = req.user!;
     const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
     if (!vendor) throw new Error('Vendor not found.');
-    const input = validateVendorContactInput(req.body);
+    const input = validateVendorContactInput(req.body,true,vendor.country);
     if (!input) throw new Error('Contact Name is required.');
     const duplicate = matchingVendorContact(vendorId, input);
     if (duplicate && !duplicate.deleted) throw new Error('Contact already exists for this vendor.');
@@ -6828,10 +8354,10 @@ app.post('/api/vendors/:id/contacts', requireAuth, requirePermission('inventory.
     res.status(duplicate ? 200 : 201).json({ok:true,contact:publicVendorContact(contact),vendor:publicVendor(vendor)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|160|20|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|160|20|80|15|phone|digit|country/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.vendorId);
   const contactId = Number(req.params.contactId);
   try {
@@ -6840,7 +8366,7 @@ app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermis
     if (!vendor) throw new Error('Vendor not found.');
     const existing = Number.isInteger(contactId) && contactId > 0 ? vendorContactById(vendorId, contactId, true) : undefined;
     if (!existing) throw new Error('Contact not found.');
-    const input = validateVendorContactInput(req.body);
+    const input = validateVendorContactInput(req.body,true,vendor.country);
     if (!input) throw new Error('Contact Name is required.');
     const duplicate = matchingVendorContact(vendorId, input, contactId);
     if (duplicate && !duplicate.deleted) throw new Error('Contact already exists for this vendor.');
@@ -6852,14 +8378,13 @@ app.put('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermis
     res.json({ok:true,contact:publicVendorContact(contact),vendor:publicVendor(vendor)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|160|20|phone type/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|160|20|80|15|phone|digit|country/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, (req:AuthRequest,res)=>{
+app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, requirePermission('vendors.delete'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.vendorId);
   const contactId = Number(req.params.contactId);
   try {
-    if (roleRank(req.user!.role) < roleRank('Manager')) return res.status(403).json({ok:false,error:'Permission denied.'});
     const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
     if (!vendor) throw new Error('Vendor not found.');
     const existing = Number.isInteger(contactId) && contactId > 0 ? vendorContactById(vendorId, contactId) : undefined;
@@ -6875,7 +8400,7 @@ app.delete('/api/vendors/:vendorId/contacts/:contactId', requireAuth, (req:AuthR
     res.status(/not found/i.test(message) ? 404 : /reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.vendorId);
   const contactId = Number(req.params.contactId);
   try {
@@ -6894,13 +8419,13 @@ app.post('/api/vendors/:vendorId/contacts/:contactId/restore', requireAuth, requ
     res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/vendors/:id', requireAuth, (req,res)=>{
+app.get('/api/vendors/:id', requireAuth, requirePermission('vendors.view'), (req,res)=>{
   const vendorId = Number(req.params.id);
   const vendor = Number.isInteger(vendorId) && vendorId > 0 ? vendorById(vendorId) : undefined;
   if (!vendor) return res.status(404).json({ok:false,error:'Vendor not found.'});
   res.json({ok:true,vendor:publicVendor(vendor)});
 });
-app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/vendors', requireAuth, requirePermission('vendors.create'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const input = validateVendorInput(req.body);
@@ -6932,10 +8457,10 @@ app.post('/api/vendors', requireAuth, requirePermission('inventory.write'), (req
     res.status(201).json({ok:true,vendor:vendor ? publicVendor(vendor) : null,mergedExisting:false});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/already exists/i.test(message) ? 409 : /required|valid|120|20|phone type|reason|Website URL/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/already exists/i.test(message) ? 409 : /required|valid|120|20|80|15|phone|digit|country|reason|Website URL/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.put('/api/vendors/:id', requireAuth, requirePermission('vendors.edit'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   try {
     if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error('Vendor not found.');
@@ -6971,14 +8496,13 @@ app.put('/api/vendors/:id', requireAuth, requirePermission('inventory.write'), (
     res.json({ok:true,vendor:vendor ? publicVendor(vendor) : null});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|phone type|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /already exists/i.test(message) ? 409 : /required|valid|120|20|80|15|phone|digit|country|reason/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
+app.delete('/api/vendors/:id', requireAuth, requirePermission('vendors.delete'), (req:AuthRequest,res)=>{
   const vendorId = Number(req.params.id);
   try {
     if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error('Vendor not found.');
-    if (roleRank(req.user!.role) < roleRank('Manager')) return res.status(403).json({ok:false,error:'Permission denied.'});
     const existing = vendorById(vendorId);
     if (!existing) throw new Error('Vendor not found.');
     const reasonNote = requiredReasonNote(isRecord(req.body) ? req.body.reasonNote ?? req.body.reason : '', 'Vendor delete');
@@ -7000,6 +8524,15 @@ app.delete('/api/vendors/:id', requireAuth, (req:AuthRequest,res)=>{
     res.status(/not found/i.test(message) ? 404 : /used by active|reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
+app.get('/api/dashboard/preventive-maintenance-due', requireAuth, requirePermission('machine.view'), (_req,res)=>{
+  const alerts=dashboardPmAlerts();
+  const summary={
+    dueSoon:alerts.filter(alert=>alert.status==='Due Soon').length,
+    dueNow:alerts.filter(alert=>alert.status==='Due Now').length,
+    pastDue:alerts.filter(alert=>alert.status==='Past Due').length,
+  };
+  res.json({ok:true,alerts,summary});
+});
 app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   seedMachineBrandSettings();
   const search = queryText(req.query.q);
@@ -7014,9 +8547,34 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
   }
   if (brand) { where.push('lower(a.brand)=lower(?)'); params.push(brand); }
   if (status && machineStatuses.includes(status as MachineAssetStatus)) { where.push('a.status=?'); params.push(status); }
-  const assets = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params).map(publicMachineAsset);
+  const assetRows = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params);
+  const assets = assetRows.map(row=>({
+    ...publicMachineAsset(row),
+    pmSummary:machineAssetPmCardSummary(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC",[row.id])),
+    historyPreview:all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 1",[String(row.id),String(row.id),row.asset_number]).map(publicHistoryRecord),
+  }));
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
-  res.json({ok:true,assets,brandSettings,permissions:{canEdit:canMachineWrite(req.user!),canDelete:canMachineDelete(req.user!)}});
+  res.json({ok:true,assets,brandSettings,permissions:{canEdit:hasPermission(req.user!,'machine.edit')||hasPermission(req.user!,'machine.create'),canDelete:hasPermission(req.user!,'machine.delete'),effective:[...getEffectivePermissions(req.user!)].filter(key=>key.startsWith('machine.'))}});
+});
+app.get('/api/machine-library/assets/:id/specification.pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
+  try {
+    const asset = machineAssetById(Number(req.params.id));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const generatedAt = new Date();
+    const tasks = all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND active=1 ORDER BY hold ASC,COALESCE(next_due_date,'9999-12-31'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE",[asset.id]).map(publicPmTask);
+    const buffer = await buildMachineAssetSpecPdf(publicMachineAsset(asset),tasks,generatedAt);
+    const fileName = machineAssetSpecPdfFilename(asset.asset_number,generatedAt);
+    const download = ['1','true','yes'].includes(String(req.query.download ?? '').toLowerCase());
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Length',String(buffer.length));
+    res.setHeader('Content-Disposition',`${download ? 'attachment' : 'inline'}; filename="${fileName}"`);
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.send(buffer);
+  } catch (error) {
+    console.error('Machine asset specification PDF generation failed',error);
+    res.status(500).json({ok:false,error:'Machine asset specification PDF generation failed.'});
+  }
 });
 app.get('/api/machine-library/inspection-records', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const assetId = Number(req.query.assetId);
@@ -7032,7 +8590,7 @@ app.get('/api/machine-library/assets/:id/inspection-records', requireAuth, requi
   const records = all<MachineInspectionRecordRow>(`SELECT r.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number FROM machine_inspection_records r JOIN machine_assets a ON a.id=r.asset_id WHERE r.asset_id=? AND a.deleted=0 ORDER BY r.record_date DESC,r.uploaded_at DESC,r.id DESC`,[asset.id]).map(publicMachineInspectionRecord);
   res.json({ok:true,records});
 });
-app.post('/api/machine-library/assets/:id/inspection-records', requireAuth, requirePermission('machine.view'), receiveMachineInspectionRecord, (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:id/inspection-records', requireAuth, requirePermission('machine.documents_upload'), receiveMachineInspectionRecord, (req:AuthRequest,res)=>{
   let storedPath = '';
   try {
     const asset = machineAssetById(Number(req.params.id));
@@ -7075,7 +8633,7 @@ app.get('/api/machine-library/inspection-records/:id/file', requireAuth, require
     res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Inspection record could not be opened.')});
   }
 });
-app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   const record = machineInspectionRecordById(Number(req.params.id));
   if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
   const recordDate = validMachineInspectionDate(req.body?.recordDate);
@@ -7083,7 +8641,7 @@ app.patch('/api/machine-library/inspection-records/:id', requireAuth, requirePer
   scheduleAutoBackup('machine inspection record date updated',req.user!);
   res.json({ok:true,record:publicMachineInspectionRecord(machineInspectionRecordById(record.id)!)});
 });
-app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
   const record = machineInspectionRecordById(Number(req.params.id));
   if (!record) return res.status(404).json({ok:false,error:'Inspection record not found.'});
   const filePath = machineInspectionRecordFilePath(record.stored_file_reference);
@@ -7091,6 +8649,258 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
   if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
   scheduleAutoBackup('machine inspection record deleted',req.user!);
   res.json({ok:true});
+});
+app.get('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const tasks=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? ORDER BY active DESC,hold ASC,COALESCE(next_due_date,'9999-12-31'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE",[asset.id]).map(publicPmTask);
+  res.status(200).json(tasks);
+});
+app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const clientRequestId=String(req.get('Idempotency-Key') ?? '').trim();
+    if (clientRequestId && !/^[A-Za-z0-9._:-]{8,128}$/.test(clientRequestId)) return res.status(400).json({ok:false,error:'Invalid PM save request identifier.'});
+    const existingRequest=clientRequestId?one<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND client_request_id=?",[clientRequestId]):undefined;
+    if (existingRequest) {
+      if (existingRequest.asset_id!==asset.id) return res.status(409).json({ok:false,error:'PM save request identifier is already in use.'});
+      return res.status(200).json({ok:true,task:publicPmTask(existingRequest),duplicatePrevented:true});
+    }
+    const input=validatePmTaskInput(req.body);
+    const timestamp=now();
+    const result=run(`INSERT INTO pm_tasks (asset_id,client_request_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
+      asset.id,clientRequestId||null,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp,
+    ]);
+    const task=pmTaskById(Number(result.lastInsertRowid))!;
+    recordPmAudit({action:'pm_created',task,asset,actor:req.user!,newValue:pmHistoryValue(task)});
+    scheduleAutoBackup('preventive maintenance created',req.user!);
+    res.status(201).json({ok:true,task:publicPmTask(task)});
+  } catch (error) {
+    const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be created.');
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
+  }
+});
+app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
+  try {
+    const existing=pmTaskById(Number(req.params.pmId));
+    if (!existing) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+    const asset=machineAssetById(existing.asset_id);
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const input=validatePmTaskInput(req.body);
+    const oldValue=pmHistoryValue(existing);
+    run(`UPDATE pm_tasks SET title=?,instructions=?,interval_type=?,interval_value=?,last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,active=?,hold=?,notes=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
+      input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,now(),existing.id,
+    ]);
+    const task=pmTaskById(existing.id)!;
+    recordPmAudit({action:'pm_updated',task,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(task)});
+    scheduleAutoBackup('preventive maintenance updated',req.user!);
+    res.json({ok:true,task:publicPmTask(task)});
+  } catch (error) {
+    const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be updated.');
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
+  }
+});
+app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
+  const task=pmTaskById(Number(req.params.pmId));
+  if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+  const asset=machineAssetById(task.asset_id);
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const oldValue=pmHistoryValue(task);
+  run('UPDATE pm_tasks SET active=0,hold=0,updated_by_user_id=?,updated_at=? WHERE id=?',[req.user!.id,now(),task.id]);
+  const updated=pmTaskById(task.id)!;
+  recordPmAudit({action:'pm_deactivated',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated)});
+  scheduleAutoBackup('preventive maintenance deactivated',req.user!);
+  res.json({ok:true,task:publicPmTask(updated)});
+});
+app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
+  try {
+    const task=pmTaskById(Number(req.params.pmId));
+    if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+    const asset=machineAssetById(task.asset_id);
+    if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    if (!task.active) throw new Error('Inactive preventive maintenance tracking cannot be completed.');
+    if (task.hold) throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');
+    const completionDate=validPmDate((isRecord(req.body)?req.body.completionDate:null) ?? new Date().toISOString().slice(0,10),'completion date',true)!;
+    const completedMeter=optionalPmNumber(isRecord(req.body)?req.body.completedMeter:null,'Completed meter');
+    if (pmMeterIntervals.has(task.interval_type) && completedMeter===null) throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);
+    const completionNotes=String(isRecord(req.body)?req.body.completionNotes ?? '':'').replace(/\r/g,'').trim().slice(0,12000);
+    const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);
+    const timestamp=now();
+    const oldValue=pmHistoryValue(task);
+    let historyId=0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,completion_date,completed_meter,performed_by_user_id,performed_by_name,completion_notes,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,[
+        task.id,task.asset_id,completionDate,completedMeter,req.user!.id,req.user!.full_name,completionNotes,task.next_due_date,task.next_due_meter,due.nextDueDate,due.nextDueMeter,timestamp,
+      ]);
+      historyId=Number(result.lastInsertRowid);
+      run(`UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
+        completionDate,pmMeterIntervals.has(task.interval_type)?completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?completedMeter:task.current_meter,due.nextDueDate,due.nextDueMeter,req.user!.id,timestamp,task.id,
+      ]);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    const updated=pmTaskById(task.id)!;
+    const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=?',[historyId])!;
+    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated),reasonNote:completionNotes});
+    scheduleAutoBackup('preventive maintenance completed',req.user!);
+    res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});
+  } catch (error) {
+    const message=safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.');
+    res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
+  }
+});
+app.get('/api/machine-library/preventive-maintenance/:pmId/history', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const task=pmTaskById(Number(req.params.pmId));
+  if (!task || !machineAssetById(task.asset_id)) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+  const history=all<PmHistoryRow>('SELECT * FROM pm_history WHERE pm_task_id=? ORDER BY completion_date DESC,id DESC',[task.id]).map(publicPmHistory);
+  res.json({ok:true,task:publicPmTask(task),history});
+});
+app.get('/api/machine-library/assets/:assetId/document-folders', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));
+  if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const folders=machineDocumentFolders(asset.id).map(publicMachineDocumentFolder);
+  const documentCount=one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=?',[asset.id])?.count??0;
+  res.json({ok:true,assetId:asset.id,folders,summary:{folderCount:folders.length,documentCount}});
+});
+app.post('/api/machine-library/assets/:assetId/document-folders', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const name=validateMachineDocumentFolderName(isRecord(req.body)?req.body.name:'');
+    const description=validateMachineDocumentDescription(isRecord(req.body)?req.body.description:'');
+    if(one('SELECT id FROM machine_document_folders WHERE asset_id=? AND lower(name)=lower(?)',[asset.id,name]))return res.status(409).json({ok:false,code:'DUPLICATE_FOLDER',error:'A folder with this name already exists.'});
+    const timestamp=now();const result=run('INSERT INTO machine_document_folders (asset_id,name,description,created_at,updated_at,created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?)',[asset.id,name,description,timestamp,timestamp,req.user!.id,req.user!.id]);
+    const folder=machineDocumentFolderById(asset.id,Number(result.lastInsertRowid))!;
+    recordMachineDocumentHistory('document_folder_created',req.user!,asset,{folderId:folder.id,folderName:name,description});
+    refreshMachineDocumentRecoveryMetadata(asset.id);
+    scheduleAutoBackup('machine document folder created',req.user!);
+    res.status(201).json({ok:true,folder:publicMachineDocumentFolder(folder)});
+  } catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be created.')});}
+});
+app.patch('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
+    const body=isRecord(req.body)?req.body:{};const name=body.name===undefined?folder.name:validateMachineDocumentFolderName(body.name);const description=body.description===undefined?folder.description:validateMachineDocumentDescription(body.description);
+    if(one('SELECT id FROM machine_document_folders WHERE asset_id=? AND lower(name)=lower(?) AND id<>?',[asset.id,name,folder.id]))return res.status(409).json({ok:false,code:'DUPLICATE_FOLDER',error:'A folder with this name already exists.'});
+    const timestamp=now();run('UPDATE machine_document_folders SET name=?,description=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[name,description,timestamp,req.user!.id,folder.id,asset.id]);
+    if(name!==folder.name)recordMachineDocumentHistory('document_folder_renamed',req.user!,asset,{folderId:folder.id,previousName:folder.name,folderName:name});
+    if(description!==folder.description)recordMachineDocumentHistory('document_folder_description_edited',req.user!,asset,{folderId:folder.id,folderName:name,description});
+    refreshMachineDocumentRecoveryMetadata(asset.id);
+    scheduleAutoBackup('machine document folder updated',req.user!);
+    res.json({ok:true,folder:publicMachineDocumentFolder(machineDocumentFolderById(asset.id,folder.id)!)});
+  } catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be updated.')});}
+});
+app.delete('/api/machine-library/assets/:assetId/document-folders/:folderId', requireAuth, requirePermission('machine.documents_manage'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
+  const count=one<{count:number}>('SELECT COUNT(*) AS count FROM machine_documents WHERE asset_id=? AND folder_id=?',[asset.id,folder.id])?.count??0;
+  if(count)return res.status(409).json({ok:false,code:'FOLDER_NOT_EMPTY',error:'This folder contains documents. Move or delete them before deleting the folder.'});
+  run('DELETE FROM machine_document_folders WHERE id=? AND asset_id=?',[folder.id,asset.id]);
+  recordMachineDocumentHistory('document_folder_deleted',req.user!,asset,{folderId:folder.id,folderName:folder.name});refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document folder deleted',req.user!);
+  res.json({ok:true});
+});
+app.get('/api/machine-library/assets/:assetId/documents', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  const search=String(req.query.search??'').trim().slice(0,180);const sort=String(req.query.sort??'name').trim().toLowerCase();
+  res.json({ok:true,documents:machineDocuments(asset.id,search,sort).map(publicMachineDocument)});
+});
+app.post('/api/machine-library/assets/:assetId/document-folders/:folderId/documents', requireAuth, requirePermission('machine.documents_upload'), receiveMachineDocuments, (req:AuthRequest,res)=>{
+  const newFiles:string[]=[];const replacedFiles:string[]=[];let databaseCommitted=false;
+  try {
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const folder=machineDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});
+    const files=(req.files as Express.Multer.File[]|undefined)??[];if(!files.length)return res.status(400).json({ok:false,error:'Select at least one document to upload.'});
+    const validated=files.map(file=>({file,...validatedMachineDocument(file)}));const duplicateAction=String(req.body?.duplicateAction??'').trim().toLowerCase();const selectedNames=new Set<string>();
+    const duplicates=validated.filter(item=>{const key=item.displayFilename.toLowerCase();const duplicate=selectedNames.has(key)||Boolean(duplicateMachineDocument(asset.id,folder.id,item.displayFilename));selectedNames.add(key);return duplicate;}).map(item=>item.displayFilename);
+    if(duplicates.length&&!['replace','keep_both'].includes(duplicateAction))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.',duplicates:[...new Set(duplicates)]});
+    const description=validateMachineDocumentDescription(req.body?.description);const revision=validateMachineDocumentRevision(req.body?.revision);const timestamp=now();const createdIds:number[]=[];const historyEvents:Array<{action:string;details:Record<string,unknown>}>=[];
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const targetDir=machineDocumentAssetDirectory(asset.id);fs.mkdirSync(targetDir,{recursive:true});
+      for(const item of validated){
+        let displayFilename=item.displayFilename;let existing=duplicateMachineDocument(asset.id,folder.id,displayFilename);
+        if(existing&&duplicateAction==='keep_both'){displayFilename=uniqueMachineDocumentName(asset.id,folder.id,displayFilename);existing=undefined;}
+        const storedFilename=`${crypto.randomUUID()}${item.extension}`;const storedPath=machineDocumentFilePath(asset.id,storedFilename);fs.writeFileSync(storedPath,item.file.buffer,{flag:'wx'});newFiles.push(storedPath);
+        if(existing&&duplicateAction==='replace'){
+          const previousPath=machineDocumentFilePath(asset.id,existing.stored_filename);replacedFiles.push(previousPath);
+          run('UPDATE machine_documents SET original_filename=?,display_filename=?,stored_filename=?,extension=?,mime_type=?,size_bytes=?,description=?,revision=?,uploaded_at=?,updated_at=?,uploaded_by_user_id=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,description,revision,timestamp,timestamp,req.user!.id,req.user!.id,existing.id,asset.id]);
+          createdIds.push(existing.id);historyEvents.push({action:'document_replaced',details:{documentId:existing.id,folderId:folder.id,folderName:folder.name,displayFilename}});
+        }else{
+          const result=run('INSERT INTO machine_documents (asset_id,folder_id,original_filename,display_filename,stored_filename,extension,mime_type,size_bytes,description,revision,uploaded_at,updated_at,uploaded_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[asset.id,folder.id,item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,description,revision,timestamp,timestamp,req.user!.id,req.user!.id]);
+          const id=Number(result.lastInsertRowid);createdIds.push(id);historyEvents.push({action:'document_uploaded',details:{documentId:id,folderId:folder.id,folderName:folder.name,displayFilename}});
+        }
+      }
+      run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,folder.id]);
+      for(const event of historyEvents)recordMachineDocumentHistory(event.action,req.user!,asset,event.details);
+      db.exec('COMMIT');databaseCommitted=true;
+    }catch(error){db.exec('ROLLBACK');throw error;}
+    for(const oldPath of replacedFiles)if(!newFiles.includes(oldPath)&&fs.existsSync(oldPath))fs.rmSync(oldPath,{force:true});
+    refreshMachineDocumentRecoveryMetadata(asset.id);
+    scheduleAutoBackup('machine documents uploaded',req.user!);
+    res.status(201).json({ok:true,documents:createdIds.map(id=>publicMachineDocument(machineDocumentById(asset.id,id)!))});
+  }catch(error){if(!databaseCommitted)for(const filePath of newFiles)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Documents could not be uploaded.')});}
+});
+for(const mode of ['open','download'] as const)app.get(`/api/machine-library/assets/:assetId/documents/:documentId/${mode}`,requireAuth,requirePermission('machine.view'),(req:AuthRequest,res)=>{
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
+    const filePath=machineDocumentFilePath(asset.id,document.stored_filename);if(!fs.existsSync(filePath))return res.status(404).json({ok:false,error:'Stored document file is missing.'});
+    const disposition=mode==='download'||document.extension!=='.pdf'?'attachment':'inline';const safeName=document.display_filename.replace(/[^\x20-\x7e]|["\\]/g,'_');
+    res.setHeader('Content-Type',document.mime_type);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`${disposition}; filename="${safeName}"`);res.sendFile(filePath);
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be opened.')});}
+});
+app.patch('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.documents_manage'),(req:AuthRequest,res)=>{
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
+    const body=isRecord(req.body)?req.body:{};const displayFilename=body.displayFilename===undefined?document.display_filename:safeMachineDocumentDisplayName(body.displayFilename,document.extension);const description=body.description===undefined?document.description:validateMachineDocumentDescription(body.description);const revision=body.revision===undefined?document.revision:validateMachineDocumentRevision(body.revision);
+    if(duplicateMachineDocument(asset.id,document.folder_id,displayFilename,document.id))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.'});
+    const timestamp=now();run('UPDATE machine_documents SET display_filename=?,description=?,revision=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[displayFilename,description,revision,timestamp,req.user!.id,document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,document.folder_id]);
+    if(displayFilename!==document.display_filename)recordMachineDocumentHistory('document_renamed',req.user!,asset,{documentId:document.id,previousFilename:document.display_filename,displayFilename,folderId:document.folder_id});
+    if(description!==document.description||revision!==document.revision)recordMachineDocumentHistory('document_metadata_edited',req.user!,asset,{documentId:document.id,displayFilename,description,revision,folderId:document.folder_id});
+    refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document updated',req.user!);res.json({ok:true,document:publicMachineDocument(machineDocumentById(asset.id,document.id)!)});
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be updated.')});}
+});
+app.post('/api/machine-library/assets/:assetId/documents/:documentId/move',requireAuth,requirePermission('machine.documents_manage'),(req:AuthRequest,res)=>{
+  let replacedPath='';
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});
+    const destination=machineDocumentFolderById(asset.id,Number(isRecord(req.body)?req.body.folderId:0));if(!destination)return res.status(404).json({ok:false,error:'Destination folder not found.'});if(destination.id===document.folder_id)return res.status(400).json({ok:false,error:'Choose a different destination folder.'});
+    const action=String(isRecord(req.body)?req.body.duplicateAction??'':'').toLowerCase();let displayFilename=document.display_filename;const duplicate=duplicateMachineDocument(asset.id,destination.id,displayFilename,document.id);
+    if(duplicate&&!['replace','keep_both'].includes(action))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.',duplicates:[displayFilename]});
+    if(duplicate&&action==='keep_both')displayFilename=uniqueMachineDocumentName(asset.id,destination.id,displayFilename,document.id);
+    const timestamp=now();db.exec('BEGIN IMMEDIATE');try{if(duplicate&&action==='replace'){replacedPath=machineDocumentFilePath(asset.id,duplicate.stored_filename);run('DELETE FROM machine_documents WHERE id=? AND asset_id=?',[duplicate.id,asset.id]);recordMachineDocumentHistory('document_replaced',req.user!,asset,{documentId:document.id,replacedDocumentId:duplicate.id,displayFilename,folderId:destination.id,folderName:destination.name});}run('UPDATE machine_documents SET folder_id=?,display_filename=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[destination.id,displayFilename,timestamp,req.user!.id,document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id IN (?,?)',[timestamp,req.user!.id,document.folder_id,destination.id]);recordMachineDocumentHistory('document_moved',req.user!,asset,{documentId:document.id,displayFilename,fromFolderId:document.folder_id,toFolderId:destination.id,toFolderName:destination.name});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+    if(replacedPath&&fs.existsSync(replacedPath))fs.rmSync(replacedPath,{force:true});refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document moved',req.user!);res.json({ok:true,document:publicMachineDocument(machineDocumentById(asset.id,document.id)!)});
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be moved.')});}
+});
+app.delete('/api/machine-library/assets/:assetId/documents/:documentId',requireAuth,requirePermission('machine.documents_manage'),(req:AuthRequest,res)=>{
+  try{const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});const document=machineDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const filePath=machineDocumentFilePath(asset.id,document.stored_filename);run('DELETE FROM machine_documents WHERE id=? AND asset_id=?',[document.id,asset.id]);run('UPDATE machine_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[now(),req.user!.id,document.folder_id]);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});recordMachineDocumentHistory('document_deleted',req.user!,asset,{documentId:document.id,displayFilename:document.display_filename,folderId:document.folder_id,folderName:document.folder_name});refreshMachineDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('machine document deleted',req.user!);res.json({ok:true});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be deleted.')});}
+});
+app.get('/api/machine-library/assets/:assetId/documents/export',requireAuth,requirePermission('machine.view'),(req:AuthRequest,res)=>{
+  try{
+    const asset=machineAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    refreshMachineDocumentRecoveryMetadata(asset.id);
+    const manifest=recoveryManifestForAsset(asset);
+    for(const document of manifest.documents){const source=machineDocumentFilePath(asset.id,document.storedFilename);if(!fs.existsSync(source))throw new Error(`Stored document is missing: ${document.visibleFilename}`);}
+    const date=new Date().toISOString().slice(0,10);const visibleNumber=safeArchiveSegment(asset.asset_number,`asset-${asset.id}`);
+    streamRecoveryArchive(res,`Asset-${visibleNumber}_Documents_${date}.zip`,archive=>appendAssetRecoveryArchive(archive,manifest));
+  }catch(error){if(res.headersSent)res.destroy(error as Error);else res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Asset document export could not be created.')});}
+});
+app.get('/api/machine-library/documents/recovery-export',requireAuth,requirePermission('machine.import_export'),(req:AuthRequest,res)=>{
+  try{
+    validateMachineDocumentStorageIntegrity();
+    const recovery=refreshMachineDocumentRecoveryMetadata();
+    const date=new Date().toISOString().slice(0,10);
+    streamRecoveryArchive(res,`MCC_Machine_Document_Recovery_${date}.zip`,archive=>{
+      archive.append(`${JSON.stringify(recovery.index,null,2)}\n`,{name:'machine-library-index.json'});
+      const csvPath=path.join(machineDocumentLibraryDir,'machine-library-index.csv');archive.file(csvPath,{name:'machine-library-index.csv'});
+      archive.append('MCC Machine Asset Document Library - Full Recovery Export\n\nAssets are grouped by their visible Asset Number and name. Each asset folder includes asset-info.json, which records the stable internal asset ID and UUID physical filenames needed for recovery.\n',{name:'README.txt'});
+      for(const manifest of recovery.manifests){const prefix=`Asset-${safeArchiveSegment(manifest.asset.assetNumber,String(manifest.asset.internalAssetId))} - ${safeArchiveSegment(manifest.asset.assetName,'Unnamed Asset')}`;appendAssetRecoveryArchive(archive,manifest,prefix);}
+    });
+  }catch(error){if(res.headersSent)res.destroy(error as Error);else res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Full document recovery export could not be created.')});}
 });
 app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.id));
@@ -7100,7 +8910,7 @@ app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission(
     WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicMachineAssetNote);
   res.json({ok:true,notes});
 });
-app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.notes_manage'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
   let noteId=0;
   const storedFiles:string[]=[];
   try {
@@ -7139,10 +8949,10 @@ app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission
     }
     for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
     const message=safeErrorMessage(error,[],'Asset note could not be saved.');
-    res.status(/not found/i.test(message)?404:/required|valid|must be|match|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+    res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
+app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.notes_manage'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
   const newAttachmentIds:number[]=[];
   const storedFiles:string[]=[];
   let previous:MachineAssetNoteRow|null=null;
@@ -7177,10 +8987,10 @@ app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermissi
     for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
     if (previous) run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[previous.title,previous.note_date,previous.body,previous.updated_by_user_id,previous.updated_at,previous.id]);
     const message=safeErrorMessage(error,[],'Asset note could not be updated.');
-    res.status(/not found/i.test(message)?404:/required|valid|must be|match|25 MB/i.test(message)?400:500).json({ok:false,error:message});
+    res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermission('machine.notes_manage'), (req:AuthRequest,res)=>{
   const note=machineAssetNoteById(Number(req.params.noteId));
   if (!note) return res.status(404).json({ok:false,error:'Asset note not found.'});
   const attachments=machineAssetNoteAttachments(note.id);
@@ -7191,7 +9001,7 @@ app.delete('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermi
   scheduleAutoBackup('machine asset note deleted',req.user!);
   res.json({ok:true});
 });
-app.delete('/api/machine-library/asset-note-attachments/:attachmentId', requireAuth, requirePermission('machine.write'), async (req:AuthRequest,res)=>{
+app.delete('/api/machine-library/asset-note-attachments/:attachmentId', requireAuth, requirePermission('machine.notes_manage'), async (req:AuthRequest,res)=>{
   try {
     const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM machine_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);
     if (!attachment || !machineAssetNoteById(attachment.note_id)) return res.status(404).json({ok:false,error:'Asset note attachment not found.'});
@@ -7266,7 +9076,7 @@ app.get('/api/machine-library/assets/:id/component-images/:componentType/image',
     res.status(/invalid/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.put('/api/machine-library/assets/:id/component-images/:componentType', requireAuth, requirePermission('machine.write'), receiveMachineComponentImage, (req:AuthRequest,res)=>{
+app.put('/api/machine-library/assets/:id/component-images/:componentType', requireAuth, requirePermission('machine.documents_manage'), receiveMachineComponentImage, (req:AuthRequest,res)=>{
   let newFilePath = '';
   let databaseCommitted = false;
   try {
@@ -7308,7 +9118,7 @@ app.put('/api/machine-library/assets/:id/component-images/:componentType', requi
     res.status(/not found/i.test(message)?404:/choose|must be|invalid|match|10 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
-app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.create'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const input = validateMachineAssetInput(req.body);
@@ -7323,6 +9133,7 @@ app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.
       const row = machineAssetById(assetId)!;
       recordMachineAssetHistory({ action: 'machine_asset_created', actor, row, newValue: machineAssetHistoryValue(row) });
       db.exec('COMMIT');
+      refreshMachineDocumentRecoveryMetadata(assetId);
       audit(req,'machine asset create','machine_asset',assetId,{assetNumber:input.assetNumber});
       scheduleAutoBackup('machine asset create', actor);
       res.status(201).json({ok:true,asset:publicMachineAsset(machineAssetById(assetId)!)});
@@ -7332,10 +9143,10 @@ app.post('/api/machine-library/assets', requireAuth, requirePermission('machine.
     }
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/required|numeric|Voltage Type|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/required|numeric|Voltage Type|Setup Type|unsafe characters|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machine.edit'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const id = Number(req.params.id);
@@ -7349,12 +9160,13 @@ app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machi
     updateMachineAsset(id, input, actor, timestamp);
     const updated = machineAssetById(id)!;
     recordMachineAssetHistory({ action: 'machine_asset_updated', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']) });
+    refreshMachineDocumentRecoveryMetadata(id);
     audit(req,'machine asset update','machine_asset',id,{assetNumber:input.assetNumber});
     scheduleAutoBackup('machine asset update', actor);
     res.json({ok:true,asset:publicMachineAsset(updated)});
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found/i.test(message) ? 404 : /required|numeric|Voltage Type|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
+    res.status(/not found/i.test(message) ? 404 : /required|numeric|Voltage Type|Setup Type|unsafe characters|already/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
 for (const action of ['disable','enable'] as const) app.post(`/api/machine-library/assets/:id/${action}`, requireAuth, requirePermission('machine.delete'), (req:AuthRequest,res)=>{
@@ -7368,6 +9180,7 @@ for (const action of ['disable','enable'] as const) app.post(`/api/machine-libra
     run('UPDATE machine_assets SET status=?, updated_at=?, updated_by_user_id=? WHERE id=?', [status,timestamp,actor.id,asset.id]);
     const updated = machineAssetById(asset.id)!;
     recordMachineAssetHistory({ action: action === 'disable' ? 'machine_asset_disabled' : 'machine_asset_enabled', actor, row: updated, oldValue, newValue: machineAssetHistoryValue(updated), reasonNote: textField(isRecord(req.body) ? req.body : {}, ['reasonNote','reason']) });
+    refreshMachineDocumentRecoveryMetadata(asset.id);
     audit(req,`machine asset ${action}`,'machine_asset',asset.id,{assetNumber:asset.asset_number});
     scheduleAutoBackup(`machine asset ${action}`, actor);
     res.json({ok:true,asset:publicMachineAsset(updated)});
@@ -7384,6 +9197,7 @@ app.delete('/api/machine-library/assets/:id', requireAuth, requirePermission('ma
     const timestamp = now();
     run('UPDATE machine_assets SET deleted=1,status=?,deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?', ['removed',timestamp,actor.id,timestamp,actor.id,asset.id]);
     const removed = machineAssetById(asset.id, true)!;
+    refreshMachineDocumentRecoveryMetadata(asset.id);
     recordMachineAssetHistory({ action: 'machine_asset_deleted', actor, row: removed, oldValue: machineAssetHistoryValue(asset), newValue: machineAssetHistoryValue(removed), reasonNote });
     audit(req,'machine asset delete','machine_asset',asset.id,{assetNumber:asset.asset_number});
     scheduleAutoBackup('machine asset delete', actor);
@@ -7393,7 +9207,7 @@ app.delete('/api/machine-library/assets/:id', requireAuth, requirePermission('ma
     res.status(/required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/machine-library/assets/:id/replacements/:field', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:id/replacements/:field', requireAuth, requirePermission('machine.edit'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const config = replacementFields[String(req.params.field) as MachineReplacementField];
@@ -7420,7 +9234,7 @@ app.get('/api/machine-library/brand-settings', requireAuth, requirePermission('m
   seedMachineBrandSettings();
   res.json({ok:true,brandSettings:all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}))});
 });
-app.put('/api/machine-library/brand-settings/:brandName', requireAuth, requirePermission('machine.write'), (req:AuthRequest,res)=>{
+app.put('/api/machine-library/brand-settings/:brandName', requireAuth, requirePermission('machine.edit'), (req:AuthRequest,res)=>{
   try {
     const actor = req.user!;
     const brandName = normalizeMachineBrand(String(req.params.brandName));
@@ -7564,10 +9378,10 @@ app.post('/api/machine-library/measurement-inspection/pdf', requireAuth, require
     res.status(500).json({ok:false,error:'Measurement PDF generation failed. Check server console for details.',detail:safeErrorMessage(error)});
   }
 });
-app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.write'), (_req,res)=>{
+app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.import_export'), (_req,res)=>{
   sendDownload(res, `MCC_Machine_List_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', machineCsvFromRows(machineImportHeaders, []));
 });
-app.post('/api/machine-library/import', requireAuth, requirePermission('machine.write'), upload.single('file'), async (req:AuthRequest,res)=>{
+app.post('/api/machine-library/import', requireAuth, requirePermission('machine.import_export'), upload.single('file'), async (req:AuthRequest,res)=>{
   try {
     const rows = await parseMachineImportFile(req.file);
     const summary = importMachineAssetRows(req, rows, machineImportModeFromValue(isRecord(req.body) ? req.body.importMode : ''));
@@ -7577,6 +9391,103 @@ app.post('/api/machine-library/import', requireAuth, requirePermission('machine.
     res.status(/Choose|must include|must be CSV|numeric|required/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],rejectedDuplicates:[],changedAssetNumbers:[]});
   }
 });
+
+app.get('/api/equipment-library/assets',requireAuth,requirePermission('equipment.view'),(req:AuthRequest,res)=>{
+  const search=queryText(req.query.q);const category=queryText(req.query.category);const status=queryText(req.query.status);const where=['a.deleted=0'];const params:SqlParam[]=[];
+  if(search){const like=`%${escapeLike(search)}%`;where.push("(a.asset_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.equipment_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.category LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.equipment_type LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.manufacturer LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.model LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.serial_number LIKE ? ESCAPE '\\' COLLATE NOCASE OR a.location LIKE ? ESCAPE '\\' COLLATE NOCASE)");params.push(like,like,like,like,like,like,like,like);}
+  if(category){where.push('lower(a.category)=lower(?)');params.push(category);}if(status&&equipmentStatuses.includes(status as EquipmentAssetStatus)){where.push('a.status=?');params.push(status);}
+  const assets=all<EquipmentAssetRow>(`SELECT a.* FROM equipment_assets a WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`,params).map(row=>{
+    const latest=one<HistoryLogRow>("SELECT * FROM history_logs WHERE ((section='equipment_library' AND entity_type='equipment_asset') OR (section='preventive_maintenance' AND equipment_name<>'')) AND asset_id=? ORDER BY created_at DESC,id DESC LIMIT 1",[String(row.id)]);
+    return {...publicEquipmentAsset(row),pmSummary:machineAssetPmCardSummary(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC",[row.id])),latestHistory:latest?publicHistoryRecord(latest):null};
+  });
+  res.json({ok:true,assets,categories:equipmentCategories,permissions:{canEdit:hasPermission(req.user!,'equipment.edit')||hasPermission(req.user!,'equipment.create'),canDelete:hasPermission(req.user!,'equipment.delete'),effective:[...getEffectivePermissions(req.user!)].filter(key=>key.startsWith('equipment.'))}});
+});
+app.post('/api/equipment-library/assets',requireAuth,requirePermission('equipment.create'),(req:AuthRequest,res)=>{
+  try{const input=validateEquipmentAssetInput(req.body);const existing=equipmentAssetByNumber(input.assetNumber);if(existing&&!existing.deleted)return res.status(409).json({ok:false,error:'Equipment Asset Number already exists.'});const timestamp=now();const actor=req.user!;let assetId=0;db.exec('BEGIN IMMEDIATE');try{assetId=existing?.deleted?existing.id:insertEquipmentAsset(input,actor,timestamp);if(existing?.deleted)updateEquipmentAsset(existing.id,input,actor,timestamp);const created=equipmentAssetById(assetId)!;recordEquipmentHistory({action:'equipment_created',actor,row:created,newValue:equipmentHistoryValue(created)});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}audit(req,'equipment asset create','equipment_asset',assetId,{assetNumber:input.assetNumber});scheduleAutoBackup('equipment asset create',actor);res.status(201).json({ok:true,asset:publicEquipmentAsset(equipmentAssetById(assetId)!)});}
+  catch(error){const message=safeErrorMessage(error);res.status(/required|unsafe|160|already/i.test(message)?400:500).json({ok:false,error:message});}
+});
+app.put('/api/equipment-library/assets/:id',requireAuth,requirePermission('equipment.edit'),(req:AuthRequest,res)=>{
+  try{const id=Number(req.params.id);const existing=equipmentAssetById(id);if(!existing)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const input=validateEquipmentAssetInput(req.body);const duplicate=equipmentAssetByNumber(input.assetNumber);if(duplicate&&duplicate.id!==id&&!duplicate.deleted)return res.status(409).json({ok:false,error:'Equipment Asset Number already exists.'});const oldValue=equipmentHistoryValue(existing);updateEquipmentAsset(id,input,req.user!,now());const updated=equipmentAssetById(id)!;recordEquipmentHistory({action:'equipment_edited',actor:req.user!,row:updated,oldValue,newValue:equipmentHistoryValue(updated),reasonNote:textField(isRecord(req.body)?req.body:{},['reasonNote','reason'])});audit(req,'equipment asset update','equipment_asset',id,{assetNumber:input.assetNumber});scheduleAutoBackup('equipment asset update',req.user!);res.json({ok:true,asset:publicEquipmentAsset(updated)});}
+  catch(error){const message=safeErrorMessage(error);res.status(/not found/i.test(message)?404:/required|unsafe|160|already/i.test(message)?400:500).json({ok:false,error:message});}
+});
+for(const action of ['disable','enable'] as const)app.post(`/api/equipment-library/assets/:id/${action}`,requireAuth,requirePermission('equipment.delete'),(req:AuthRequest,res)=>{
+  const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const oldValue=equipmentHistoryValue(asset);const status=action==='disable'?'disabled':'active';run('UPDATE equipment_assets SET status=?,updated_at=?,updated_by_user_id=? WHERE id=?',[status,now(),req.user!.id,asset.id]);const updated=equipmentAssetById(asset.id)!;recordEquipmentHistory({action:action==='disable'?'equipment_disabled':'equipment_enabled',actor:req.user!,row:updated,oldValue,newValue:equipmentHistoryValue(updated),reasonNote:textField(isRecord(req.body)?req.body:{},['reasonNote','reason'])});scheduleAutoBackup(`equipment ${action}`,req.user!);res.json({ok:true,asset:publicEquipmentAsset(updated)});
+});
+app.delete('/api/equipment-library/assets/:id',requireAuth,requirePermission('equipment.delete'),(req:AuthRequest,res)=>{
+  const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const reasonNote=requiredReasonNote(isRecord(req.body)?req.body.reasonNote??req.body.reason:'','Equipment delete');const timestamp=now();run("UPDATE equipment_assets SET deleted=1,status='removed',deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?",[timestamp,req.user!.id,timestamp,req.user!.id,asset.id]);const removed=equipmentAssetById(asset.id,true)!;recordEquipmentHistory({action:'equipment_deleted',actor:req.user!,row:removed,oldValue:equipmentHistoryValue(asset),newValue:equipmentHistoryValue(removed),reasonNote});scheduleAutoBackup('equipment asset delete',req.user!);res.json({ok:true});
+});
+app.get('/api/equipment-library/assets/:id/history',requireAuth,requirePermission('equipment.view'),(req,res)=>{
+  const asset=equipmentAssetById(Number(req.params.id),true);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const records=all<HistoryLogRow>("SELECT * FROM history_logs WHERE (((section='equipment_library' AND entity_type='equipment_asset') OR (section='preventive_maintenance' AND equipment_name<>'')) AND asset_id=?) OR (section='equipment_library' AND entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 200",[String(asset.id),asset.asset_number]).map(publicHistoryRecord);res.json({ok:true,asset:publicEquipmentAsset(asset),records});
+});
+app.get('/api/equipment-library/assets/:id/specification.pdf',requireAuth,requirePermission('equipment.view'),async(req:AuthRequest,res)=>{
+  try{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const tasks=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND asset_id=? ORDER BY active DESC,hold ASC,updated_at DESC",[asset.id]).map(publicPmTask);const generatedAt=new Date();const buffer=await buildEquipmentAssetSpecPdf(publicEquipmentAsset(asset),tasks,generatedAt);const filename=equipmentAssetSpecPdfFilename(asset.asset_number,generatedAt);res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`${String(req.query.download)==='true'?'attachment':'inline'}; filename="${filename}"`);res.setHeader('Content-Length',String(buffer.length));res.send(buffer);}catch(error){res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Equipment specification PDF could not be generated.')});}
+});
+app.get('/api/equipment-library/export/template',requireAuth,requirePermission('equipment.import_export'),(_req,res)=>sendDownload(res,`MCC_Equipment_Library_Template_${downloadDateStamp()}.csv`,'text/csv; charset=utf-8',machineCsvFromRows(equipmentImportHeaders,[])));
+app.get('/api/equipment-library/export',requireAuth,requirePermission('equipment.import_export'),(_req,res)=>{
+  const rows=all<EquipmentAssetRow>('SELECT * FROM equipment_assets WHERE deleted=0 ORDER BY asset_number COLLATE NOCASE').map(row=>{const item=publicEquipmentAsset(row);return Object.fromEntries(equipmentImportHeaders.map(header=>[header,({ 'Equipment Asset Number':item.assetNumber,'Equipment Name':item.equipmentName,'Category':item.category,'Equipment Type':item.equipmentType,'Manufacturer / Brand':item.manufacturer,'Model':item.model,'Serial Number':item.serialNumber,'Year':item.equipmentYear,'Location':item.location,'Department / Area':item.department,'Status':item.status,'Criticality':item.criticality,'Power Type':item.powerType,'Voltage':item.voltage,'Phase':item.phase,'Amperage':item.amperage,'Air Requirement':item.airRequirement,'Water Requirement':item.waterRequirement,'Capacity / Rating':item.capacityRating,'Dimensions':item.dimensions,'Weight':item.weight,'Specification Notes':item.specificationNotes } as Record<string,string>)[header]??'']));});sendDownload(res,`MCC_Equipment_Library_${downloadDateStamp()}.csv`,'text/csv; charset=utf-8',machineCsvFromRows(equipmentImportHeaders,rows));
+});
+app.post('/api/equipment-library/import',requireAuth,requirePermission('equipment.import_export'),upload.single('file'),async(req:AuthRequest,res)=>{try{const rows=await parseEquipmentImportFile(req.file);res.json(importEquipmentRows(req,rows,machineImportModeFromValue(isRecord(req.body)?req.body.importMode:'')));}catch(error){const message=safeErrorMessage(error);res.status(/Choose|must include|must be CSV|required/i.test(message)?400:500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],changedAssetNumbers:[]});}});
+
+app.get('/api/equipment-library/assets/:assetId/preventive-maintenance',requireAuth,requirePermission('equipment.view'),(req,res)=>{
+  const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});
+  res.json(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND asset_id=? ORDER BY active DESC,hold ASC,COALESCE(next_due_date,'9999-12-31'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE",[asset.id]).map(publicPmTask));
+});
+app.post('/api/equipment-library/assets/:assetId/preventive-maintenance',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
+  try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const clientRequestId=String(req.get('Idempotency-Key')??'').trim();if(clientRequestId&&!/^[A-Za-z0-9._:-]{8,128}$/.test(clientRequestId))return res.status(400).json({ok:false,error:'Invalid PM save request identifier.'});const existingRequest=clientRequestId?one<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='equipment' AND client_request_id=?",[clientRequestId]):undefined;if(existingRequest){if(existingRequest.asset_id!==asset.id)return res.status(409).json({ok:false,error:'PM save request identifier is already in use.'});return res.json({ok:true,task:publicPmTask(existingRequest),duplicatePrevented:true});}const input=validatePmTaskInput(req.body);const timestamp=now();const result=run(`INSERT INTO pm_tasks (asset_id,asset_library,client_request_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[asset.id,'equipment',clientRequestId||null,input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,req.user!.id,timestamp,timestamp]);const task=pmTaskById(Number(result.lastInsertRowid),'equipment')!;recordPmAudit({action:'pm_created',task,asset,actor:req.user!,newValue:pmHistoryValue(task)});scheduleAutoBackup('equipment preventive maintenance created',req.user!);res.status(201).json({ok:true,task:publicPmTask(task)});}catch(error){const message=safeErrorMessage(error,[],'Preventive maintenance tracking could not be created.');res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});}
+});
+app.put('/api/equipment-library/preventive-maintenance/:pmId',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
+  try{const existing=pmTaskById(Number(req.params.pmId),'equipment');if(!existing)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(existing.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const input=validatePmTaskInput(req.body);const oldValue=pmHistoryValue(existing);run('UPDATE pm_tasks SET title=?,instructions=?,interval_type=?,interval_value=?,last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,active=?,hold=?,notes=?,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library=?',[input.title,input.instructions,input.intervalType,input.intervalValue,input.lastCompletedDate,input.lastCompletedMeter,input.currentMeter,input.nextDueDate,input.nextDueMeter,input.active?1:0,input.hold?1:0,input.notes,req.user!.id,now(),existing.id,'equipment']);const task=pmTaskById(existing.id,'equipment')!;recordPmAudit({action:'pm_updated',task,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(task)});scheduleAutoBackup('equipment preventive maintenance updated',req.user!);res.json({ok:true,task:publicPmTask(task)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance tracking could not be updated.')});}
+});
+app.post('/api/equipment-library/preventive-maintenance/:pmId/deactivate',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
+  const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const oldValue=pmHistoryValue(task);run("UPDATE pm_tasks SET active=0,hold=0,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library='equipment'",[req.user!.id,now(),task.id]);const updated=pmTaskById(task.id,'equipment')!;recordPmAudit({action:'pm_deactivated',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated)});scheduleAutoBackup('equipment preventive maintenance deactivated',req.user!);res.json({ok:true,task:publicPmTask(updated)});
+});
+app.post('/api/equipment-library/preventive-maintenance/:pmId/complete',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
+  try{const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});if(!task.active)throw new Error('Inactive preventive maintenance tracking cannot be completed.');if(task.hold)throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');const completionDate=validPmDate((isRecord(req.body)?req.body.completionDate:null)??new Date().toISOString().slice(0,10),'completion date',true)!;const completedMeter=optionalPmNumber(isRecord(req.body)?req.body.completedMeter:null,'Completed meter');if(pmMeterIntervals.has(task.interval_type)&&completedMeter===null)throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);const completionNotes=String(isRecord(req.body)?req.body.completionNotes??'':'').replace(/\r/g,'').trim().slice(0,12000);const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);const timestamp=now();const oldValue=pmHistoryValue(task);let historyId=0;db.exec('BEGIN IMMEDIATE');try{const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_date,completed_meter,performed_by_user_id,performed_by_name,completion_notes,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,[task.id,task.asset_id,'equipment',completionDate,completedMeter,req.user!.id,req.user!.full_name,completionNotes,task.next_due_date,task.next_due_meter,due.nextDueDate,due.nextDueMeter,timestamp]);historyId=Number(result.lastInsertRowid);run("UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library='equipment'",[completionDate,pmMeterIntervals.has(task.interval_type)?completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?completedMeter:task.current_meter,due.nextDueDate,due.nextDueMeter,req.user!.id,timestamp,task.id]);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}const updated=pmTaskById(task.id,'equipment')!;const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=? AND asset_library=?',[historyId,'equipment'])!;recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated),reasonNote:completionNotes});scheduleAutoBackup('equipment preventive maintenance completed',req.user!);res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.')});}
+});
+app.get('/api/equipment-library/preventive-maintenance/:pmId/history',requireAuth,requirePermission('equipment.view'),(req,res)=>{
+  const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task||!equipmentAssetById(task.asset_id))return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});res.json({ok:true,task:publicPmTask(task),history:all<PmHistoryRow>("SELECT * FROM pm_history WHERE pm_task_id=? AND asset_library='equipment' ORDER BY completion_date DESC,id DESC",[task.id]).map(publicPmHistory)});
+});
+
+function equipmentDocumentAssetDirectory(assetId:number){return path.join(equipmentDocumentLibraryDir,`asset-${assetId}`);}
+function equipmentDocumentFilePath(assetId:number,storedFilename:string){const root=equipmentDocumentAssetDirectory(assetId);const resolved=path.resolve(root,path.basename(storedFilename));if(!resolved.startsWith(`${path.resolve(root)}${path.sep}`))throw new Error('Equipment document path is invalid.');return resolved;}
+function equipmentDocumentFolderById(assetId:number,folderId:number){return one<MachineDocumentFolderRow>('SELECT f.*,(SELECT COUNT(*) FROM equipment_documents d WHERE d.folder_id=f.id AND d.asset_id=f.asset_id) AS document_count FROM equipment_document_folders f WHERE f.id=? AND f.asset_id=?',[folderId,assetId]);}
+function equipmentDocumentById(assetId:number,documentId:number){return one<MachineDocumentRow>(`SELECT d.*,f.name AS folder_name,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name FROM equipment_documents d JOIN equipment_document_folders f ON f.id=d.folder_id LEFT JOIN users u ON u.id=d.uploaded_by_user_id WHERE d.id=? AND d.asset_id=?`,[documentId,assetId]);}
+function equipmentDuplicateDocument(assetId:number,folderId:number,displayFilename:string,excludeId=0){return one<MachineDocumentRow>('SELECT * FROM equipment_documents WHERE asset_id=? AND folder_id=? AND lower(display_filename)=lower(?) AND id<>?',[assetId,folderId,displayFilename,excludeId]);}
+function uniqueEquipmentDocumentName(assetId:number,folderId:number,displayFilename:string,excludeId=0){const extension=path.extname(displayFilename);const stem=path.basename(displayFilename,extension);let candidate=displayFilename;let index=2;while(equipmentDuplicateDocument(assetId,folderId,candidate,excludeId)){candidate=`${stem} (${index})${extension}`;index+=1;}return candidate;}
+function publicEquipmentDocument(row:MachineDocumentRow){const base=`/api/equipment-library/assets/${row.asset_id}/documents/${row.id}`;return {id:row.id,assetId:row.asset_id,folderId:row.folder_id,folderName:row.folder_name??'',originalFilename:row.original_filename,displayFilename:row.display_filename,extension:row.extension,mimeType:row.mime_type,sizeBytes:Number(row.size_bytes),description:row.description,revision:row.revision,uploadedAt:row.uploaded_at,updatedAt:row.updated_at,uploadedBy:row.uploaded_by_name??'Unknown user',openUrl:`${base}/open`,downloadUrl:`${base}/download`,canPrint:row.extension==='.pdf'};}
+function refreshEquipmentDocumentRecoveryMetadata(assetId?:number){
+  fs.mkdirSync(equipmentDocumentLibraryDir,{recursive:true});const assets=assetId?[equipmentAssetById(assetId,true)].filter((item):item is EquipmentAssetRow=>Boolean(item)):all<EquipmentAssetRow>('SELECT * FROM equipment_assets ORDER BY id');const manifests=assets.map(asset=>{const folders=all<MachineDocumentFolderRow>('SELECT * FROM equipment_document_folders WHERE asset_id=? ORDER BY name COLLATE NOCASE',[asset.id]);const documents=all<MachineDocumentRow>('SELECT d.*,f.name AS folder_name FROM equipment_documents d JOIN equipment_document_folders f ON f.id=d.folder_id WHERE d.asset_id=? ORDER BY f.name COLLATE NOCASE,d.display_filename COLLATE NOCASE',[asset.id]);const directory=equipmentDocumentAssetDirectory(asset.id);fs.mkdirSync(directory,{recursive:true});const manifest={schemaVersion:1,generatedAt:now(),library:'equipment',asset:{internalAssetId:asset.id,assetNumber:asset.asset_number,equipmentName:asset.equipment_name,category:asset.category,manufacturer:asset.manufacturer,model:asset.model,serialNumber:asset.serial_number},summary:{folderCount:folders.length,documentCount:documents.length},folders:folders.map(folder=>({id:folder.id,name:folder.name,description:folder.description})),documents:documents.map(document=>({id:document.id,folderId:document.folder_id,folderName:document.folder_name,visibleFilename:document.display_filename,storedFilename:document.stored_filename,mimeType:document.mime_type,sizeBytes:document.size_bytes,description:document.description,revision:document.revision,uploadedAt:document.uploaded_at}))};atomicWriteText(path.join(directory,'asset-info.json'),`${JSON.stringify(manifest,null,2)}\n`);return manifest;});const index={schemaVersion:1,generatedAt:now(),storageRoot:'uploads/equipment-library',assets:manifests.map(manifest=>({...manifest.asset,...manifest.summary,storageDirectory:`asset-${manifest.asset.internalAssetId}`,manifestPath:`asset-${manifest.asset.internalAssetId}/asset-info.json`}))};atomicWriteText(path.join(equipmentDocumentLibraryDir,'equipment-library-index.json'),`${JSON.stringify(index,null,2)}\n`);return {index,manifests};}
+function recordEquipmentDocumentHistory(action:string,actor:User,asset:EquipmentAssetRow,details:Record<string,unknown>){recordEquipmentHistory({action,actor,row:asset,newValue:details});}
+function registerEquipmentDocumentLibraryRoutes(){
+  const base='/api/equipment-library';
+  app.get(`${base}/assets/:assetId/document-folders`,requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const folders=all<MachineDocumentFolderRow>('SELECT f.*,(SELECT COUNT(*) FROM equipment_documents d WHERE d.folder_id=f.id AND d.asset_id=f.asset_id) AS document_count FROM equipment_document_folders f WHERE f.asset_id=? ORDER BY f.name COLLATE NOCASE',[asset.id]).map(publicMachineDocumentFolder);const documentCount=one<{count:number}>('SELECT COUNT(*) AS count FROM equipment_documents WHERE asset_id=?',[asset.id])?.count??0;res.json({ok:true,folders,summary:{folderCount:folders.length,documentCount}});});
+  app.post(`${base}/assets/:assetId/document-folders`,requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const name=validateMachineDocumentFolderName(isRecord(req.body)?req.body.name:'');const description=validateMachineDocumentDescription(isRecord(req.body)?req.body.description:'');if(one('SELECT id FROM equipment_document_folders WHERE asset_id=? AND lower(name)=lower(?)',[asset.id,name]))return res.status(409).json({ok:false,code:'DUPLICATE_FOLDER',error:'A folder with this name already exists.'});const timestamp=now();const result=run('INSERT INTO equipment_document_folders (asset_id,name,description,created_at,updated_at,created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?)',[asset.id,name,description,timestamp,timestamp,req.user!.id,req.user!.id]);const folder=equipmentDocumentFolderById(asset.id,Number(result.lastInsertRowid))!;recordEquipmentDocumentHistory('document_folder_created',req.user!,asset,{folderId:folder.id,folderName:name,description});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment document folder created',req.user!);res.status(201).json({ok:true,folder:publicMachineDocumentFolder(folder)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be created.')});}});
+  app.patch(`${base}/assets/:assetId/document-folders/:folderId`,requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const folder=equipmentDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});const body=isRecord(req.body)?req.body:{};const name=body.name===undefined?folder.name:validateMachineDocumentFolderName(body.name);const description=body.description===undefined?folder.description:validateMachineDocumentDescription(body.description);if(one('SELECT id FROM equipment_document_folders WHERE asset_id=? AND lower(name)=lower(?) AND id<>?',[asset.id,name,folder.id]))return res.status(409).json({ok:false,code:'DUPLICATE_FOLDER',error:'A folder with this name already exists.'});run('UPDATE equipment_document_folders SET name=?,description=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[name,description,now(),req.user!.id,folder.id,asset.id]);recordEquipmentDocumentHistory(name!==folder.name?'document_folder_renamed':'document_folder_edited',req.user!,asset,{folderId:folder.id,previousName:folder.name,folderName:name,description});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment document folder updated',req.user!);res.json({ok:true,folder:publicMachineDocumentFolder(equipmentDocumentFolderById(asset.id,folder.id)!)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Folder could not be updated.')});}});
+  app.delete(`${base}/assets/:assetId/document-folders/:folderId`,requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const folder=equipmentDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});if(folder.document_count)return res.status(409).json({ok:false,code:'FOLDER_NOT_EMPTY',error:'This folder contains documents. Move or delete them before deleting the folder.'});run('DELETE FROM equipment_document_folders WHERE id=? AND asset_id=?',[folder.id,asset.id]);recordEquipmentDocumentHistory('document_folder_deleted',req.user!,asset,{folderId:folder.id,folderName:folder.name});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment document folder deleted',req.user!);res.json({ok:true});});
+  app.get(`${base}/assets/:assetId/documents`,requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const documents=all<MachineDocumentRow>(`SELECT d.*,f.name AS folder_name,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name FROM equipment_documents d JOIN equipment_document_folders f ON f.id=d.folder_id LEFT JOIN users u ON u.id=d.uploaded_by_user_id WHERE d.asset_id=? ORDER BY d.display_filename COLLATE NOCASE`,[asset.id]).map(publicEquipmentDocument);res.json({ok:true,documents});});
+  app.post(`${base}/assets/:assetId/document-folders/:folderId/documents`,requireAuth,requirePermission('equipment.write'),receiveMachineDocuments,(req:AuthRequest,res)=>{const written:string[]=[];const oldFiles:string[]=[];let committed=false;try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const folder=equipmentDocumentFolderById(asset.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Document folder not found.'});const files=(req.files as Express.Multer.File[]|undefined)??[];if(!files.length)return res.status(400).json({ok:false,error:'Select at least one document to upload.'});const validated=files.map(file=>({file,...validatedMachineDocument(file)}));const duplicateAction=String(req.body?.duplicateAction??'').toLowerCase();const names=new Set<string>();const duplicates=validated.filter(item=>{const key=item.displayFilename.toLowerCase();const duplicate=names.has(key)||Boolean(equipmentDuplicateDocument(asset.id,folder.id,item.displayFilename));names.add(key);return duplicate;});if(duplicates.length&&!['replace','keep_both'].includes(duplicateAction))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.',duplicates:duplicates.map(item=>item.displayFilename)});const description=validateMachineDocumentDescription(req.body?.description);const revision=validateMachineDocumentRevision(req.body?.revision);const timestamp=now();const ids:number[]=[];db.exec('BEGIN IMMEDIATE');try{fs.mkdirSync(equipmentDocumentAssetDirectory(asset.id),{recursive:true});for(const item of validated){let displayFilename=item.displayFilename;let existing=equipmentDuplicateDocument(asset.id,folder.id,displayFilename);if(existing&&duplicateAction==='keep_both'){displayFilename=uniqueEquipmentDocumentName(asset.id,folder.id,displayFilename);existing=undefined;}const storedFilename=`${crypto.randomUUID()}${item.extension}`;const filePath=equipmentDocumentFilePath(asset.id,storedFilename);fs.writeFileSync(filePath,item.file.buffer,{flag:'wx'});written.push(filePath);if(existing&&duplicateAction==='replace'){oldFiles.push(equipmentDocumentFilePath(asset.id,existing.stored_filename));run('UPDATE equipment_documents SET original_filename=?,display_filename=?,stored_filename=?,extension=?,mime_type=?,size_bytes=?,description=?,revision=?,uploaded_at=?,updated_at=?,uploaded_by_user_id=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,description,revision,timestamp,timestamp,req.user!.id,req.user!.id,existing.id,asset.id]);ids.push(existing.id);recordEquipmentDocumentHistory('document_replaced',req.user!,asset,{documentId:existing.id,folderId:folder.id,folderName:folder.name,displayFilename});}else{const result=run('INSERT INTO equipment_documents (asset_id,folder_id,original_filename,display_filename,stored_filename,extension,mime_type,size_bytes,description,revision,uploaded_at,updated_at,uploaded_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[asset.id,folder.id,item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,description,revision,timestamp,timestamp,req.user!.id,req.user!.id]);const id=Number(result.lastInsertRowid);ids.push(id);recordEquipmentDocumentHistory('document_uploaded',req.user!,asset,{documentId:id,folderId:folder.id,folderName:folder.name,displayFilename});}}run('UPDATE equipment_document_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,folder.id]);db.exec('COMMIT');committed=true;}catch(error){db.exec('ROLLBACK');throw error;}oldFiles.forEach(filePath=>{if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment documents uploaded',req.user!);res.status(201).json({ok:true,documents:ids.map(id=>publicEquipmentDocument(equipmentDocumentById(asset.id,id)!))});}catch(error){if(!committed)written.forEach(filePath=>{if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Documents could not be uploaded.')});}});
+  for(const mode of ['open','download'] as const)app.get(`${base}/assets/:assetId/documents/:documentId/${mode}`,requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const document=equipmentDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const filePath=equipmentDocumentFilePath(asset.id,document.stored_filename);if(!fs.existsSync(filePath))return res.status(404).json({ok:false,error:'Stored document file is missing.'});const disposition=mode==='download'||document.extension!=='.pdf'?'attachment':'inline';res.setHeader('Content-Type',document.mime_type);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`${disposition}; filename="${document.display_filename.replace(/[^\x20-\x7e]|["\\]/g,'_')}"`);res.sendFile(filePath);});
+  app.patch(`${base}/assets/:assetId/documents/:documentId`,requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const document=equipmentDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const body=isRecord(req.body)?req.body:{};const displayFilename=body.displayFilename===undefined?document.display_filename:safeMachineDocumentDisplayName(body.displayFilename,document.extension);const description=body.description===undefined?document.description:validateMachineDocumentDescription(body.description);const revision=body.revision===undefined?document.revision:validateMachineDocumentRevision(body.revision);if(equipmentDuplicateDocument(asset.id,document.folder_id,displayFilename,document.id))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.'});run('UPDATE equipment_documents SET display_filename=?,description=?,revision=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[displayFilename,description,revision,now(),req.user!.id,document.id,asset.id]);recordEquipmentDocumentHistory(displayFilename!==document.display_filename?'document_renamed':'document_metadata_edited',req.user!,asset,{documentId:document.id,previousFilename:document.display_filename,displayFilename,description,revision});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment document updated',req.user!);res.json({ok:true,document:publicEquipmentDocument(equipmentDocumentById(asset.id,document.id)!)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be updated.')});}});
+  app.post(`${base}/assets/:assetId/documents/:documentId/move`,requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{let replacedPath='';try{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const document=equipmentDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const destination=equipmentDocumentFolderById(asset.id,Number(isRecord(req.body)?req.body.folderId:0));if(!destination)return res.status(404).json({ok:false,error:'Destination folder not found.'});if(destination.id===document.folder_id)return res.status(400).json({ok:false,error:'Choose a different destination folder.'});const action=String(isRecord(req.body)?req.body.duplicateAction??'':'').toLowerCase();let displayFilename=document.display_filename;const duplicate=equipmentDuplicateDocument(asset.id,destination.id,displayFilename,document.id);if(duplicate&&!['replace','keep_both'].includes(action))return res.status(409).json({ok:false,code:'DOCUMENT_DUPLICATE',error:'A document with this name already exists.'});if(duplicate&&action==='keep_both')displayFilename=uniqueEquipmentDocumentName(asset.id,destination.id,displayFilename,document.id);db.exec('BEGIN IMMEDIATE');try{if(duplicate&&action==='replace'){replacedPath=equipmentDocumentFilePath(asset.id,duplicate.stored_filename);run('DELETE FROM equipment_documents WHERE id=? AND asset_id=?',[duplicate.id,asset.id]);}run('UPDATE equipment_documents SET folder_id=?,display_filename=?,updated_at=?,updated_by_user_id=? WHERE id=? AND asset_id=?',[destination.id,displayFilename,now(),req.user!.id,document.id,asset.id]);recordEquipmentDocumentHistory('document_moved',req.user!,asset,{documentId:document.id,displayFilename,fromFolderId:document.folder_id,toFolderId:destination.id,toFolderName:destination.name});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}if(replacedPath&&fs.existsSync(replacedPath))fs.rmSync(replacedPath,{force:true});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment document moved',req.user!);res.json({ok:true,document:publicEquipmentDocument(equipmentDocumentById(asset.id,document.id)!)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Document could not be moved.')});}});
+  app.delete(`${base}/assets/:assetId/documents/:documentId`,requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const document=equipmentDocumentById(asset.id,Number(req.params.documentId));if(!document)return res.status(404).json({ok:false,error:'Document not found.'});const filePath=equipmentDocumentFilePath(asset.id,document.stored_filename);run('DELETE FROM equipment_documents WHERE id=? AND asset_id=?',[document.id,asset.id]);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});recordEquipmentDocumentHistory('document_deleted',req.user!,asset,{documentId:document.id,displayFilename:document.display_filename,folderId:document.folder_id});refreshEquipmentDocumentRecoveryMetadata(asset.id);scheduleAutoBackup('equipment document deleted',req.user!);res.json({ok:true});});
+  app.get(`${base}/assets/:assetId/documents/export`,requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const recovery=refreshEquipmentDocumentRecoveryMetadata(asset.id);const manifest=recovery.manifests[0];const date=new Date().toISOString().slice(0,10);streamRecoveryArchive(res,`Equipment-${safeArchiveSegment(asset.asset_number,String(asset.id))}_Documents_${date}.zip`,archive=>{archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:'asset-info.json'});for(const document of manifest.documents){const source=equipmentDocumentFilePath(asset.id,String(document.storedFilename));if(!fs.existsSync(source))throw new Error(`Stored document is missing: ${document.visibleFilename}`);archive.file(source,{name:`${safeArchiveSegment(String(document.folderName),'Unfiled')}/${safeArchiveSegment(String(document.visibleFilename),'document')}`});}});});
+}
+registerEquipmentDocumentLibraryRoutes();
+app.get('/api/equipment-library/documents/recovery-export',requireAuth,requirePermission('equipment.import_export'),(req:AuthRequest,res)=>{const recovery=refreshEquipmentDocumentRecoveryMetadata();const date=new Date().toISOString().slice(0,10);streamRecoveryArchive(res,`MCC_Equipment_Document_Recovery_${date}.zip`,archive=>{archive.append(`${JSON.stringify(recovery.index,null,2)}\n`,{name:'equipment-library-index.json'});archive.append('MCC Equipment Asset Document Library - Full Recovery Export\n\nFiles are grouped by visible Equipment Asset Number. asset-info.json retains stable internal IDs and physical filenames for recovery.\n',{name:'README.txt'});for(const manifest of recovery.manifests){const prefix=`Equipment-${safeArchiveSegment(manifest.asset.assetNumber,String(manifest.asset.internalAssetId))} - ${safeArchiveSegment(manifest.asset.equipmentName,'Unnamed Equipment')}`;archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:`${prefix}/asset-info.json`});for(const document of manifest.documents){const source=equipmentDocumentFilePath(manifest.asset.internalAssetId,String(document.storedFilename));if(fs.existsSync(source))archive.file(source,{name:`${prefix}/${safeArchiveSegment(String(document.folderName),'Unfiled')}/${safeArchiveSegment(String(document.visibleFilename),'document')}`});}}});});
+
+function equipmentAssetNoteFilePath(storedReference:string){const relative=storedReference.replace(/\\/g,'/');if(!relative.startsWith('uploads/equipment-asset-notes/'))throw new Error('Equipment note file reference is invalid.');const resolved=path.resolve(equipmentAssetNotesDir,path.basename(relative));const root=path.resolve(equipmentAssetNotesDir);if(!resolved.startsWith(`${root}${path.sep}`))throw new Error('Equipment note file reference is invalid.');return resolved;}
+function equipmentAssetNoteById(noteId:number){return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.id=? AND a.deleted=0`,[noteId]);}
+function equipmentAssetNoteAttachments(noteId:number){return all<MachineAssetNoteAttachmentRow>('SELECT * FROM equipment_asset_note_attachments WHERE note_id=? ORDER BY created_at,id',[noteId]);}
+function publicEquipmentAssetNoteAttachment(row:MachineAssetNoteAttachmentRow){const base=`/api/equipment-library/asset-note-attachments/${row.id}/file`;const version=encodeURIComponent(row.created_at);return {id:row.id,noteId:row.note_id,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),createdAt:row.created_at,contentUrl:`${base}?v=${version}`,downloadUrl:`${base}?download=true&v=${version}`};}
+function publicEquipmentAssetNote(row:MachineAssetNoteRow){const base=`/api/equipment-library/asset-notes/${row.id}/pdf`;const version=encodeURIComponent(row.updated_at);return {id:row.id,assetId:row.asset_id,title:row.title,noteDate:row.note_date,body:row.body,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,pdfFilename:row.pdf_filename,pdfUrl:`${base}?v=${version}`,pdfDownloadUrl:`${base}?download=true&v=${version}`,attachments:equipmentAssetNoteAttachments(row.id).map(publicEquipmentAssetNoteAttachment)};}
+async function regenerateEquipmentAssetNotePdf(noteId:number){const note=equipmentAssetNoteById(noteId);if(!note)throw new Error('Equipment asset note not found.');const buffer=await buildMachineAssetNotePdf(note,equipmentAssetNoteAttachments(note.id));const filename=`${safeFileToken(note.asset_number??`Equipment_${note.asset_id}`)}_${safeFileToken(note.title)}_Maintenance_Note_${note.note_date}.pdf`;const storedName=`${crypto.randomUUID()}.pdf`;const storedPath=path.join(equipmentAssetNotesDir,storedName);fs.writeFileSync(storedPath,buffer,{flag:'wx'});const previous=note.pdf_stored_reference;run('UPDATE equipment_asset_notes SET pdf_filename=?,pdf_stored_reference=?,updated_at=? WHERE id=?',[filename,`uploads/equipment-asset-notes/${storedName}`,now(),note.id]);if(previous){const previousPath=equipmentAssetNoteFilePath(previous);if(fs.existsSync(previousPath))fs.rmSync(previousPath,{force:true});}}
+app.get('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicEquipmentAssetNote);res.json({ok:true,notes});});
+app.post('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{let noteId=0;const stored:string[]=[];try{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const title=String(req.body?.title??'').replace(/\s+/g,' ').trim().slice(0,180);const body=String(req.body?.body??'').replace(/\r/g,'').trim().slice(0,30000);if(!title||!body)throw new Error('Note Title and Note Body are required.');const noteDate=validMachineAssetNoteDate(req.body?.noteDate);const files=(req.files as Express.Multer.File[]|undefined)??[];const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));const timestamp=now();const result=run('INSERT INTO equipment_asset_notes (asset_id,title,note_date,body,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',[asset.id,title,noteDate,body,req.user!.id,req.user!.id,timestamp,timestamp]);noteId=Number(result.lastInsertRowid);for(const {file,detected} of validated){const storedName=`${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(equipmentAssetNotesDir,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});stored.push(storedPath);run('INSERT INTO equipment_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[noteId,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/equipment-asset-notes/${storedName}`,req.user!.id,timestamp]);}await regenerateEquipmentAssetNotePdf(noteId);recordEquipmentHistory({action:'note_created',actor:req.user!,row:asset,newValue:{noteId,title,noteDate,attachmentCount:files.length}});scheduleAutoBackup('equipment note created',req.user!);res.status(201).json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(noteId)!)});}catch(error){if(noteId){run('DELETE FROM equipment_asset_note_attachments WHERE note_id=?',[noteId]);run('DELETE FROM equipment_asset_notes WHERE id=?',[noteId]);}stored.forEach(filePath=>{if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Equipment note could not be created.')});}});
+app.put('/api/equipment-library/asset-notes/:noteId',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{try{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;const title=String(req.body?.title??'').replace(/\s+/g,' ').trim().slice(0,180);const body=String(req.body?.body??'').replace(/\r/g,'').trim().slice(0,30000);if(!title||!body)throw new Error('Note Title and Note Body are required.');const noteDate=validMachineAssetNoteDate(req.body?.noteDate);const timestamp=now();run('UPDATE equipment_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[title,noteDate,body,req.user!.id,timestamp,note.id]);for(const file of (req.files as Express.Multer.File[]|undefined)??[]){const detected=validatedMachineAssetNoteAttachment(file);const storedName=`${crypto.randomUUID()}${detected.extension}`;fs.writeFileSync(path.join(equipmentAssetNotesDir,storedName),file.buffer,{flag:'wx'});run('INSERT INTO equipment_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[note.id,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/equipment-asset-notes/${storedName}`,req.user!.id,timestamp]);}await regenerateEquipmentAssetNotePdf(note.id);recordEquipmentHistory({action:'note_edited',actor:req.user!,row:asset,oldValue:{noteId:note.id,title:note.title,noteDate:note.note_date},newValue:{noteId:note.id,title,noteDate}});scheduleAutoBackup('equipment note edited',req.user!);res.json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(note.id)!)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Equipment note could not be updated.')});}});
+app.delete('/api/equipment-library/asset-notes/:noteId',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;const attachments=equipmentAssetNoteAttachments(note.id);run('DELETE FROM equipment_asset_note_attachments WHERE note_id=?',[note.id]);run('DELETE FROM equipment_asset_notes WHERE id=?',[note.id]);for(const item of attachments){const filePath=equipmentAssetNoteFilePath(item.stored_file_reference);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});}if(note.pdf_stored_reference){const pdfPath=equipmentAssetNoteFilePath(note.pdf_stored_reference);if(fs.existsSync(pdfPath))fs.rmSync(pdfPath,{force:true});}recordEquipmentHistory({action:'note_deleted',actor:req.user!,row:asset,oldValue:{noteId:note.id,title:note.title}});scheduleAutoBackup('equipment note deleted',req.user!);res.json({ok:true});});
+app.delete('/api/equipment-library/asset-note-attachments/:attachmentId',requireAuth,requirePermission('equipment.write'),async(req:AuthRequest,res)=>{const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM equipment_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);if(!attachment)return res.status(404).json({ok:false,error:'Equipment note attachment not found.'});const note=equipmentAssetNoteById(attachment.note_id);if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;run('DELETE FROM equipment_asset_note_attachments WHERE id=?',[attachment.id]);const filePath=equipmentAssetNoteFilePath(attachment.stored_file_reference);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});await regenerateEquipmentAssetNotePdf(note.id);recordEquipmentHistory({action:'note_attachment_deleted',actor:req.user!,row:asset,oldValue:{attachmentId:attachment.id,filename:attachment.original_filename}});scheduleAutoBackup('equipment note attachment deleted',req.user!);res.json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(note.id)!)});});
+app.get('/api/equipment-library/asset-notes/:noteId/pdf',requireAuth,requirePermission('equipment.view'),(req,res)=>{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const filePath=equipmentAssetNoteFilePath(note.pdf_stored_reference);if(!fs.existsSync(filePath))return res.status(404).json({ok:false,error:'Generated note PDF is missing.'});res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`${String(req.query.download)==='true'?'attachment':'inline'}; filename="${safeMachineAssetNoteOriginalName(note.pdf_filename,'.pdf')}"`);res.sendFile(filePath);});
+app.get('/api/equipment-library/asset-note-attachments/:attachmentId/file',requireAuth,requirePermission('equipment.view'),(req,res)=>{const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM equipment_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);if(!attachment||!equipmentAssetNoteById(attachment.note_id))return res.status(404).json({ok:false,error:'Equipment note attachment not found.'});const filePath=equipmentAssetNoteFilePath(attachment.stored_file_reference);if(!fs.existsSync(filePath))return res.status(404).json({ok:false,error:'Stored attachment is missing.'});const extension=path.extname(attachment.original_filename).toLowerCase();const disposition=String(req.query.download)==='true'||['.doc','.docx'].includes(extension)?'attachment':'inline';res.setHeader('Content-Type',attachment.mime_type);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`${disposition}; filename="${safeMachineAssetNoteOriginalName(attachment.original_filename,extension)}"`);res.sendFile(filePath);});
 
 app.get('/api/history/summary', requireAuth, requirePermission('history.view'), (_req,res)=>{
   const rows = all<{ section: HistorySection; count: number; latestCreatedAt: string | null }>('SELECT section, COUNT(*) AS count, MAX(created_at) AS latestCreatedAt FROM history_logs GROUP BY section');
@@ -7769,7 +9680,7 @@ app.get('/api/settings/network-links', requireAuth, requirePermission('settings.
     primaryLanUrl: lanUrls[0] ?? null,
   });
 });
-app.get('/api/requisition-batches', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+app.get('/api/requisition-batches', requireAuth, requirePermission('requisitions.view'), (req:AuthRequest,res)=>{
   try {
     ensureGeneralRequisitionBatch();
     res.json({ok:true,batches:requisitionBatchList(queryText(req.query.view) || 'active')});
@@ -7777,7 +9688,7 @@ app.get('/api/requisition-batches', requireAuth, requirePermission('inventory.vi
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-batches', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = validateRequisitionBatchInput(req.body);
@@ -7793,7 +9704,7 @@ app.post('/api/requisition-batches', requireAuth, requirePermission('inventory.w
     res.status(/required|invalid|must|reserved/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requisition-batch.manage'), (req:AuthRequest,res)=>{
+app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const batchId = Number(req.params.id);
   try {
@@ -7814,7 +9725,7 @@ app.patch('/api/requisition-batches/:id', requireAuth, requirePermission('requis
     res.status(/not found/i.test(message) ? 404 : /required|invalid|cannot|must|reserved/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requisition-batch.manage'), (req:AuthRequest,res)=>{
+app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const batchId = Number(req.params.id);
   try {
@@ -7862,7 +9773,7 @@ app.delete('/api/requisition-batches/:id', requireAuth, requirePermission('requi
     res.status(500).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+app.get('/api/requisition-staging', requireAuth, requirePermission('requisitions.view'), (req:AuthRequest,res)=>{
   try {
     const batchId = Number(req.query.batchId ?? 0);
     const includeCompleted = ['1','true','yes'].includes(String(req.query.includeCompleted ?? '').toLowerCase());
@@ -7872,7 +9783,7 @@ app.get('/api/requisition-staging', requireAuth, requirePermission('inventory.vi
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = validateRequisitionStagingInput(req.body);
@@ -7899,7 +9810,7 @@ app.post('/api/requisition-staging', requireAuth, requirePermission('inventory.w
     res.status(/already staged/i.test(message) ? 409 : /required|must|invalid|not found/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -7947,7 +9858,7 @@ app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('invent
     res.status(/required|select|not found|must|positive|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/move', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/move', requireAuth, requirePermission('requisitions.manage_batches'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -8001,7 +9912,7 @@ app.post('/api/requisition-staging/move', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /select|only|different|open|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const itemId = Number(req.params.id);
   try {
@@ -8030,7 +9941,7 @@ app.patch('/api/requisition-staging/:id', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /already staged/i.test(message) ? 409 : /required|must|invalid/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   try {
     const input = isRecord(req.body) ? req.body : {};
     const ids = Array.isArray(input.ids) ? uniquePositiveIds(input.ids.map(value=>Number(value))) : [];
@@ -8052,7 +9963,7 @@ app.post('/api/requisition-staging/clear-selected', requireAuth, requirePermissi
     res.status(/select/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inventory.requisition_stage'), (req:AuthRequest,res)=>{
   const itemId = Number(req.params.id);
   try {
     const existing = requisitionStagingById(itemId);
@@ -8072,7 +9983,7 @@ app.delete('/api/requisition-staging/:id', requireAuth, requirePermission('inven
     res.status(/not found/i.test(message) ? 404 : /only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/preview', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/preview', requireAuth, requirePermission('requisitions.print_download'), (req:AuthRequest,res)=>{
   try {
     const input = isRecord(req.body) ? req.body : {};
     res.json({ok:true,...createStagingPreview(req.user!,input)});
@@ -8081,7 +9992,7 @@ app.post('/api/requisition-staging/preview', requireAuth, requirePermission('inv
     res.status(/not found|select|must|required|already exists|open/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth, requirePermission('inventory.view'), async (req:AuthRequest,res)=>{
+app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth, requirePermission('requisitions.print_download'), async (req:AuthRequest,res)=>{
   try {
     const record = stagingPreviewRecord(req.user!,String(req.params.token));
     const groupIndex = Number(req.params.groupIndex);
@@ -8099,7 +10010,7 @@ app.get('/api/requisition-staging/previews/:token/:groupIndex/pdf', requireAuth,
     res.status(/not found|expired/i.test(message) ? 404 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePermission('requisitions.create'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -8121,8 +10032,8 @@ app.post('/api/requisition-staging/create-requisitions', requireAuth, requirePer
     sendRequisitionError(req,res,'requisition create from staging','selection',error);
   }
 });
-app.get('/api/requisitions/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...requisitionSummary()}));
-app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (req:AuthRequest,res)=>{
+app.get('/api/requisitions/summary', requireAuth, requirePermission('requisitions.view'), (_req,res)=>res.json({ok:true,...requisitionSummary()}));
+app.get('/api/requisitions', requireAuth, requirePermission('requisitions.view'), (req:AuthRequest,res)=>{
   try {
     const includeDeleted = canDeleteRequisitions(req.user!) && String(req.query.includeDeleted ?? '').toLowerCase() === 'true';
     const includeDrafts = canDeleteRequisitions(req.user!) && String(req.query.includeDrafts ?? '').toLowerCase() === 'true';
@@ -8131,12 +10042,12 @@ app.get('/api/requisitions', requireAuth, requirePermission('inventory.view'), (
     res.status(400).json({ok:false,error:safeErrorMessage(error)});
   }
 });
-app.get('/api/requisitions/:id', requireAuth, requirePermission('inventory.view'), (req,res)=>{
+app.get('/api/requisitions/:id', requireAuth, requirePermission('requisitions.view'), (req,res)=>{
   const requisition = requisitionById(Number(req.params.id));
   if (!requisition) return res.status(404).json({ok:false,error:'Requisition not found.'});
   res.json({ok:true,requisition:publicRequisition(requisition)});
 });
-app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.view'), async (req:AuthRequest,res)=>{
+app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('requisitions.print_download'), async (req:AuthRequest,res)=>{
   const requisitionId = Number(req.params.id);
   try {
     const requisition = requisitionById(requisitionId, { includeDeleted: canDeleteRequisitions(req.user!) });
@@ -8167,7 +10078,7 @@ app.get('/api/requisitions/:id/pdf', requireAuth, requirePermission('inventory.v
     res.status(/not found/i.test(message) ? 404 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions', requireAuth, requirePermission('requisitions.create'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition create';
   try {
@@ -8187,7 +10098,7 @@ app.post('/api/requisitions', requireAuth, requirePermission('inventory.write'),
   }
 });
 
-app.post('/api/requisitions/preview', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions/preview', requireAuth, requirePermission('requisitions.print_download'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition preview create';
   try {
@@ -8207,7 +10118,7 @@ app.post('/api/requisitions/preview', requireAuth, requirePermission('inventory.
   }
 });
 
-app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('requisitions.create'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition preview pass';
   const requisitionId = Number(req.params.id);
@@ -8254,7 +10165,7 @@ app.post('/api/requisitions/:id/pass', requireAuth, requirePermission('inventory
   }
 });
 
-app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('inventory.write'), async (req:AuthRequest,res)=>{
+app.post('/api/requisitions/vendor-pdf', requireAuth, requirePermission('requisitions.print_download'), async (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'vendor requisition PDF create';
   try {
@@ -8322,7 +10233,7 @@ WHERE p.deleted=0 AND p.id=?`, [partId]);
   }
 });
 
-app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisitions/:id/status', requireAuth, (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition status changed';
   const requisitionId = Number(req.params.id);
@@ -8330,6 +10241,11 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
     const input = isRecord(req.body) ? req.body : {};
     const nextStatus = textField(input, ['status']) as RequisitionStatus;
     if (!['Ordered','Received','Canceled'].includes(nextStatus)) throw new Error('Status must be Ordered, Received, or Canceled.');
+    const requiredPermission:PermissionKey=nextStatus==='Ordered'?'requisitions.mark_ordered':nextStatus==='Received'?'requisitions.mark_received':'requisitions.cancel';
+    if(!hasPermission(actor,requiredPermission)) {
+      const definition=permissionByKey.get(requiredPermission)!;
+      return res.status(403).json({error:`You do not have permission to ${definition.label.toLowerCase()}.`,code:'PERMISSION_REQUIRED',permission:requiredPermission});
+    }
     const cancelReason = textField(input, ['cancelReason','cancel_reason']);
     if (nextStatus === 'Canceled' && !cancelReason) throw new Error('Cancel reason is required.');
     const timestamp = now();
@@ -8381,7 +10297,7 @@ app.patch('/api/requisitions/:id/status', requireAuth, requirePermission('invent
     sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
   }
 });
-app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.patch('/api/requisitions/:id', requireAuth, requirePermission('requisitions.edit'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const operation = 'requisition edit';
   const requisitionId = Number(req.params.id);
@@ -8424,7 +10340,7 @@ app.patch('/api/requisitions/:id', requireAuth, requirePermission('inventory.wri
     sendRequisitionError(req,res,operation,Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? ''),error);
   }
 });
-app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
+app.delete('/api/requisitions/:id', requireAuth, requirePermission('requisitions.delete'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   const requisitionId = Number(req.params.id);
   const targetId = Number.isFinite(requisitionId) ? requisitionId : String(req.params.id ?? '');
@@ -8473,7 +10389,7 @@ app.delete('/api/requisitions/:id', requireAuth, (req:AuthRequest,res)=>{
     res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : /required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('inventory.write'), (req:AuthRequest,res)=>{
+app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('requisitions.cancel'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     const input = isRecord(req.body) ? req.body : {};
@@ -8506,7 +10422,7 @@ app.post('/api/requisitions/bulk-cancel', requireAuth, requirePermission('invent
     res.status(/not found/i.test(message) ? 404 : /required|select|only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/requisitions/bulk-delete', requireAuth, (req:AuthRequest,res)=>{
+app.post('/api/requisitions/bulk-delete', requireAuth, requirePermission('requisitions.delete'), (req:AuthRequest,res)=>{
   const actor = req.user!;
   try {
     if (!canDeleteRequisitions(actor)) return res.status(403).json({ok:false,error:'Permission denied.'});
@@ -8547,7 +10463,7 @@ app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory
   const filter: NativePartFilter = ['low','requisition'].includes(requestedFilter) ? requestedFilter as NativePartFilter : 'all';
   res.json({ok:true,source:'mcc-native',parts:nativeParts(search,filter),summary:nativeInventorySummary()});
 });
-app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inventory.export'), (req,res)=>{
   try {
     const records = nativeInventoryRows().map(nativeExportRecord);
     const fileName = `MCC_Inventory_Export_${downloadDateStamp()}.csv`;
@@ -8559,7 +10475,7 @@ app.get('/api/inventory/native/export/csv', requireAuth, requirePermission('inve
     res.status(500).json({ok:false,error:message});
   }
 });
-app.get('/api/inventory/native/export/excel-update-template', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.get('/api/inventory/native/export/excel-update-template', requireAuth, requirePermission('inventory.export'), async (req,res)=>{
   try {
     const records = nativeInventoryRows().map(nativeExportRecord);
     const fileName = `MCC_Inventory_Update_Template_${downloadDateStamp()}.xlsx`;
@@ -8572,7 +10488,7 @@ app.get('/api/inventory/native/export/excel-update-template', requireAuth, requi
     res.status(500).json({ok:false,error:message});
   }
 });
-app.get('/api/inventory/native/export/blank-import-template', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.get('/api/inventory/native/export/blank-import-template', requireAuth, requirePermission('inventory.export'), async (req,res)=>{
   try {
     const fileName = 'MCC_Inventory_Blank_Import_Template.xlsx';
     const buffer = await workbookBuffer('MCC Inventory Import', nativeBlankImportHeaders, []);
@@ -8584,10 +10500,10 @@ app.get('/api/inventory/native/export/blank-import-template', requireAuth, requi
     res.status(500).json({ok:false,error:message});
   }
 });
-app.get('/api/inventory/native/backups', requireAuth, requirePermission('inventory.write'), (_req,res)=>{
+app.get('/api/inventory/native/backups', requireAuth, requirePermission('inventory.export'), (_req,res)=>{
   res.json({ok:true,backups:listNativeInventoryBackups()});
 });
-app.post('/api/inventory/native/backups/create', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.post('/api/inventory/native/backups/create', requireAuth, requirePermission('inventory.export'), (req,res)=>{
   try {
     const backups = createAndAuditNativeBackup(req,'manual');
     res.status(201).json({ok:true,backups,backupCount:backups.length});
@@ -8596,7 +10512,7 @@ app.post('/api/inventory/native/backups/create', requireAuth, requirePermission(
     res.status(500).json({ok:false,error:message});
   }
 });
-app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.write'), upload.single('file'), async (req,res)=>{
+app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.import'), upload.single('file'), async (req,res)=>{
   try {
     const backupFiles = createAndAuditNativeBackup(req,'auto-before-import');
     const rows = await parseInventoryImportFile(req.file);
@@ -8611,7 +10527,7 @@ app.post('/api/inventory/native/import', requireAuth, requirePermission('invento
     res.status(/choose a CSV|must include|must be CSV|numeric|required|already exists/i.test(message) ? 400 : 500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,duplicateMergedCount:0,duplicatesRemovedCount:0,vendorCreatedCount:0,locationCreatedCount:0,invalidUrlCount:0,errorCount:1,errors:[message]});
   }
 });
-app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventory.create'), (req,res)=>{
   const actor = (req as AuthRequest).user!;
   const operation = 'native part create';
   try {
@@ -8646,7 +10562,7 @@ app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventor
     sendNativeInventoryError(req,res,operation,'',error);
   }
 });
-app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inventory.edit'), (req,res)=>{
   const actor = (req as AuthRequest).user!;
   const operation = 'native part edit';
   const partId = Number(req.params.id);
@@ -8687,7 +10603,7 @@ app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inv
     sendNativeInventoryError(req,res,operation,Number.isFinite(partId) ? partId : String(req.params.id ?? ''),error);
   }
 });
-app.patch('/api/inventory/native/parts/:id/requisition', requireAuth, requirePermission('inventory.write'), (req,res)=>{
+app.patch('/api/inventory/native/parts/:id/requisition', requireAuth, requirePermission('inventory.edit'), (req,res)=>{
   const actor = (req as AuthRequest).user!;
   const operation = 'native requisition change';
   const partId = Number(req.params.id);
@@ -8775,7 +10691,7 @@ app.get('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.v
     res.status(503).json({ok:false,error:error instanceof Error ? error.message : 'Retired inventory bridge unavailable.',mit3Url});
   }
 });
-app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.create'), async (req,res)=>{
   const operation = 'inventory add through retired inventory bridge';
   try {
     const input = validateMit3PartInput(req.body);
@@ -8819,7 +10735,7 @@ app.post('/api/inventory/mit3-parts', requireAuth, requirePermission('inventory.
     sendMit3InventoryError(req,res,operation,'',error);
   }
 });
-app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inventory.edit'), async (req,res)=>{
   const operation = 'inventory edit through retired inventory bridge';
   const targetId = String(req.params.id ?? '');
   try {
@@ -8838,7 +10754,7 @@ app.patch('/api/inventory/mit3-parts/:id', requireAuth, requirePermission('inven
     sendMit3InventoryError(req,res,operation,targetId,error);
   }
 });
-app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermission('inventory.write'), async (req,res)=>{
+app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermission('inventory.edit'), async (req,res)=>{
   const operation = 'inventory requisition update through retired inventory bridge';
   const targetId = String(req.params.id ?? '');
   try {
@@ -8860,11 +10776,49 @@ app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermi
     sendMit3InventoryError(req,res,operation,targetId,error);
   }
 });
+try {
+  validateMachineDocumentStorageIntegrity();
+  refreshMachineDocumentRecoveryMetadata();
+  facilityInfoService?.validateStorage();
+  facilityInfoService?.refreshRecoveryMetadata();
+} catch (error) {
+  console.log(`MCC document recovery metadata repair needs attention: ${safeErrorMessage(error)}`);
+}
+app.use('/api', (_req,res)=>res.status(404).json({ok:false,error:'API route not found.'}));
 app.use(express.static(frontendDistPath));
 app.get('*', (_req,res)=>res.sendFile(path.join(frontendDistPath,'index.html')));
-app.listen(port,()=>{
+try {
+  reconcileExternalSystemUpdateEvents(systemUpdateService.readStatus());
+} catch {
+  console.log('MCC update audit reconciliation needs attention.');
+}
+const httpServer=app.listen(port,()=>{
   console.log(`${appName} running at http://localhost:${port}`);
   console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);
   console.log(`SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
   startBackupSchedulers();
 });
+if(systemUpdateConfiguration.windowsShutdownPath){
+  const shutdownPath=systemUpdateConfiguration.windowsShutdownPath;
+  const shutdownPoll=setInterval(()=>{
+    if(!fs.existsSync(shutdownPath))return;
+    try{
+      const signal=JSON.parse(fs.readFileSync(shutdownPath,'utf8')) as Record<string,unknown>;
+      const requestedAt=Date.parse(String(signal.requestedAt??''));
+      fs.rmSync(shutdownPath,{force:true});
+      if(signal.schemaVersion!==1
+        ||Number(signal.processId)!==process.pid
+        ||!Number.isFinite(requestedAt)
+        ||Math.abs(Date.now()-requestedAt)>60_000)return;
+      clearInterval(shutdownPoll);
+      const forcedExit=setTimeout(()=>process.exit(0),15_000);
+      httpServer.close(()=>{
+        clearTimeout(forcedExit);
+        process.exit(0);
+      });
+    }catch{
+      try{fs.rmSync(shutdownPath,{force:true});}catch{}
+    }
+  },1_000);
+  shutdownPoll.unref();
+}

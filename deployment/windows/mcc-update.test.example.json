@@ -1,0 +1,14 @@
+{
+  "applicationPath": "Z:\\MCC_V1_FINAL",
+  "stateDirectory": "Z:\\MCC_UPDATE\\state",
+  "backupDirectory": "Z:\\MCC_UPDATE_BACKUPS",
+  "repository": "https://github.com/Recklessrage17/maintenance-command-center.git",
+  "remote": "origin",
+  "branch": "main",
+  "port": 4273,
+  "simulation": {
+    "failInstall": false,
+    "failBuild": false,
+    "failHealth": false
+  }
+}

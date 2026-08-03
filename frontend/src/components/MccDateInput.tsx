@@ -1,4 +1,12 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 type DatePopoverPosition = { top: number; left: number; width: number; placement: 'top' | 'bottom' };
@@ -80,13 +88,21 @@ export function MccDateInput({
   required?: boolean;
 }) {
   const today = useMemo(()=>new Date(),[]);
+  const generatedId=useId().replace(/:/g,'');
+  const calendarId=`mcc-date-calendar-${generatedId}`;
   const [draft,setDraft]=useState(formatDateDisplay(value));
   const [open,setOpen]=useState(false);
   const parsed = parseTypedDate(value);
   const selectedDate = parsed.valid && parsed.iso ? parseIsoDate(parsed.iso) : null;
   const [viewDate,setViewDate]=useState<Date>(selectedDate ?? today);
+  const [focusedIso,setFocusedIso]=useState(selectedDate ? localIsoDate(selectedDate) : localIsoDate(today));
+  const [focusRequest,setFocusRequest]=useState(0);
   const wrapRef=useRef<HTMLLabelElement>(null);
+  const inputRef=useRef<HTMLInputElement>(null);
+  const triggerRef=useRef<HTMLButtonElement>(null);
   const popoverRef=useRef<HTMLDivElement>(null);
+  const returnFocusRef=useRef<HTMLElement|null>(null);
+  const focusDayOnRenderRef=useRef(false);
   const [position,setPosition]=useState<DatePopoverPosition>({top:0,left:0,width:312,placement:'bottom'});
   const invalid = Boolean(draft.trim()) && !parseTypedDate(draft).valid;
   const viewYear = viewDate.getFullYear();
@@ -98,6 +114,42 @@ export function MccDateInput({
   const todayIso = localIsoDate(today);
 
   useEffect(()=>setDraft(formatDateDisplay(value)),[value]);
+
+  function findDayButton(iso: string) {
+    return Array.from(
+      popoverRef.current?.querySelectorAll<HTMLButtonElement>('[data-mcc-calendar-date]') ?? [],
+    ).find(button=>button.dataset.mccCalendarDate===iso) ?? null;
+  }
+
+  function requestDayFocus(date: Date) {
+    const iso=localIsoDate(date);
+    focusDayOnRenderRef.current=true;
+    setFocusRequest(current=>current+1);
+    setFocusedIso(iso);
+    if(date.getFullYear()!==viewYear||date.getMonth()!==viewMonth){
+      setViewDate(new Date(date.getFullYear(),date.getMonth(),1));
+    }
+  }
+
+  function openCalendar(returnTarget: HTMLElement, focusCalendar = false) {
+    returnFocusRef.current=returnTarget;
+    const focusDate=selectedDate ?? today;
+    setViewDate(focusDate);
+    setFocusedIso(localIsoDate(focusDate));
+    focusDayOnRenderRef.current=focusCalendar;
+    if(focusCalendar)setFocusRequest(current=>current+1);
+    setOpen(true);
+  }
+
+  function closeCalendar(restoreFocus = false) {
+    setOpen(false);
+    focusDayOnRenderRef.current=false;
+    if(!restoreFocus)return;
+    const returnTarget=returnFocusRef.current ?? inputRef.current;
+    window.requestAnimationFrame(()=>{
+      if(returnTarget?.isConnected&&!returnTarget.matches(':disabled'))returnTarget.focus();
+    });
+  }
 
   function updatePopoverPosition() {
     const anchor = wrapRef.current?.querySelector('.mcc-date-control') ?? wrapRef.current;
@@ -117,21 +169,37 @@ export function MccDateInput({
 
   useEffect(()=>{
     if(!open) return;
-    setViewDate(selectedDate ?? today);
+    const focusDate=selectedDate ?? today;
+    setViewDate(focusDate);
+    setFocusedIso(localIsoDate(focusDate));
     updatePopoverPosition();
     const frame = window.requestAnimationFrame(updatePopoverPosition);
     return ()=>window.cancelAnimationFrame(frame);
   },[open,selectedIso,today]);
 
   useEffect(()=>{
+    if(!open||!focusDayOnRenderRef.current)return;
+    const frame=window.requestAnimationFrame(()=>{
+      const button=findDayButton(focusedIso);
+      if(!button)return;
+      focusDayOnRenderRef.current=false;
+      button.focus();
+    });
+    return()=>window.cancelAnimationFrame(frame);
+  },[focusRequest,focusedIso,open,viewMonth,viewYear]);
+
+  useEffect(()=>{
     if(!open) return;
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Node;
       if(wrapRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      setOpen(false);
+      closeCalendar();
     }
     function onKeyDown(event: KeyboardEvent) {
-      if(event.key==='Escape') setOpen(false);
+      if(event.key!=='Escape')return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeCalendar(true);
     }
     document.addEventListener('pointerdown',onPointerDown);
     document.addEventListener('keydown',onKeyDown);
@@ -160,13 +228,147 @@ export function MccDateInput({
     const iso = localIsoDate(date);
     onChange(iso);
     setDraft(formatDateDisplay(iso));
-    setOpen(false);
+    closeCalendar(true);
   }
 
-  function moveMonth(offset: number) {
-    setViewDate(current=>new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  function shiftedMonthDate(offset: number) {
+    const focusedDate=parseIsoDate(focusedIso) ?? new Date(viewYear,viewMonth,1);
+    const targetMonthStart=new Date(viewYear,viewMonth+offset,1);
+    const lastDay=new Date(
+      targetMonthStart.getFullYear(),
+      targetMonthStart.getMonth()+1,
+      0,
+    ).getDate();
+    return new Date(
+      targetMonthStart.getFullYear(),
+      targetMonthStart.getMonth(),
+      Math.min(focusedDate.getDate(),lastDay),
+    );
   }
 
-  const calendar = open ? createPortal(<div className={`mcc-date-popover placement-${position.placement}`} ref={popoverRef} role="dialog" aria-label={`${label} calendar`} style={{top:position.top,left:position.left,width:position.width}}><div className="mcc-date-header"><button type="button" onClick={()=>moveMonth(-1)} aria-label="Previous month">&lt;</button><strong>{viewDate.toLocaleString(undefined,{month:'long',year:'numeric'})}</strong><button type="button" onClick={()=>moveMonth(1)} aria-label="Next month">&gt;</button></div><div className="mcc-date-weekdays" aria-hidden="true">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><span key={day}>{day}</span>)}</div><div className="mcc-date-grid">{days.map(day=>{ const iso=localIsoDate(day); const outside=day.getMonth()!==viewMonth; return <button className={`${outside?'outside ':''}${iso===todayIso?'today ':''}${iso===selectedIso?'selected ':''}`.trim()} type="button" key={iso} onClick={()=>chooseDate(day)} aria-label={day.toLocaleDateString(undefined,{dateStyle:'full'})} aria-pressed={iso===selectedIso}>{day.getDate()}</button>; })}</div><div className="mcc-date-footer"><button type="button" onClick={()=>{ onChange(''); setDraft(''); setOpen(false); }}>Clear</button><button type="button" onClick={()=>chooseDate(today)}>Today</button></div></div>, document.body) : null;
-  return <label className={open?'form-field machine-date-field mcc-date-open':'form-field machine-date-field'} ref={wrapRef}><span>{label}</span><div className="mcc-date-control"><input className="mcc-date-input" type="text" inputMode="numeric" value={draft} disabled={disabled} required={required} aria-invalid={invalid} onFocus={()=>setOpen(true)} onChange={event=>setDateValue(event.target.value)} onBlur={()=>{ const next = parseTypedDate(draft); if (next.valid) setDraft(next.iso ? formatDateDisplay(next.iso) : ''); }} placeholder="MM/DD/YYYY" /><button className="mcc-date-trigger" type="button" aria-label={`Open ${label} calendar`} disabled={disabled} onClick={()=>setOpen(current=>!current)}><span className="mcc-date-icon" aria-hidden="true" /></button>{calendar}</div>{invalid&&<small className="machine-date-error">Enter a valid date.</small>}{helper}</label>;
+  function moveMonth(offset: number, focusDay = false) {
+    const next=shiftedMonthDate(offset);
+    setViewDate(new Date(next.getFullYear(),next.getMonth(),1));
+    setFocusedIso(localIsoDate(next));
+    focusDayOnRenderRef.current=focusDay;
+    if(focusDay)setFocusRequest(current=>current+1);
+  }
+
+  function handleDayKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, day: Date) {
+    let next:Date|null=null;
+    if(event.key==='ArrowLeft')next=new Date(day.getFullYear(),day.getMonth(),day.getDate()-1);
+    if(event.key==='ArrowRight')next=new Date(day.getFullYear(),day.getMonth(),day.getDate()+1);
+    if(event.key==='ArrowUp')next=new Date(day.getFullYear(),day.getMonth(),day.getDate()-7);
+    if(event.key==='ArrowDown')next=new Date(day.getFullYear(),day.getMonth(),day.getDate()+7);
+    if(event.key==='Home')next=new Date(day.getFullYear(),day.getMonth(),day.getDate()-day.getDay());
+    if(event.key==='End')next=new Date(day.getFullYear(),day.getMonth(),day.getDate()+(6-day.getDay()));
+    if(event.key==='PageUp'||event.key==='PageDown'){
+      event.preventDefault();
+      moveMonth(event.key==='PageUp'?-1:1,true);
+      return;
+    }
+    if(!next)return;
+    event.preventDefault();
+    requestDayFocus(next);
+  }
+
+  const calendar = open ? createPortal(
+    <div
+      id={calendarId}
+      className={`mcc-date-popover placement-${position.placement}`}
+      ref={popoverRef}
+      role="dialog"
+      aria-label={`${label} calendar`}
+      style={{top:position.top,left:position.left,width:position.width}}
+    >
+      <div className="mcc-date-header">
+        <button type="button" onClick={()=>moveMonth(-1)} aria-label="Previous month">&lt;</button>
+        <strong>{viewDate.toLocaleString(undefined,{month:'long',year:'numeric'})}</strong>
+        <button type="button" onClick={()=>moveMonth(1)} aria-label="Next month">&gt;</button>
+      </div>
+      <div className="mcc-date-weekdays" aria-hidden="true">
+        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><span key={day}>{day}</span>)}
+      </div>
+      <div className="mcc-date-grid">
+        {days.map(day=>{
+          const iso=localIsoDate(day);
+          const outside=day.getMonth()!==viewMonth;
+          return <button
+            className={`${outside?'outside ':''}${iso===todayIso?'today ':''}${iso===selectedIso?'selected ':''}`.trim()}
+            type="button"
+            key={iso}
+            data-mcc-calendar-date={iso}
+            tabIndex={iso===focusedIso?0:-1}
+            onFocus={()=>setFocusedIso(iso)}
+            onKeyDown={event=>handleDayKeyDown(event,day)}
+            onClick={()=>chooseDate(day)}
+            aria-label={day.toLocaleDateString(undefined,{dateStyle:'full'})}
+            aria-pressed={iso===selectedIso}
+          >
+            {day.getDate()}
+          </button>;
+        })}
+      </div>
+      <div className="mcc-date-footer">
+        <button type="button" onClick={()=>{onChange('');setDraft('');closeCalendar(true);}}>Clear</button>
+        <button type="button" onClick={()=>chooseDate(today)}>Today</button>
+      </div>
+    </div>,
+    document.body,
+  ) : null;
+
+  return <label className={open?'form-field machine-date-field mcc-date-open':'form-field machine-date-field'} ref={wrapRef}>
+    <span>{label}</span>
+    <div className="mcc-date-control">
+      <input
+        ref={inputRef}
+        className="mcc-date-input"
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        disabled={disabled}
+        required={required}
+        aria-invalid={invalid}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={calendarId}
+        onClick={event=>{if(!open)openCalendar(event.currentTarget);}}
+        onKeyDown={event=>{
+          if(event.key!=='ArrowDown')return;
+          event.preventDefault();
+          openCalendar(event.currentTarget,true);
+        }}
+        onChange={event=>setDateValue(event.target.value)}
+        onBlur={()=>{
+          const next = parseTypedDate(draft);
+          if (next.valid) setDraft(next.iso ? formatDateDisplay(next.iso) : '');
+        }}
+        placeholder="MM/DD/YYYY"
+      />
+      <button
+        ref={triggerRef}
+        className="mcc-date-trigger"
+        type="button"
+        aria-label={`Open ${label} calendar`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={calendarId}
+        disabled={disabled}
+        onKeyDown={event=>{
+          if(event.key!=='ArrowDown')return;
+          event.preventDefault();
+          openCalendar(event.currentTarget,true);
+        }}
+        onClick={event=>{
+          if(open)closeCalendar();
+          else openCalendar(event.currentTarget);
+        }}
+      >
+        <span className="mcc-date-icon" aria-hidden="true" />
+      </button>
+      {calendar}
+    </div>
+    {invalid&&<small className="machine-date-error">Enter a valid date.</small>}
+    {helper}
+  </label>;
 }

@@ -23,8 +23,11 @@ Replacement actions for New Screw, New Screw Tip, New Barrel, and New Barrel End
 
 When Add Machine Asset is clicked, MCC opens a Machine Injection Setup modal before the asset editor. The setup asks:
 
+- Setup Type, using the shared searchable combobox
 - Does this machine have double shot injection?
 - Does this machine have plunger injection?
+
+Setup Type is stored in `machine_assets.setup_type` and exposed as `setupType`. It is separate from Power Type. Existing secondary-injection assets default to `Two-Shot / 2K Injection`, plunger assets default to `Plunger Injection`, and all other legacy assets default to `Standard Injection`. Selecting `Other / Custom` requires a custom value, which is persisted as the Setup Type.
 
 Standard injection machines show the normal Screw Box and Barrel Box. They are labeled Screw and Barrel, not Unit 1 or Screw 1.
 
@@ -74,6 +77,7 @@ The same mm / in / ft display and edit behavior is used for Screw 2 Length, Barr
 
 The machine blank template includes injection setup headers:
 
+- Setup Type
 - Double Shot Injection
 - Plunger Injection
 - Screw 2 Type, Screw 2 Tip Type, Screw 2 Rebuild / Repaired, Screw 2 Condition Status, Screw 2 Installed Date, Screw 2 Tip Installed Date, Screw 2 Length
@@ -82,6 +86,14 @@ The machine blank template includes injection setup headers:
 - Plunger Barrel Type, Plunger Barrel Rebuild / Repaired, Plunger Barrel Condition Status, Plunger Barrel Installed Date, Plunger Barrel End Cap Installed Date, Plunger Barrel Length, Plunger Barrel Diameter
 
 Imports accept yes/no, true/false, y/n, and 1/0 for Double Shot Injection and Plunger Injection. Old machine import files without these headers still work and default both setup choices to No.
+
+Old import files without Setup Type remain compatible. New records derive Setup Type from the injection flags, while upserts preserve an existing stored Setup Type when the column is absent.
+
+## Shared Category Accents
+
+Machine detail accordions use the reusable `MccCategoryAccordion` and `MccAccordionHeader` components with semantic `MccCategoryAccent` variants. The variants expose shared CSS variables through `.mcc-category-accent` and `data-category-accent`, so Equipment Library accordions can adopt the same system without Machine-Library-only styling.
+
+Related sections intentionally share variants: Screw and Screw Tip, Barrel and Barrel End Cap, their secondary-injection counterparts, and all plunger sections. PM, Document Library, Asset Notes, and Inspection Records use their own semantic variants.
 
 ## Import Duplicate Safety
 
@@ -100,4 +112,4 @@ An automatic backup is scheduled only when an import adds or updates at least on
 
 ## History And Backups
 
-Machine asset create and update actions write to the `machine_library` history section with `machine_asset` entity data, including changed numeric fields, rebuild flags, condition statuses, notes, dates, and dimensions where old/new values are available. Successful machine asset saves continue to schedule an automatic backup through the current backup system.
+Machine asset create and update actions write to the `machine_library` history section with `machine_asset` entity data, including Setup Type, changed numeric fields, rebuild flags, condition statuses, notes, dates, and dimensions where old/new values are available. Successful machine asset saves continue to schedule an automatic backup through the current backup system. Setup Type is part of the SQLite database and therefore follows the existing master backup and restore workflow automatically.

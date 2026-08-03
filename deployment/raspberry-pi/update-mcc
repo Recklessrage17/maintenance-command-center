@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly APPROVED_REPOSITORY="https://github.com/Recklessrage17/maintenance-command-center.git"
+readonly APPROVED_REMOTE="origin"
+readonly APPROVED_BRANCH="main"
+readonly MCC_SERVICE="mcc.service"
+readonly HEALTH_URL="http://127.0.0.1:4273/"
+readonly CONFIG_FILE="/etc/mcc-update.conf"
+readonly STATUS_WRITER="/usr/local/lib/mcc-update/write-status.py"
+readonly REQUEST_MODE="${1:---manual}"
+
+if [[ "${REQUEST_MODE}" != "--request" && "${REQUEST_MODE}" != "--manual" ]]; then
+  echo "Usage: update-mcc [--request|--manual]" >&2
+  exit 64
+fi
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "MCC updater must run as root. Use: sudo mcc-update" >&2
+  exit 77
+fi
+if [[ ! -r "${CONFIG_FILE}" ]]; then
+  echo "Missing root-owned ${CONFIG_FILE}." >&2
+  exit 78
+fi
+
+# This file is installed root:root 0644 and contains deployment-owned paths only.
+# shellcheck source=/dev/null
+source "${CONFIG_FILE}"
+: "${MCC_APP_DIR:?MCC_APP_DIR is required}"
+: "${MCC_UPDATE_STATE_DIR:=/var/lib/mcc-update}"
+: "${MCC_UPDATE_BACKUP_DIR:=/var/backups/mcc-updates}"
+
+readonly APP_DIR="$(readlink -f "${MCC_APP_DIR}")"
+readonly STATE_DIR="$(readlink -m "${MCC_UPDATE_STATE_DIR}")"
+readonly BACKUP_ROOT="$(readlink -m "${MCC_UPDATE_BACKUP_DIR}")"
+readonly STATUS_PATH="${STATE_DIR}/status.json"
+readonly REQUEST_PATH="${STATE_DIR}/request.json"
+readonly LOCK_PATH="/run/lock/mcc-update.lock"
+
+if [[ -z "${APP_DIR}" || "${APP_DIR}" == "/" || ! -d "${APP_DIR}/.git" || ! -f "${APP_DIR}/package.json" ]]; then
+  echo "Configured MCC application directory is invalid." >&2
+  exit 78
+fi
+if [[ ! -x "${STATUS_WRITER}" ]]; then
+  echo "Root-owned MCC status writer is missing." >&2
+  exit 78
+fi
+
+mkdir -p "${STATE_DIR}" "${BACKUP_ROOT}" "$(dirname "${LOCK_PATH}")"
+chmod 0750 "${STATE_DIR}" "${BACKUP_ROOT}"
+exec 9>"${LOCK_PATH}"
+if ! flock -n 9; then
+  echo "An MCC update is already running." >&2
+  exit 75
+fi
+
+job_id="manual-$(date -u +%Y%m%dT%H%M%SZ)"
+requester_id="0"
+requester_name="Manual root operator"
+requested_target=""
+requested_version=""
+old_commit=""
+old_version=""
+target_commit=""
+target_version=""
+backup_path=""
+code_changed="false"
+service_stopped="false"
+
+write_status() {
+  local state="$1"
+  local message="$2"
+  local outcome="${3:-none}"
+  "${STATUS_WRITER}" \
+    --status-path "${STATUS_PATH}" \
+    --job-id "${job_id}" \
+    --state "${state}" \
+    --message "${message}" \
+    --installed-version "${old_version}" \
+    --installed-commit "${old_commit}" \
+    --target-version "${target_version}" \
+    --target-commit "${target_commit}" \
+    --requester-id "${requester_id}" \
+    --requester-name "${requester_name}" \
+    --outcome "${outcome}"
+  chown mcc:mcc "${STATUS_PATH}"
+  chmod 0640 "${STATUS_PATH}"
+}
+
+health_check() {
+  local attempt
+  for attempt in $(seq 1 45); do
+    if /usr/bin/curl --fail --silent --show-error --max-time 3 "${HEALTH_URL}" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+read_local_version() {
+  node -e 'const fs=require("node:fs");const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version;if(!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value))process.exit(2);process.stdout.write(value)' "${APP_DIR}/package.json"
+}
+
+restore_previous_build() {
+  set +e
+  write_status "rolling_back" "The new build failed verification. Restoring the previous MCC version." "none"
+  /usr/bin/systemctl stop "${MCC_SERVICE}"
+  if [[ "${code_changed}" == "true" ]]; then
+    git -C "${APP_DIR}" update-ref "refs/heads/${APPROVED_BRANCH}" "${old_commit}" "${target_commit}"
+    git -C "${APP_DIR}" read-tree --reset -u "${old_commit}"
+  fi
+  if [[ -n "${backup_path}" && -f "${backup_path}" ]]; then
+    tar -xzf "${backup_path}" -C "${APP_DIR}"
+  fi
+  npm ci --prefix "${APP_DIR}/frontend"
+  npm ci --prefix "${APP_DIR}/backend"
+  npm run build --prefix "${APP_DIR}"
+  /usr/bin/systemctl start "${MCC_SERVICE}"
+  if health_check \
+    && [[ "$(git -C "${APP_DIR}" rev-parse HEAD)" == "${old_commit}" ]] \
+    && [[ "$(read_local_version)" == "${old_version}" ]]; then
+    write_status "rolled_back" "The update failed. MCC was restored to the previous healthy version." "rolled_back"
+    rm -f "${REQUEST_PATH}"
+    exit 1
+  fi
+  write_status "failed" "Critical rollback failure: MCC could not restore the previous healthy version." "failed"
+  rm -f "${REQUEST_PATH}"
+  exit 2
+}
+
+on_failure() {
+  local exit_code=$?
+  trap - ERR
+  if [[ -n "${old_commit}" && ( "${service_stopped}" == "true" || "${code_changed}" == "true" ) ]]; then
+    restore_previous_build
+  fi
+  if [[ -n "${old_commit}" ]]; then
+    write_status "failed" "The update failed before MCC code was changed. The installed build was preserved." "failed"
+  fi
+  rm -f "${REQUEST_PATH}"
+  exit "${exit_code}"
+}
+trap on_failure ERR
+
+if [[ "${REQUEST_MODE}" == "--request" ]]; then
+  if [[ ! -r "${REQUEST_PATH}" ]]; then
+    echo "No queued MCC update request exists." >&2
+    exit 66
+  fi
+  mapfile -t request_values < <(/usr/bin/python3 - "${REQUEST_PATH}" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+source = value.get("source", {})
+installed = value.get("installed", {})
+target = value.get("target", {})
+requester = value.get("requester", {})
+assert value.get("schemaVersion") == 1
+assert source == {
+    "repository": "https://github.com/Recklessrage17/maintenance-command-center.git",
+    "remote": "origin",
+    "branch": "main",
+    "port": 4273,
+}
+assert re.fullmatch(r"[0-9a-f]{40}", str(installed.get("commit", "")), re.I)
+assert re.fullmatch(r"[0-9a-f]{40}", str(target.get("commit", "")), re.I)
+assert re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", str(target.get("version", "")))
+print(re.sub(r"\s+", " ", str(value.get("jobId", ""))).strip()[:120])
+print(max(0, int(requester.get("id", 0))))
+print(re.sub(r"\s+", " ", str(requester.get("name", ""))).strip()[:120])
+print(str(installed["commit"]).lower())
+print(str(target["commit"]).lower())
+print(str(target["version"]))
+PY
+  )
+  if [[ "${#request_values[@]}" -ne 6 || -z "${request_values[0]}" ]]; then
+    echo "Queued MCC update request is invalid." >&2
+    exit 65
+  fi
+  job_id="${request_values[0]}"
+  requester_id="${request_values[1]}"
+  requester_name="${request_values[2]}"
+  old_commit="${request_values[3]}"
+  requested_target="${request_values[4]}"
+  requested_version="${request_values[5]}"
+fi
+
+[[ "$(git -C "${APP_DIR}" remote get-url "${APPROVED_REMOTE}")" == "${APPROVED_REPOSITORY}" ]]
+[[ "$(git -C "${APP_DIR}" branch --show-current)" == "${APPROVED_BRANCH}" ]]
+[[ "$(readlink -f "$(/usr/bin/systemctl show "${MCC_SERVICE}" --property=WorkingDirectory --value)")" == "${APP_DIR}" ]]
+if [[ -n "$(git -C "${APP_DIR}" status --porcelain=v1 --untracked-files=normal)" ]]; then
+  echo "Update blocked: this MCC installation contains local code changes." >&2
+  exit 65
+fi
+
+git -C "${APP_DIR}" fetch --no-tags "${APPROVED_REMOTE}" "+refs/heads/${APPROVED_BRANCH}:refs/remotes/${APPROVED_REMOTE}/${APPROVED_BRANCH}"
+target_commit="$(git -C "${APP_DIR}" rev-parse "refs/remotes/${APPROVED_REMOTE}/${APPROVED_BRANCH}")"
+actual_old_commit="$(git -C "${APP_DIR}" rev-parse HEAD)"
+if [[ "${REQUEST_MODE}" == "--request" ]]; then
+  [[ "${actual_old_commit}" == "${old_commit}" ]]
+fi
+old_commit="${actual_old_commit}"
+old_version="$(read_local_version)"
+target_version="$(git -C "${APP_DIR}" show "${target_commit}:package.json" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const v=JSON.parse(d).version;if(!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(v))process.exit(2);process.stdout.write(v)})')"
+git -C "${APP_DIR}" merge-base --is-ancestor "${old_commit}" "${target_commit}"
+
+if [[ "${REQUEST_MODE}" == "--request" ]]; then
+  [[ "${target_commit}" == "${requested_target}" ]]
+  [[ "${target_version}" == "${requested_version}" ]]
+fi
+if [[ "${target_commit}" == "${old_commit}" ]]; then
+  if [[ "${REQUEST_MODE}" == "--request" ]]; then
+    write_status "failed" "The queued target is already installed. Run a new update check." "failed"
+    exit 65
+  fi
+  write_status "succeeded" "MCC is already running the approved origin/main build." "succeeded"
+  exit 0
+fi
+
+write_status "stopping" "Stopping MCC before the runtime-data safety snapshot."
+/usr/bin/systemctl stop "${MCC_SERVICE}"
+service_stopped="true"
+
+write_status "backing_up" "Creating and verifying the pre-update MCC safety backup."
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+backup_path="${BACKUP_ROOT}/mcc-pre-update-${timestamp}-${old_commit:0:7}.tar.gz"
+runtime_paths=()
+for relative_path in backend/data backend/uploads backend/documents backend/files backend/.env .env; do
+  if [[ -e "${APP_DIR}/${relative_path}" ]]; then
+    runtime_paths+=("${relative_path}")
+  fi
+done
+if [[ "${#runtime_paths[@]}" -gt 0 ]]; then
+  tar -czf "${backup_path}" -C "${APP_DIR}" -- "${runtime_paths[@]}"
+else
+  tar -czf "${backup_path}" --files-from /dev/null
+fi
+tar -tzf "${backup_path}" >/dev/null
+test -s "${backup_path}"
+chmod 0600 "${backup_path}"
+
+write_status "pulling" "Fast-forwarding MCC to the verified approved commit."
+git -C "${APP_DIR}" merge --ff-only "${target_commit}"
+code_changed="true"
+
+write_status "installing_dependencies" "Installing locked frontend and backend dependencies."
+npm ci --prefix "${APP_DIR}/frontend"
+npm ci --prefix "${APP_DIR}/backend"
+
+write_status "building" "Building the MCC frontend and backend."
+npm run build --prefix "${APP_DIR}"
+
+write_status "starting" "Starting the updated MCC service."
+/usr/bin/systemctl start "${MCC_SERVICE}"
+service_stopped="false"
+
+write_status "health_check" "Verifying MCC health on port 4273 and confirming the running build."
+health_check
+[[ "$(git -C "${APP_DIR}" rev-parse HEAD)" == "${target_commit}" ]]
+[[ "$(read_local_version)" == "${target_version}" ]]
+
+old_commit="${target_commit}"
+old_version="${target_version}"
+write_status "succeeded" "The approved MCC update completed and passed its health check." "succeeded"
+rm -f "${REQUEST_PATH}"
+exit 0

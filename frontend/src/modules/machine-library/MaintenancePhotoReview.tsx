@@ -68,7 +68,7 @@ export function MaintenancePhotoReview({ file, title, detail, saving, onRetake, 
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onCancel, saving]);
   return createPortal(<div className="modal-backdrop maintenance-photo-review-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onCancel(); }}>
-    <section className="mcc-card maintenance-photo-review" role="dialog" aria-modal="true" aria-label={title}>
+    <section className="mcc-card maintenance-photo-review mcc-full-view-dialog" role="dialog" aria-modal="true" aria-label={title}>
       <div className="modal-heading"><div><p className="eyebrow">Photo Preview</p><h3>{title}</h3>{detail && <p>{detail}</p>}</div></div>
       <div className="maintenance-photo-preview-canvas"><img src={previewUrl} alt="Maintenance photo preview" /></div>
       <div className="maintenance-photo-preview-meta"><strong>{file.name}</strong><span>{formatPhotoSize(file.size)}</span></div>

@@ -1,5 +1,8 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
+import { MccStatusPill, MccTextLink, type MccSemanticVariant } from '../../components/MccPills';
+import { hasPermission } from '../../permissions';
 import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
 type InventoryPart = {
@@ -201,7 +204,7 @@ const noticeDurationMs = 5 * 60 * 1000;
 const newPartHighlightMs = 5 * 60 * 1000;
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;
@@ -252,6 +255,20 @@ function previewPdfPath(requisition: CreatedRequisition) {
 
 function isLowStock(part: InventoryPart) {
   return part.status === 'Low Stock' || part.status === 'Out of Stock';
+}
+
+function inventoryStatusVariant(status: string): MccSemanticVariant {
+  const normalized=status.trim().toLowerCase();
+  if (normalized==='in stock') return 'success';
+  if (normalized==='low stock') return 'warning';
+  if (normalized==='out of stock') return 'danger';
+  if (normalized==='on order') return 'info';
+  if (normalized==='discontinued') return 'muted';
+  return 'neutral';
+}
+
+function inventoryStatusClass(status: string) {
+  return `inventory-status-${status.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'unknown'}`;
 }
 
 function safeHttpUrl(value: string) {
@@ -435,7 +452,7 @@ function vendorNameKey(value: string) {
   return value.trim().toLowerCase();
 }
 
-export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
+export function InventoryPage({ userRole, effectivePermissions, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; effectivePermissions?:string[]; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [parts,setParts]=useState<InventoryPart[]>([]);
   const [search,setSearch]=useState('');
@@ -494,8 +511,8 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   const noticeIdRef = useRef(0);
   const lastRefreshStartedAtRef = useRef<Date|null>(null);
 
-  const canWrite = writeRoles.has(userRole);
-  const canUseInventoryTools = canWrite;
+  const canWrite = hasPermission(effectivePermissions,'inventory.create',writeRoles.has(userRole))||hasPermission(effectivePermissions,'inventory.edit',writeRoles.has(userRole));
+  const canUseInventoryTools = hasPermission(effectivePermissions,'inventory.import',canWrite)||hasPermission(effectivePermissions,'inventory.export',canWrite);
 
   function showNotice(kind: Notice['kind'], text: string, options: { autoHide?: boolean } = {}) {
     const autoHide = options.autoHide ?? kind !== 'error';
@@ -1244,9 +1261,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
   function renderPartNumber(part: InventoryPart) {
     const label = part.partNumber || part.itemId || '-';
     const partInfoUrl = safeHttpUrl(part.partInfoUrl || '');
-    if (partInfoUrl) return <a className="vendor-website-link compact inventory-part-info-link" href={partInfoUrl} target="_blank" rel="noopener noreferrer" title="Open part information" aria-label={`Open part information for ${label}`} onClick={event=>event.stopPropagation()}>
-        <span>{label}</span>
-      </a>;
+    if (partInfoUrl) return <MccTextLink className="inventory-part-info-link" href={partInfoUrl} title={label} ariaLabel={`Open part information for ${label}`} tone="gold">{label}</MccTextLink>;
     return <span className="plain-part-number" title={label}>{label}</span>;
   }
 
@@ -1409,7 +1424,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
                     </td>
                     <td>{part.quantity}</td>
                     <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
-                    <td><div className="inventory-status-stack"><span className={isLowStock(part)?'status-pill disabled':'status-pill'}>{part.status}</span></div></td>
+                    <td className="inventory-status-cell"><div className="inventory-status-stack"><MccStatusPill variant={inventoryStatusVariant(part.status)} className={inventoryStatusClass(part.status)}>{part.status}</MccStatusPill></div></td>
                     {showWriteActions&&(
                       <td className="inventory-actions-column">
                         <div className="inventory-row-actions">
@@ -1439,7 +1454,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {modal&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeModal(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={submitForm}>
+          <form className="mcc-card inventory-modal mcc-wide-modal" onSubmit={submitForm}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">{modal==='edit'?'Edit Part':'Add Part'}</p>
@@ -1560,7 +1575,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {reviewGroups[reviewIndex]&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReview(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void passVendorRequisition(); }}>
+          <form className="mcc-card inventory-modal mcc-wide-modal" onSubmit={event=>{ event.preventDefault(); void passVendorRequisition(); }}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Vendor requisition {reviewIndex + 1} of {reviewGroups.length}</p>
@@ -1611,7 +1626,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {requisitionLines.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeRequisition(); }}>
-          <form className="mcc-card inventory-modal" onSubmit={event=>{ event.preventDefault(); void generateRequisitionPreview(); }}>
+          <form className="mcc-card inventory-modal mcc-wide-modal" onSubmit={event=>{ event.preventDefault(); void generateRequisitionPreview(); }}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Preview Requisition</p>
@@ -1700,7 +1715,7 @@ export function InventoryPage({ userRole, userFullName, onBackToDashboard, onOpe
 
       {previewRequisitions.length>0&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closePreview(); }}>
-          <div className="mcc-card requisition-preview-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-requisition-preview-title">
+          <div className="mcc-card requisition-preview-modal mcc-full-view-dialog" role="dialog" aria-modal="true" aria-labelledby="inventory-requisition-preview-title">
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">{previewRequisitions.length === 1 ? 'Requisition preview' : `${previewRequisitions.length} requisition previews`}</p>
