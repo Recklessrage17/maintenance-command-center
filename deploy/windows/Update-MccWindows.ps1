@@ -311,13 +311,12 @@ function Start-MccManagedTask {
     param(
         [Parameter(Mandatory = $true)][string]$ExpectedVersion,
         [Parameter(Mandatory = $true)][string]$ExpectedCommit,
-        [switch]$AllowLegacyHealthPayload
+        [switch]$AllowLegacyReadiness404
     )
     Wait-MccScheduledTaskNotRunning -TaskName $constants.MccTaskName
     $startupRequestedAt = [DateTime]::UtcNow
     Start-ScheduledTask -TaskName $constants.MccTaskName -ErrorAction Stop
     $expectedMode = if ([string]$configuration.deploymentMode -eq 'WindowsTest') { 'windows_test' } else { 'windows_production' }
-    $expectedShortCommit = $ExpectedCommit.Substring(0, 7).ToLowerInvariant()
     $deadline = [DateTime]::UtcNow.AddSeconds(180)
     $lastFailure = 'The managed launcher has not published a new process yet.'
     do {
@@ -333,40 +332,28 @@ function Start-MccManagedTask {
             if (-not [int]::TryParse([string]$record.processId, [ref]$newProcessId) -or $newProcessId -le 0) {
                 throw 'The managed launcher process record does not contain a running child PID.'
             }
+            $newLaunchId = [Guid]::Empty
+            if (-not [Guid]::TryParse([string]$record.launchId, [ref]$newLaunchId)) {
+                throw 'The managed launcher process record does not contain a valid launch ID.'
+            }
             if ($newProcessId -eq $script:PreviousManagedProcessId -or
-                ([string]$record.launchId -and [string]$record.launchId -eq $script:PreviousManagedLaunchId)) {
+                ($script:PreviousManagedLaunchId -and $newLaunchId.ToString() -ceq $script:PreviousManagedLaunchId)) {
                 throw 'The managed launcher has not published a distinct replacement process.'
             }
             $startedAt = [DateTime]::MinValue
             if (-not [DateTime]::TryParse([string]$record.startedAt, [ref]$startedAt) -or $startedAt.ToUniversalTime() -lt $startupRequestedAt.AddSeconds(-2)) {
                 throw 'The managed launcher process record is stale.'
             }
-            [void](Assert-MccManagedProcessIdentity -Record $record -RequireLauncherAttestation)
+            $processDetails = Assert-MccManagedProcessIdentity -Record $record -RequireLauncherAttestation
+            if ($null -eq $processDetails) {
+                throw 'The newly recorded managed MCC process is not running.'
+            }
             $listeners = @(Get-NetTCPConnection -LocalPort $constants.Port -State Listen -ErrorAction SilentlyContinue)
             if ($listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne $newProcessId) {
                 throw 'Port 4273 is not owned by the newly recorded managed MCC process.'
             }
-            $healthUri = if ($AllowLegacyHealthPayload) {
-                "http://127.0.0.1:$($constants.Port)/api/health"
-            } else {
-                "http://127.0.0.1:$($constants.Port)/api/system/update/managed-readiness"
-            }
-            $health = Invoke-RestMethod -Method Get -Uri $healthUri -TimeoutSec 5
-            if ($health.ok -ne $true) { throw 'The managed MCC health endpoint did not report healthy.' }
-            if (-not $AllowLegacyHealthPayload) {
-                if ($health.systemUpdate.configured -ne $true -or
-                    $health.systemUpdate.enabled -ne $true -or
-                    $health.systemUpdate.applicationMatchesConfiguration -ne $true -or
-                    $health.systemUpdate.repositoryApproved -ne $true -or
-                    [string]$health.systemUpdate.mode -cne $expectedMode -or
-                    [string]$health.systemUpdate.environmentLabel -cne $environmentLabel -or
-                    [string]$health.systemUpdate.branch -cne $configuredBranch -or
-                    [string]$health.systemUpdate.installedVersion -cne $ExpectedVersion -or
-                    ([string]$health.systemUpdate.installedCommit).ToLowerInvariant() -cne $expectedShortCommit) {
-                    throw 'The protected updater readiness payload does not match the managed target.'
-                }
-            }
-            Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch $configuredBranch
+            Assert-MccRepository -ApplicationPath $applicationPath -ExpectedBranch $configuredBranch -RequireClean
+            Assert-MccOriginBranch -ApplicationPath $applicationPath -Branch $configuredBranch -DetailedLogPath $detailedLogPath
             Write-MccUpdaterHealthSnapshot
             $agentHealth = Read-MccJson -LiteralPath $agentHealthPath
             if ($agentHealth.agentHealthy -ne $true -or
@@ -374,10 +361,95 @@ function Start-MccManagedTask {
                 $agentHealth.applicationPathMatches -ne $true -or
                 $agentHealth.repositoryValid -ne $true -or
                 $agentHealth.branchValid -ne $true -or
+                $agentHealth.requestDirectoryAccessible -ne $true -or
+                $agentHealth.statusDirectoryAccessible -ne $true -or
+                $agentHealth.mccTaskInstalled -ne $true -or
                 $agentHealth.mccTaskRunning -ne $true -or
+                $agentHealth.updaterTaskInstalled -ne $true -or
                 $agentHealth.updaterTaskRunning -ne $true -or
                 [string]$agentHealth.deploymentMode -cne [string]$configuration.deploymentMode) {
                 throw 'The protected updater-agent heartbeat is not healthy after managed startup.'
+            }
+            $readinessProbe = Invoke-MccHttpJsonProbe `
+                -Uri "http://127.0.0.1:$($constants.Port)/api/system/update/managed-readiness" `
+                -TimeoutSeconds 5 `
+                -AllowedFailureStatusCodes @(404) `
+                -RequireFailureJson
+            if ([int]$readinessProbe.statusCode -eq 200) {
+                Assert-MccManagedReadinessPayload `
+                    -Payload $readinessProbe.payload `
+                    -ExpectedMode $expectedMode `
+                    -ExpectedEnvironmentLabel $environmentLabel `
+                    -ExpectedBranch $configuredBranch `
+                    -ExpectedVersion $ExpectedVersion `
+                    -ExpectedCommit $ExpectedCommit `
+                    -ExpectedPort $constants.Port
+            } elseif ([int]$readinessProbe.statusCode -eq 404) {
+                if (-not $AllowLegacyReadiness404) {
+                    throw 'The managed-readiness endpoint is mandatory for the newly updated MCC target.'
+                }
+                $actualVersion = Get-MccPackageVersion -ApplicationPath $applicationPath
+                $actualCommit = (Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', 'HEAD') -DetailedLogPath $detailedLogPath).StandardOutput.ToLowerInvariant()
+                $healthProbe = Invoke-MccHttpJsonProbe -Uri "http://127.0.0.1:$($constants.Port)/api/health" -TimeoutSeconds 5
+                $health = $healthProbe.payload
+                $statusProbe = Invoke-MccHttpJsonProbe `
+                    -Uri "http://127.0.0.1:$($constants.Port)/api/system/update/status" `
+                    -TimeoutSeconds 5 `
+                    -AllowedFailureStatusCodes @(401)
+                $configurationValid =
+                    [string]$configuration.repository -ceq $constants.Repository -and
+                    [string]$configuration.remote -ceq $constants.Remote -and
+                    [string]$configuration.branch -ceq $configuredBranch -and
+                    [int]$configuration.port -eq $constants.Port -and
+                    [string]$configuration.serviceIdentity -ceq 'NT AUTHORITY\LOCAL SERVICE' -and
+                    [string]$configuration.agentIdentity -ceq 'NT AUTHORITY\SYSTEM'
+                $expectedNode = Get-MccNormalizedPath -LiteralPath ([string]$configuration.nodePath)
+                $expectedEntryPoint = Get-MccNormalizedPath -LiteralPath (Join-Path $applicationPath 'backend\dist\server\index.js')
+                $actualNode = Get-MccNormalizedPath -LiteralPath ([string]$processDetails.ExecutablePath)
+                $actualCommandLine = ([string]$processDetails.CommandLine).Replace('"', '')
+                Assert-MccLegacyManagedRuntimeEvidence -Evidence ([ordered]@{
+                    verificationContext = 'Rollback'
+                    readinessStatusCode = [int]$readinessProbe.statusCode
+                    installedVersion = $actualVersion
+                    restoredCommitMatchesBackup = $actualCommit -ceq $ExpectedCommit.ToLowerInvariant()
+                    configurationValid = $configurationValid
+                    applicationPathMatches = (Get-MccNormalizedPath -LiteralPath ([string]$configuration.applicationPath)).Equals($applicationPath, [StringComparison]::OrdinalIgnoreCase)
+                    originMatches = $true
+                    branchMatches = $true
+                    packageVersionMatches = $actualVersion -ceq $ExpectedVersion
+                    commitMatches = $actualCommit -ceq $ExpectedCommit.ToLowerInvariant()
+                    repositoryClean = $true
+                    mccTaskInstalled = $null -ne $mccTask
+                    mccTaskRunning = [string]$mccTask.State -eq 'Running'
+                    mccTaskIdentityMatches = Test-MccScheduledTaskIdentity -Task $mccTask -ExpectedSid 'S-1-5-19'
+                    updaterTaskInstalled = $null -ne $updaterTask
+                    updaterTaskRunning = [string]$updaterTask.State -eq 'Running'
+                    updaterTaskIdentityMatches = Test-MccScheduledTaskIdentity -Task $updaterTask -ExpectedSid 'S-1-5-18'
+                    agentHealthy = $agentHealth.agentHealthy -eq $true
+                    agentConfigurationValid = $agentHealth.configurationValid -eq $true
+                    agentRepositoryValid = $agentHealth.repositoryValid -eq $true
+                    agentBranchValid = $agentHealth.branchValid -eq $true
+                    agentApplicationPathMatches = $agentHealth.applicationPathMatches -eq $true
+                    requestDirectoryAccessible = $agentHealth.requestDirectoryAccessible -eq $true
+                    statusDirectoryAccessible = $agentHealth.statusDirectoryAccessible -eq $true
+                    processRecordExists = $null -ne $record
+                    launchIdValid = $newLaunchId -ne [Guid]::Empty
+                    launchIdDistinct = -not $script:PreviousManagedLaunchId -or $newLaunchId.ToString() -cne $script:PreviousManagedLaunchId
+                    processApplicationMatchesConfiguration = $record.applicationMatchesConfiguration -eq $true
+                    processUpdateModeMatches = [string]$record.managedEnvironment.updateMode -ceq 'windows_agent'
+                    processNodeEnvironmentMatches = [string]$record.managedEnvironment.nodeEnvironment -ceq 'production'
+                    pidRunning = $null -ne $processDetails
+                    nodeExecutableMatches = $actualNode.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)
+                    backendCommandLineMatches = $actualCommandLine.IndexOf($expectedEntryPoint, [StringComparison]::OrdinalIgnoreCase) -ge 0
+                    exclusivePortOwner = $listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $newProcessId
+                    healthOk = [int]$healthProbe.statusCode -eq 200 -and $health.ok -eq $true
+                    healthApplicationMatches = [string]$health.app -ceq 'Maintenance Command Center'
+                    healthPortMatches = [int]$health.port -eq $constants.Port
+                    updateStatusUnauthorized = [int]$statusProbe.statusCode -eq 401
+                })
+                Write-UpdateLog -Message 'Legacy managed-readiness compatibility verification passed for a restored MCC version predating the managed-readiness endpoint.'
+            } else {
+                throw 'The managed MCC readiness endpoint returned an unsupported response.'
             }
             return $record
         } catch {
@@ -673,7 +745,7 @@ try {
             }
             Install-MccLockedDependencies
             Build-Mcc
-            Start-MccManagedTask -ExpectedVersion $script:InstalledVersion -ExpectedCommit $script:InstalledCommit -AllowLegacyHealthPayload | Out-Null
+            Start-MccManagedTask -ExpectedVersion $script:InstalledVersion -ExpectedCommit $script:InstalledCommit -AllowLegacyReadiness404 | Out-Null
             if ((Invoke-MccGit -ApplicationPath $applicationPath -ArgumentList @('rev-parse', 'HEAD') -DetailedLogPath $detailedLogPath).StandardOutput.ToLowerInvariant() -ne $script:InstalledCommit -or
                 (Get-MccPackageVersion -ApplicationPath $applicationPath) -ne $script:InstalledVersion) {
                 throw 'Rollback commit or version verification failed.'

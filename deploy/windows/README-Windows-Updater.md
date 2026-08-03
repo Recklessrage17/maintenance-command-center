@@ -25,6 +25,8 @@ The updater stops the managed task, validates the exact PID recorded by the laun
 
 Every launcher start publishes a unique launch ID, launcher PID, child PID, application/entry-point/configuration identity, and the fixed `windows_agent`/`production` environment attestation in protected `mcc-process.json`. Update success requires a different launch ID and child PID, both scheduled tasks running, the exact child command line, exclusive ownership of port 4273, the loopback-only managed-readiness API, a fresh healthy updater heartbeat, the configured mode/label/branch, and the requested version/commit. A generic 200 response from `/api/health` is never enough.
 
+Installer bootstrap has one backward-compatibility exception for legitimate installed versions older than 1.4.4, which predate the managed-readiness endpoint. It is considered only when that endpoint returns exactly HTTP 404 and the protected configuration, approved origin and configured branch, clean version/commit, scheduled-task identities and running state, healthy updater-agent heartbeat, distinct launcher record, exact Node executable and backend command line, exclusive port owner, complete `/api/health` identity payload, and unauthenticated update-status HTTP 401 all verify. A timeout, malformed JSON, any other HTTP status, or a 404 from version 1.4.4 or newer fails installation. This exception is never used to approve a newly updated target.
+
 ## Supported Windows 11 editions
 
 Windows 11 Pro, Enterprise, and Education are supported. Windows 11 Home is not a supported production host because the production operating model assumes centrally administered local security policy, Task Scheduler service identities, and recoverable administrative access.
@@ -243,7 +245,7 @@ Normal History UI records only sanitized update/audit fields and never raw Power
 
 ## Rollback and recovery
 
-After installed code changes, any dependency, build, managed-handoff, task, process identity, port owner, updater readiness, heartbeat, commit, or version failure records `rolling_back`, stops only the verified managed child, restores the previous commit and verified runtime backup, reinstalls the previous locked dependencies, rebuilds, and restarts through the same scheduled task and protected launcher. The restored version/commit, launcher attestation, process identity, port ownership, tasks, and heartbeat must pass before `rolled_back` is published. No detached Node process is intentionally left behind.
+After installed code changes, any dependency, build, managed-handoff, task, process identity, port owner, updater readiness, heartbeat, commit, or version failure records `rolling_back`, stops only the verified managed child, restores the previous commit and verified runtime backup, reinstalls the previous locked dependencies, rebuilds, and restarts through the same scheduled task and protected launcher. The restored version/commit, launcher attestation, process identity, port ownership, tasks, and heartbeat must pass before `rolled_back` is published. When the exact recorded backup version is older than 1.4.4 and managed readiness returns exactly 404, rollback may use the same complete legacy evidence verification; the restored Git HEAD must exactly match the recorded backup commit. No detached Node process is intentionally left behind.
 
 ## Live end-to-end WindowsTest procedure
 

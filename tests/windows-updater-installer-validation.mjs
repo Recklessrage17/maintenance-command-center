@@ -11,6 +11,8 @@ const installedTestPath = 'deploy/windows/Test-MccWindowsUpdater.ps1';
 const readmePath = 'deploy/windows/README-Windows-Updater.md';
 const atomicReplacementTestPath = 'tests/windows-updater-atomic-replacement.ps1';
 const agentRuntimeTestPath = 'tests/windows-updater-agent-runtime.ps1';
+const legacyReadinessTestPath = 'tests/windows-updater-legacy-readiness.ps1';
+const updaterRunnerPath = 'deploy/windows/Update-MccWindows.ps1';
 
 const installer = fs.readFileSync(installerPath, 'utf8');
 const common = fs.readFileSync(commonPath, 'utf8');
@@ -19,6 +21,7 @@ const launcher = fs.readFileSync(launcherPath, 'utf8');
 const backendUpdate = fs.readFileSync(backendUpdatePath, 'utf8');
 const installedTest = fs.readFileSync(installedTestPath, 'utf8');
 const readme = fs.readFileSync(readmePath, 'utf8');
+const updaterRunner = fs.readFileSync(updaterRunnerPath, 'utf8');
 
 function functionSource(source, name, nextName) {
   const start = source.indexOf(`function ${name} {`);
@@ -211,6 +214,15 @@ assert.doesNotMatch(installerManagedStop, /Get-Process[^\r\n]*-Name|Stop-Process
 assert.match(installFlow, /managed launcher identity and updater readiness verification/);
 assert.match(installFlow, /managed-readiness/);
 assert.match(installFlow, /OwningProcess/);
+assert.match(installFlow, /AllowedFailureStatusCodes @\(404\)/);
+assert.match(installFlow, /Assert-MccLegacyManagedRuntimeEvidence/);
+assert.match(installFlow, /Test-MccScheduledTaskIdentity/);
+assert.match(installFlow, /Get-CimInstance[\s\S]*ExecutablePath[\s\S]*CommandLine/);
+assert.match(installFlow, /Legacy managed-readiness compatibility verification passed/);
+assert.match(common, /installed MCC versions older than 1\.4\.4/);
+assert.match(updaterRunner, /Start-MccManagedTask -ExpectedVersion \$script:TargetVersion -ExpectedCommit \$script:TargetCommit \| Out-Null/);
+assert.match(updaterRunner, /managed-readiness endpoint is mandatory for the newly updated MCC target/);
+assert.match(updaterRunner, /Start-MccManagedTask -ExpectedVersion \$script:InstalledVersion -ExpectedCommit \$script:InstalledCommit -AllowLegacyReadiness404/);
 
 assert.match(backendUpdate, /function gitProcessEnvironment/);
 assert.match(backendUpdate, /GIT_CONFIG_COUNT = '1'/);
@@ -259,7 +271,7 @@ assert.equal(
   'Every Windows updater File.Replace call must remain centralized in the validated helper and rollback path.',
 );
 
-for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPath, agentRuntimeTestPath]) {
+for (const powershellPath of [...updaterPowerShellFiles, atomicReplacementTestPath, agentRuntimeTestPath, legacyReadinessTestPath]) {
   const parser = spawnSync('powershell.exe', [
     '-NoLogo',
     '-NoProfile',
@@ -308,6 +320,24 @@ assert.equal(
   `${agentRuntimeTestPath}\n${agentRuntime.error ?? ''}\n${agentRuntime.stderr || agentRuntime.stdout}`,
 );
 process.stdout.write(agentRuntime.stdout);
+
+const legacyReadiness = spawnSync('powershell.exe', [
+  '-NoLogo',
+  '-NoProfile',
+  '-NonInteractive',
+  '-ExecutionPolicy',
+  'RemoteSigned',
+  '-File',
+  legacyReadinessTestPath,
+  '-ModulePath',
+  commonPath,
+], { encoding: 'utf8', windowsHide: true });
+assert.equal(
+  legacyReadiness.status,
+  0,
+  `${legacyReadinessTestPath}\n${legacyReadiness.stderr || legacyReadiness.stdout}`,
+);
+process.stdout.write(legacyReadiness.stdout);
 
 const atomicReplacement = spawnSync('powershell.exe', [
   '-NoLogo',

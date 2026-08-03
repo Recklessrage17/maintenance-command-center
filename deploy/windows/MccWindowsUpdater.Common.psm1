@@ -772,7 +772,9 @@ function Read-MccWindowsConfiguration {
         ([string]$configuration.deploymentMode -eq 'WindowsProduction' -and $configuredBranch -cne $constants.Branch) -or
         [int]$configuration.port -ne $constants.Port -or
         [string]$configuration.mccTaskName -ne $constants.MccTaskName -or
-        [string]$configuration.updaterTaskName -ne $constants.UpdaterTaskName) {
+        [string]$configuration.updaterTaskName -ne $constants.UpdaterTaskName -or
+        [string]$configuration.serviceIdentity -cne 'NT AUTHORITY\LOCAL SERVICE' -or
+        [string]$configuration.agentIdentity -cne 'NT AUTHORITY\SYSTEM') {
         throw 'The protected Windows updater configuration contains unsupported deployment values.'
     }
     if (-not (Test-Path -LiteralPath $applicationPath -PathType Container)) {
@@ -846,6 +848,195 @@ function Assert-MccOriginBranch {
     }
 }
 
+function Test-MccVersionBeforeManagedReadiness {
+    param([AllowNull()][object]$Value)
+    if (-not (Test-MccSemver -Value $Value)) { return $false }
+    return ([version][string]$Value) -lt ([version]'1.4.4')
+}
+
+function Test-MccScheduledTaskIdentity {
+    param(
+        [AllowNull()][object]$Task,
+        [Parameter(Mandatory = $true)][ValidateSet('S-1-5-18', 'S-1-5-19')][string]$ExpectedSid
+    )
+    if ($null -eq $Task -or $null -eq $Task.Principal) { return $false }
+    $userId = [string]$Task.Principal.UserId
+    if ($userId -ceq $ExpectedSid) { return $true }
+    try {
+        $account = [Security.Principal.NTAccount]::new($userId)
+        $sid = $account.Translate([Security.Principal.SecurityIdentifier])
+        return [string]$sid.Value -ceq $ExpectedSid
+    } catch {
+        return $false
+    }
+}
+
+function Get-MccHttpStatusCodeFromErrorRecord {
+    param([Parameter(Mandatory = $true)][object]$ErrorRecord)
+    if ($null -ne $ErrorRecord.Exception -and
+        $null -ne $ErrorRecord.Exception.Data -and
+        $ErrorRecord.Exception.Data.Contains('MccHttpStatusCode')) {
+        return [int]$ErrorRecord.Exception.Data['MccHttpStatusCode']
+    }
+    if ($null -ne $ErrorRecord.Exception -and $null -ne $ErrorRecord.Exception.Response) {
+        try { return [int]$ErrorRecord.Exception.Response.StatusCode } catch {}
+    }
+    return 0
+}
+
+function Invoke-MccHttpJsonProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [ValidateRange(1, 120)][int]$TimeoutSeconds = 10,
+        [int[]]$AllowedFailureStatusCodes = @(),
+        [switch]$RequireFailureJson,
+        [scriptblock]$RequestInvoker
+    )
+    if ($null -ne $RequestInvoker) {
+        try {
+            $response = & $RequestInvoker $Uri $TimeoutSeconds
+        } catch {
+            $statusCode = Get-MccHttpStatusCodeFromErrorRecord -ErrorRecord $_
+            if ($AllowedFailureStatusCodes -contains $statusCode -and -not $RequireFailureJson) {
+                return [pscustomobject]@{ statusCode = $statusCode; payload = $null }
+            }
+            throw
+        }
+    } else {
+        $request = [Net.HttpWebRequest]::Create($Uri)
+        $request.Method = 'GET'
+        $request.AllowAutoRedirect = $false
+        $request.Proxy = $null
+        $request.Timeout = $TimeoutSeconds * 1000
+        $request.ReadWriteTimeout = $TimeoutSeconds * 1000
+        $webResponse = $null
+        try {
+            try {
+                $webResponse = $request.GetResponse()
+            } catch [Net.WebException] {
+                if ($null -eq $_.Exception.Response) { throw }
+                $webResponse = $_.Exception.Response
+            }
+            $reader = [IO.StreamReader]::new($webResponse.GetResponseStream())
+            try {
+                $content = $reader.ReadToEnd()
+            } finally {
+                $reader.Dispose()
+            }
+            $response = [pscustomobject]@{ StatusCode = [int]$webResponse.StatusCode; Content = $content }
+        } finally {
+            if ($null -ne $webResponse) { $webResponse.Dispose() }
+        }
+    }
+    $statusCode = [int]$response.StatusCode
+    if ($statusCode -ne 200) {
+        if ($AllowedFailureStatusCodes -contains $statusCode) {
+            if ($RequireFailureJson) {
+                try {
+                    $failurePayload = [string]$response.Content | ConvertFrom-Json -ErrorAction Stop
+                } catch {
+                    throw 'The protected HTTP failure response returned invalid JSON.'
+                }
+                return [pscustomobject]@{ statusCode = $statusCode; payload = $failurePayload }
+            }
+            return [pscustomobject]@{ statusCode = $statusCode; payload = $null }
+        }
+        throw "The protected HTTP probe returned unexpected status $statusCode."
+    }
+    try {
+        $payload = [string]$response.Content | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw 'The protected HTTP probe returned invalid JSON.'
+    }
+    return [pscustomobject]@{ statusCode = 200; payload = $payload }
+}
+
+function Assert-MccManagedReadinessPayload {
+    param(
+        [Parameter(Mandatory = $true)][object]$Payload,
+        [Parameter(Mandatory = $true)][string]$ExpectedMode,
+        [Parameter(Mandatory = $true)][string]$ExpectedEnvironmentLabel,
+        [Parameter(Mandatory = $true)][string]$ExpectedBranch,
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+        [Parameter(Mandatory = $true)][string]$ExpectedCommit,
+        [ValidateRange(1, 65535)][int]$ExpectedPort = 4273
+    )
+    $expectedShortCommit = $ExpectedCommit.Substring(0, 7).ToLowerInvariant()
+    if ($Payload.ok -ne $true -or
+        [int]$Payload.port -ne $ExpectedPort -or
+        $Payload.systemUpdate.configured -ne $true -or
+        $Payload.systemUpdate.enabled -ne $true -or
+        $Payload.systemUpdate.applicationMatchesConfiguration -ne $true -or
+        $Payload.systemUpdate.repositoryApproved -ne $true -or
+        [string]$Payload.systemUpdate.mode -cne $ExpectedMode -or
+        [string]$Payload.systemUpdate.environmentLabel -cne $ExpectedEnvironmentLabel -or
+        [string]$Payload.systemUpdate.branch -cne $ExpectedBranch -or
+        [string]$Payload.systemUpdate.installedVersion -cne $ExpectedVersion -or
+        ([string]$Payload.systemUpdate.installedCommit).ToLowerInvariant() -cne $expectedShortCommit) {
+        throw 'The protected updater readiness payload does not match the managed target.'
+    }
+}
+
+function Assert-MccLegacyManagedRuntimeEvidence {
+    param([Parameter(Mandatory = $true)][Collections.IDictionary]$Evidence)
+    if (-not $Evidence.Contains('verificationContext') -or
+        @('InstallerBootstrap', 'Rollback') -cnotcontains [string]$Evidence.verificationContext) {
+        throw 'Legacy managed-readiness compatibility is not permitted in this verification context.'
+    }
+    if (-not $Evidence.Contains('readinessStatusCode') -or [int]$Evidence.readinessStatusCode -ne 404) {
+        throw 'Legacy managed-readiness compatibility requires an exact HTTP 404 response.'
+    }
+    if (-not $Evidence.Contains('installedVersion') -or
+        -not (Test-MccVersionBeforeManagedReadiness -Value $Evidence.installedVersion)) {
+        throw 'Legacy managed-readiness compatibility is limited to installed MCC versions older than 1.4.4.'
+    }
+    if ([string]$Evidence.verificationContext -ceq 'Rollback' -and
+        (-not $Evidence.Contains('restoredCommitMatchesBackup') -or $Evidence.restoredCommitMatchesBackup -ne $true)) {
+        throw 'Legacy rollback verification requires the exact recorded backup commit.'
+    }
+    $requiredEvidence = @(
+        'configurationValid',
+        'applicationPathMatches',
+        'originMatches',
+        'branchMatches',
+        'packageVersionMatches',
+        'commitMatches',
+        'repositoryClean',
+        'mccTaskInstalled',
+        'mccTaskRunning',
+        'mccTaskIdentityMatches',
+        'updaterTaskInstalled',
+        'updaterTaskRunning',
+        'updaterTaskIdentityMatches',
+        'agentHealthy',
+        'agentConfigurationValid',
+        'agentRepositoryValid',
+        'agentBranchValid',
+        'agentApplicationPathMatches',
+        'requestDirectoryAccessible',
+        'statusDirectoryAccessible',
+        'processRecordExists',
+        'launchIdValid',
+        'launchIdDistinct',
+        'processApplicationMatchesConfiguration',
+        'processUpdateModeMatches',
+        'processNodeEnvironmentMatches',
+        'pidRunning',
+        'nodeExecutableMatches',
+        'backendCommandLineMatches',
+        'exclusivePortOwner',
+        'healthOk',
+        'healthApplicationMatches',
+        'healthPortMatches',
+        'updateStatusUnauthorized'
+    )
+    foreach ($name in $requiredEvidence) {
+        if (-not $Evidence.Contains($name) -or $Evidence[$name] -ne $true) {
+            throw "Legacy managed-readiness compatibility evidence failed: $name."
+        }
+    }
+}
+
 function Test-MccHttpHealth {
     param(
         [ValidateRange(1, 65535)][int]$Port = 4273,
@@ -885,5 +1076,10 @@ Export-ModuleMember -Function @(
     'Read-MccWindowsConfiguration',
     'Assert-MccRepository',
     'Assert-MccOriginBranch',
+    'Test-MccVersionBeforeManagedReadiness',
+    'Test-MccScheduledTaskIdentity',
+    'Invoke-MccHttpJsonProbe',
+    'Assert-MccManagedReadinessPayload',
+    'Assert-MccLegacyManagedRuntimeEvidence',
     'Test-MccHttpHealth'
 )
