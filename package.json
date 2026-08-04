@@ -1,6 +1,6 @@
 {
   "name": "maintenance-command-center",
-  "version": "1.4.6",
+  "version": "1.5.0",
   "private": true,
   "description": "Maintenance Command Center website shell.",
   "scripts": {
@@ -39,6 +39,9 @@
     "test:presence-ui": "playwright test tests/reliable-user-presence.spec.ts",
     "test:teams": "playwright test tests/maintenance-team-roster.spec.ts",
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
+    "test:pm-excel-workbook": "npm run build --prefix backend && node tests/pm-excel-workflow.mjs",
+    "test:pm-excel-api": "npm run build --prefix backend && node tests/pm-excel-api.mjs",
+    "test:pm-excel-ui": "playwright test tests/pm-excel-ui.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
     "test:requisitions": "playwright test tests/requisitions-lifecycle.spec.ts",
     "test:requisitions-api": "node tests/requisition-status-api.mjs",
