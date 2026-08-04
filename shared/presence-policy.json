@@ -1,0 +1,7 @@
+{
+  "heartbeatIntervalMs": 25000,
+  "rosterRefreshIntervalMs": 25000,
+  "onlineTimeoutMs": 90000,
+  "awayAfterMs": 300000,
+  "writeThrottleMs": 20000
+}

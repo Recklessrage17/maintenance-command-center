@@ -1,8 +1,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
+import { MccStatusAge } from '../../components/MccStatusAge';
+import { MccSuccessBurst } from '../../components/MccSuccessBurst';
+import { hasPermission } from '../../permissions';
+import { RequisitionItemsPopover } from './RequisitionItemsPopover';
 
 type RequisitionStatus = 'Requested' | 'Ordered' | 'Received' | 'Canceled';
-type StatusFilter = 'Requisition Staging' | 'All' | RequisitionStatus;
+type StatusFilter = 'Requisition Staging' | 'Active' | 'All' | RequisitionStatus;
 type Notice = { kind: 'success' | 'error'; text: string };
 
 type RequisitionLine = {
@@ -42,6 +47,9 @@ type Requisition = {
   status: RequisitionStatus;
   requestedByName: string;
   requestedAt: string;
+  orderedAt: string | null;
+  receivedAt: string | null;
+  canceledAt: string | null;
   workOrderNumber: string;
   notes: string;
   cancelReason: string;
@@ -96,11 +104,24 @@ type StagingPdfPreview = { id:number; vendorName:string; lineCount:number; total
 const writeRoles = new Set(['Admin','Manager','Maintenance Tech 3','Maintenance Tech 2']);
 const deleteRoles = new Set(['Admin','Manager']);
 const batchManageRoles = new Set(['Admin','Administrator','Manager','Maintenance Tech 3','Tier 3']);
-const filters: StatusFilter[] = ['Requisition Staging','Requested','Ordered','Received','Canceled','All'];
+const filters: StatusFilter[] = ['Requisition Staging','Active','Requested','Ordered','Received','Canceled','All'];
 const emptySummary: Summary = { requestedCount: 0, orderedCount: 0, receivedCount: 0, canceledCount: 0, activeCount: 0 };
 
+function filterFromLocation():StatusFilter {
+  const view=new URLSearchParams(window.location.search).get('view')?.trim().toLowerCase();
+  const mapped:Record<string,StatusFilter>={active:'Active',requested:'Requested',ordered:'Ordered',received:'Received',canceled:'Canceled',all:'All',staging:'Requisition Staging'};
+  return view&&mapped[view]?mapped[view]:'Requisition Staging';
+}
+
+function replaceFilterLocation(filter:StatusFilter) {
+  const url=new URL(window.location.href);
+  if(filter==='Requisition Staging')url.searchParams.delete('view');
+  else url.searchParams.set('view',filter.toLowerCase());
+  window.history.replaceState(null,'',`${url.pathname}${url.search}`);
+}
+
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data as T;
@@ -172,6 +193,10 @@ function statusClass(status: RequisitionStatus) {
   return `requisition-status status-${status.toLowerCase()}`;
 }
 
+function workflowClass(option:StatusFilter,active:boolean) {
+  return `mcc-industrial-button mcc-workflow-tab workflow-${option.toLowerCase().replace(/[^a-z]+/g,'-')}${active?' active':''}`;
+}
+
 function editFormFromRequisition(requisition: Requisition): EditForm {
   return {
     quantityRequested: String(requisition.quantityRequested),
@@ -192,10 +217,10 @@ function blankStagingReviewForm(userFullName = ''): StagingReviewForm {
   return {poInitiator:'',requisitionedByName:userFullName,taxExempt:'',workOrderNumber:'',confirmedWith:'',materialCert:'No',shipVia:'',fob:'Destination',notes:''};
 }
 
-export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: string; userFullName?: string }) {
+export function RequisitionsPage({ userRole, effectivePermissions, userFullName = '' }: { userRole: string; effectivePermissions?:string[]; userFullName?: string }) {
   const [requisitions,setRequisitions]=useState<Requisition[]>([]);
   const [summary,setSummary]=useState<Summary>(emptySummary);
-  const [filter,setFilter]=useState<StatusFilter>('Requisition Staging');
+  const [filter,setFilter]=useState<StatusFilter>(()=>filterFromLocation());
   const [search,setSearch]=useState('');
   const [loading,setLoading]=useState(true);
   const [notice,setNotice]=useState<Notice|null>(null);
@@ -245,10 +270,17 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   const [stagingPreviewUrl,setStagingPreviewUrl]=useState('');
   const [stagingPreviewLoading,setStagingPreviewLoading]=useState(false);
   const [createdFromStaging,setCreatedFromStaging]=useState<StagingCreateResult[]>([]);
+  const [receivedSuccessId,setReceivedSuccessId]=useState<number|null>(null);
+  const [reducedMotion,setReducedMotion]=useState(()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const receiveFeedbackTimerRef=useRef<number|null>(null);
 
-  const canWrite = writeRoles.has(userRole);
-  const canDelete = deleteRoles.has(userRole);
-  const canManageBatches = batchManageRoles.has(userRole);
+  const canWrite = hasPermission(effectivePermissions,'requisitions.create',writeRoles.has(userRole))||hasPermission(effectivePermissions,'requisitions.edit',writeRoles.has(userRole))||hasPermission(effectivePermissions,'inventory.requisition_stage',writeRoles.has(userRole));
+  const canDelete = hasPermission(effectivePermissions,'requisitions.delete',deleteRoles.has(userRole));
+  const canManageBatches = hasPermission(effectivePermissions,'requisitions.manage_batches',batchManageRoles.has(userRole));
+  const canMarkOrdered=hasPermission(effectivePermissions,'requisitions.mark_ordered',canWrite);
+  const canMarkReceived=hasPermission(effectivePermissions,'requisitions.mark_received',canWrite);
+  const canCancel=hasPermission(effectivePermissions,'requisitions.cancel',canWrite);
+  const canPrint=hasPermission(effectivePermissions,'requisitions.print_download',true);
 
   async function loadStaging(nextView: 'active'|'completed' = batchView, preferredBatchId: number|null = activeBatchId) {
     setLoading(true);
@@ -293,9 +325,9 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
     setNotice(null);
     try {
       const params = new URLSearchParams();
-      params.set('status', nextFilter === 'All' ? 'all' : nextFilter);
+      if(nextFilter!=='Active')params.set('status', nextFilter === 'All' ? 'all' : nextFilter);
       if (nextShowDeleted) params.set('includeDeleted', 'true');
-      const query = `?${params.toString()}`;
+      const query = params.size ? `?${params.toString()}` : '';
       const result = await api<ListResponse>(`/api/requisitions${query}`);
       setRequisitions(result.requisitions ?? []);
       setSummary(result.summary ?? emptySummary);
@@ -308,6 +340,23 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   useEffect(()=>{ void loadRequisitions(); void loadInventoryOptions(); },[]);
+  useEffect(()=>{
+    const query=window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update=()=>setReducedMotion(query.matches);
+    query.addEventListener('change',update);
+    return()=>query.removeEventListener('change',update);
+  },[]);
+  useEffect(()=>()=>{if(receiveFeedbackTimerRef.current!==null)window.clearTimeout(receiveFeedbackTimerRef.current);},[]);
+  useEffect(()=>{
+    const syncFilterFromLocation=()=>{
+      if(window.location.pathname.replace(/\/+$/,'')!=='/requisitions')return;
+      const nextFilter=filterFromLocation();
+      setFilter(nextFilter);
+      void loadRequisitions(nextFilter,false);
+    };
+    window.addEventListener('popstate',syncFilterFromLocation);
+    return()=>window.removeEventListener('popstate',syncFilterFromLocation);
+  },[]);
   useEffect(()=>{
     if (!previewing) {
       setPreviewUrl('');
@@ -399,6 +448,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
   function setNextFilter(nextFilter: StatusFilter) {
     setFilter(nextFilter);
+    replaceFilterLocation(nextFilter);
     void loadRequisitions(nextFilter, showDeleted);
   }
 
@@ -825,7 +875,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   async function updateStatus(requisition: Requisition, status: Exclude<RequisitionStatus,'Requested'>) {
-    if (!canWrite || requisition.deleted || busyId) return;
+    const allowed=status==='Ordered'?canMarkOrdered:status==='Received'?canMarkReceived:canCancel;
+    if (!allowed || requisition.deleted || busyId) return;
     if (status === 'Canceled') {
       openReasonAction('cancel',[requisition]);
       return;
@@ -837,8 +888,19 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
         method: 'PATCH',
         body: JSON.stringify({status}),
       });
+      if(status==='Received'){
+        setReceivedSuccessId(requisition.id);
+        setNotice({kind:'success',text:`${requisition.requisitionNumber} marked Received.`});
+        await new Promise<void>(resolve=>{
+          receiveFeedbackTimerRef.current=window.setTimeout(()=>{
+            receiveFeedbackTimerRef.current=null;
+            resolve();
+          },reducedMotion?500:850);
+        });
+        setReceivedSuccessId(null);
+      }
       await loadRequisitions(filter, showDeleted);
-      setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
+      if(status!=='Received')setNotice({kind:'success',text:`${requisition.requisitionNumber} marked ${status}.`});
     } catch (err) {
       setNotice({kind:'error',text:(err as Error).message});
     } finally {
@@ -898,7 +960,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
   }
 
   return (
-    <div className="page-stack requisitions-page">
+    <div className={`page-stack requisitions-page${filter==='Requisition Staging'?' requisitions-page--staging':''}`}>
       {!canWrite&&<span className="view-only-badge requisitions-access-badge">View-only access.</span>}
 
       <div className="card-grid requisition-summary-grid">
@@ -910,7 +972,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
       </div>
 
       <nav className="requisition-view-pills" aria-label="Requisition status views">
-        {filters.map(option=><button className={filter===option?'active':''} key={option} type="button" onClick={()=>setNextFilter(option)}>{option}</button>)}
+        {filters.map(option=><button className={workflowClass(option,filter===option)} key={option} type="button" aria-pressed={filter===option} onClick={()=>setNextFilter(option)}>{option}</button>)}
       </nav>
 
       {notice&&<p className={notice.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'} role="status">{notice.text}</p>}
@@ -922,8 +984,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
             {canWrite&&<button className="primary-button" type="button" onClick={openBatchCreator}>Create Requisition Batch</button>}
           </div>
           <div className="requisition-batch-view-pills" role="tablist" aria-label="Requisition Batch views">
-            <button className={batchView==='active'?'active':''} type="button" onClick={()=>{setBatchView('active');void loadStaging('active',null);}}>Open Batches</button>
-            <button className={batchView==='completed'?'active':''} type="button" onClick={()=>{setBatchView('completed');void loadStaging('completed',null);}}>Converted / Closed</button>
+            <button className={`mcc-industrial-button requisition-batch-view-button${batchView==='active'?' active':''}`} type="button" aria-pressed={batchView==='active'} onClick={()=>{setBatchView('active');void loadStaging('active',null);}}>Open Batches</button>
+            <button className={`mcc-industrial-button requisition-batch-view-button${batchView==='completed'?' active':''}`} type="button" aria-pressed={batchView==='completed'} onClick={()=>{setBatchView('completed');void loadStaging('completed',null);}}>Converted / Closed</button>
           </div>
           <div className="requisition-batch-grid">
             {requisitionBatches.map(batch=>{
@@ -1010,7 +1072,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
           <span>Selected: {selectedRequisitions.length}</span>
           <button className="secondary-button compact-button" type="button" onClick={toggleVisibleSelection} disabled={!filteredRequisitions.length}>{allVisibleSelected?'Unselect Visible':'Select Visible'}</button>
           <button className="secondary-button compact-button" type="button" onClick={clearSelection} disabled={!selectedRequisitions.length}>Clear Selection</button>
-          {canWrite&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',selectedCancelable)} disabled={!selectedCancelable.length}>Cancel Selected</button>}
+          {canCancel&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',selectedCancelable)} disabled={!selectedCancelable.length}>Cancel Selected</button>}
           {canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('delete',selectedRequisitions)} disabled={!selectedRequisitions.length}>Delete Selected</button>}
         </div>
 
@@ -1039,8 +1101,8 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                     <input className="table-checkbox" type="checkbox" checked={selectedIds.has(requisition.id)} onChange={()=>toggleRequisitionSelection(requisition.id)} disabled={requisition.deleted} aria-label={`Select ${requisition.requisitionNumber}`} />
                   </td>
                   <td><strong className="req-number">{requisition.requisitionNumber}</strong></td>
-                  <td><span className={statusClass(requisition.status)}>{requisition.status}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
-                  <td>{partNumberSummary(requisition)}</td>
+                  <td><span className="requisition-status-stack"><span className={statusClass(requisition.status)}>{requisition.status}</span>{(requisition.status==='Requested'||requisition.status==='Ordered')&&<MccStatusAge status={requisition.status} timestamp={requisition.status==='Requested'?requisition.requestedAt:requisition.orderedAt}/>}</span>{requisition.deleted&&<span className="deleted-chip">Deleted</span>}</td>
+                  <td>{requisitionLineCount(requisition)>1&&requisition.lines?.length?<RequisitionItemsPopover lines={requisition.lines} label={partNumberSummary(requisition)}/>:partNumberSummary(requisition)}</td>
                   <td className="inventory-description-cell"><span className="inventory-description-text" title={(requisition.descriptions ?? [requisition.description]).filter(Boolean).join(' / ') || undefined}>{descriptionSummary(requisition)}</span></td>
                   <td>{formatQuantity(Number(requisition.totalQuantity ?? requisition.quantityRequested ?? 0))}</td>
                   <td>{requisition.vendorSummary || requisition.vendorName || '-'}</td>
@@ -1050,13 +1112,13 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
                   <td>{formatDateTime(requisition.requestedAt)}</td>
                   <td>
                     <div className="requisition-row-actions">
-                      <button className="secondary-button compact-button" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>
-                      <button className="secondary-button compact-button" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>
-                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="secondary-button compact-button" type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id}>Mark Received</button>}
-                      {canWrite&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
-                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
-                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button" type="button" onClick={()=>deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
+                      {canPrint&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>openPreview(requisition)} disabled={busyId===requisition.id}>Preview</button>}
+                      {canPrint&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-neutral" type="button" onClick={()=>void downloadPdf(requisition)} disabled={busyId===requisition.id}>PDF</button>}
+                      {canMarkOrdered&&!requisition.deleted&&requisition.status==='Requested'&&<button className="secondary-button compact-button mcc-industrial-button requisition-action-ordered" type="button" onClick={()=>void updateStatus(requisition,'Ordered')} disabled={busyId===requisition.id}>Mark Ordered</button>}
+                      {canMarkReceived&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<span className="requisition-receive-action"><button className={`secondary-button compact-button mcc-industrial-button requisition-action-received${receivedSuccessId===requisition.id?' is-success':''}`} type="button" onClick={()=>void updateStatus(requisition,'Received')} disabled={busyId===requisition.id} aria-live="polite">{receivedSuccessId===requisition.id?'Received ✓':'Mark Received'}</button><MccSuccessBurst active={receivedSuccessId===requisition.id}/></span>}
+                      {canCancel&&!requisition.deleted&&(requisition.status==='Requested'||requisition.status==='Ordered')&&<button className="danger-button compact-button mcc-industrial-button requisition-action-cancel" type="button" onClick={()=>openReasonAction('cancel',[requisition])} disabled={busyId===requisition.id}>Cancel</button>}
+                      {canWrite&&!requisition.deleted&&requisition.status==='Requested'&&<button className="link-button compact-button mcc-industrial-button requisition-action-edit" type="button" onClick={()=>openEdit(requisition)} disabled={busyId===requisition.id}>Edit</button>}
+                      {canDelete&&!requisition.deleted&&<button className="danger-button compact-button mcc-industrial-button requisition-action-delete" type="button" onClick={()=>deleteRequisition(requisition)} disabled={busyId===requisition.id}>Delete</button>}
                     </div>
                   </td>
                 </tr>
@@ -1083,7 +1145,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {batchEditing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setBatchEditing(false);}}>
-          <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveRequisitionBatch}>
+          <form className="mcc-card requisition-modal staging-editor-modal mcc-wide-modal" onSubmit={saveRequisitionBatch}>
             <div className="modal-heading"><div><p className="eyebrow">Requisition Batch</p><h3>{editingBatchId===null?'Create Requisition Batch':'Edit Requisition Batch'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>setBatchEditing(false)}>Close</button></div>
             <div className="staging-editor-grid">
               <label className="form-field"><span>Batch Name <b className="required-marker">*</b></span><input value={batchForm.name} onChange={event=>setBatchForm({...batchForm,name:event.target.value})} autoFocus placeholder="Press 51 Repair" /></label>
@@ -1101,7 +1163,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {stagingEditing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)closeStagingEditor();}}>
-          <form className="mcc-card requisition-modal staging-editor-modal" onSubmit={saveStagingItem}>
+          <form className="mcc-card requisition-modal staging-editor-modal mcc-wide-modal" onSubmit={saveStagingItem}>
             <div className="modal-heading"><div><p className="eyebrow">Requisition Staging List</p><h3>{stagingEditing==='new'?'Add staged item':`Edit ${stagingEditing.partNumber}`}</h3></div><button className="link-button compact-button" type="button" onClick={()=>closeStagingEditor()}>Close</button></div>
             <div className="staging-editor-grid">
               <label className="form-field"><span>Part Number <b className="required-marker">*</b></span><input value={stagingForm.partNumber} onChange={event=>setStagingForm({...stagingForm,partNumber:event.target.value})} /></label>
@@ -1127,7 +1189,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {reviewingStaging&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setReviewingStaging(false);}}>
-          <form className="mcc-card requisition-modal staging-review-modal" onSubmit={generateStagingPreview}>
+          <form className="mcc-card requisition-modal staging-review-modal mcc-wide-modal" onSubmit={generateStagingPreview}>
             <div className="modal-heading"><div><p className="eyebrow">Review before official creation</p><h3>{stagingPreviewToken?'Requisition PDF Preview':'Preview Requisition'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>setReviewingStaging(false)} disabled={stagingSaving}>Close</button></div>
             {!createdFromStaging.length&&!stagingPreviewToken&&<>
               <div className="staging-review-summary"><strong>{selectedStagingItems.length} staged item{selectedStagingItems.length===1?'':'s'}</strong><span>{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size} vendor requisition{new Set(selectedStagingItems.map(item=>item.vendor.trim().toLowerCase())).size===1?'':'s'} will be created using the existing vendor grouping.</span></div>
@@ -1183,7 +1245,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {editing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeEdit(); }}>
-          <form className="mcc-card requisition-modal" onSubmit={saveEdit}>
+          <form className="mcc-card requisition-modal mcc-wide-modal" onSubmit={saveEdit}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Edit requisition</p>
@@ -1216,7 +1278,7 @@ export function RequisitionsPage({ userRole, userFullName = '' }: { userRole: st
 
       {previewing&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closePreview(); }}>
-          <div className="mcc-card requisition-preview-modal" role="dialog" aria-modal="true" aria-labelledby="requisition-page-preview-title">
+          <div className="mcc-card requisition-preview-modal mcc-full-view-dialog" role="dialog" aria-modal="true" aria-labelledby="requisition-page-preview-title">
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">PDF preview</p>

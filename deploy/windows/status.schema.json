@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maintenance-command-center.local/schemas/windows-update-status-v1.json",
+  "title": "MCC Windows updater sanitized status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "jobId",
+    "state",
+    "code",
+    "message",
+    "mode",
+    "environmentLabel",
+    "installed",
+    "target",
+    "requestedAt",
+    "startedAt",
+    "lastUpdatedAt",
+    "completedAt",
+    "requester",
+    "outcome",
+    "finalResult",
+    "checkToken",
+    "checkExpiresAt",
+    "events"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "jobId": { "type": ["string", "null"], "maxLength": 120 },
+    "state": {
+      "enum": [
+        "idle",
+        "checking",
+        "update_available",
+        "queued",
+        "backing_up",
+        "stopping",
+        "pulling",
+        "installing_dependencies",
+        "building",
+        "starting",
+        "health_check",
+        "succeeded",
+        "rolling_back",
+        "rolled_back",
+        "failed"
+      ]
+    },
+    "code": { "type": "string", "maxLength": 80 },
+    "message": { "type": "string", "maxLength": 240 },
+    "mode": { "enum": ["windows_test", "windows_production"] },
+    "environmentLabel": { "enum": ["WINDOWS TEST MODE", "WINDOWS 11 PRODUCTION"] },
+    "installed": { "$ref": "#/$defs/versionRef" },
+    "target": { "$ref": "#/$defs/versionRef" },
+    "requestedAt": { "type": ["string", "null"], "format": "date-time" },
+    "startedAt": { "type": ["string", "null"], "format": "date-time" },
+    "lastUpdatedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": ["string", "null"], "format": "date-time" },
+    "requester": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name"],
+          "properties": {
+            "id": { "type": "integer", "minimum": 0 },
+            "name": { "type": "string", "maxLength": 120 }
+          }
+        }
+      ]
+    },
+    "outcome": { "enum": ["none", "succeeded", "rolled_back", "failed"] },
+    "finalResult": { "enum": ["none", "succeeded", "rolled_back", "failed"] },
+    "checkToken": { "type": ["string", "null"], "maxLength": 160 },
+    "checkExpiresAt": { "type": ["string", "null"], "format": "date-time" },
+    "events": {
+      "type": "array",
+      "maxItems": 80,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "state", "at", "message"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 120 },
+          "state": { "type": "string", "maxLength": 40 },
+          "at": { "type": "string", "format": "date-time" },
+          "message": { "type": "string", "maxLength": 240 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "versionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": {
+          "type": ["string", "null"],
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "commit": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    }
+  }
+}

@@ -1,10 +1,59 @@
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { withJsonRequestDefaults } from '../../apiRequest';
 
 type NetworkLinks = {
   localPort: number;
   localhostUrl: string;
   detectedLanUrls: string[];
   primaryLanUrl: string | null;
+};
+
+type SystemVersionMetadata = {
+  version: string | null;
+  displayVersion: string;
+  commit: string | null;
+  buildDate: string | null;
+};
+
+type SystemUpdateState =
+  | 'idle'
+  | 'checking'
+  | 'update_available'
+  | 'queued'
+  | 'backing_up'
+  | 'stopping'
+  | 'pulling'
+  | 'installing_dependencies'
+  | 'building'
+  | 'starting'
+  | 'health_check'
+  | 'succeeded'
+  | 'rolling_back'
+  | 'rolled_back'
+  | 'failed';
+type SystemUpdateStatus = {
+  ok: boolean;
+  configured: boolean;
+  available: boolean;
+  state: SystemUpdateState;
+  code: string;
+  message: string;
+  mode: 'disabled' | 'raspberry_pi' | 'windows_test' | 'windows_production';
+  environmentLabel: string;
+  installedVersion: string | null;
+  installedCommit: string | null;
+  targetVersion: string | null;
+  targetCommit: string | null;
+  startedAt: string | null;
+  requestedAt: string | null;
+  lastUpdatedAt: string;
+  completedAt: string | null;
+  requester: { id: number; name: string } | null;
+  outcome: 'none' | 'succeeded' | 'rolled_back' | 'failed';
+  checkToken: string | null;
+  checkExpiresAt: string | null;
+  csrfToken: string;
+  active: boolean;
 };
 
 type BackupCategory = 'daily' | 'weekly' | 'master' | 'legacy';
@@ -162,6 +211,15 @@ const resetStepLabels = [
   'Refreshing status',
   'Complete',
 ];
+const systemUpdateStepLabels = [
+  'Creating and verifying safety backup',
+  'Fast-forwarding approved code',
+  'Installing locked dependencies',
+  'Building frontend and backend',
+  'Starting MCC',
+  'Health-checking port 4273',
+  'Complete',
+];
 const emptyBackupCounts: Record<BackupType, number> = { startup: 0, scheduled: 0, auto: 0, manual: 0, pre_restore: 0 };
 const backupCategoryLabels: Record<Exclude<BackupCategory, 'legacy'>, string> = {
   daily: 'Daily Backup',
@@ -198,14 +256,112 @@ const defaultBranding: BrandingSettings = {
 };
 
 async function api(path:string, options:RequestInit={}) {
-  const res=await fetch(path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers??{})},...options});
+  const res=await fetch(path,withJsonRequestDefaults(options));
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'Request failed.');
   return data;
 }
 
+class SystemUpdateRequestError extends Error {
+  constructor(message:string,public readonly data:Record<string,unknown>,public readonly retryAfterSeconds:number|null) {
+    super(message);
+  }
+}
+
+async function systemUpdateApi(path:string,options:RequestInit={}) {
+  const res=await fetch(path,withJsonRequestDefaults(options));
+  const data=await res.json().catch(()=>({})) as Record<string,unknown>;
+  if(!res.ok){
+    const headerRetry=Number(res.headers.get('Retry-After'));
+    const bodyRetry=Number(data.retryAfterSeconds);
+    const retryAfterSeconds=Number.isFinite(bodyRetry)&&bodyRetry>0?Math.ceil(bodyRetry):Number.isFinite(headerRetry)&&headerRetry>0?Math.ceil(headerRetry):null;
+    const baseMessage=String(data.error??'Update request failed.');
+    const retryMinutes=retryAfterSeconds?Math.ceil(retryAfterSeconds/60):0;
+    const retryMessage=retryAfterSeconds?` Try again in ${retryAfterSeconds>=60?`${retryMinutes} minute${retryMinutes===1?'':'s'}`:`${retryAfterSeconds} seconds`}.`:'';
+    throw new SystemUpdateRequestError(`${baseMessage.replace(/\s*Try again later\.?$/i,'')}${retryMessage}`,data,retryAfterSeconds);
+  }
+  return data;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+const activeSystemUpdateStates = new Set<SystemUpdateState>([
+  'queued',
+  'backing_up',
+  'stopping',
+  'pulling',
+  'installing_dependencies',
+  'building',
+  'starting',
+  'health_check',
+  'rolling_back',
+]);
+
+function normalizeSystemUpdate(value:unknown):SystemUpdateStatus|null {
+  const data=asRecord(value);
+  const state=String(data.state??'');
+  if(![
+    'idle','checking','update_available','queued','backing_up','stopping','pulling','installing_dependencies',
+    'building','starting','health_check','succeeded','rolling_back','rolled_back','failed',
+  ].includes(state))return null;
+  const mode=['raspberry_pi','windows_test','windows_production'].includes(String(data.mode))?String(data.mode) as SystemUpdateStatus['mode']:'disabled';
+  const requester=asRecord(data.requester);
+  return {
+    ok:data.ok!==false,
+    configured:data.configured===true,
+    available:data.available!==false&&data.configured===true,
+    state:state as SystemUpdateState,
+    code:String(data.code??'not_checked').slice(0,80),
+    message:String(data.message??'').replace(/\s+/g,' ').slice(0,240),
+    mode,
+    environmentLabel:String(data.environmentLabel??(mode==='windows_test'?'WINDOWS TEST MODE':mode==='windows_production'?'WINDOWS 11 PRODUCTION':mode==='raspberry_pi'?'RASPBERRY PI PRODUCTION':'UPDATER NOT CONFIGURED')).slice(0,80),
+    installedVersion:typeof data.installedVersion==='string'?data.installedVersion:null,
+    installedCommit:typeof data.installedCommit==='string'?data.installedCommit:null,
+    targetVersion:typeof data.targetVersion==='string'?data.targetVersion:null,
+    targetCommit:typeof data.targetCommit==='string'?data.targetCommit:null,
+    startedAt:typeof data.startedAt==='string'?data.startedAt:null,
+    requestedAt:typeof data.requestedAt==='string'?data.requestedAt:null,
+    lastUpdatedAt:typeof data.lastUpdatedAt==='string'?data.lastUpdatedAt:'',
+    completedAt:typeof data.completedAt==='string'?data.completedAt:null,
+    requester:requester.name?{id:Number(requester.id)||0,name:String(requester.name).slice(0,120)}:null,
+    outcome:['succeeded','rolled_back','failed'].includes(String(data.outcome))?data.outcome as SystemUpdateStatus['outcome']:'none',
+    checkToken:typeof data.checkToken==='string'?data.checkToken:null,
+    checkExpiresAt:typeof data.checkExpiresAt==='string'?data.checkExpiresAt:null,
+    csrfToken:typeof data.csrfToken==='string'?data.csrfToken:'',
+    active:data.active===true||activeSystemUpdateStates.has(state as SystemUpdateState)||state==='checking',
+  };
+}
+
+function updateStateLabel(update:SystemUpdateStatus|null) {
+  if(!update)return 'UPDATE STATUS UNAVAILABLE';
+  if(update.state==='checking')return 'CHECKING FOR UPDATES';
+  if(activeSystemUpdateStates.has(update.state))return `${update.state==='rolling_back'?'ROLLING BACK':'INSTALLING'}${update.targetVersion?` v${update.targetVersion}`:''}`;
+  if(update.state==='succeeded')return 'UPDATE COMPLETE';
+  if(update.state==='rolled_back')return 'UPDATE FAILED — PREVIOUS VERSION RESTORED';
+  if(update.state==='failed')return 'CRITICAL UPDATE FAILURE — MANUAL RECOVERY REQUIRED';
+  if(['update_available','same_version_different_commit'].includes(update.code))return 'UPDATE AVAILABLE';
+  if(update.code==='up_to_date')return 'MCC IS UP TO DATE';
+  if(update.code==='not_checked')return 'READY TO CHECK';
+  if(update.code==='deployment_not_configured')return 'UPDATER NOT CONFIGURED';
+  if(update.code==='updater_agent_offline')return 'UPDATER AGENT OFFLINE';
+  if(update.code==='configuration_invalid')return 'CONFIGURATION INVALID';
+  if(update.code==='mcc_service_not_running')return 'MCC SERVICE NOT RUNNING';
+  if(update.code==='local_changes_block_update')return 'LOCAL CHANGES BLOCK UPDATE';
+  if(update.code==='remote_not_fast_forward')return 'REMOTE HISTORY BLOCKED';
+  return 'UPDATE CHECK FAILED';
+}
+
+function updateProgressIndex(state:SystemUpdateState) {
+  if(state==='backing_up'||state==='stopping')return 0;
+  if(state==='pulling')return 1;
+  if(state==='installing_dependencies')return 2;
+  if(state==='building')return 3;
+  if(state==='starting')return 4;
+  if(state==='health_check')return 5;
+  if(state==='succeeded')return 6;
+  return state==='queued'?0:state==='rolling_back'||state==='rolled_back'||state==='failed'?6:0;
 }
 
 
@@ -397,7 +553,18 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
   );
 }
 
-export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
+export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{isOwnerAdmin?: boolean;canViewSystemVersion?: boolean}) {
+  const [systemVersion,setSystemVersion]=useState<SystemVersionMetadata|null>(null);
+  const [systemVersionLoading,setSystemVersionLoading]=useState(false);
+  const [systemUpdate,setSystemUpdate]=useState<SystemUpdateStatus|null>(null);
+  const [systemUpdateLoading,setSystemUpdateLoading]=useState(false);
+  const [systemUpdateInstalling,setSystemUpdateInstalling]=useState(false);
+  const [systemUpdateConfirmationOpen,setSystemUpdateConfirmationOpen]=useState(false);
+  const [systemUpdateProgressOpen,setSystemUpdateProgressOpen]=useState(false);
+  const [systemUpdateReconnectMessage,setSystemUpdateReconnectMessage]=useState('');
+  const updateCompletionHandled=useRef('');
+  const systemUpdateRequestInFlight=useRef<'check'|'install'|null>(null);
+  const systemUpdatePanelRef=useRef<HTMLElement|null>(null);
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
@@ -457,6 +624,73 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
       .then(data=>{ setLinks(data); setMsg(''); })
       .catch(e=>setMsg(e.message))
       .finally(()=>setLoading(false));
+  }
+
+  function loadSystemVersion() {
+    if (!canViewSystemVersion) return Promise.resolve();
+    setSystemVersionLoading(true);
+    return api('/api/version')
+      .then(data=>setSystemVersion(data as SystemVersionMetadata))
+      .catch(()=>setSystemVersion(null))
+      .finally(()=>setSystemVersionLoading(false));
+  }
+
+  function applySystemUpdateResponse(value:unknown) {
+    const next=normalizeSystemUpdate(value);
+    if(next)setSystemUpdate(next);
+    return next;
+  }
+
+  function loadSystemUpdateStatus(options:{quiet?:boolean}={}) {
+    if(!canViewSystemVersion)return Promise.resolve(null);
+    if(!options.quiet)setSystemUpdateLoading(true);
+    return systemUpdateApi('/api/system/update/status')
+      .then(data=>applySystemUpdateResponse(data))
+      .catch(error=>{
+        if(!options.quiet)setSystemUpdateReconnectMessage((error as Error).message||'Update status is temporarily unavailable.');
+        return null;
+      })
+      .finally(()=>{if(!options.quiet)setSystemUpdateLoading(false);});
+  }
+
+  async function checkForSystemUpdate() {
+    if(systemUpdateRequestInFlight.current||systemUpdateLoading||systemUpdateInstalling||systemUpdate?.active)return;
+    systemUpdateRequestInFlight.current='check';
+    setSystemUpdateLoading(true);
+    setSystemUpdateReconnectMessage('');
+    try {
+      const data=await systemUpdateApi('/api/system/update/check',{method:'POST',body:'{}'});
+      applySystemUpdateResponse(data);
+    } catch(error) {
+      if(error instanceof SystemUpdateRequestError)applySystemUpdateResponse(error.data);
+      setSystemUpdateReconnectMessage((error as Error).message||'The MCC update check failed.');
+    } finally {
+      systemUpdateRequestInFlight.current=null;
+      setSystemUpdateLoading(false);
+    }
+  }
+
+  async function installSystemUpdate() {
+    if(systemUpdateRequestInFlight.current||systemUpdateInstalling||!systemUpdate?.checkToken||!systemUpdate.csrfToken)return;
+    systemUpdateRequestInFlight.current='install';
+    setSystemUpdateInstalling(true);
+    setSystemUpdateReconnectMessage('');
+    try {
+      const data=await systemUpdateApi('/api/system/update/install',{
+        method:'POST',
+        headers:{'X-MCC-CSRF-Token':systemUpdate.csrfToken},
+        body:JSON.stringify({confirm:true,checkToken:systemUpdate.checkToken}),
+      });
+      applySystemUpdateResponse(data);
+      setSystemUpdateConfirmationOpen(false);
+      setSystemUpdateProgressOpen(true);
+    } catch(error) {
+      if(error instanceof SystemUpdateRequestError)applySystemUpdateResponse(error.data);
+      setSystemUpdateReconnectMessage((error as Error).message||'The MCC update request was not accepted.');
+    } finally {
+      systemUpdateRequestInFlight.current=null;
+      setSystemUpdateInstalling(false);
+    }
   }
 
   function loadBranding() {
@@ -620,11 +854,68 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   }
 
   useEffect(()=>{
+    if (canViewSystemVersion) {
+      void loadSystemVersion();
+      void loadSystemUpdateStatus();
+    } else {
+      setSystemVersion(null);
+      setSystemUpdate(null);
+    }
     loadLinks();
     loadBranding();
     loadBackupStatus();
     if (isOwnerAdmin) void loadResetStatus();
-  },[isOwnerAdmin]);
+  },[isOwnerAdmin,canViewSystemVersion]);
+  useEffect(()=>{
+    if(!canViewSystemVersion||window.location.hash!=='#system-update')return;
+    const timer=window.setTimeout(()=>{
+      systemUpdatePanelRef.current?.scrollIntoView({behavior:'smooth',block:'center'});
+      systemUpdatePanelRef.current?.focus({preventScroll:true});
+    },50);
+    return()=>window.clearTimeout(timer);
+  },[canViewSystemVersion]);
+  const updatePollingActive=Boolean(systemUpdate&&activeSystemUpdateStates.has(systemUpdate.state));
+  useEffect(()=>{
+    if(!canViewSystemVersion||!updatePollingActive)return;
+    let cancelled=false;
+    let timer=0;
+    let consecutiveFailures=0;
+    const pollingStartedAt=Date.now();
+    async function poll() {
+      try {
+        const data=await systemUpdateApi('/api/system/update/status');
+        if(cancelled)return;
+        const next=applySystemUpdateResponse(data);
+        consecutiveFailures=0;
+        setSystemUpdateReconnectMessage('');
+        if(next&&activeSystemUpdateStates.has(next.state)) {
+          timer=window.setTimeout(()=>void poll(),1800);
+          return;
+        }
+        if(next&&['succeeded','rolled_back','failed'].includes(next.state)) {
+          setSystemUpdateProgressOpen(true);
+          const completionKey=`${next.state}:${next.completedAt??next.lastUpdatedAt}`;
+          if(updateCompletionHandled.current!==completionKey) {
+            updateCompletionHandled.current=completionKey;
+            void loadSystemVersion();
+          }
+        }
+      } catch {
+        if(cancelled)return;
+        consecutiveFailures+=1;
+        const elapsed=Date.now()-pollingStartedAt;
+        if(consecutiveFailures<=30&&elapsed<5*60*1000) {
+          setSystemUpdateReconnectMessage('MCC is temporarily unavailable while restarting. Reconnecting…');
+          const delay=Math.min(10_000,1000*(2**Math.min(consecutiveFailures,3)));
+          timer=window.setTimeout(()=>void poll(),delay);
+        } else {
+          setSystemUpdateReconnectMessage('Automatic reconnect paused. Use View progress to retry when MCC is available.');
+        }
+      }
+    }
+    timer=window.setTimeout(()=>void poll(),900);
+    return()=>{cancelled=true;window.clearTimeout(timer);};
+  },[canViewSystemVersion,updatePollingActive,systemUpdate?.startedAt]);
   useEffect(()=>{
     if (manualBackupProgress.state !== 'running' || manualBackupProgress.activeStep >= backupStepLabels.length - 2) return;
     const timer = window.setTimeout(()=>{
@@ -634,9 +925,156 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
   },[manualBackupProgress.activeStep,manualBackupProgress.state]);
 
   const resetReady = Boolean(resetModal && resetModal.reason.trim() && resetModal.confirmation === resetModal.target.confirmation && resetModal.state !== 'running');
+  const updateAvailable=Boolean(systemUpdate&&systemUpdate.state==='update_available'&&['update_available','same_version_different_commit'].includes(systemUpdate.code));
+  const updateBusy=Boolean(systemUpdateLoading||systemUpdateInstalling||systemUpdate?.state==='checking');
+  const updateButtonLabel=systemUpdate?.active
+    ? 'View progress'
+    : updateAvailable
+      ? systemUpdate?.code==='same_version_different_commit'
+        ? `Update build ${systemUpdate.targetCommit??''}`.trim()
+        : `Update to v${systemUpdate?.targetVersion??''}`.trim()
+      : systemUpdate?.code==='not_checked'||systemUpdate?.code==='up_to_date'
+        ? 'Check for updates'
+        : systemUpdate?.available===false
+          ? 'Unavailable'
+          : 'Try again';
 
   return (
     <div className="page-stack settings-page">
+      {canViewSystemVersion&&(
+        <aside id="system-update" ref={systemUpdatePanelRef} tabIndex={-1} className="mcc-card system-version-panel" aria-label="MCC system version">
+          <div className="system-version-installed">
+            <span className="system-version-label"><i aria-hidden="true" />System Version</span>
+            <strong>{systemVersion?.displayVersion ? `MCC ${systemVersion.displayVersion}` : systemVersionLoading ? 'MCC loading…' : 'MCC version unavailable'}</strong>
+            <small>{systemVersion?.commit ? `Build ${systemVersion.commit}` : 'Build unavailable'}</small>
+          </div>
+          <div className={`system-update-control state-${systemUpdate?.state??'idle'} code-${systemUpdate?.code??'loading'}`}>
+            <div className="system-update-heading">
+              <span>{systemUpdateLoading&&!systemUpdate?'LOADING UPDATE STATUS':updateStateLabel(systemUpdate)}</span>
+              <em>{systemUpdate?.environmentLabel??'UPDATE STATUS LOADING'}</em>
+            </div>
+            {systemUpdate?.active&&<p>Backup → Pull → Build → Restart</p>}
+            {!systemUpdate?.active&&systemUpdate?.code==='up_to_date'&&<div className="system-update-up-to-date" aria-live="polite">
+              <strong>No new updates are available.</strong>
+              <span>Installed v{systemUpdate.installedVersion??systemVersion?.version??'unavailable'} · Build {systemUpdate.installedCommit??systemVersion?.commit??'unavailable'}</span>
+              <small>Last checked {formatDateTime(systemUpdate.lastUpdatedAt)}</small>
+            </div>}
+            {!systemUpdate?.active&&systemUpdate?.code!=='up_to_date'&&systemUpdate?.message&&<p>{systemUpdate.message}</p>}
+            {systemUpdateReconnectMessage&&<p className="system-update-reconnect" role="status">{systemUpdateReconnectMessage}</p>}
+            <button
+              className={updateAvailable?'primary-button compact-button':'secondary-button compact-button'}
+              type="button"
+              disabled={updateBusy||(!systemUpdate?.available&&!systemUpdate?.active)}
+              onClick={()=>{
+                if(systemUpdate?.active){setSystemUpdateProgressOpen(true);return;}
+                if(updateAvailable){setSystemUpdateConfirmationOpen(true);return;}
+                void checkForSystemUpdate();
+              }}
+            >
+              {updateBusy?'Checking…':updateButtonLabel}
+            </button>
+          </div>
+        </aside>
+      )}
+      {systemUpdateConfirmationOpen&&systemUpdate&&(
+        <div className="modal-backdrop system-update-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="mcc-update-confirmation-title">
+          <section className="mcc-card inventory-modal system-update-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Verified origin/main release</p>
+                <h3 id="mcc-update-confirmation-title">MCC Update Available</h3>
+              </div>
+              <span className="system-update-environment">{systemUpdate.environmentLabel}</span>
+            </div>
+            <div className="system-update-version-grid">
+              <div>
+                <span>Installed</span>
+                <strong>v{systemUpdate.installedVersion??'unavailable'}</strong>
+                <small>Build {systemUpdate.installedCommit??'unavailable'}</small>
+              </div>
+              <div>
+                <span>Available</span>
+                <strong>v{systemUpdate.targetVersion??'unavailable'}</strong>
+                <small>Build {systemUpdate.targetCommit??'unavailable'}</small>
+              </div>
+            </div>
+            <section className="system-update-warning">
+              <strong>MCC may be unavailable for approximately 1–3 minutes.</strong>
+              <p>A safety backup will be created before installation.</p>
+              <p>Open sessions may reconnect or require a refresh or login.</p>
+            </section>
+            {systemUpdateReconnectMessage&&<p className="form-message error" role="alert">{systemUpdateReconnectMessage}</p>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={()=>setSystemUpdateConfirmationOpen(false)} disabled={systemUpdateInstalling}>Cancel</button>
+              <button className="primary-button" type="button" onClick={()=>void installSystemUpdate()} disabled={systemUpdateInstalling}>
+                {systemUpdateInstalling?'Queuing update…':'Install Update'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {systemUpdateProgressOpen&&systemUpdate&&(
+        <div className="modal-backdrop system-update-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="mcc-update-progress-title">
+          <section className="mcc-card inventory-modal system-update-modal system-update-progress-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">{systemUpdate.environmentLabel}</p>
+                <h3 id="mcc-update-progress-title">
+                  {systemUpdate.state==='succeeded'?'Update Complete':systemUpdate.state==='rolled_back'?'Update Failed':systemUpdate.state==='failed'?'Update Failed':'MCC Update Progress'}
+                </h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>setSystemUpdateProgressOpen(false)}>Close</button>
+            </div>
+            {systemUpdate.state==='succeeded'&&(
+              <section className="system-update-result success" aria-live="polite">
+                <strong>MCC v{systemUpdate.targetVersion??systemUpdate.installedVersion} is running</strong>
+                <span>Build {systemUpdate.targetCommit??systemUpdate.installedCommit??'unavailable'}</span>
+                <p>The browser reconnected and refreshed the installed version information.</p>
+              </section>
+            )}
+            {systemUpdate.state==='rolled_back'&&(
+              <section className="system-update-result rollback" aria-live="assertive">
+                <strong>MCC was restored to v{systemUpdate.installedVersion??'the previous version'}</strong>
+                <span>Previous version is running normally</span>
+                <p>The attempted update failed. Automatic rollback completed and was not hidden.</p>
+              </section>
+            )}
+            {systemUpdate.state==='failed'&&(
+              <section className="system-update-result failure" aria-live="assertive">
+                <strong>{systemUpdate.message||'The MCC update failed.'}</strong>
+                <span>{systemUpdate.outcome==='failed'?'Automatic recovery needs administrator attention.':'The previous build may still be running.'}</span>
+              </section>
+            )}
+            {!['succeeded','rolled_back','failed'].includes(systemUpdate.state)&&(
+              <section className="backup-progress-panel running" aria-live="polite">
+                <div className="backup-progress-heading">
+                  <div>
+                    <span>{updateStateLabel(systemUpdate)}</span>
+                    <strong>{systemUpdate.message}</strong>
+                  </div>
+                  <span className="backup-spinner" aria-hidden="true" />
+                </div>
+                <ol className="backup-step-list">
+                  {systemUpdateStepLabels.map((step,index)=>{
+                    const activeIndex=updateProgressIndex(systemUpdate.state);
+                    return <li className={index<activeIndex?'done':index===activeIndex?'running':''} key={step}>{step}</li>;
+                  })}
+                </ol>
+              </section>
+            )}
+            {systemUpdateReconnectMessage&&<p className="system-update-reconnect prominent" role="status">{systemUpdateReconnectMessage}</p>}
+            <div className="system-update-progress-meta">
+              <span>Installed</span><strong>v{systemUpdate.installedVersion??'—'} · {systemUpdate.installedCommit??'build unavailable'}</strong>
+              <span>Target</span><strong>v{systemUpdate.targetVersion??'—'} · {systemUpdate.targetCommit??'build unavailable'}</strong>
+              <span>Last update</span><strong>{formatDateTime(systemUpdate.lastUpdatedAt)}</strong>
+            </div>
+            <div className="modal-actions">
+              {!systemUpdate.active&&<button className="secondary-button" type="button" onClick={()=>{void loadSystemUpdateStatus();void loadSystemVersion();}}>Refresh status</button>}
+              <button className="primary-button" type="button" onClick={()=>setSystemUpdateProgressOpen(false)}>Return to Settings</button>
+            </div>
+          </section>
+        </div>
+      )}
       <article className="mcc-card wide-card branding-card">
         <div className="share-card-heading">
           <div>
@@ -761,7 +1199,10 @@ export function SettingsPage({isOwnerAdmin=false}:{isOwnerAdmin?: boolean}) {
               <strong>Tiered MCC data protection</strong>
               <p>Daily change backups, Friday weekly backups, and monthly master backups are separated by role and folder.</p>
             </div>
-            <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
+            <div className="backup-row-actions">
+              {backupPermissions.canViewWeekly&&<a className="secondary-button compact-button" href="/api/machine-library/documents/recovery-export" download>Export Document Recovery ZIP</a>}
+              <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
+            </div>
           </div>
 
           {manualBackupProgress.state!=='idle'&&(

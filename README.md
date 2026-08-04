@@ -35,7 +35,14 @@ On Windows, use `Start MCC Website.cmd` to start the backend website and open th
 ## Backend Endpoints
 
 - `GET /api/health` returns MCC health and port information.
-- `GET /api/version` returns basic MCC version information.
+- `GET /api/version` returns MCC version/build metadata to authenticated Admin and Owner Admin users.
+- `GET /api/system/update/status`, `POST /api/system/update/check`, and `POST /api/system/update/install` provide the Admin/Owner-only fixed-source updater workflow. See `docs/admin-one-click-updater.md` before enabling it.
+
+## Managed Windows updater
+
+The managed Windows installer keeps `WindowsProduction` permanently restricted to `origin/main`. `WindowsTest` also defaults to `main`, but an elevated Administrator may configure one explicit origin branch during installation with `-TestBranch`. That branch is validated on origin and stored only in the protected `C:\ProgramData\MCC\Updater\config.json`; the browser and API cannot select or change it, and Settings has no branch control.
+
+See [`deploy/windows/README-Windows-Updater.md`](deploy/windows/README-Windows-Updater.md) for installation, validation, rollback, and removal commands.
 
 ## Planned Modules
 
