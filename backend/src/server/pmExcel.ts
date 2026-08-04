@@ -14,6 +14,8 @@ export type WorkbookPmStatus = 'Current' | 'Due Soon' | 'Due Now' | 'Overdue';
 export type ParsedTrackerRow = {
   rowNumber:number;
   assetNumber:string;
+  assetNumberInherited:boolean;
+  machineSectionRow:number|null;
   assetName:string;
   taskTitle:string;
   intervalType:WorkbookPmInterval;
@@ -80,42 +82,42 @@ export type HistoryWorkbookAppend = {
   taskNote:string;
 };
 
-type TrackerField = 'assetNumber'|'assetName'|'taskTitle'|'intervalType'|'intervalValue'|'lastCompleted'|'current'|'remaining'|'status';
+type TrackerField = 'assetNumber'|'assetName'|'taskTitle'|'intervalType'|'intervalValue'|'lastCompleted'|'current'|'due'|'remaining'|'status';
 type HistoryField = 'assetNumber'|'workOrderNumber'|'taskStatus'|'startDate'|'completionDate'|'workOrderType'|'performedBy'|'intervalType'|'taskType'|'taskNote';
 type HeaderMap<Field extends string> = { rowNumber:number; columns:Record<Field,number> };
 
 const trackerAliases:Record<TrackerField,string[]> = {
   assetNumber:['Asset Number','Asset #','Asset No','Machine Number','Machine #','Machine No','Press Number','Press #','Press'],
   assetName:['Asset Name','Machine Name','Equipment Name','Name'],
-  taskTitle:['PM Task','Task','Task Type','PM Task Type','PM Description','Task Description'],
+  taskTitle:['PM Task','Task','Task Type','PM Task Type','PM Description','Task Description','Maintenance Task','Maintenance Description'],
   intervalType:['Interval Type','PM Interval Type','Frequency Type','Interval Unit','Frequency Unit'],
-  intervalValue:['Interval Value','Interval Amount','PM Interval','PM Frequency','Frequency','Interval'],
-  lastCompleted:['Last Completed','Last Completed Value','Last Completed Date or Meter','Last Completed Date / Meter','Last PM','Last PM Date / Meter','Last PM Date/Hour','Last Completed Date','Last Completed Meter'],
-  current:['Current','Current Value','Current Date or Meter','Current Date / Meter','Current Reading','Current Meter','Current Date','Current Date/Hour'],
+  intervalValue:['Interval Value','Interval Amount','PM Interval','PM Frequency','Frequency','Interval','Interval Cycle','Interval Cycles'],
+  lastCompleted:['Last Completed','Last Completed Value','Last Completed Date or Meter','Last Completed Date / Meter','Last PM','Last PM Date / Meter','Last PM Date/Hour','Last Completed Date','Last Completed Meter','Last Completed Date / Last hourly','Last Completed Date / Last Hourly'],
+  current:['Current','Current Value','Current Date or Meter','Current Date / Meter','Current Reading','Current Meter','Current Date','Current Date/Hour','Today Date / Hourly','Today Date/Hourly'],
+  due:['Due Date','Due Meter','Next Due','Next Due Date','Next Due Meter','Due Date / Meter'],
   remaining:['Remaining','Remaining Value','Hours Remaining','Cycles Remaining','Days Remaining','Hours left/Days left','Hours Left / Days Left'],
   status:['Status','PM Status','Task Status'],
 };
 
 const historyAliases:Record<HistoryField,string[]> = {
-  assetNumber:['Asset Number','Asset #','Asset No','Machine Number','Machine #','Press Number','Press #','Press'],
-  workOrderNumber:['Work-order Number','Work Order Number','Work-order #','Work Order #','WO Number','WO #'],
+  assetNumber:['Asset Number','Asset #','Asset No','AssetNo','Machine Number','Machine #','Press Number','Press #','Press'],
+  workOrderNumber:['Work-order Number','Work Order Number','Work-order #','Work Order #','Work order #','WO Number','WO #'],
   taskStatus:['Task Status','Status','Work Order Status'],
   startDate:['Start Date','Started Date','Work Order Start Date'],
   completionDate:['End Date','Completion Date','Completed Date','Work Order End Date'],
   workOrderType:['Work-order Type','Work Order Type','WO Type'],
-  performedBy:['Performed By','Completed By','Technician'],
+  performedBy:['Performed By','Perform By','Perform By:','Completed By','Technician'],
   intervalType:['Interval Type','PM Interval Type','Frequency Type'],
   taskType:['Task Type','PM Task','Task','PM Task Type'],
   taskNote:['Task Note','Task Notes','Completion Note','Completion Notes','Notes'],
 };
 
-const trackerRequired:TrackerField[]=['assetNumber','taskTitle','intervalType','intervalValue','lastCompleted','current','remaining','status'];
+const trackerRequired:TrackerField[]=['taskTitle','intervalType','intervalValue','lastCompleted','current','status'];
 const historyRequired:HistoryField[]=['assetNumber','workOrderNumber','taskStatus','startDate','completionDate','workOrderType','performedBy','intervalType','taskType','taskNote'];
 
 function cleanText(value:unknown) { return String(value ?? '').replace(/\r/g,'').trim(); }
 export function normalizedPmKey(value:unknown) { return cleanText(value).replace(/[\u2010-\u2015]/g,'-').replace(/\s+/g,' ').toLowerCase(); }
-function normalizedHeader(value:unknown) { return normalizedPmKey(value).replace(/[^a-z0-9]+/g,''); }
-function safeClone<T>(value:T):T { return value===undefined?value:structuredClone(value); }
+function normalizedHeader(value:unknown) { return normalizedPmKey(value).replace(/[^a-z0-9]+/g,'').replace(/cycles/g,'cycle'); }
 
 function cellRawValue(cell:ExcelJS.Cell):unknown {
   const value=cell.value;
@@ -145,6 +147,12 @@ function findHeader<Field extends string>(sheet:ExcelJS.Worksheet, aliases:Recor
   const missing=required.filter(field=>best?.columns[field]===undefined);
   if (missing.length) throw new Error(`${sheet.name} is missing required columns: ${missing.map(field=>aliases[field][0]).join(', ')}.`);
   return {rowNumber:best!.rowNumber,columns:best!.columns as Record<Field,number>};
+}
+
+function isTrackerHeaderRow(sheet:ExcelJS.Worksheet,rowNumber:number,header:HeaderMap<TrackerField>) {
+  const fields:TrackerField[]=['taskTitle','intervalType','intervalValue','lastCompleted','current','status'];
+  const matches=fields.filter(field=>{const column=header.columns[field];if(!column)return false;const value=normalizedHeader(cellRawValue(sheet.getCell(rowNumber,column)));return trackerAliases[field].some(alias=>normalizedHeader(alias)===value);});
+  return matches.length>=5;
 }
 
 function isoDate(value:unknown,label:string) {
@@ -202,7 +210,7 @@ export function calculateWorkbookPm(input:{intervalType:WorkbookPmInterval;inter
     return {nextDueDate:null,nextDueMeter:nextDue,remaining,status};
   }
   if (!input.lastCompletedDate||!input.currentDate) throw new Error('Last completed and current dates are required.');
-  const nextDueDate=intervalType==='annual'?addMonths(input.lastCompletedDate,12):addDays(input.lastCompletedDate,input.intervalValue);
+  const nextDueDate=intervalType==='annual'?(input.intervalValue===365?addDays(input.lastCompletedDate,365):addMonths(input.lastCompletedDate,input.intervalValue)):addDays(input.lastCompletedDate,input.intervalValue);
   const remaining=dayDifference(nextDueDate,input.currentDate);
   const status:WorkbookPmStatus=remaining<0?'Overdue':remaining===0?'Due Now':remaining<=14?'Due Soon':'Current';
   return {nextDueDate,nextDueMeter:null,remaining,status};
@@ -216,23 +224,57 @@ export function defaultPmCompletionNote(intervalType:WorkbookPmInterval,reading:
 
 export function meaningfulPmNote(value:unknown) { const clean=cleanText(value);return clean.length>=5&&/[A-Za-z0-9]/.test(clean); }
 
-function parseTrackerRow(sheet:ExcelJS.Worksheet,rowNumber:number,header:HeaderMap<TrackerField>):ParsedTrackerRow|null {
+type TrackerSectionContext = {assetNumber:string;rowNumber:number}|null;
+type TrackerSectionHeading = {matched:false}|{matched:true;assetNumber:string|null;reason?:string};
+
+function trackerSectionHeading(sheet:ExcelJS.Worksheet,rowNumber:number,header:HeaderMap<TrackerField>):TrackerSectionHeading {
+  const values:Array<{column:number;text:string}>=[];
+  for(let column=1;column<=Math.min(Math.max(sheet.columnCount,1),100);column+=1){const text=cleanText(cellRawValue(sheet.getCell(rowNumber,column)));if(text)values.push({column,text});}
+  const taskColumn=header.columns.taskTitle;const intervalColumn=header.columns.intervalType;const explicitAssetColumn=header.columns.assetNumber;
+  const task=taskColumn?cleanText(cellRawValue(sheet.getCell(rowNumber,taskColumn))):'';
+  const interval=intervalColumn?cleanText(cellRawValue(sheet.getCell(rowNumber,intervalColumn))):'';
+  const explicitAsset=explicitAssetColumn?cleanText(cellRawValue(sheet.getCell(rowNumber,explicitAssetColumn))):'';
+  if(explicitAsset&&!task&&!interval)return {matched:true,assetNumber:explicitAsset};
+  const labels=new Set(['press','pressnumber','pressno','machine','machinenumber','machineno','asset','assetnumber','assetno']);
+  const candidates:string[]=[];let foundLabel=false;
+  for(let index=0;index<values.length;index+=1){
+    const item=values[index];const normalized=normalizedHeader(item.text);
+    const combined=/^(?:press|machine|asset)(?:\s*(?:number|no|#))?\s*:\s*(.+)$/i.exec(item.text);
+    if(combined){foundLabel=true;const candidate=cleanText(combined[1]);if(candidate)candidates.push(candidate);continue;}
+    if(!labels.has(normalized))continue;foundLabel=true;
+    const next=values.find(candidate=>candidate.column===item.column+1&&!labels.has(normalizedHeader(candidate.text)));
+    if(next)candidates.push(next.text);
+  }
+  if(!foundLabel)return {matched:false};
+  const unique=[...new Map(candidates.map(value=>[normalizedPmKey(value),value])).values()];
+  if(unique.length!==1)return {matched:true,assetNumber:null,reason:'Machine/press section heading is ambiguous or missing its identifier.'};
+  return {matched:true,assetNumber:unique[0]};
+}
+
+function trackerSectionBeforeHeader(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>):TrackerSectionContext {
+  let section:TrackerSectionContext=null;
+  for(let rowNumber=1;rowNumber<header.rowNumber;rowNumber+=1){const heading=trackerSectionHeading(sheet,rowNumber,header);if(heading.matched)section=heading.assetNumber?{assetNumber:heading.assetNumber,rowNumber}:null;}
+  return section;
+}
+
+function parseTrackerRow(sheet:ExcelJS.Worksheet,rowNumber:number,header:HeaderMap<TrackerField>,section:TrackerSectionContext):ParsedTrackerRow|null {
   const value=(field:TrackerField)=>cellRawValue(sheet.getCell(rowNumber,header.columns[field]));
-  const assetNumber=cleanText(value('assetNumber'));
+  const explicitAssetNumber=header.columns.assetNumber?cleanText(value('assetNumber')):'';
+  const assetNumber=explicitAssetNumber||section?.assetNumber||'';
   const taskTitle=cleanText(value('taskTitle'));
   const intervalText=cleanText(value('intervalType'));
-  if (!assetNumber&&!taskTitle&&!intervalText) return null;
-  if (!assetNumber) throw new Error('Asset Number is required.');
+  if (!taskTitle&&!intervalText) return null;
+  if (!assetNumber) throw new Error('Machine/press section ownership could not be determined unambiguously.');
   if (!taskTitle) throw new Error('PM Task is required.');
   const intervalType=normalizeWorkbookInterval(intervalText);
   const meter=intervalType==='hourly'||intervalType==='cycles';
-  const intervalValue=intervalType==='annual'?12:positiveNumber(value('intervalValue'),'Interval Value',intervalType!=='hourly');
+  const intervalValue=positiveNumber(value('intervalValue'),'Interval Value',intervalType!=='hourly');
   const lastCompletedDate=meter?null:isoDate(value('lastCompleted'),'Last Completed');
   const lastCompletedMeter=meter?requiredNumber(value('lastCompleted'),'Last Completed',intervalType==='cycles'):null;
   const currentDate=meter?null:isoDate(value('current'),'Current Date');
   const currentMeter=meter?requiredNumber(value('current'),'Current Meter',intervalType==='cycles'):null;
   const calculated=calculateWorkbookPm({intervalType,intervalValue,lastCompletedDate,lastCompletedMeter,currentDate,currentMeter});
-  return {rowNumber,assetNumber,assetName:header.columns.assetName?cleanText(value('assetName')):'',taskTitle,intervalType,intervalValue,lastCompletedDate,lastCompletedMeter,currentDate,currentMeter,remaining:calculated.remaining,status:calculated.status};
+  return {rowNumber,assetNumber,assetNumberInherited:!explicitAssetNumber,machineSectionRow:explicitAssetNumber?null:section?.rowNumber??null,assetName:header.columns.assetName?cleanText(value('assetName')):'',taskTitle,intervalType,intervalValue,lastCompletedDate,lastCompletedMeter,currentDate,currentMeter,remaining:calculated.remaining,status:calculated.status};
 }
 
 function historySourceRef(input:Omit<ParsedHistoryRow,'rowNumber'|'sourceRef'>) {
@@ -272,11 +314,14 @@ export async function inspectPmWorkbook(buffer:Buffer):Promise<ParsedPmWorkbook>
   const trackerHeader=findHeader(tracker,trackerAliases,trackerRequired);
   const historyHeader=findHeader(history,historyAliases,historyRequired);
   const trackerRows:ParsedTrackerRow[]=[];const historyRows:ParsedHistoryRow[]=[];const rejectedRows:RejectedWorkbookRow[]=[];const warnings:ParsedPmWorkbook['warnings']=[];
+  let trackerSection=trackerSectionBeforeHeader(tracker,trackerHeader);
   for (let rowNumber=trackerHeader.rowNumber+1;rowNumber<=tracker.rowCount;rowNumber+=1) {
     try {
-      const row=parseTrackerRow(tracker,rowNumber,trackerHeader);if (!row) continue;trackerRows.push(row);
-      const supplied=cellRawValue(tracker.getCell(rowNumber,trackerHeader.columns.remaining));
-      if (cleanText(supplied)!=='') { const numeric=Number(cleanText(supplied).replace(/,/g,''));if (Number.isFinite(numeric)&&Math.abs(numeric-row.remaining)>0.000001) warnings.push({sheet:PM_TRACKER_SHEET,rowNumber,message:`Remaining value will be recalculated from the MCC baseline (${row.remaining}).`}); }
+      if(isTrackerHeaderRow(tracker,rowNumber,trackerHeader))continue;
+      const heading=trackerSectionHeading(tracker,rowNumber,trackerHeader);if(heading.matched){trackerSection=heading.assetNumber?{assetNumber:heading.assetNumber,rowNumber}:null;if(heading.reason)rejectedRows.push({sheet:PM_TRACKER_SHEET,rowNumber,reason:heading.reason});continue;}
+      const row=parseTrackerRow(tracker,rowNumber,trackerHeader,trackerSection);if (!row) continue;trackerRows.push(row);
+      const remainingColumn=trackerHeader.columns.remaining;
+      if(remainingColumn){const supplied=cellRawValue(tracker.getCell(rowNumber,remainingColumn));if (cleanText(supplied)!=='') { const numeric=Number(cleanText(supplied).replace(/,/g,''));if (Number.isFinite(numeric)&&Math.abs(numeric-row.remaining)>0.000001) warnings.push({sheet:PM_TRACKER_SHEET,rowNumber,message:`Remaining value will be recalculated from the MCC baseline (${row.remaining}).`}); }}
       const status=cleanText(cellRawValue(tracker.getCell(rowNumber,trackerHeader.columns.status)));
       if (status&&normalizedPmKey(status)!==normalizedPmKey(row.status)) warnings.push({sheet:PM_TRACKER_SHEET,rowNumber,message:`Status will be recalculated as ${row.status}.`});
     } catch (error) { rejectedRows.push({sheet:PM_TRACKER_SHEET,rowNumber,reason:error instanceof Error?error.message:'Invalid PM tracker row.'}); }
@@ -295,38 +340,70 @@ function sameCellValue(cell:ExcelJS.Cell,value:unknown) {
   if (typeof current==='number'&&typeof value==='number') return Math.abs(current-value)<0.000001;
   return cleanText(current)===cleanText(value);
 }
-function setTargetCell(cell:ExcelJS.Cell,value:unknown) {
-  if (cell.type===ExcelJS.ValueType.Formula) return false;
-  if (sameCellValue(cell,value)) return false;
-  cell.value=value as ExcelJS.CellValue;
-  return true;
-}
-
 function xmlAttribute(tag:string,name:string){const match=new RegExp(`(?:^|\\s)${name.replace(':','\\:')}="([^"]*)"`).exec(tag);return match?.[1]??'';}
 function decodeXml(value:string){return value.replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
 function relationshipPart(part:string){return path.posix.join(path.posix.dirname(part),'_rels',`${path.posix.basename(part)}.rels`);}
 function relationshipTarget(ownerPart:string,target:string){if(target.startsWith('/'))return target.slice(1);return path.posix.normalize(path.posix.join(path.posix.dirname(ownerPart),target));}
 
-async function restoreUnrelatedWorksheetParts(sourcePath:string,generatedPath:string){
-  const [sourceZip,generatedZip]=await Promise.all([JSZip.loadAsync(fs.readFileSync(sourcePath)),JSZip.loadAsync(fs.readFileSync(generatedPath))]);
-  async function sheetParts(zip:JSZip){const workbookXml=await zip.file('xl/workbook.xml')?.async('string');const relationshipsXml=await zip.file('xl/_rels/workbook.xml.rels')?.async('string');if(!workbookXml||!relationshipsXml)throw new Error('Workbook package relationships are unreadable.');const targets=new Map<string,string>();for(const match of relationshipsXml.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];const id=xmlAttribute(tag,'Id');const target=xmlAttribute(tag,'Target');if(id&&target)targets.set(id,relationshipTarget('xl/workbook.xml',decodeXml(target)));}const parts=new Map<string,string>();for(const match of workbookXml.matchAll(/<sheet\b[^>]*\/?\s*>/g)){const tag=match[0];const name=decodeXml(xmlAttribute(tag,'name'));const target=targets.get(xmlAttribute(tag,'r:id'));if(name&&target)parts.set(name,target);}return parts;}
-  const [sourceParts,generatedParts]=await Promise.all([sheetParts(sourceZip),sheetParts(generatedZip)]);
-  const sourceShared=await sourceZip.file('xl/sharedStrings.xml')?.async('string');const generatedShared=await generatedZip.file('xl/sharedStrings.xml')?.async('string');
-  if(sourceShared&&generatedShared){const sourceEntries=[...sourceShared.matchAll(/<si\b[^>]*>[\s\S]*?<\/si>/g)].map(match=>match[0]);const generatedEntries=[...generatedShared.matchAll(/<si\b[^>]*>[\s\S]*?<\/si>/g)].map(match=>match[0]);const combined=[...sourceEntries];const indexes=new Map(combined.map((entry,index)=>[entry,index]));const remap=generatedEntries.map(entry=>{const existing=indexes.get(entry);if(existing!==undefined)return existing;const index=combined.length;combined.push(entry);indexes.set(entry,index);return index;});const first=sourceShared.search(/<si\b/);const last=sourceShared.lastIndexOf('</si>');if(first>=0&&last>=first){let merged=`${sourceShared.slice(0,first)}${combined.join('')}${sourceShared.slice(last+5)}`;merged=merged.replace(/\bcount="\d+"/,`count="${combined.length}"`).replace(/\buniqueCount="\d+"/,`uniqueCount="${combined.length}"`);generatedZip.file('xl/sharedStrings.xml',merged);for(const name of [PM_TRACKER_SHEET,PM_HISTORY_SHEET]){const part=generatedParts.get(name);if(!part)continue;const file=generatedZip.file(part);if(!file)continue;const xml=await file.async('string');const remapped=xml.replace(/<c\b([^>]*\bt="s"[^>]*)>([\s\S]*?)<\/c>/g,(cell,attributes,body)=>`<c${attributes}>${String(body).replace(/<v>(\d+)<\/v>/,(_value,index)=>`<v>${remap[Number(index)]??Number(index)}</v>`)}</c>`);generatedZip.file(part,remapped);}}}
-  const copied=new Set<string>();
-  async function copyPart(part:string):Promise<void>{
-    if(copied.has(part))return;copied.add(part);const sourceFile=sourceZip.file(part);if(!sourceFile)return;generatedZip.file(part,await sourceFile.async('nodebuffer'));
-    const relPart=relationshipPart(part);const relFile=sourceZip.file(relPart);if(!relFile)return;const relXml=await relFile.async('string');generatedZip.file(relPart,Buffer.from(relXml));
-    for(const match of relXml.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];if(/TargetMode="External"/i.test(tag))continue;const target=xmlAttribute(tag,'Target');if(target)await copyPart(relationshipTarget(part,decodeXml(target)));}
+async function workbookSheetParts(zip:JSZip){
+  const workbookXml=await zip.file('xl/workbook.xml')?.async('string');const relationshipsXml=await zip.file('xl/_rels/workbook.xml.rels')?.async('string');if(!workbookXml||!relationshipsXml)throw new Error('Workbook package relationships are unreadable.');
+  const targets=new Map<string,string>();for(const match of relationshipsXml.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];const id=xmlAttribute(tag,'Id');const target=xmlAttribute(tag,'Target');if(id&&target)targets.set(id,relationshipTarget('xl/workbook.xml',decodeXml(target)));}
+  const parts=new Map<string,string>();for(const match of workbookXml.matchAll(/<sheet\b[^>]*\/?\s*>/g)){const tag=match[0];const name=decodeXml(xmlAttribute(tag,'name'));const target=targets.get(xmlAttribute(tag,'r:id'));if(name&&target)parts.set(name,target);}
+  return parts;
+}
+
+function xmlEscape(value:string){return value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
+function regexEscape(value:string){return value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function cellColumnNumber(address:string){const letters=/^[A-Z]+/i.exec(address)?.[0].toUpperCase()??'';let result=0;for(const letter of letters)result=result*26+letter.charCodeAt(0)-64;return result;}
+function excelSerial(value:Date,date1904:boolean){const epoch=date1904?Date.UTC(1904,0,1):Date.UTC(1899,11,30);return (value.getTime()-epoch)/86400000;}
+function xmlCellValue(value:unknown,date1904:boolean){
+  if(value===null||value===undefined)return {type:'',body:''};
+  if(value instanceof Date)return {type:'',body:`<v>${excelSerial(value,date1904)}</v>`};
+  if(typeof value==='number')return {type:'',body:`<v>${Number.isFinite(value)?String(value):'0'}</v>`};
+  if(typeof value==='boolean')return {type:'b',body:`<v>${value?1:0}</v>`};
+  const text=String(value);return {type:'inlineStr',body:`<is><t xml:space="preserve">${xmlEscape(text)}</t></is>`};
+}
+function rowXmlPattern(rowNumber:number){return new RegExp(`<row\\b(?=[^>]*\\br="${rowNumber}")[^>]*?(?:\\/>|>[\\s\\S]*?<\\/row>)`);}
+function cellXmlPattern(address:string){return new RegExp(`<c\\b(?=[^>]*\\br="${regexEscape(address)}")[^>]*?(?:\\/>|>[\\s\\S]*?<\\/c>)`);}
+function shiftFormulaRows(formula:string,delta:number){return formula.replace(/(\$?[A-Z]{1,3})(\$?)(\d+)/g,(_match,column,absolute,row)=>`${column}${absolute?'$':''}${absolute?row:Number(row)+delta}`);}
+function shiftedTemplateRow(rowXml:string,sourceRow:number,targetRow:number){
+  const delta=targetRow-sourceRow;let shifted=rowXml.replace(new RegExp(`(<row\\b[^>]*\\br=")${sourceRow}("[^>]*>)`),`$1${targetRow}$2`).replace(new RegExp(`(<c\\b[^>]*\\br="[A-Z]+)${sourceRow}("[^>]*>)`,'g'),`$1${targetRow}$2`);
+  shifted=shifted.replace(/<f(\b[^>]*)>([\s\S]*?)<\/f>/g,(_match,attributes,formula)=>`<f${attributes}>${shiftFormulaRows(formula,delta)}</f>`);return shifted;
+}
+function ensureWorksheetRow(xml:string,rowNumber:number,templateRowNumber:number|null){
+  if(rowXmlPattern(rowNumber).test(xml))return xml;
+  let rowXml=`<row r="${rowNumber}"></row>`;if(templateRowNumber!==null){const template=rowXmlPattern(templateRowNumber).exec(xml)?.[0];if(template)rowXml=shiftedTemplateRow(template,templateRowNumber,rowNumber);}
+  const sheetDataEnd=xml.indexOf('</sheetData>');if(sheetDataEnd<0)throw new Error('Worksheet data is unreadable.');
+  let insertAt=sheetDataEnd;for(const match of xml.slice(0,sheetDataEnd).matchAll(/<row\b[^>]*\br="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)){if(Number(match[1])>rowNumber){insertAt=match.index??insertAt;break;}}
+  return `${xml.slice(0,insertAt)}${rowXml}${xml.slice(insertAt)}`;
+}
+function setWorksheetCell(xml:string,address:string,value:unknown,date1904:boolean,templateAddress?:string){
+  const rowNumber=Number(/\d+$/.exec(address)?.[0]??0);const rowMatch=rowXmlPattern(rowNumber).exec(xml);if(!rowMatch)throw new Error(`Worksheet row ${rowNumber} is unavailable.`);let rowXml=rowMatch[0];const existing=cellXmlPattern(address).exec(rowXml)?.[0];if(existing&&/<f\b/i.test(existing))return {xml,changed:false};
+  let opening=existing?.match(/^<c\b[^>]*\/?\s*>/)?.[0]??'';
+  if(!opening&&templateAddress){const template=cellXmlPattern(templateAddress).exec(xml)?.[0];opening=template?.match(/^<c\b[^>]*\/?\s*>/)?.[0]??'';}
+  let attributes=opening.replace(/^<c\b|\/?>$/g,'').trim().replace(/(?:^|\s)r="[^"]*"/g,'').replace(/(?:^|\s)t="[^"]*"/g,'').trim();
+  const encoded=xmlCellValue(value,date1904);const replacement=`<c r="${address}"${attributes?` ${attributes}`:''}${encoded.type?` t="${encoded.type}"`:''}>${encoded.body}</c>`;
+  if(existing)rowXml=rowXml.replace(existing,replacement);
+  else{
+    if(/<row\b[^>]*\/>$/.test(rowXml))rowXml=rowXml.replace(/\/>$/,'></row>');
+    const targetColumn=cellColumnNumber(address);const cells=[...rowXml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)];const after=cells.find(match=>cellColumnNumber(match[1])>targetColumn);const insertAt=after?.index??rowXml.lastIndexOf('</row>');rowXml=`${rowXml.slice(0,insertAt)}${replacement}${rowXml.slice(insertAt)}`;
   }
-  for(const [name,part] of sourceParts){if(name!==PM_TRACKER_SHEET&&name!==PM_HISTORY_SHEET)await copyPart(part);}
-  const output=await generatedZip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});fs.writeFileSync(generatedPath,output);
+  return {xml:`${xml.slice(0,rowMatch.index)}${rowXml}${xml.slice((rowMatch.index??0)+rowMatch[0].length)}`,changed:true};
+}
+function extendWorksheetDimension(xml:string,rowNumber:number){return xml.replace(/<dimension\b([^>]*)\bref="([A-Z]+\d+):([A-Z]+)(\d+)"([^>]*)\/>/i,(tag,before,start,endColumn,endRow,after)=>rowNumber>Number(endRow)?`<dimension${before}ref="${start}:${endColumn}${rowNumber}"${after}/>`:tag);}
+async function extendHistoryTable(zip:JSZip,sheetPart:string,headerRow:number,rowNumber:number){
+  const relationships=await zip.file(relationshipPart(sheetPart))?.async('string');if(!relationships)return;const tableParts:string[]=[];for(const match of relationships.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];if(!/\/table"?$/i.test(xmlAttribute(tag,'Type')))continue;const target=xmlAttribute(tag,'Target');if(target)tableParts.push(relationshipTarget(sheetPart,decodeXml(target)));}
+  for(const name of tableParts){const file=zip.file(name);if(!file)continue;const xml=await file.async('string');const tableTag=/<table\b[^>]*>/.exec(xml)?.[0];if(!tableTag)continue;const ref=xmlAttribute(tableTag,'ref');const match=/^\$?[A-Z]+\$?(\d+):\$?[A-Z]+\$?(\d+)$/i.exec(ref);if(!match||Number(match[1])!==headerRow||rowNumber<=Number(match[2]))continue;const nextRef=ref.replace(/(\$?[A-Z]+\$?)\d+$/i,`$1${rowNumber}`);zip.file(name,xml.replace(new RegExp(`ref="${regexEscape(ref)}"`,'g'),`ref="${nextRef}"`));return;
+  }
 }
 
 function trackerRowsByKey(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>) {
   const map=new Map<string,number[]>();
+  let section=trackerSectionBeforeHeader(sheet,header);
   for (let rowNumber=header.rowNumber+1;rowNumber<=sheet.rowCount;rowNumber+=1) {
-    const asset=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.assetNumber)));
+    if(isTrackerHeaderRow(sheet,rowNumber,header))continue;
+    const heading=trackerSectionHeading(sheet,rowNumber,header);if(heading.matched){section=heading.assetNumber?{assetNumber:heading.assetNumber,rowNumber}:null;continue;}
+    const asset=(header.columns.assetNumber?cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.assetNumber))):'')||section?.assetNumber||'';
     const task=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.taskTitle)));
     const rawInterval=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.intervalType)));
     if (!asset&&!task&&!rawInterval) continue;
@@ -340,50 +417,15 @@ function trackerRowsByKey(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>
 function historyExistingKeys(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryField>) {
   const keys=new Set<string>();
   for (let rowNumber=header.rowNumber+1;rowNumber<=sheet.rowCount;rowNumber+=1) {
-    const workOrder=normalizedPmKey(cellRawValue(sheet.getCell(rowNumber,header.columns.workOrderNumber)));
-    if (workOrder) keys.add(`wo:${workOrder}`);
     try { const row=parseHistoryRow(sheet,rowNumber,header);if (row) keys.add(`ref:${row.sourceRef}`); } catch {/* Existing legacy rows remain untouched. */}
   }
   return keys;
-}
-
-function copyHistoryTemplate(sheet:ExcelJS.Worksheet,templateRowNumber:number,newRowNumber:number,mappedColumns:Set<number>) {
-  const template=sheet.getRow(templateRowNumber);const target=sheet.getRow(newRowNumber);target.height=template.height;
-  const maxColumn=Math.max(sheet.columnCount,template.cellCount);
-  for (let column=1;column<=maxColumn;column+=1) {
-    const source=template.getCell(column);const destination=target.getCell(column);
-    destination.style=safeClone(source.style);
-    if (source.dataValidation) destination.dataValidation=safeClone(source.dataValidation);
-    if (source.note) destination.note=safeClone(source.note);
-    if (!mappedColumns.has(column)&&source.type===ExcelJS.ValueType.Formula&&source.value&&typeof source.value==='object') destination.value=safeClone(source.value);
-  }
 }
 
 function lastHistoryDataRow(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryField>) {
   const columns=Object.values(header.columns);
   for (let rowNumber=sheet.rowCount;rowNumber>header.rowNumber;rowNumber-=1) if (columns.some(column=>cleanText(cellRawValue(sheet.getCell(rowNumber,column)))!=='')) return rowNumber;
   return header.rowNumber;
-}
-
-function historyFieldForHeader(value:unknown):HistoryField|null {
-  const normalized=normalizedHeader(value);
-  for(const [field,aliases] of Object.entries(historyAliases) as Array<[HistoryField,string[]]>)if(aliases.some(alias=>normalizedHeader(alias)===normalized))return field;
-  return null;
-}
-
-function appendHistoryRow(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryField>,value:HistoryWorkbookAppend) {
-  const previous=lastHistoryDataRow(sheet,header);const rowNumber=previous+1;const mapped=new Set(Object.values(header.columns));
-  const values:Record<HistoryField,unknown>={
-    assetNumber:value.assetNumber,workOrderNumber:value.workOrderNumber,taskStatus:value.taskStatus,startDate:workbookValue(value.startDate,true),completionDate:workbookValue(value.completionDate,true),workOrderType:value.workOrderType,performedBy:value.performedBy,intervalType:value.intervalType==='cycles'?'Cycles':value.intervalType[0].toUpperCase()+value.intervalType.slice(1),taskType:value.taskType,taskNote:value.taskNote,
-  };
-  const tables=sheet.getTables().map(entry=>Array.isArray(entry)?entry[0]:entry).filter(Boolean);
-  const table=tables.find(item=>{const runtime=item as ExcelJS.Table&{table?:{tableRef?:string;columns?:Array<{name:string}>}};const ref=runtime.ref??runtime.table?.tableRef;const columns=runtime.columns??runtime.table?.columns??[];return Number(String(ref).match(/\d+/)?.[0])===header.rowNumber&&columns.some(column=>historyFieldForHeader(column.name)==='workOrderNumber');});
-  if(table){const runtime=table as ExcelJS.Table&{table?:{tableRef?:string;autoFilterRef?:string}};const model=runtime.table;if(model?.tableRef){model.tableRef=model.tableRef.replace(/(\$?[A-Z]+\$?)\d+$/i,`$1${rowNumber}`);model.autoFilterRef=model.tableRef;}}
-  if (previous>header.rowNumber) copyHistoryTemplate(sheet,previous,rowNumber,mapped);
-  for (const [field,column] of Object.entries(header.columns) as Array<[HistoryField,number]>) sheet.getCell(rowNumber,column).value=values[field] as ExcelJS.CellValue;
-  sheet.getCell(rowNumber,header.columns.startDate).numFmt=sheet.getCell(previous,header.columns.startDate).numFmt||'yyyy-mm-dd';
-  sheet.getCell(rowNumber,header.columns.completionDate).numFmt=sheet.getCell(previous,header.columns.completionDate).numFmt||'yyyy-mm-dd';
-  return rowNumber;
 }
 
 export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];historyRows:HistoryWorkbookAppend[];beforeReplace?:()=>void|Promise<void>}) {
@@ -393,10 +435,11 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
   const temporaryPath=path.join(path.dirname(destinationPath),`.pm-sync-${crypto.randomUUID()}.xlsx`);
   let backupPath:string|null=null;let destinationMoved=false;
   try {
-    fs.copyFileSync(sourcePath,temporaryPath,fs.constants.COPYFILE_EXCL);
-    const workbook=new ExcelJS.Workbook();await workbook.xlsx.readFile(temporaryPath);
+    const sourceBuffer=fs.readFileSync(sourcePath);const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(sourceBuffer.buffer.slice(sourceBuffer.byteOffset,sourceBuffer.byteOffset+sourceBuffer.byteLength) as ArrayBuffer);const zip=await JSZip.loadAsync(sourceBuffer);const sheetParts=await workbookSheetParts(zip);
     const tracker=workbook.getWorksheet(PM_TRACKER_SHEET);const history=workbook.getWorksheet(PM_HISTORY_SHEET);
     if (!tracker||!history) throw new Error(`Workbook must contain ${PM_TRACKER_SHEET} and ${PM_HISTORY_SHEET}.`);
+    const trackerPart=sheetParts.get(PM_TRACKER_SHEET);const historyPart=sheetParts.get(PM_HISTORY_SHEET);if(!trackerPart||!historyPart)throw new Error('Workbook worksheet package parts are unavailable.');
+    let trackerXml=await zip.file(trackerPart)?.async('string');let historyXml=await zip.file(historyPart)?.async('string');if(!trackerXml||!historyXml)throw new Error('Workbook worksheet data is unreadable.');const date1904=Boolean(workbook.properties.date1904);
     const trackerHeader=findHeader(tracker,trackerAliases,trackerRequired);const historyHeader=findHeader(history,historyAliases,historyRequired);const rowsByKey=trackerRowsByKey(tracker,trackerHeader);
     let changedCells=0;
     for (const update of input.trackerUpdates) {
@@ -409,19 +452,23 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
         ['intervalValue',update.intervalValue],
         ['lastCompleted',meter?update.lastCompletedMeter:workbookValue(update.lastCompletedDate,true)],
         ['current',meter?update.currentMeter:workbookValue(update.currentDate,true)],
+        ['due',meter?update.lastCompletedMeter===null?null:update.lastCompletedMeter+update.intervalValue:workbookValue(calculateWorkbookPm({intervalType:update.intervalType,intervalValue:update.intervalValue,lastCompletedDate:update.lastCompletedDate,currentDate:update.currentDate}).nextDueDate,true)],
         ['remaining',update.remaining],['status',update.status],
       ];
-      for (const [field,value] of targets) if (setTargetCell(tracker.getCell(row,trackerHeader.columns[field]),value)) changedCells+=1;
+      for (const [field,value] of targets) {const column=trackerHeader.columns[field];if(!column)continue;const cell=tracker.getCell(row,column);if(cell.type===ExcelJS.ValueType.Formula||sameCellValue(cell,value))continue;const patched=setWorksheetCell(trackerXml,cell.address,value,date1904);trackerXml=patched.xml;if(patched.changed){cell.value=value as ExcelJS.CellValue;changedCells+=1;}}
     }
-    const existing=historyExistingKeys(history,historyHeader);let appendedHistory=0;
+    const existing=historyExistingKeys(history,historyHeader);let appendedHistory=0;let previousHistoryRow=lastHistoryDataRow(history,historyHeader);let lastAppendedHistoryRow=previousHistoryRow;
     for (const row of input.historyRows) {
-      const workOrderKey=normalizedPmKey(row.workOrderNumber);const base={...row,rowNumber:0,sourceRef:''};
+      const base={...row,rowNumber:0,sourceRef:''};
       const sourceRef=historySourceRef({assetNumber:base.assetNumber,workOrderNumber:base.workOrderNumber,taskStatus:base.taskStatus,startDate:base.startDate,completionDate:base.completionDate,workOrderType:base.workOrderType,performedBy:base.performedBy,intervalType:base.intervalType,taskType:base.taskType,taskNote:base.taskNote});
-      if ((workOrderKey&&existing.has(`wo:${workOrderKey}`))||existing.has(`ref:${sourceRef}`)) continue;
-      appendHistoryRow(history,historyHeader,row);appendedHistory+=1;if(workOrderKey)existing.add(`wo:${workOrderKey}`);existing.add(`ref:${sourceRef}`);
+      if (existing.has(`ref:${sourceRef}`)) continue;
+      const rowNumber=previousHistoryRow+1;historyXml=ensureWorksheetRow(historyXml,rowNumber,previousHistoryRow>historyHeader.rowNumber?previousHistoryRow:null);
+      const values:Record<HistoryField,unknown>={assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskStatus:row.taskStatus,startDate:workbookValue(row.startDate,true),completionDate:workbookValue(row.completionDate,true),workOrderType:row.workOrderType,performedBy:row.performedBy,intervalType:row.intervalType==='cycles'?'Cycles':row.intervalType[0].toUpperCase()+row.intervalType.slice(1),taskType:row.taskType,taskNote:row.taskNote};
+      for(const [field,column] of Object.entries(historyHeader.columns) as Array<[HistoryField,number]>){const address=history.getCell(rowNumber,column).address;const templateAddress=history.getCell(previousHistoryRow,column).address;const patched=setWorksheetCell(historyXml,address,values[field],date1904,templateAddress);if(!patched.changed)throw new Error(`PMHistory ${address} cannot be updated because it contains a protected formula.`);historyXml=patched.xml;}
+      previousHistoryRow=rowNumber;lastAppendedHistoryRow=rowNumber;appendedHistory+=1;existing.add(`ref:${sourceRef}`);
     }
-    await workbook.xlsx.writeFile(temporaryPath);
-    await restoreUnrelatedWorksheetParts(sourcePath,temporaryPath);
+    historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);
+    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
     const validation=new ExcelJS.Workbook();await validation.xlsx.readFile(temporaryPath);
     if (!validation.getWorksheet(PM_TRACKER_SHEET)||!validation.getWorksheet(PM_HISTORY_SHEET)) throw new Error('Workbook validation failed after synchronization.');
     if (input.beforeReplace) await input.beforeReplace();

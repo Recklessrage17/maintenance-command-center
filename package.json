@@ -41,6 +41,7 @@
     "test:dashboard-pm": "playwright test tests/dashboard-pm-alerts.spec.ts",
     "test:pm-excel-workbook": "npm run build --prefix backend && node tests/pm-excel-workflow.mjs",
     "test:pm-excel-api": "npm run build --prefix backend && node tests/pm-excel-api.mjs",
+    "test:pm-excel-migration": "npm run build --prefix backend && node tests/pm-excel-migration.mjs",
     "test:pm-excel-ui": "playwright test tests/pm-excel-ui.spec.ts",
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
     "test:requisitions": "playwright test tests/requisitions-lifecycle.spec.ts",

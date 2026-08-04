@@ -253,7 +253,7 @@ CREATE INDEX IF NOT EXISTS idx_equipment_asset_note_attachments_note ON equipmen
 CREATE INDEX IF NOT EXISTS idx_equipment_document_folders_asset ON equipment_document_folders (asset_id,name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_equipment_documents_asset_folder ON equipment_documents (asset_id,folder_id,updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_documents_unique_display_name ON equipment_documents (asset_id,folder_id,display_filename COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_library,asset_id,active,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);
@@ -463,6 +463,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
   if (!pmTaskColumns.has('asset_library')) run("ALTER TABLE pm_tasks ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
+  db.exec('DROP INDEX IF EXISTS idx_pm_tasks_asset; CREATE INDEX idx_pm_tasks_asset ON pm_tasks (asset_library,asset_id,active,updated_at DESC);');
   const pmHistoryColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_history)').map(column => column.name));
   if (!pmHistoryColumns.has('asset_library')) run("ALTER TABLE pm_history ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
   const pmHistoryMigrations: Array<{name:string;definition:string}> = [
@@ -483,7 +484,8 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
 CREATE TABLE IF NOT EXISTS pm_excel_sync_state (id INTEGER PRIMARY KEY CHECK(id=1), status TEXT NOT NULL DEFAULT 'never', attempted_at TEXT, synchronized_at TEXT, original_filename TEXT NOT NULL DEFAULT '', source_path TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '', changed_cells INTEGER NOT NULL DEFAULT 0, appended_history INTEGER NOT NULL DEFAULT 0, updated_by_user_id INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_completion_request ON pm_history (completion_request_id) WHERE completion_request_id IS NOT NULL AND completion_request_id<>'';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_import_source ON pm_history (import_source_ref) WHERE import_source_ref IS NOT NULL AND import_source_ref<>'';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_work_order ON pm_history (work_order_number COLLATE NOCASE) WHERE work_order_number<>'';`);
+DROP INDEX IF EXISTS idx_pm_history_work_order;
+CREATE INDEX IF NOT EXISTS idx_pm_history_work_order_lookup ON pm_history (work_order_number COLLATE NOCASE) WHERE work_order_number<>'';`);
   run("INSERT OR IGNORE INTO pm_excel_sync_state (id,status,original_filename,source_path,error_message) VALUES (1,'never','','','')");
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('barrel_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
@@ -7535,6 +7537,7 @@ function pmDueValues(intervalType:PmIntervalType, intervalValue:number, complete
   if (intervalType==='days') return { nextDueDate:addPmDays(completedDate,intervalValue),nextDueMeter:null };
   if (intervalType==='weekly') return { nextDueDate:addPmDays(completedDate,intervalValue*7),nextDueMeter:null };
   if (intervalType==='monthly') return { nextDueDate:addPmMonths(completedDate,intervalValue),nextDueMeter:null };
+  if (intervalType==='annual'&&intervalValue===365) return { nextDueDate:addPmDays(completedDate,365),nextDueMeter:null };
   const fixed=pmFixedCalendarIntervals[intervalType];
   if (fixed?.days) return { nextDueDate:addPmDays(completedDate,fixed.days),nextDueMeter:null };
   if (fixed?.months) return { nextDueDate:addPmMonths(completedDate,fixed.months),nextDueMeter:null };
@@ -7548,9 +7551,10 @@ function validatePmTaskInput(value:unknown) {
   if (!pmIntervalTypes.includes(intervalType)) throw new Error('Choose a valid PM interval type.');
   const fixedCadence=pmFixedCalendarIntervals[intervalType];
   const requestedInterval=Number(input.intervalValue);
+  const annual365=intervalType==='annual'&&requestedInterval===365;
   if (!fixedCadence && (!Number.isFinite(requestedInterval) || requestedInterval<=0)) throw new Error('How long is the interval must be greater than zero.');
-  const intervalValue=fixedCadence?.intervalValue ?? requestedInterval;
-  if (['cycles','days','weekly','monthly'].includes(intervalType) && !Number.isInteger(intervalValue)) throw new Error(`${pmIntervalLabels[intervalType]} intervals must use a whole number.`);
+  const intervalValue=annual365?365:fixedCadence?.intervalValue ?? requestedInterval;
+  if (['cycles','days','weekly','monthly','annual'].includes(intervalType) && !Number.isInteger(intervalValue)) throw new Error(`${pmIntervalLabels[intervalType]} intervals must use a whole number.`);
   const lastCompletedDate=validPmDate(input.lastCompletedDate,'last completed date / starting date',Boolean(fixedCadence));
   const lastCompletedMeter=optionalPmNumber(input.lastCompletedMeter,'Last completed meter');
   const currentMeter=optionalPmNumber(input.currentMeter,'Current meter');
@@ -7749,23 +7753,24 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   for (const row of parsed.trackerRows) {const key=pmImportTaskKey(row.assetNumber,row.taskTitle,row.intervalType);workbookKeyCounts.set(key,(workbookKeyCounts.get(key)??0)+1);}
   for (const row of parsed.trackerRows) {
     const key=pmImportTaskKey(row.assetNumber,row.taskTitle,row.intervalType);
-    if ((workbookKeyCounts.get(key)??0)>1) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,code:'AMBIGUOUS_WORKBOOK_MATCH',message:'More than one workbook row has this asset and PM task.'});continue;}
+    const sectionDetails={machineSectionInherited:row.assetNumberInherited,machineSectionRow:row.machineSectionRow};
+    if ((workbookKeyCounts.get(key)??0)>1) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,code:'AMBIGUOUS_WORKBOOK_MATCH',message:'More than one workbook row has this asset and PM task.'});continue;}
     const assets=assetsByNumber.get(normalizedPmKey(row.assetNumber))??[];
     if (assets.length!==1) {
       const message=assets.length?'More than one active MCC asset matches this Asset Number.':'No active MCC machine asset matches this Asset Number.';
-      if (assets.length) conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,code:'AMBIGUOUS_ASSET_MATCH',message});
+      if (assets.length) conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,code:'AMBIGUOUS_ASSET_MATCH',message});
       else rejectedRows.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,reason:message});
       continue;
     }
     const asset=assets[0];const titleMatches=dbTasks.filter(task=>task.asset_id===asset.id&&normalizedPmKey(task.title)===normalizedPmKey(row.taskTitle));const matching=titleMatches.filter(task=>task.interval_type===row.intervalType);
-    if (matching.length>1) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,code:'AMBIGUOUS_MCC_MATCH',message:'More than one MCC PM task matches this asset and task title.'});continue;}
-    if (!matching.length&&titleMatches.length) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,code:'INTERVAL_MISMATCH',message:'An MCC PM task has this asset and title but a different interval type.'});continue;}
-    if (!matching.length) {const item={sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,assetName:row.assetName,taskTitle:row.taskTitle,intervalType:row.intervalType,intervalValue:row.intervalValue};additions.push(item);trackerActions.push({kind:'addition',rowNumber:row.rowNumber,assetId:asset.id,taskId:null,decreasingMeter:false,row});continue;}
+    if (matching.length>1) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,code:'AMBIGUOUS_MCC_MATCH',message:'More than one MCC PM task matches this asset and task title.'});continue;}
+    if (!matching.length&&titleMatches.length) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,code:'INTERVAL_MISMATCH',message:'An MCC PM task has this asset and title but a different interval type.'});continue;}
+    if (!matching.length) {const item={sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,assetName:row.assetName,taskTitle:row.taskTitle,intervalType:row.intervalType,intervalValue:row.intervalValue,...sectionDetails};additions.push(item);trackerActions.push({kind:'addition',rowNumber:row.rowNumber,assetId:asset.id,taskId:null,decreasingMeter:false,row});continue;}
     const task=matching[0];const next=pmTaskValuesFromWorkbook(row);const oldValue=pmHistoryValue(task);
     const changed=task.interval_type!==next.intervalType||Number(task.interval_value)!==next.intervalValue||task.last_completed_date!==next.lastCompletedDate||task.last_completed_meter!==next.lastCompletedMeter||task.current_meter!==next.currentMeter;
     const decreasingMeter=(row.intervalType==='hourly'||row.intervalType==='cycles')&&task.current_meter!==null&&row.currentMeter!==null&&row.currentMeter<task.current_meter;
-    if (decreasingMeter) conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,code:'DECREASING_METER',message:`Current meter would decrease from ${task.current_meter} to ${row.currentMeter}.`,overrideRequired:true,originalValue:task.current_meter,newValue:row.currentMeter});
-    if (changed) {updates.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,oldValue,newValue:next,decreasingMeter});trackerActions.push({kind:'update',rowNumber:row.rowNumber,assetId:asset.id,taskId:task.id,decreasingMeter,row});}
+    if (decreasingMeter) conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,code:'DECREASING_METER',message:`Current meter would decrease from ${task.current_meter} to ${row.currentMeter}.`,overrideRequired:true,originalValue:task.current_meter,newValue:row.currentMeter});
+    if (changed) {updates.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,oldValue,newValue:next,decreasingMeter});trackerActions.push({kind:'update',rowNumber:row.rowNumber,assetId:asset.id,taskId:task.id,decreasingMeter,row});}
     else warnings.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,message:'No MCC changes are required for this row.'});
   }
   const seenHistory=new Set<string>();const historyAdditions:Array<Record<string,unknown>>=[];
@@ -7776,7 +7781,7 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
     const taskKey=pmImportTaskKey(row.assetNumber,row.taskType,row.intervalType);
     const taskExists=dbTasks.some(task=>task.asset_id===asset[0].id&&task.interval_type===row.intervalType&&normalizedPmKey(task.title)===normalizedPmKey(row.taskType))||trackerActions.some(action=>action.assetId===asset[0].id&&action.row.intervalType===row.intervalType&&normalizedPmKey(action.row.taskTitle)===normalizedPmKey(row.taskType));
     if (!taskExists) {rejectedRows.push({sheet:'PMHistory',rowNumber:row.rowNumber,reason:'No unambiguous MCC PM task matches this Task Type.'});continue;}
-    const duplicate=one<{id:number}>('SELECT id FROM pm_history WHERE import_source_ref=? OR (?<>\'\' AND lower(work_order_number)=lower(?))',[row.sourceRef,row.workOrderNumber,row.workOrderNumber]);
+    const duplicate=one<{id:number}>('SELECT id FROM pm_history WHERE import_source_ref=?',[row.sourceRef]);
     if (duplicate) {warnings.push({sheet:'PMHistory',rowNumber:row.rowNumber,message:'History row already exists in MCC and will not be duplicated.'});continue;}
     historyAdditions.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskType:row.taskType,completionDate:row.completionDate});historyActions.push({row,assetId:asset[0].id,taskKey});
   }
