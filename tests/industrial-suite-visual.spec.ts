@@ -166,6 +166,7 @@ async function mockIndustrialSuite(page: Page) {
     if (path === '/api/presence/team') return fulfillJson(route, roster);
     if (path === '/api/requisitions/summary') return fulfillJson(route, { ok: true, ...requisitionSummary });
     if (path === '/api/dashboard/preventive-maintenance-due') return fulfillJson(route, { ok: true, alerts: dashboardAlerts, summary: { dueSoon: 1, dueNow: 0, pastDue: 1 } });
+    if (path === '/api/pm-excel/status') return fulfillJson(route, { ok: true, sync: { status: 'never', attemptedAt: null, synchronizedAt: null, originalFilename: '', errorMessage: '', changedCells: 0, appendedHistory: 0, downloadAvailable: false } });
     if (path === '/api/inventory/native/summary') return fulfillJson(route, { ok: true, totalParts: inventoryParts.length, lowStockCount: 1, requisitionCount: 2, vendorCount: 1, locationCount: 1 });
     if (path === '/api/inventory/native/parts') return fulfillJson(route, { ok: true, parts: inventoryParts });
     if (path === '/api/inventory/native/backups') return fulfillJson(route, { ok: true, backups: [] });

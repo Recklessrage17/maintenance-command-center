@@ -268,7 +268,7 @@ function importToast(summary: MachineImportSummary) {
 export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userRole?: string; userFullName?: string }) {
   const [assets,setAssets]=useState<MachineAsset[]>([]);
   const [brandSettings,setBrandSettings]=useState<BrandSetting[]>([]);
-  const [permissions,setPermissions]=useState({canEdit:editableRoles.has(userRole),canDelete:deleteRoles.has(userRole)});
+  const [permissions,setPermissions]=useState({canEdit:editableRoles.has(userRole),canDelete:deleteRoles.has(userRole),canManagePm:editableRoles.has(userRole)});
   const [search,setSearch]=useState('');
   const [brandFilter,setBrandFilter]=useState('');
   const [statusFilter,setStatusFilter]=useState('');
@@ -295,6 +295,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const brands = useMemo(()=>[...new Set(assets.map(asset=>asset.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[assets]);
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
+  const canManagePm = permissions.canManagePm || editableRoles.has(userRole);
   const canManageMeasurementYearFolders = measurementFolderDeleteRoles.has(userRole);
 
   function loadAssets() {
@@ -302,7 +303,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     if (search.trim()) params.set('q', search.trim());
     if (brandFilter) params.set('brand', brandFilter);
     if (statusFilter) params.set('status', statusFilter);
-    api<{ok:boolean;assets:MachineAsset[];brandSettings:BrandSetting[];permissions:{canEdit:boolean;canDelete:boolean}}>(`/api/machine-library/assets?${params}`)
+    api<{ok:boolean;assets:MachineAsset[];brandSettings:BrandSetting[];permissions:{canEdit:boolean;canDelete:boolean;canManagePm:boolean}}>(`/api/machine-library/assets?${params}`)
       .then(data=>{ setAssets(data.assets ?? []); setBrandSettings(data.brandSettings ?? []); setPermissions(data.permissions ?? permissions); setColorDrafts(Object.fromEntries((data.brandSettings ?? []).map(setting=>[setting.brandName,setting.colorHex]))); })
       .catch(error=>setMessage({kind:'error',text:(error as Error).message}));
   }
@@ -436,7 +437,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   return (
     <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'}`}>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
-      {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
+      {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} canManagePm={canManagePm} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
         <section className="mcc-card machine-toolbar-card glass-panel glass-panel--highlight">
         <label className="form-field machine-search"><span>Search assets</span><input className="glass-input" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>
         <label className="form-field"><span>Brand</span><select className="glass-input" value={brandFilter} onChange={event=>setBrandFilter(event.target.value)}><option value="">All brands</option>{brands.map(brand=><option key={brand} value={brand}>{brand}</option>)}</select></label>
@@ -500,7 +501,7 @@ function MachineHistoryPreview({records,onOpen}:{records:HistoryRecord[];onOpen:
   </button>;
 }
 
-function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onRecordLogs:(asset:MachineAsset)=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
+function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit,onLogs,onRecordLogs,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;canManagePm:boolean;performedBy:string;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onRecordLogs:(asset:MachineAsset)=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
   const [currentAsset,setCurrentAsset]=useState(asset);
   const [draft,setDraft]=useState<AssetForm>(()=>assetToForm(asset));
   const [openSection,setOpenSection]=useState<MachineDetailSectionKey|null>(null);
@@ -724,7 +725,7 @@ function MachineDetailView({asset,canEdit,onClose,onEdit,onLogs,onRecordLogs,onA
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
         return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} accent={machineDetailAccents[section.key]} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
-      <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canEdit} />
+      <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canManagePm} performedBy={performedBy} />
       <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} />
       <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} />
     </div>

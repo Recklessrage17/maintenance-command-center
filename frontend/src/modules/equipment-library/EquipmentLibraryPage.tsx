@@ -18,7 +18,7 @@ type EquipmentAsset={
 };
 type EquipmentDraft=Omit<EquipmentAsset,'id'|'assetName'|'brand'|'year'|'createdAt'|'updatedAt'|'pmSummary'|'latestHistory'> & {customCategory:string};
 type EquipmentSection='basic'|'utilities'|'capacity';
-type EquipmentResponse={ok:boolean;assets:EquipmentAsset[];categories:string[];permissions:{canEdit:boolean;canDelete:boolean}};
+type EquipmentResponse={ok:boolean;assets:EquipmentAsset[];categories:string[];permissions:{canEdit:boolean;canDelete:boolean;canManagePm:boolean}};
 
 const categories=[
   'Dryer','Chiller','Air Compressor','Vacuum Pump','Blender','Material Loader','Granulator / Grinder','Mold Temperature Controller','Cooling Tower','Robot / Picker','Conveyor','Vision System','Leak Tester','Welder','Packaging Equipment','Water Treatment / Filtration','Electrical Panel / Transformer','HVAC','Toolroom Equipment','Forklift / Material Handling','Other / Custom',
@@ -43,9 +43,9 @@ function categoryAccent(category:string){const palette=['#44D7FF','#38D7B3','#FF
 function historyAction(value:string){return value.replace(/_/g,' ').replace(/\b\w/g,letter=>letter.toUpperCase());}
 function formatDateTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?value:date.toLocaleString();}
 
-export function EquipmentLibraryPage(){
+export function EquipmentLibraryPage({userFullName=''}:{userFullName?:string}){
   const [assets,setAssets]=useState<EquipmentAsset[]>([]);
-  const [permissions,setPermissions]=useState({canEdit:false,canDelete:false});
+  const [permissions,setPermissions]=useState({canEdit:false,canDelete:false,canManagePm:false});
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
@@ -69,7 +69,7 @@ export function EquipmentLibraryPage(){
   async function importFile(file:File){setImporting(true);setError('');setNotice('');try{const body=new FormData();body.append('file',file,file.name);body.append('importMode',importMode);const result=await api<{addedCount:number;updatedCount:number;skippedCount:number}>('/api/equipment-library/import',{method:'POST',body});setNotice(`Import complete: ${result.addedCount} added, ${result.updatedCount} updated, ${result.skippedCount} skipped.`);await load();}catch(value){setError((value as Error).message);}finally{setImporting(false);}}
   async function saved(asset:EquipmentAsset,message:string){setNotice(message);setCreateOpen(false);await load();setDetailAsset(asset);}
 
-  if(detailAsset)return <EquipmentDetail asset={detailAsset} canEdit={permissions.canEdit} canDelete={permissions.canDelete} onBack={()=>{setDetailAsset(null);setNotice('');}} onUpdated={asset=>{setDetailAsset(asset);setAssets(current=>current.map(item=>item.id===asset.id?asset:item));}} onRemoved={async()=>{setDetailAsset(null);await load();}} />;
+  if(detailAsset)return <EquipmentDetail asset={detailAsset} canEdit={permissions.canEdit} canDelete={permissions.canDelete} canManagePm={permissions.canManagePm} performedBy={userFullName} onBack={()=>{setDetailAsset(null);setNotice('');}} onUpdated={asset=>{setDetailAsset(asset);setAssets(current=>current.map(item=>item.id===asset.id?asset:item));}} onRemoved={async()=>{setDetailAsset(null);await load();}} />;
   return <div className="page-stack equipment-library-page mcc-glass-page">
     <section className="mcc-card glass-panel equipment-library-toolbar">
       <div className="equipment-library-search-row">
@@ -102,7 +102,7 @@ function EquipmentCard({asset,onOpen}:{asset:EquipmentAsset;onOpen:()=>void}){
   </MccPillCard>;
 }
 
-function EquipmentDetail({asset,canEdit,canDelete,onBack,onUpdated,onRemoved}:{asset:EquipmentAsset;canEdit:boolean;canDelete:boolean;onBack:()=>void;onUpdated:(asset:EquipmentAsset)=>void;onRemoved:()=>void}){
+function EquipmentDetail({asset,canEdit,canDelete,canManagePm,performedBy,onBack,onUpdated,onRemoved}:{asset:EquipmentAsset;canEdit:boolean;canDelete:boolean;canManagePm:boolean;performedBy:string;onBack:()=>void;onUpdated:(asset:EquipmentAsset)=>void;onRemoved:()=>void}){
   const [current,setCurrent]=useState(asset);const [open,setOpen]=useState<EquipmentSection|null>('basic');const [editing,setEditing]=useState<EquipmentSection|null>(null);const [draft,setDraft]=useState(()=>assetToDraft(asset));const [saving,setSaving]=useState(false);const [error,setError]=useState('');const [history,setHistory]=useState<HistoryRecord[]>([]);const [historyOpen,setHistoryOpen]=useState(false);
   useEffect(()=>{setCurrent(asset);setDraft(assetToDraft(asset));},[asset]);
   useEffect(()=>{void api<{records:HistoryRecord[]}>(`/api/equipment-library/assets/${asset.id}/history`).then(data=>setHistory(data.records)).catch(()=>setHistory([]));},[asset.id]);
@@ -119,7 +119,7 @@ function EquipmentDetail({asset,canEdit,canDelete,onBack,onUpdated,onRemoved}:{a
     <header className="mcc-card glass-panel equipment-detail-header"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onBack}>← Equipment Library</button><div><p className="eyebrow">Equipment Asset {current.assetNumber}</p><h2>{current.equipmentName}</h2><p>{display(current.category)} · {display(current.manufacturer)} · {display(current.location)}</p></div><div className="equipment-detail-actions"><a className="primary-button compact-button glass-button glass-button--primary" href={`/api/equipment-library/assets/${current.id}/specification.pdf?download=true`} download>Equipment Specification PDF</a>{canEdit&&<button className="secondary-button compact-button" type="button" onClick={()=>void toggleDisabled()}>{current.status==='disabled'?'Enable Equipment':'Disable Equipment'}</button>}{canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>void remove()}>Remove</button>}</div></header>
     {error&&<p className="form-message error" role="alert">{error}</p>}
     <div className="machine-detail-accordion-list">{sections.map(section=>{const expanded=open===section.key;const isEditing=editing===section.key;return <MccCategoryAccordion key={section.key} accent={section.accent} expanded={expanded} editing={isEditing}><MccAccordionHeader title={section.title} summary={section.summary} expanded={expanded} controls={`equipment-${section.key}`} onToggle={()=>{if(!editing)setOpen(value=>value===section.key?null:section.key);}} actions={canEdit&&(isEditing?<div className="glass-button-group"><button className="secondary-button compact-button" type="button" disabled={saving} onClick={()=>{setEditing(null);setDraft(assetToDraft(current));}}>Cancel</button><button className="primary-button compact-button" type="button" disabled={saving} onClick={()=>void save(section.key)}>{saving?'Saving...':'Save'}</button></div>:<button className="secondary-button compact-button" type="button" onClick={()=>begin(section.key)}>Edit Mode</button>)}/><div className="machine-detail-accordion-panel" id={`equipment-${section.key}`} aria-hidden={!expanded}>{isEditing?<div className="equipment-edit-grid">{section.edit}</div>:section.view}</div></MccCategoryAccordion>;})}</div>
-    <PreventiveMaintenanceTracking asset={{id:current.id,assetNumber:current.assetNumber,assetName:current.equipmentName}} canEdit={canEdit} library="equipment"/>
+    <PreventiveMaintenanceTracking asset={{id:current.id,assetNumber:current.assetNumber,assetName:current.equipmentName}} canEdit={canManagePm} library="equipment" performedBy={performedBy}/>
     <AssetDocumentLibrary asset={{id:current.id,assetNumber:current.assetNumber,assetName:current.equipmentName}} canEdit={canEdit} library="equipment"/>
     <AssetNotesAttachments asset={{id:current.id,assetNumber:current.assetNumber,assetName:current.equipmentName,brand:current.manufacturer,model:current.model,serialNumber:current.serialNumber}} canEdit={canEdit} library="equipment"/>
     <MccCategoryAccordion accent="inspection" expanded className="equipment-history-preview glass-panel glass-panel--nested"><MccAccordionHeader title="History Preview" summary={history.length?`${history.length} recorded action${history.length===1?'':'s'}`:'No history'} expanded actions={history.length>1?<button className="secondary-button compact-button" type="button" onClick={()=>setHistoryOpen(true)}>View Full History</button>:undefined}/><div className="machine-detail-accordion-panel">{history[0]?<HistoryItem item={history[0]}/>:<div className="glass-empty-state">No equipment history has been recorded.</div>}</div></MccCategoryAccordion>
