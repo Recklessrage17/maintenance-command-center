@@ -1491,9 +1491,19 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-task-card {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  padding: 15px;
+  padding: 16px;
+  border-color: rgba(83, 207, 242, 0.24);
+  background: linear-gradient(150deg, rgba(14, 43, 59, 0.82), rgba(3, 17, 28, 0.9));
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  transition: transform var(--glass-transition), border-color var(--glass-transition), box-shadow var(--glass-transition);
+}
+
+.pm-task-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(91, 220, 250, 0.42);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.3), 0 0 24px rgba(52, 191, 231, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .pm-task-card-heading {
@@ -1510,27 +1520,38 @@ button.mcc-resource-row__content { cursor: pointer; }
 }
 
 .pm-interval-label {
-  color: #9fc3d3;
+  color: #91acb9;
   font-size: 0.74rem;
   font-weight: 800;
   letter-spacing: 0.01em;
 }
 
+.pm-interval-value { font-weight: 900; }
+.pm-interval-value--30-days { color: #ff8797; }
+.pm-interval-value--60-days { color: #ffad70; }
+.pm-interval-value--90-days { color: #ffd275; }
+.pm-interval-value--180-days { color: #70e5d0; }
+.pm-interval-value--365-days { color: #ffe66f; }
+.pm-interval-value--annual { color: #c8afff; }
+.pm-interval-value--hours { color: #79dcff; }
+.pm-interval-value--cycles { color: #c49cff; }
+.pm-interval-value--calendar { color: #9bd9e8; }
+
 .pm-status {
   flex: 0 0 auto;
   min-height: 32px;
-  padding: 5px 11px;
+  padding: 5px 12px;
   border-width: 1px;
   font-weight: 900;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.055em;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.42);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  backdrop-filter: blur(12px) saturate(130%);
 }
 
-.pm-status--current { color: #c2ffe9; border-color: rgba(68, 236, 176, 0.68); background: rgba(16, 118, 84, 0.42); box-shadow: 0 0 16px rgba(57, 226, 167, 0.16), inset 0 1px 0 rgba(255,255,255,0.17); }
-.pm-status--due-soon { color: #ffe8a8; border-color: rgba(255, 196, 74, 0.72); background: rgba(132, 82, 9, 0.45); box-shadow: 0 0 16px rgba(255, 187, 54, 0.17), inset 0 1px 0 rgba(255,255,255,0.16); }
+.pm-status--current { color: #d8f8ff; border-color: rgba(75, 218, 255, 0.76); background: linear-gradient(180deg, rgba(20, 116, 151, 0.58), rgba(5, 53, 76, 0.68)); box-shadow: 0 0 18px rgba(55, 205, 248, 0.23), inset 0 1px 0 rgba(255,255,255,0.2); }
+.pm-status--due-soon { color: #fff0b8; border-color: rgba(255, 197, 72, 0.78); background: linear-gradient(180deg, rgba(153, 101, 17, 0.62), rgba(91, 53, 6, 0.7)); box-shadow: 0 0 18px rgba(255, 188, 48, 0.23), inset 0 1px 0 rgba(255,255,255,0.19); }
 .pm-status--due-now { color: #ffd0d8; border-color: rgba(255, 91, 116, 0.82); background: rgba(142, 22, 45, 0.5); box-shadow: 0 0 19px rgba(255, 67, 99, 0.25), inset 0 1px 0 rgba(255,255,255,0.18); }
-.pm-status--overdue { color: #ffd4da; border-color: rgba(255, 72, 93, 0.88); background: rgba(139, 18, 36, 0.55); box-shadow: 0 0 22px rgba(255, 48, 76, 0.31), inset 0 1px 0 rgba(255,255,255,0.18); }
+.pm-status--overdue { color: #ffe1e5; border-color: rgba(255, 68, 94, 0.9); background: linear-gradient(180deg, rgba(162, 22, 47, 0.68), rgba(91, 8, 26, 0.76)); box-shadow: 0 0 22px rgba(255, 43, 75, 0.34), inset 0 1px 0 rgba(255,255,255,0.2); }
 .pm-status--hold { color: #e5dcff; border-color: rgba(181, 157, 255, 0.62); background: rgba(72, 51, 132, 0.46); box-shadow: 0 0 15px rgba(153, 121, 255, 0.14), inset 0 1px 0 rgba(255,255,255,0.15); }
 .pm-status--inactive { color: #ffb3bf; border-color: rgba(222, 91, 111, 0.62); background: rgba(103, 35, 48, 0.5); box-shadow: 0 0 14px rgba(221, 67, 91, 0.14), inset 0 1px 0 rgba(255,255,255,0.13); }
 .pm-status--setup-incomplete { color: #d5ebf7; border-color: rgba(124, 187, 226, 0.52); background: rgba(38, 68, 91, 0.48); box-shadow: 0 0 13px rgba(89, 180, 227, 0.1), inset 0 1px 0 rgba(255,255,255,0.12); }
@@ -1588,13 +1609,18 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-countdown {
   margin: 0;
   color: var(--glass-text);
+  min-height: 24px;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.45;
 }
 
-.pm-countdown--current { color: #aef4dc; }
-.pm-countdown--due-soon { color: #ffe09a; }
+.pm-countdown-value { font-size: 1.02em; font-weight: 950; }
+.pm-countdown--current { color: #9ff2c9; }
+.pm-countdown--due-soon { color: #ffe080; }
 .pm-countdown--due-now,
 .pm-countdown--inactive { color: #ff8da0; }
-.pm-countdown--overdue { color: #ffc1c1; }
+.pm-countdown--overdue { color: #ff9dab; }
 .pm-countdown--hold { color: #d8caff; }
 
 .pm-due-legend {
@@ -1630,15 +1656,31 @@ button.mcc-resource-row__content { cursor: pointer; }
 }
 
 .pm-card-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: auto;
+  padding-top: 2px;
 }
 
 .pm-card-actions .glass-button {
-  flex: 0 1 auto;
-  min-height: 44px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  white-space: normal;
+}
+
+.pm-card-actions .pm-card-action--complete {
+  box-shadow: 0 8px 18px rgba(5, 49, 36, 0.24), 0 0 14px rgba(67, 221, 157, 0.08), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+.pm-card-actions .pm-card-action--edit {
+  color: #fff0b3;
+}
+
+.pm-card-actions .pm-card-action--deactivate {
+  color: #ffdce1;
 }
 
 .pm-modal {
@@ -1741,6 +1783,8 @@ button.mcc-resource-row__content { cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   .pm-due-now-text { animation: none; }
+  .pm-task-card { transition: none; }
+  .pm-task-card:hover { transform: none; }
 }
 
 /* Shared category accents intentionally remain library-agnostic for future equipment accordions. */
@@ -1925,7 +1969,7 @@ button.mcc-resource-row__content { cursor: pointer; }
 
   .pm-panel-toolbar .glass-button,
   .pm-card-actions .glass-button {
-    flex: 1 1 150px;
+    min-width: 0;
   }
 
   .pm-form-grid,
@@ -1959,6 +2003,10 @@ button.mcc-resource-row__content { cursor: pointer; }
 @media (max-width: 520px) {
   .pm-task-card {
     padding: 13px;
+  }
+
+  .pm-card-actions {
+    grid-template-columns: 1fr;
   }
 
   .pm-status {

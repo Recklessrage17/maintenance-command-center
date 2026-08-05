@@ -115,6 +115,24 @@ function cadenceLabel(intervalType:PmIntervalType,intervalValue:number) {
   const unit=units[intervalType as keyof typeof units];
   return `Every ${formatNumber(intervalValue)} ${unit?pluralizedUnit(intervalValue,unit.singular,unit.plural):'intervals'}`;
 }
+function intervalTone(intervalType:PmIntervalType,intervalValue:number){
+  if(intervalType==='hourly')return 'hours';
+  if(intervalType==='cycles')return 'cycles';
+  if(intervalType==='annual')return 'annual';
+  const approximateDays=intervalType==='days'?intervalValue:intervalType==='weekly'?intervalValue*7:intervalType==='monthly'?intervalValue*30:intervalType==='bi_weekly'?14:intervalType==='quarterly'?90:intervalType==='bi_annual'?180:null;
+  if(approximateDays===30)return '30-days';
+  if(approximateDays===60)return '60-days';
+  if(approximateDays===90)return '90-days';
+  if(approximateDays===180)return '180-days';
+  if(approximateDays===365)return '365-days';
+  return 'calendar';
+}
+function countdownParts(countdown:string,status:PmStatus){
+  const match=countdown.match(/^(.*?)(-?[\d][\d,.]*)(.*)$/);
+  if(!match)return null;
+  if(status==='Overdue')return {lead:'Overdue: ',value:`-${match[2].replace(/^-/, '')}`,tail:match[3]};
+  return {lead:match[1],value:match[2],tail:match[3]};
+}
 function calendarPastDueText(intervalType:PmIntervalType,nextDate:string,today:string,daysPastDue:number){
   if(['monthly','quarterly','bi_annual','annual'].includes(intervalType)){
     const due=new Date(`${nextDate}T12:00:00Z`);const current=new Date(`${today}T12:00:00Z`);let months=(current.getUTCFullYear()-due.getUTCFullYear())*12+current.getUTCMonth()-due.getUTCMonth();if(current.getUTCDate()<due.getUTCDate())months-=1;
@@ -236,11 +254,13 @@ function PmTaskCard({task,canEdit,onView,onEdit,onComplete,onDeactivate,onHistor
   const meter=meterIntervals.has(task.intervalType);
   const status=validStatuses.has(task.status)?task.status:'Setup incomplete';
   const statusClass=status.toLowerCase().replace(/\s+/g,'-');
+  const countdown=safeString(task.countdown,status==='Setup incomplete'?'PM setup is incomplete':'');
+  const countdownDisplay=countdownParts(countdown,status);
   return <article className="pm-task-card glass-card">
-    <div className="pm-task-card-heading"><div><span className="pm-interval-label">Interval: {cadenceLabel(task.intervalType,task.intervalValue)}</span><h4>{safeString(task.title,'Untitled PM task')}</h4></div><span className={`glass-pill pm-status pm-status--${statusClass}`}>{status==='Hold'?'HOLD':status}</span></div>
+    <div className="pm-task-card-heading"><div><span className="pm-interval-label"><span>Interval:</span> <strong className={`pm-interval-value pm-interval-value--${intervalTone(task.intervalType,task.intervalValue)}`}>{cadenceLabel(task.intervalType,task.intervalValue)}</strong></span><h4>{safeString(task.title,'Untitled PM task')}</h4></div><span className={`glass-pill pm-status pm-status--${statusClass}`}>{status==='Hold'?'HOLD':status}</span></div>
     <div className="pm-task-metrics"><div className="pm-metric-pill pm-metric-pill--last"><span>Last completed</span><strong>{meter?formatMeterMetric(task.lastCompletedMeter,task.intervalType):formatDate(task.lastCompletedDate)}</strong></div><div className={`pm-metric-pill pm-metric-pill--${statusClass}`}><span>Next due</span><strong>{meter?formatMeterMetric(task.nextDueMeter,task.intervalType):formatDate(task.nextDueDate)}</strong></div></div>
-    <p className={`pm-countdown pm-countdown--${statusClass}${status==='Due Now'?' pm-due-now-text':''}`}>{safeString(task.countdown,status==='Setup incomplete'?'PM setup is incomplete':'')}</p>
-    <div className="pm-card-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onView}>View</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onHistory}>View History ({safeCount(task.historyCount)})</button>{canEdit&&<button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onEdit}>Edit</button>}{canEdit&&task.scheduleStatus==='active'&&<button className="primary-button compact-button glass-button glass-button--success" type="button" onClick={onComplete}>Complete PM</button>}{canEdit&&task.scheduleStatus!=='inactive'&&<button className="secondary-button compact-button glass-button glass-button--warning" type="button" onClick={onDeactivate}>Deactivate</button>}</div>
+    <p className={`pm-countdown pm-countdown--${statusClass}${status==='Due Now'?' pm-due-now-text':''}`}>{countdownDisplay?<><span>{countdownDisplay.lead}</span><strong className="pm-countdown-value">{countdownDisplay.value}</strong><span>{countdownDisplay.tail}</span></>:countdown}</p>
+    <div className="pm-card-actions glass-button-group"><button className="secondary-button compact-button glass-button glass-button--secondary pm-card-action pm-card-action--view" type="button" onClick={onView}>View</button><button className="secondary-button compact-button glass-button glass-button--secondary pm-card-action pm-card-action--history" type="button" onClick={onHistory}>View History ({safeCount(task.historyCount)})</button>{canEdit&&<button className="secondary-button compact-button glass-button glass-button--warning pm-card-action pm-card-action--edit" type="button" onClick={onEdit}>Edit</button>}{canEdit&&task.scheduleStatus==='active'&&<button className="primary-button compact-button glass-button glass-button--success pm-card-action pm-card-action--complete" type="button" onClick={onComplete}>Complete PM</button>}{canEdit&&task.scheduleStatus!=='inactive'&&<button className="secondary-button compact-button glass-button glass-button--danger pm-card-action pm-card-action--deactivate" type="button" onClick={onDeactivate}>Deactivate</button>}</div>
   </article>;
 }
 
