@@ -47,7 +47,7 @@ async function run(){
 
   result=await request(base,`/api/equipment-library/assets/${assetId}/preventive-maintenance`,{method:'POST',cookie:ownerCookie,headers:{'Idempotency-Key':'equipment-pm-create-100'},body:{title:'Clean dryer filters',instructions:'Lock out and clean both filters.',intervalType:'monthly',intervalValue:1,lastCompletedDate:'2026-07-01',scheduleStatus:'active',notes:'Use approved air nozzle.'}});assert.equal(result.response.status,201);const pmId=result.data.task.id;
   result=await request(base,'/api/dashboard/preventive-maintenance-due',{cookie:ownerCookie});assert.equal(result.response.status,200);const equipmentAlert=result.data.alerts.find(alert=>alert.id===pmId);assert.equal(equipmentAlert.assetLibrary,'equipment');assert.equal(equipmentAlert.assetNumber,'EQ-100');
-  result=await request(base,`/api/equipment-library/preventive-maintenance/${pmId}/complete`,{method:'POST',cookie:ownerCookie,body:{completionDate:'2026-07-23',completionNotes:'Filters cleaned.'}});assert.equal(result.response.status,200);
+  result=await request(base,`/api/equipment-library/preventive-maintenance/${pmId}/complete`,{method:'POST',cookie:ownerCookie,body:{completionDate:'2026-07-23',workOrderNumber:'N/A',completionNotes:'Filters cleaned.'}});assert.equal(result.response.status,200);
   result=await request(base,`/api/equipment-library/preventive-maintenance/${pmId}/history`,{cookie:ownerCookie});assert.equal(result.response.status,200);assert.equal(result.data.history.length,1);
   result=await request(base,`/api/machine-library/preventive-maintenance/${pmId}/history`,{cookie:ownerCookie});assert.equal(result.response.status,404,'Equipment PM IDs must not resolve through Machine Library.');
 

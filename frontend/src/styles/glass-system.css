@@ -1762,6 +1762,15 @@ button.mcc-resource-row__content { cursor: pointer; }
   opacity: 1;
 }
 
+.pm-work-order-file input[type='file'] {
+  min-height: 48px;
+  padding: 9px;
+}
+
+.pm-work-order-file input[type='file']::file-selector-button {
+  margin-right: 10px;
+}
+
 .pm-inline-error {
   color: #ffb8c1;
   font-size: 0.72rem;
@@ -1886,7 +1895,20 @@ button.mcc-resource-row__content { cursor: pointer; }
 }
 
 .pm-history-due {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+}
+
+.pm-history-work-order {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(150px, max-content));
+  align-items: center;
+  padding-top: 9px;
+  border-top: 1px solid rgba(99, 181, 210, 0.12);
+}
+
+.pm-attachment-missing,
+.pm-package-warning {
+  color: #ffd59a;
 }
 
 .pm-history-entry p {
@@ -1923,6 +1945,15 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-excel-sync small,
 .pm-excel-import-controls > span {
   color: var(--glass-text-muted);
+}
+
+.pm-package-warning {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.pm-excel-sync-heading .glass-button-group {
+  flex-wrap: wrap;
 }
 
 .pm-sync-error {
@@ -2027,7 +2058,8 @@ button.mcc-resource-row__content { cursor: pointer; }
 
   .pm-form-wide,
   .pm-due-preview,
-  .pm-history-entry p {
+  .pm-history-entry p,
+  .pm-history-work-order {
     grid-column: 1;
   }
 

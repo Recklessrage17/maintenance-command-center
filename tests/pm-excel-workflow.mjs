@@ -75,9 +75,9 @@ try {
   const preparedHelperFormulas=new Map();for(let row=10;row<=12;row+=1)for(let column=11;column<=20;column+=1)preparedHelperFormulas.set(`${row}:${column}`,originalHistory.getCell(row,column).formula);
   const workOrderNumber='MCC-PM-UNIT00000001';
   const historyRows=[
-    {assetNumber:'Press 100',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'hourly',taskType:'Hydraulic service verified',taskNote:'PM completed at 3,600 machine hours. No issues found.'},
+    {assetNumber:'Press 100',workOrderNumber,workOrderHyperlink:'PDF - Work orders/Press 100/WO-UNIT_report.pdf',taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'hourly',taskType:'Hydraulic service verified',taskNote:'PM completed at 3,600 machine hours. No issues found.'},
     {assetNumber:'Press 100',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'annual',taskType:'Annual safety review',taskNote:'Annual PM completed. No issues found.'},
-    {assetNumber:'Press 200',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'days',taskType:'Inspect guards',taskNote:'PM completed. No issues found.'},
+    {assetNumber:'Press 200',workOrderNumber:'N/A',taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'days',taskType:'Inspect guards',taskNote:'PM completed. No issues found.'},
   ];
   const update={assetNumber:'Press 100',taskTitle:'Hydraulic service verified',matchTaskTitle:'Hydraulic service',intervalType:'hourly',intervalValue:3200,lastCompletedDate:null,lastCompletedMeter:3560,currentDate:null,currentMeter:3600,remaining:3160,status:'Current'};
   const annualUpdate={assetNumber:'Press 100',taskTitle:'Annual safety review',intervalType:'annual',intervalValue:365,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentDate:'2026-07-20',currentMeter:null,remaining:12,status:'Due Soon'};
@@ -97,7 +97,10 @@ try {
   assert.equal(changedTracker.getCell('A14').value,'Press:');assert.equal(changedTracker.getCell('B14').value,'200','Press section identifiers must not be rewritten during alias matching');
   for(const row of [6,7,8,9])assert.ok(!changedTracker.getRow(row).values.includes('100'),'carried machine identifiers must not be written into task rows');
   for(const row of [16,17])assert.ok(!changedTracker.getRow(row).values.includes('200'),'carried machine identifiers must not be written into task rows');
-  assert.deepEqual([changedHistory.getCell('B10').value,changedHistory.getCell('B11').value,changedHistory.getCell('B12').value],[workOrderNumber,workOrderNumber,workOrderNumber]);
+  assert.deepEqual([changedHistory.getCell('B10').text,changedHistory.getCell('B11').text,changedHistory.getCell('B12').text],[workOrderNumber,workOrderNumber,'N/A']);
+  assert.equal(changedHistory.getCell('B10').hyperlink,'PDF - Work orders/Press 100/WO-UNIT_report.pdf','real work orders must receive a relative package hyperlink');
+  assert.equal(changedHistory.getCell('B11').hyperlink,undefined,'rows without an attachment must remain plain text');
+  assert.equal(changedHistory.getCell('B12').hyperlink,undefined,'N/A work orders must remain plain text');
   assert.deepEqual([changedHistory.getCell('A10').value,changedHistory.getCell('A11').value,changedHistory.getCell('A12').value],['Press 100','Press 100','Press 200']);
   assert.deepEqual([changedHistory.getCell('I10').value,changedHistory.getCell('I11').value,changedHistory.getCell('I12').value],['Hydraulic service verified','Annual safety review','Inspect guards']);
   for(const [key,formula] of preparedHelperFormulas){const [row,column]=key.split(':').map(Number);assert.equal(changedHistory.getCell(row,column).formula,formula,`pre-existing Helper formula ${changedHistory.getCell(row,column).address} must not be modified`);}

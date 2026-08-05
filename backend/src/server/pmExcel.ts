@@ -83,6 +83,7 @@ export type HistoryWorkbookAppend = {
   intervalType:WorkbookPmInterval;
   taskType:string;
   taskNote:string;
+  workOrderHyperlink?:string|null;
 };
 
 type TrackerField = 'assetNumber'|'assetName'|'taskTitle'|'intervalType'|'intervalValue'|'lastCompleted'|'current'|'due'|'remaining'|'status';
@@ -399,6 +400,27 @@ async function extendHistoryTable(zip:JSZip,sheetPart:string,headerRow:number,ro
   }
 }
 
+function portableWorkOrderHyperlink(value:string) {
+  const normalized=value.trim();
+  if(!normalized.startsWith('PDF - Work orders/')||normalized.includes('\\')||normalized.startsWith('/')||normalized.split('/').some(part=>!part||part==='.'||part==='..'))throw new Error('PM work-order hyperlink must be a safe relative package path.');
+  return normalized;
+}
+
+async function addWorksheetExternalHyperlink(zip:JSZip,sheetPart:string,worksheetXml:string,address:string,targetValue:string) {
+  const target=portableWorkOrderHyperlink(targetValue);const relPart=relationshipPart(sheetPart);
+  let relationships=await zip.file(relPart)?.async('string');
+  if(!relationships)relationships='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+  const ids=new Set([...relationships.matchAll(/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\/?\s*>/g)].map(match=>match[1]));let next=1;while(ids.has(`rId${next}`))next+=1;const relationshipId=`rId${next}`;
+  const relationship=`<Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(target)}" TargetMode="External"/>`;
+  relationships=relationships.replace('</Relationships>',`${relationship}</Relationships>`);zip.file(relPart,relationships);
+  if(!/\bxmlns:r="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships"/.test(worksheetXml))worksheetXml=worksheetXml.replace(/<worksheet\b/,`<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`);
+  const hyperlink=`<hyperlink ref="${xmlEscape(address)}" r:id="${relationshipId}"/>`;
+  if(/<hyperlinks\b[^>]*>/.test(worksheetXml))return worksheetXml.replace('</hyperlinks>',`${hyperlink}</hyperlinks>`);
+  const insertion=worksheetXml.search(/<(?:printOptions|pageMargins|pageSetup|headerFooter|drawing|legacyDrawing|tableParts|extLst)\b|<\/worksheet>/);
+  if(insertion<0)throw new Error('PMHistory worksheet hyperlink location is unavailable.');
+  return `${worksheetXml.slice(0,insertion)}<hyperlinks>${hyperlink}</hyperlinks>${worksheetXml.slice(insertion)}`;
+}
+
 function trackerRowsByKey(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>) {
   const exact=new Map<string,number[]>();const aliases=new Map<string,number[]>();
   let section=trackerSectionBeforeHeader(sheet,header);
@@ -470,6 +492,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
       const rowNumber=previousHistoryRow+1;historyXml=ensureWorksheetRow(historyXml,rowNumber,previousHistoryRow>historyHeader.rowNumber?previousHistoryRow:null);
       const values:Record<HistoryField,unknown>={assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskStatus:row.taskStatus,startDate:workbookValue(row.startDate,true),completionDate:workbookValue(row.completionDate,true),workOrderType:row.workOrderType,performedBy:row.performedBy,intervalType:row.intervalType==='cycles'?'Cycles':row.intervalType[0].toUpperCase()+row.intervalType.slice(1),taskType:row.taskType,taskNote:row.taskNote};
       for(const [field,column] of Object.entries(historyHeader.columns) as Array<[HistoryField,number]>){const address=history.getCell(rowNumber,column).address;const templateAddress=history.getCell(previousHistoryRow,column).address;const patched=setWorksheetCell(historyXml,address,values[field],date1904,templateAddress);if(!patched.changed)throw new Error(`PMHistory ${address} cannot be updated because it contains a protected formula.`);historyXml=patched.xml;}
+      if(row.workOrderHyperlink)historyXml=await addWorksheetExternalHyperlink(zip,historyPart,historyXml,history.getCell(rowNumber,historyHeader.columns.workOrderNumber).address,row.workOrderHyperlink);
       previousHistoryRow=rowNumber;lastAppendedHistoryRow=rowNumber;appendedHistory+=1;existing.add(`ref:${sourceRef}`);
     }
     historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);

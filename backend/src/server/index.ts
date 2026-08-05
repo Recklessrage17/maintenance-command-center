@@ -17,6 +17,7 @@ import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpe
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
 import { createPmMachineAssetResolver } from './pmAssetResolver.js';
+import { createPmWorkOrderStorage, DEFAULT_PM_WORK_ORDER_MAX_BYTES, PM_WORK_ORDER_DIRECTORY_NAME, PM_WORK_ORDER_MIME, validatePmFollowUp, validatePmWorkOrderNumber, type StagedPmWorkOrder, type StoredPmWorkOrder } from './pmWorkOrders.js';
 import {
   PM_EXCEL_MIME,
   calculateWorkbookPm,
@@ -113,6 +114,9 @@ const pmExcelDir = path.resolve(process.env.MCC_PM_EXCEL_DIR || path.join(dataDi
 const pmExcelSourceDir = path.join(pmExcelDir, 'sources');
 const pmExcelBackupDir = path.join(pmExcelDir, 'backups');
 const pmExcelLatestPath = path.join(pmExcelDir, 'PM_report_latest.xlsx');
+const pmWorkOrderDir = path.resolve(process.env.MCC_PM_WORK_ORDER_DIR || path.join(dataDir, PM_WORK_ORDER_DIRECTORY_NAME));
+const configuredPmWorkOrderMaxMb=Number(process.env.MCC_PM_WORK_ORDER_MAX_MB??DEFAULT_PM_WORK_ORDER_MAX_BYTES/1024/1024);
+const pmWorkOrderMaxBytes=Number.isFinite(configuredPmWorkOrderMaxMb)&&configuredPmWorkOrderMaxMb>0&&configuredPmWorkOrderMaxMb<=100?Math.floor(configuredPmWorkOrderMaxMb*1024*1024):DEFAULT_PM_WORK_ORDER_MAX_BYTES;
 const dbPath = path.join(dataDir, 'mcc.sqlite');
 const isProd = process.env.NODE_ENV === 'production';
 const sessionSecretConfigured = Boolean(process.env.SESSION_SECRET);
@@ -129,8 +133,10 @@ fs.mkdirSync(equipmentAssetNotesDir, { recursive: true });
 fs.mkdirSync(equipmentDocumentLibraryDir, { recursive: true });
 fs.mkdirSync(pmExcelSourceDir, { recursive: true });
 fs.mkdirSync(pmExcelBackupDir, { recursive: true });
+const pmWorkOrderStorage=createPmWorkOrderStorage(pmWorkOrderDir,pmWorkOrderMaxBytes);
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const pmExcelUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 20 * 1024 * 1024 } });
+const pmWorkOrderUpload = multer({ storage: multer.memoryStorage(), preservePath:true, limits: { files: 1, fileSize: pmWorkOrderMaxBytes } });
 const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
 const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
 const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
@@ -214,7 +220,8 @@ CREATE TABLE IF NOT EXISTS equipment_asset_note_attachments (id INTEGER PRIMARY 
 CREATE TABLE IF NOT EXISTS equipment_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS equipment_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES equipment_document_folders(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', completion_request_id TEXT, work_order_number TEXT NOT NULL DEFAULT '', task_status TEXT NOT NULL DEFAULT 'Completed', start_date TEXT, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', work_order_type TEXT NOT NULL DEFAULT 'Preventive Maintenance', interval_type TEXT NOT NULL DEFAULT '', task_type TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', no_issues_found INTEGER NOT NULL DEFAULT 1, meter_override_type TEXT, meter_override_reason TEXT, import_source_ref TEXT, previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', completion_request_id TEXT, work_order_number TEXT NOT NULL DEFAULT '', task_status TEXT NOT NULL DEFAULT 'Completed', start_date TEXT, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', work_order_type TEXT NOT NULL DEFAULT 'Preventive Maintenance', interval_type TEXT NOT NULL DEFAULT '', task_type TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', no_issues_found INTEGER NOT NULL DEFAULT 1, follow_up_required INTEGER NOT NULL DEFAULT 0, follow_up_reason TEXT NOT NULL DEFAULT '', meter_override_type TEXT, meter_override_reason TEXT, import_source_ref TEXT, previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_work_order_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_history_id INTEGER NOT NULL UNIQUE, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', asset_display_name TEXT NOT NULL, work_order_number TEXT NOT NULL, original_filename TEXT NOT NULL, stored_relative_path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, mime_type TEXT NOT NULL, uploaded_by_user_id INTEGER, uploaded_by_name TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, FOREIGN KEY(pm_history_id) REFERENCES pm_history(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_excel_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, preview_token TEXT NOT NULL UNIQUE, confirm_request_id TEXT NOT NULL UNIQUE, workbook_sha256 TEXT NOT NULL, original_filename TEXT NOT NULL, source_path TEXT NOT NULL, imported_by_user_id INTEGER NOT NULL, confirmed_by_user_id INTEGER NOT NULL, previewed_at TEXT NOT NULL, confirmed_at TEXT NOT NULL, summary_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS pm_excel_sync_state (id INTEGER PRIMARY KEY CHECK(id=1), status TEXT NOT NULL DEFAULT 'never', attempted_at TEXT, synchronized_at TEXT, original_filename TEXT NOT NULL DEFAULT '', source_path TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '', changed_cells INTEGER NOT NULL DEFAULT 0, appended_history INTEGER NOT NULL DEFAULT 0, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
@@ -258,6 +265,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_tasks_asset ON pm_tasks (asset_id,active,updat
 CREATE INDEX IF NOT EXISTS idx_pm_tasks_due_date ON pm_tasks (next_due_date,active);
 CREATE INDEX IF NOT EXISTS idx_pm_history_task ON pm_history (pm_task_id,completion_date DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completion_date DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_work_order_attachments_asset ON pm_work_order_attachments (asset_library,asset_id,uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_logs_section ON history_logs (section);
 CREATE INDEX IF NOT EXISTS idx_history_logs_action ON history_logs (action);
 CREATE INDEX IF NOT EXISTS idx_history_logs_created_at ON history_logs (created_at);
@@ -476,17 +484,21 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
     {name:'interval_type',definition:"TEXT NOT NULL DEFAULT ''"},
     {name:'task_type',definition:"TEXT NOT NULL DEFAULT ''"},
     {name:'no_issues_found',definition:'INTEGER NOT NULL DEFAULT 1'},
+    {name:'follow_up_required',definition:'INTEGER NOT NULL DEFAULT 0'},
+    {name:'follow_up_reason',definition:"TEXT NOT NULL DEFAULT ''"},
     {name:'meter_override_type',definition:'TEXT'},
     {name:'meter_override_reason',definition:'TEXT'},
     {name:'import_source_ref',definition:'TEXT'},
   ];
   for (const column of pmHistoryMigrations) if (!pmHistoryColumns.has(column.name)) run(`ALTER TABLE pm_history ADD COLUMN ${column.name} ${column.definition}`);
-  db.exec(`CREATE TABLE IF NOT EXISTS pm_excel_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, preview_token TEXT NOT NULL UNIQUE, confirm_request_id TEXT NOT NULL UNIQUE, workbook_sha256 TEXT NOT NULL, original_filename TEXT NOT NULL, source_path TEXT NOT NULL, imported_by_user_id INTEGER NOT NULL, confirmed_by_user_id INTEGER NOT NULL, previewed_at TEXT NOT NULL, confirmed_at TEXT NOT NULL, summary_json TEXT NOT NULL DEFAULT '{}');
+  db.exec(`CREATE TABLE IF NOT EXISTS pm_work_order_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_history_id INTEGER NOT NULL UNIQUE, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', asset_display_name TEXT NOT NULL, work_order_number TEXT NOT NULL, original_filename TEXT NOT NULL, stored_relative_path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, mime_type TEXT NOT NULL, uploaded_by_user_id INTEGER, uploaded_by_name TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, FOREIGN KEY(pm_history_id) REFERENCES pm_history(id) ON DELETE RESTRICT);
+CREATE TABLE IF NOT EXISTS pm_excel_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, preview_token TEXT NOT NULL UNIQUE, confirm_request_id TEXT NOT NULL UNIQUE, workbook_sha256 TEXT NOT NULL, original_filename TEXT NOT NULL, source_path TEXT NOT NULL, imported_by_user_id INTEGER NOT NULL, confirmed_by_user_id INTEGER NOT NULL, previewed_at TEXT NOT NULL, confirmed_at TEXT NOT NULL, summary_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS pm_excel_sync_state (id INTEGER PRIMARY KEY CHECK(id=1), status TEXT NOT NULL DEFAULT 'never', attempted_at TEXT, synchronized_at TEXT, original_filename TEXT NOT NULL DEFAULT '', source_path TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '', changed_cells INTEGER NOT NULL DEFAULT 0, appended_history INTEGER NOT NULL DEFAULT 0, updated_by_user_id INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_completion_request ON pm_history (completion_request_id) WHERE completion_request_id IS NOT NULL AND completion_request_id<>'';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_import_source ON pm_history (import_source_ref) WHERE import_source_ref IS NOT NULL AND import_source_ref<>'';
 DROP INDEX IF EXISTS idx_pm_history_work_order;
 CREATE INDEX IF NOT EXISTS idx_pm_history_work_order_lookup ON pm_history (work_order_number COLLATE NOCASE) WHERE work_order_number<>'';`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pm_work_order_attachments_asset ON pm_work_order_attachments (asset_library,asset_id,uploaded_at DESC);');
   run("INSERT OR IGNORE INTO pm_excel_sync_state (id,status,original_filename,source_path,error_message) VALUES (1,'never','','','')");
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('barrel_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
@@ -2400,6 +2412,7 @@ type BackupManifest = {
   includedFolders: string[];
   recordCounts: Record<string, number>;
   documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
+  workOrderAttachments?: { attachmentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
   fileChecksums?: Record<string,string>;
   notes: string;
@@ -2418,6 +2431,7 @@ type BackupSummary = {
   includedFolders: string[];
   recordCounts: Record<string, number>;
   documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
+  workOrderAttachments?: { attachmentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
   notes: string;
   restorable: boolean;
@@ -2488,13 +2502,13 @@ const backupRetention: Record<CreatableBackupCategory, Partial<Record<BackupType
   weekly: { weekly_scheduled: 26, weekly_manual: 12 },
   master: { master_scheduled: 24, master_manual: 30, pre_restore: 20, startup: 10 },
 };
-const masterBackupFolderCandidates = ['uploads','documents','files'];
+const masterBackupFolderCandidates = ['uploads','documents','files','pm-work-orders'];
 const backupDataAreaDefinitions = [
   { key: 'inventoryParts', label: 'Inventory', tables: ['inventory_parts'] },
   { key: 'vendors', label: 'Vendors', tables: ['inventory_vendors'] },
   { key: 'requisitions', label: 'Requisitions', tables: ['inventory_requisitions','inventory_requisition_lines','requisition_batches','requisition_batch_requisitions','requisition_staging_items'] },
   { key: 'historyLogs', label: 'History', tables: ['history_logs'] },
-  { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','preventive_maintenance'] },
+  { key: 'preventiveMaintenanceRecords', label: 'PM', tables: ['pm_tasks','pm_history','pm_work_order_attachments','preventive_maintenance'] },
   { key: 'machineRecords', label: 'Machines', tables: ['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms'] },
   { key: 'equipmentRecords', label: 'Equipment', tables: ['equipment_assets','equipment_asset_notes','equipment_asset_note_attachments','equipment_document_folders','equipment_documents','equipment','equipment_library','equipment_pms'] },
   { key: 'facilityRecords', label: 'Facility', tables: ['facility_areas','facility_folders','facility_items','facility_documents','facility_info','building_prints','facility_pms'] },
@@ -2560,9 +2574,9 @@ function folderSizeBytes(folderPath: string): number {
   if (stat.isFile()) return stat.size;
   return fs.readdirSync(folderPath).reduce((total, entry)=>total + folderSizeBytes(path.join(folderPath, entry)), 0);
 }
-function copyDirectoryIfPresent(sourcePath: string, targetPath: string) {
+function copyDirectoryIfPresent(sourcePath: string, targetPath: string, filter?: (source: string, destination: string) => boolean) {
   if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isDirectory()) return false;
-  fs.cpSync(sourcePath, targetPath, { recursive: true });
+  fs.cpSync(sourcePath, targetPath, { recursive: true, filter });
   return true;
 }
 function removeDirectoryIfPresent(targetPath: string) {
@@ -2591,8 +2605,37 @@ function masterBackupRecordCounts() {
     machineRecords: tableGroupCount(['machine_assets','machine_component_images','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','machine_document_folders','machine_documents','machines','machine_library','machine_pms']),
     equipmentRecords: tableGroupCount(['equipment_assets','equipment_asset_notes','equipment_asset_note_attachments','equipment_document_folders','equipment_documents','equipment','equipment_library','equipment_pms']),
     facilityRecords: tableGroupCount(['facility_areas','facility_folders','facility_items','facility_documents','facility_info','building_prints','facility_pms']),
-    preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','preventive_maintenance']),
+    preventiveMaintenanceRecords: tableGroupCount(['pm_tasks','pm_history','pm_work_order_attachments','preventive_maintenance']),
   };
+}
+
+function pmWorkOrderBackupStats() {
+  let fileCount=0;let sizeBytes=0;
+  function visit(folderPath:string) {
+    if (!fs.existsSync(folderPath)) return;
+    for (const entry of fs.readdirSync(folderPath,{withFileTypes:true})) {
+      if (entry.name==='.staging'||entry.isSymbolicLink()) continue;
+      const entryPath=path.join(folderPath,entry.name);
+      if (entry.isDirectory()) visit(entryPath);
+      else if (entry.isFile()) { fileCount+=1;sizeBytes+=fs.statSync(entryPath).size; }
+    }
+  }
+  visit(pmWorkOrderDir);
+  return { attachmentCount:tableCount('pm_work_order_attachments'),fileCount,sizeBytes };
+}
+
+function validatePmWorkOrderStorageIntegrity() {
+  if (!tableExists('pm_work_order_attachments')) return;
+  const failures:string[]=[];
+  for (const attachment of all<PmWorkOrderAttachmentRow>('SELECT * FROM pm_work_order_attachments ORDER BY id')) {
+    try {
+      const filePath=pmWorkOrderStorage.absolutePath(attachment.stored_relative_path);
+      if (!fs.existsSync(filePath)||!fs.statSync(filePath).isFile()) failures.push(`attachment ${attachment.id} is missing`);
+      else if (fs.statSync(filePath).size!==Number(attachment.size_bytes)) failures.push(`attachment ${attachment.id} has the wrong size`);
+      else if (sha256File(filePath)!==attachment.sha256) failures.push(`attachment ${attachment.id} has a hash mismatch`);
+    } catch { failures.push(`attachment ${attachment.id} has an unsafe storage path`); }
+  }
+  if (failures.length) throw new Error(`Work-order attachment storage verification failed: ${failures.slice(0,5).join('; ')}${failures.length>5?`; and ${failures.length-5} more`:''}.`);
 }
 function machineDocumentLibraryBackupStats() {
   const documentCount = tableCount('machine_documents');
@@ -2711,6 +2754,7 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     includedFolders: manifest?.includedFolders ?? (manifest?.includedPaths ?? []).filter(value=>value.endsWith('/')),
     recordCounts: manifest?.recordCounts ?? {},
     documentLibrary: manifest?.documentLibrary,
+    workOrderAttachments: manifest?.workOrderAttachments,
     checksumSha256: manifest?.checksumSha256 ?? '',
     notes: manifest?.notes ?? '',
     restorable: fs.existsSync(dbFile),
@@ -2781,7 +2825,10 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
     const fileTargetRoot = path.join(targetDir, 'files');
     for (const includedFolder of masterBackupFolderCandidates) {
       const sourcePath = appDataFolderPath(includedFolder);
-      if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder))) {
+      const filter=includedFolder==='pm-work-orders'
+        ? (source:string)=>path.basename(source)!=='.staging'
+        : undefined;
+      if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder), filter)) {
         includedPaths.push(`${includedFolder}/`);
         includedFolders.push(`${includedFolder}/`);
       }
@@ -2800,6 +2847,7 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
       includedFolders,
       recordCounts: masterBackupRecordCounts(),
       documentLibrary: machineDocumentLibraryBackupStats(),
+      workOrderAttachments: pmWorkOrderBackupStats(),
       checksumSha256: sha256File(backupDbPath),
       fileChecksums: backupFileChecksums(targetDir),
       notes: input.notes ?? '',
@@ -2867,12 +2915,13 @@ function verifyMasterBackup(id: unknown) {
 function appDataFolderPath(folderName: string) {
   if (!masterBackupFolderCandidates.includes(folderName)) throw new Error('Unsafe restore folder.');
   if (folderName === 'uploads') return uploadsDir;
+  if (folderName === 'pm-work-orders') return pmWorkOrderDir;
   const backendRoot = path.resolve(__dirname, '../../');
   const resolved = path.resolve(backendRoot, folderName);
   if (!resolved.startsWith(`${backendRoot}${path.sep}`)) throw new Error('Unsafe restore folder.');
   return resolved;
 }
-function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: { removeMissing: boolean }) {
+function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, _options: { removeMissing: boolean }) {
   const restoredFolders: string[] = [];
   const backupFilesRoot = path.join(backupFolderPath, 'files');
   for (const folderName of masterBackupFolderCandidates) {
@@ -2882,8 +2931,6 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
       removeDirectoryIfPresent(targetPath);
       fs.cpSync(sourcePath, targetPath, { recursive: true });
       restoredFolders.push(folderName);
-    } else if (options.removeMissing) {
-      removeDirectoryIfPresent(targetPath);
     }
   }
   fs.mkdirSync(brandingUploadsDir, { recursive: true });
@@ -2891,6 +2938,7 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, options: 
   fs.mkdirSync(machineInspectionRecordsDir, { recursive: true });
   fs.mkdirSync(machineAssetNotesDir, { recursive: true });
   fs.mkdirSync(machineDocumentLibraryDir, { recursive: true });
+  fs.mkdirSync(pmWorkOrderStorage.stagingRoot, { recursive: true });
   facilityInfoService?.ensureSchema();
   return restoredFolders;
 }
@@ -2916,6 +2964,7 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
     initDb();
     migrateDb();
     restoredFolders = restoreWhitelistedFoldersFromBackup(backupFolderPath, { removeMissing: true });
+    validatePmWorkOrderStorageIntegrity();
     validateMachineDocumentStorageIntegrity();
     refreshMachineDocumentRecoveryMetadata();
     facilityInfoService?.validateStorage();
@@ -2938,6 +2987,7 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
         migrateDb();
       }
       restoreWhitelistedFoldersFromBackup(preRestoreFolderPath, { removeMissing: true });
+      validatePmWorkOrderStorageIntegrity();
       refreshMachineDocumentRecoveryMetadata();
       facilityInfoService?.ensureSchema();
       facilityInfoService?.refreshRecoveryMetadata();
@@ -6848,7 +6898,8 @@ type PmIntervalType = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | '
 type PmScheduleStatus = 'active' | 'hold' | 'inactive';
 type AssetLibrary = 'machine' | 'equipment';
 type PmTaskRow = { id:number; asset_id:number; asset_library:AssetLibrary; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; hold:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string };
-type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; asset_library:AssetLibrary; completion_request_id:string|null; work_order_number:string; task_status:string; start_date:string|null; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; work_order_type:string; interval_type:string; task_type:string; completion_notes:string; no_issues_found:number; meter_override_type:string|null; meter_override_reason:string|null; import_source_ref:string|null; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
+type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; asset_library:AssetLibrary; completion_request_id:string|null; work_order_number:string; task_status:string; start_date:string|null; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; work_order_type:string; interval_type:string; task_type:string; completion_notes:string; no_issues_found:number; follow_up_required:number; follow_up_reason:string; meter_override_type:string|null; meter_override_reason:string|null; import_source_ref:string|null; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
+type PmWorkOrderAttachmentRow = { id:number; pm_history_id:number; asset_id:number; asset_library:AssetLibrary; asset_display_name:string; work_order_number:string; original_filename:string; stored_relative_path:string; size_bytes:number; sha256:string; mime_type:string; uploaded_by_user_id:number|null; uploaded_by_name:string; uploaded_at:string };
 type MachineAssetRow = {
   id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; setup_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
@@ -7459,6 +7510,21 @@ function streamRecoveryArchive(res:Response,fileName:string,build:(archive:Archi
   res.setHeader('Cache-Control','private, no-store');
   archive.pipe(res);build(archive);void archive.finalize();
 }
+function appendPmPackageArchive(archive:Archiver) {
+  if(!fs.existsSync(pmExcelLatestPath)||!fs.statSync(pmExcelLatestPath).isFile())throw new Error('No synchronized PM workbook is available yet.');
+  validatePmWorkOrderStorageIntegrity();
+  archive.file(pmExcelLatestPath,{name:'PM_report.xlsx'});
+  archive.append('',{name:`${PM_WORK_ORDER_DIRECTORY_NAME}/`});
+  function visit(folderPath:string,parts:string[]) {
+    for(const entry of fs.readdirSync(folderPath,{withFileTypes:true}).sort((left,right)=>left.name.localeCompare(right.name))) {
+      if(entry.name==='.staging'||entry.isSymbolicLink())continue;
+      const entryPath=path.join(folderPath,entry.name);const nextParts=[...parts,entry.name];
+      if(entry.isDirectory())visit(entryPath,nextParts);
+      else if(entry.isFile())archive.file(entryPath,{name:[PM_WORK_ORDER_DIRECTORY_NAME,...nextParts].join('/')});
+    }
+  }
+  visit(pmWorkOrderDir,[]);
+}
 function validateMachineDocumentStorageIntegrity() {
   const missing:string[]=[];
   for (const row of all<Pick<MachineDocumentRow,'id'|'asset_id'|'stored_filename'|'size_bytes'>>('SELECT id,asset_id,stored_filename,size_bytes FROM machine_documents')) {
@@ -7646,8 +7712,26 @@ function dashboardPmAlerts() {
       assetLibrary:row.asset_library,
     }));
 }
+function pmWorkOrderAttachment(historyId:number) {return one<PmWorkOrderAttachmentRow>('SELECT * FROM pm_work_order_attachments WHERE pm_history_id=?',[historyId]);}
+function publicPmWorkOrderAttachment(row:PmWorkOrderAttachmentRow) {
+  let status:'available'|'missing'='missing';
+  try{const filePath=pmWorkOrderStorage.absolutePath(row.stored_relative_path);if(fs.existsSync(filePath)&&fs.statSync(filePath).isFile()&&fs.statSync(filePath).size===Number(row.size_bytes))status='available';}catch{/* Invalid legacy metadata is reported as missing without exposing its path. */}
+  const library=row.asset_library==='equipment'?'equipment-library':'machine-library';
+  return {id:row.id,filename:row.original_filename,sizeBytes:Number(row.size_bytes),mimeType:row.mime_type,sha256:row.sha256,uploadedBy:row.uploaded_by_name||'Unknown user',uploadedAt:row.uploaded_at,status,openUrl:`/api/${library}/pm-history/${row.pm_history_id}/work-order-pdf`};
+}
+function servePmWorkOrderPdf(res:Response,historyId:number,library:AssetLibrary) {
+  const row=one<PmWorkOrderAttachmentRow>('SELECT * FROM pm_work_order_attachments WHERE pm_history_id=? AND asset_library=?',[historyId,library]);
+  if(!row)return res.status(404).json({ok:false,error:'Work-order PDF attachment not found.'});
+  try{
+    const filePath=pmWorkOrderStorage.absolutePath(row.stored_relative_path);
+    if(!fs.existsSync(filePath)||!fs.statSync(filePath).isFile()||fs.statSync(filePath).size!==Number(row.size_bytes))return res.status(404).json({ok:false,error:'Stored work-order PDF is missing.'});
+    const safeName=row.original_filename.replace(/[^\x20-\x7e]|["\\]/g,'_');
+    res.setHeader('Content-Type',PM_WORK_ORDER_MIME);res.setHeader('Content-Length',String(row.size_bytes));res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Security-Policy',"sandbox");res.setHeader('Content-Disposition',`inline; filename="${safeName}"`);return res.sendFile(filePath);
+  }catch{return res.status(404).json({ok:false,error:'Stored work-order PDF is unavailable.'});}
+}
 function publicPmHistory(row:PmHistoryRow) {
-  return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,workOrderNumber:row.work_order_number,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,noIssuesFound:Boolean(row.no_issues_found),previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
+  const attachment=pmWorkOrderAttachment(row.id);
+  return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,workOrderNumber:row.work_order_number,followUpRequired:Boolean(row.follow_up_required),followUpReason:row.follow_up_required?row.follow_up_reason:'',attachment:attachment?publicPmWorkOrderAttachment(attachment):null,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:row.performed_by_name || 'Unknown user',completionNotes:row.completion_notes,noIssuesFound:Boolean(row.no_issues_found),previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
 }
 function machineAssetPmCardSummary(tasks:PmTaskRow[]) {
   if (!tasks.length) return null;
@@ -7698,7 +7782,8 @@ function pmTrackerUpdate(task:PmTaskRow,assetNumber:string,currentDate=new Date(
   return {assetNumber,taskTitle:task.title,intervalType,...(previousTask?{matchTaskTitle:previousTask.title,matchIntervalType:pmWorkbookInterval(previousTask.interval_type)}:{}),intervalValue:task.interval_value,lastCompletedDate:task.last_completed_date,lastCompletedMeter:task.last_completed_meter,currentDate:meter?null:currentDate,currentMeter:task.current_meter,remaining:calculation.remaining,status:calculation.status};
 }
 function pmHistoryWorkbookRow(history:PmHistoryRow,task:PmTaskRow,assetNumber:string):HistoryWorkbookAppend {
-  return {assetNumber,workOrderNumber:history.work_order_number||`MCC-PM-${history.id}`,taskStatus:history.task_status||'Completed',startDate:history.start_date||history.completion_date,completionDate:history.completion_date,workOrderType:history.work_order_type||'Preventive Maintenance',performedBy:history.performed_by_name||'Unknown user',intervalType:pmWorkbookInterval(task.interval_type),taskType:history.task_type||task.title,taskNote:history.completion_notes};
+  const attachment=pmWorkOrderAttachment(history.id);
+  return {assetNumber,workOrderNumber:history.work_order_number||`MCC-PM-${history.id}`,workOrderHyperlink:attachment?.stored_relative_path??null,taskStatus:history.task_status||'Completed',startDate:history.start_date||history.completion_date,completionDate:history.completion_date,workOrderType:history.work_order_type||'Preventive Maintenance',performedBy:history.performed_by_name||'Unknown user',intervalType:pmWorkbookInterval(task.interval_type),taskType:history.task_type||task.title,taskNote:history.completion_notes};
 }
 function pmSyncState() {
   const state=one<PmExcelSyncStateRow>('SELECT status,attempted_at,synchronized_at,original_filename,source_path,error_message,changed_cells,appended_history,updated_by_user_id FROM pm_excel_sync_state WHERE id=1');
@@ -7817,18 +7902,60 @@ function pmCompletionRequestId(req:AuthRequest) {
   if (!/^[A-Za-z0-9._:-]{8,128}$/.test(value)) throw new Error('The PM completion request identifier is invalid.');
   return value;
 }
-function pmCompletionWorkOrder(requestId:string) {return `MCC-PM-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0,12).toUpperCase()}`;}
 function pmCompletionNote(input:Record<string,unknown>,intervalType:PmIntervalType,completedMeter:number|null) {
-  const noIssuesFound=input.noIssuesFound!==false;const entered=String(input.taskNote??input.completionNotes??'').replace(/\r/g,'').trim().slice(0,12000);
+  const noIssuesValue=String(input.noIssuesFound??'true').trim().toLowerCase();const noIssuesFound=!(input.noIssuesFound===false||input.noIssuesFound===0||noIssuesValue==='false'||noIssuesValue==='0');const entered=String(input.taskNote??input.completionNotes??'').replace(/\r/g,'').trim().slice(0,12000);
   if(!noIssuesFound&&!meaningfulPmNote(entered))throw new Error('Enter a meaningful Task Note when issues were found.');
   const noteInterval:WorkbookPmInterval=intervalType==='hourly'?'hourly':intervalType==='cycles'?'cycles':intervalType==='annual'?'annual':'days';
   return {noIssuesFound,note:entered||(noIssuesFound?defaultPmCompletionNote(noteInterval,completedMeter):'')};
 }
 function pmMeterOverride(input:Record<string,unknown>,task:PmTaskRow,completedMeter:number|null) {
   const decreasing=pmMeterIntervals.has(task.interval_type)&&completedMeter!==null&&task.current_meter!==null&&completedMeter<task.current_meter;if(!decreasing)return null;
-  const raw=isRecord(input.meterOverride)?input.meterOverride:{};const type=String(raw.type??'').trim().toLowerCase();const reason=String(raw.reason??'').replace(/\r/g,'').trim().slice(0,1000);
+  const raw=isRecord(input.meterOverride)?input.meterOverride:{};const type=String(raw.type??input.meterOverrideType??'').trim().toLowerCase();const reason=String(raw.reason??input.meterOverrideReason??'').replace(/\r/g,'').trim().slice(0,1000);
   if(!['replacement','correction','override'].includes(type)||!meaningfulPmNote(reason))throw new Error(`A decreasing meter reading requires an authorized meter replacement, correction, or override reason. Stored reading: ${task.current_meter}.`);
   return {type,reason,originalValue:task.current_meter,newValue:completedMeter};
+}
+function receivePmWorkOrder(req:Request,res:Response,next:NextFunction) {
+  pmWorkOrderUpload.single('workOrderPdf')(req,res,error=>{
+    if(!error)return next();
+    const message=error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE'?`Work-order PDF must be ${Math.floor(pmWorkOrderMaxBytes/1024/1024)} MB or smaller.`:safeErrorMessage(error,[],'Work-order PDF upload failed.');
+    res.status(400).json({ok:false,error:message});
+  });
+}
+function pmCompletionInput(task:PmTaskRow,body:Record<string,unknown>,upload:Express.Multer.File|undefined) {
+  const completionDate=validPmDate(body.completionDate??new Date().toISOString().slice(0,10),'completion date',true)!;
+  const completedMeter=optionalPmNumber(body.completedMeter,'Completed meter');
+  if(pmMeterIntervals.has(task.interval_type)&&completedMeter===null)throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);
+  if(task.interval_type==='cycles'&&completedMeter!==null&&!Number.isInteger(completedMeter))throw new Error('Cycle completion readings must use whole numbers.');
+  const workOrder=validatePmWorkOrderNumber(body.workOrderNumber);
+  const followUp=validatePmFollowUp(body.followUpRequired,body.followUpReason);
+  if(!workOrder.notApplicable&&!upload)throw new Error('A valid work-order PDF is required for a real Work Order Number.');
+  const completion=pmCompletionNote(body,task.interval_type,completedMeter);
+  const override=pmMeterOverride(body,task,completedMeter);
+  const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);
+  const staged=pmWorkOrderStorage.stage(upload);
+  return {completionDate,completedMeter,...workOrder,...followUp,completion,override,due,staged};
+}
+function commitPmCompletion(input:{task:PmTaskRow;assetDisplayName:string;actor:User;requestId:string;values:ReturnType<typeof pmCompletionInput>;beforeFinalize?:()=>void}) {
+  const {task,actor,requestId,values}=input;const timestamp=now();let historyId=0;let stored:StoredPmWorkOrder|null=null;
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_request_id,work_order_number,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,follow_up_required,follow_up_reason,meter_override_type,meter_override_reason,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
+      task.id,task.asset_id,task.asset_library,requestId,values.workOrderNumber,'Completed',values.completionDate,values.completionDate,values.completedMeter,actor.id,actor.full_name,'Preventive Maintenance',task.interval_type,task.title,values.completion.note,values.completion.noIssuesFound?1:0,values.followUpRequired?1:0,values.followUpReason,values.override?.type??null,values.override?.reason??null,task.next_due_date,task.next_due_meter,values.due.nextDueDate,values.due.nextDueMeter,timestamp,
+    ]);historyId=Number(result.lastInsertRowid);
+    if(values.staged){
+      stored=pmWorkOrderStorage.finalize(values.staged,input.assetDisplayName,task.asset_id,values.workOrderNumber,input.beforeFinalize);
+      run('INSERT INTO pm_work_order_attachments (pm_history_id,asset_id,asset_library,asset_display_name,work_order_number,original_filename,stored_relative_path,size_bytes,sha256,mime_type,uploaded_by_user_id,uploaded_by_name,uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',[historyId,task.asset_id,task.asset_library,input.assetDisplayName,values.workOrderNumber,stored.originalFilename,stored.relativePath,stored.sizeBytes,stored.sha256,stored.mimeType,actor.id,actor.full_name,timestamp]);
+    }
+    run('UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library=?',[values.completionDate,pmMeterIntervals.has(task.interval_type)?values.completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?values.completedMeter:task.current_meter,values.due.nextDueDate,values.due.nextDueMeter,actor.id,timestamp,task.id,task.asset_library]);
+    db.exec('COMMIT');
+  }catch(error){
+    db.exec('ROLLBACK');
+    if(stored&&fs.existsSync(stored.absolutePath))fs.rmSync(stored.absolutePath,{force:true});
+    pmWorkOrderStorage.discard(values.staged);
+    throw error;
+  }
+  pmWorkOrderStorage.discard(values.staged);
+  return {historyId,stored};
 }
 async function syncSingleMachinePmTask(actor:User,task:PmTaskRow,asset:MachineAssetRow,currentDate?:string,previousTask?:PmTaskRow){if(!fs.existsSync(pmExcelLatestPath))return null;try{return await performPmWorkbookSync({actor,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',trackerUpdates:[pmTrackerUpdate(task,asset.asset_number,currentDate,previousTask)],historyRows:[]});}catch(error){const message=safeErrorMessage(error,[],'The PM change could not be synchronized to the approved workbook.');updatePmSyncState({status:'failed',actor,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',errorMessage:message});recordPmWorkbookAudit(actor,'pm_excel_sync_failed',{taskId:task.id,error:message},message);return{ok:false as const,error:message,status:pmSyncState()};}}
 function normalizedMachineAssetNumber(value: string) {
@@ -8858,7 +8985,12 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
 app.get('/api/pm-excel/status',requireAuth,requirePermission('machine.view'),(_req,res)=>res.json({ok:true,sync:pmSyncState()}));
 app.get('/api/pm-excel/download',requireAuth,requirePermission('machine.view'),(_req,res)=>{
   if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
-  res.setHeader('Content-Type',PM_EXCEL_MIME);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename="PM_report_latest.xlsx"');res.sendFile(pmExcelLatestPath);
+  res.setHeader('Content-Type',PM_EXCEL_MIME);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename="PM_report.xlsx"');res.sendFile(pmExcelLatestPath);
+});
+app.get('/api/pm-excel/package/download',requireAuth,requirePermission('machine.view'),(_req,res)=>{
+  if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
+  try{streamRecoveryArchive(res,`PM_Package_${new Date().toISOString().slice(0,10)}.zip`,appendPmPackageArchive);}
+  catch(error){if(!res.headersSent)res.status(500).json({ok:false,error:safeErrorMessage(error,[],'The PM package could not be created.')});else res.destroy(error instanceof Error?error:new Error(String(error)));}
 });
 app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manage'),pmExcelUpload.single('file'),async(req:AuthRequest,res)=>{
   try {
@@ -8901,6 +9033,8 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
   }catch(error){const message=safeErrorMessage(error,[],'The PM workbook import could not be confirmed.');res.status(/expired|valid|required/i.test(message)?400:409).json({ok:false,error:message});}
 });
 app.post('/api/pm-excel/sync/retry',requireAuth,requirePermission('machine.pm_manage'),async(req:AuthRequest,res)=>{try{const sync=await retryPmWorkbookSync(req.user!);res.status(sync.ok?200:500).json({ok:sync.ok,sync:sync.status,...(!sync.ok?{error:sync.error}:{})});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'PM workbook synchronization could not be retried.')});}});
+
+app.get('/api/machine-library/pm-history/:historyId/work-order-pdf',requireAuth,requirePermission('machine.view'),(req,res)=>servePmWorkOrderPdf(res,Number(req.params.historyId),'machine'));
 
 app.get('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.assetId));
@@ -8967,7 +9101,8 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', require
   scheduleAutoBackup('preventive maintenance deactivated',req.user!);
   res.json({ok:true,task:publicPmTask(updated)});
 });
-app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), async(req:AuthRequest,res)=>{
+app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), receivePmWorkOrder, async(req:AuthRequest,res)=>{
+  let staged:StagedPmWorkOrder|null=null;
   try {
     const task=pmTaskById(Number(req.params.pmId));
     if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
@@ -8977,39 +9112,21 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAu
     if(duplicate){if(duplicate.pm_task_id!==task.id)return res.status(409).json({ok:false,error:'PM completion request identifier is already in use.'});return res.json({ok:true,duplicatePrevented:true,task:publicPmTask(task),history:publicPmHistory(duplicate),sync:pmSyncState()});}
     if (!task.active) throw new Error('Inactive preventive maintenance tracking cannot be completed.');
     if (task.hold) throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');
-    const body=isRecord(req.body)?req.body:{};const completionDate=validPmDate(body.completionDate??new Date().toISOString().slice(0,10),'completion date',true)!;
-    const completedMeter=optionalPmNumber(body.completedMeter,'Completed meter');
-    if (pmMeterIntervals.has(task.interval_type) && completedMeter===null) throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);
-    if(task.interval_type==='cycles'&&completedMeter!==null&&!Number.isInteger(completedMeter))throw new Error('Cycle completion readings must use whole numbers.');
-    const completion=pmCompletionNote(body,task.interval_type,completedMeter);const override=pmMeterOverride(body,task,completedMeter);
-    const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);
-    const timestamp=now();
+    const body=isRecord(req.body)?req.body:{};const values=pmCompletionInput(task,body,req.file);staged=values.staged;
     const oldValue=pmHistoryValue(task);
-    let historyId=0;
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_request_id,work_order_number,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,meter_override_type,meter_override_reason,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
-        task.id,task.asset_id,'machine',requestId,pmCompletionWorkOrder(requestId),'Completed',completionDate,completionDate,completedMeter,req.user!.id,req.user!.full_name,'Preventive Maintenance',task.interval_type,task.title,completion.note,completion.noIssuesFound?1:0,override?.type??null,override?.reason??null,task.next_due_date,task.next_due_meter,due.nextDueDate,due.nextDueMeter,timestamp,
-      ]);
-      historyId=Number(result.lastInsertRowid);
-      run(`UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=?`,[
-        completionDate,pmMeterIntervals.has(task.interval_type)?completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?completedMeter:task.current_meter,due.nextDueDate,due.nextDueMeter,req.user!.id,timestamp,task.id,
-      ]);
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
+    const failureInjection=process.env.NODE_ENV==='test'&&String(req.get('X-MCC-Test-PM-Finalize-Failure')??'')==='1'?()=>{throw new Error('Simulated work-order PDF finalization failure.');}:undefined;
+    const {historyId}=commitPmCompletion({task,assetDisplayName:asset.asset_name||asset.asset_number,actor:req.user!,requestId,values,beforeFinalize:failureInjection});staged=null;
     const updated=pmTaskById(task.id)!;
     const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=?',[historyId])!;
-    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,noIssuesFound:completion.noIssuesFound},reasonNote:completion.note});
-    if(override)recordPmAudit({action:'pm_meter_override',task:updated,asset,actor:req.user!,oldValue:{currentMeter:override.originalValue},newValue:{currentMeter:override.newValue,overrideType:override.type,completionRequestId:requestId},reasonNote:override.reason});
+    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,noIssuesFound:values.completion.noIssuesFound,followUpRequired:values.followUpRequired,attachmentId:pmWorkOrderAttachment(historyId)?.id??null},reasonNote:values.completion.note});
+    if(values.override)recordPmAudit({action:'pm_meter_override',task:updated,asset,actor:req.user!,oldValue:{currentMeter:values.override.originalValue},newValue:{currentMeter:values.override.newValue,overrideType:values.override.type,completionRequestId:requestId},reasonNote:values.override.reason});
     scheduleAutoBackup('preventive maintenance completed',req.user!);
     let sync:{ok:boolean;error?:string;status:ReturnType<typeof pmSyncState>};
-    if(fs.existsSync(pmExcelLatestPath)){try{const result=await performPmWorkbookSync({actor:req.user!,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',trackerUpdates:[pmTrackerUpdate(updated,asset.asset_number,completionDate)],historyRows:[pmHistoryWorkbookRow(history,updated,asset.asset_number)]});sync=result.ok?{ok:true,status:result.status}:{ok:false,error:result.error,status:result.status};}catch(error){const message=safeErrorMessage(error,[],'The completed PM uses an interval that cannot be synchronized to the approved workbook.');updatePmSyncState({status:'failed',actor:req.user!,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',errorMessage:message});recordPmWorkbookAudit(req.user!,'pm_excel_sync_failed',{historyId,taskId:task.id,error:message},message);sync={ok:false,error:message,status:pmSyncState()};}}
+    if(fs.existsSync(pmExcelLatestPath)){try{const result=await performPmWorkbookSync({actor:req.user!,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',trackerUpdates:[pmTrackerUpdate(updated,asset.asset_number,values.completionDate)],historyRows:[pmHistoryWorkbookRow(history,updated,asset.asset_number)]});sync=result.ok?{ok:true,status:result.status}:{ok:false,error:result.error,status:result.status};}catch(error){const message=safeErrorMessage(error,[],'The completed PM uses an interval that cannot be synchronized to the approved workbook.');updatePmSyncState({status:'failed',actor:req.user!,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',errorMessage:message});recordPmWorkbookAudit(req.user!,'pm_excel_sync_failed',{historyId,taskId:task.id,error:message},message);sync={ok:false,error:message,status:pmSyncState()};}}
     else{const message='No synchronized PM workbook is available. Upload, preview, and confirm a workbook, then retry synchronization.';updatePmSyncState({status:'failed',actor:req.user!,sourcePath:'',originalFilename:'',errorMessage:message});recordPmWorkbookAudit(req.user!,'pm_excel_sync_failed',{historyId,taskId:task.id,error:message},message);sync={ok:false,error:message,status:pmSyncState()};}
     res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history),sync:sync.status,syncError:sync.ok?null:sync.error});
   } catch (error) {
+    pmWorkOrderStorage.discard(staged);
     const message=safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.');
     res.status(/not found/i.test(message)?404:400).json({ok:false,error:message});
   }
@@ -9702,12 +9819,27 @@ app.put('/api/equipment-library/preventive-maintenance/:pmId',requireAuth,requir
 app.post('/api/equipment-library/preventive-maintenance/:pmId/deactivate',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
   const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const oldValue=pmHistoryValue(task);run("UPDATE pm_tasks SET active=0,hold=0,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library='equipment'",[req.user!.id,now(),task.id]);const updated=pmTaskById(task.id,'equipment')!;recordPmAudit({action:'pm_deactivated',task:updated,asset,actor:req.user!,oldValue,newValue:pmHistoryValue(updated)});scheduleAutoBackup('equipment preventive maintenance deactivated',req.user!);res.json({ok:true,task:publicPmTask(updated)});
 });
-app.post('/api/equipment-library/preventive-maintenance/:pmId/complete',requireAuth,requirePermission('equipment.pm_manage'),(req:AuthRequest,res)=>{
-  try{const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const requestId=pmCompletionRequestId(req);const duplicate=one<PmHistoryRow>('SELECT * FROM pm_history WHERE completion_request_id=?',[requestId]);if(duplicate){if(duplicate.pm_task_id!==task.id)return res.status(409).json({ok:false,error:'PM completion request identifier is already in use.'});return res.json({ok:true,duplicatePrevented:true,task:publicPmTask(task),history:publicPmHistory(duplicate)});}if(!task.active)throw new Error('Inactive preventive maintenance tracking cannot be completed.');if(task.hold)throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');const body=isRecord(req.body)?req.body:{};const completionDate=validPmDate(body.completionDate??new Date().toISOString().slice(0,10),'completion date',true)!;const completedMeter=optionalPmNumber(body.completedMeter,'Completed meter');if(pmMeterIntervals.has(task.interval_type)&&completedMeter===null)throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);if(task.interval_type==='cycles'&&completedMeter!==null&&!Number.isInteger(completedMeter))throw new Error('Cycle completion readings must use whole numbers.');const completion=pmCompletionNote(body,task.interval_type,completedMeter);const override=pmMeterOverride(body,task,completedMeter);const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);const timestamp=now();const oldValue=pmHistoryValue(task);let historyId=0;db.exec('BEGIN IMMEDIATE');try{const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_request_id,work_order_number,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,meter_override_type,meter_override_reason,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[task.id,task.asset_id,'equipment',requestId,pmCompletionWorkOrder(requestId),'Completed',completionDate,completionDate,completedMeter,req.user!.id,req.user!.full_name,'Preventive Maintenance',task.interval_type,task.title,completion.note,completion.noIssuesFound?1:0,override?.type??null,override?.reason??null,task.next_due_date,task.next_due_meter,due.nextDueDate,due.nextDueMeter,timestamp]);historyId=Number(result.lastInsertRowid);run("UPDATE pm_tasks SET last_completed_date=?,last_completed_meter=?,current_meter=?,next_due_date=?,next_due_meter=?,updated_by_user_id=?,updated_at=? WHERE id=? AND asset_library='equipment'",[completionDate,pmMeterIntervals.has(task.interval_type)?completedMeter:task.last_completed_meter,pmMeterIntervals.has(task.interval_type)?completedMeter:task.current_meter,due.nextDueDate,due.nextDueMeter,req.user!.id,timestamp,task.id]);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}const updated=pmTaskById(task.id,'equipment')!;const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=? AND asset_library=?',[historyId,'equipment'])!;recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,noIssuesFound:completion.noIssuesFound},reasonNote:completion.note});if(override)recordPmAudit({action:'pm_meter_override',task:updated,asset,actor:req.user!,oldValue:{currentMeter:override.originalValue},newValue:{currentMeter:override.newValue,overrideType:override.type,completionRequestId:requestId},reasonNote:override.reason});scheduleAutoBackup('equipment preventive maintenance completed',req.user!);res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.')});}
+app.post('/api/equipment-library/preventive-maintenance/:pmId/complete',requireAuth,requirePermission('equipment.pm_manage'),receivePmWorkOrder,(req:AuthRequest,res)=>{
+  let staged:StagedPmWorkOrder|null=null;
+  try{
+    const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task)return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
+    const asset=equipmentAssetById(task.asset_id);if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});
+    const requestId=pmCompletionRequestId(req);const duplicate=one<PmHistoryRow>('SELECT * FROM pm_history WHERE completion_request_id=?',[requestId]);
+    if(duplicate){if(duplicate.pm_task_id!==task.id)return res.status(409).json({ok:false,error:'PM completion request identifier is already in use.'});return res.json({ok:true,duplicatePrevented:true,task:publicPmTask(task),history:publicPmHistory(duplicate)});}
+    if(!task.active)throw new Error('Inactive preventive maintenance tracking cannot be completed.');if(task.hold)throw new Error('Preventive maintenance tracking on Hold cannot be completed until it is returned to Active.');
+    const body=isRecord(req.body)?req.body:{};const values=pmCompletionInput(task,body,req.file);staged=values.staged;const oldValue=pmHistoryValue(task);
+    const failureInjection=process.env.NODE_ENV==='test'&&String(req.get('X-MCC-Test-PM-Finalize-Failure')??'')==='1'?()=>{throw new Error('Simulated work-order PDF finalization failure.');}:undefined;
+    const {historyId}=commitPmCompletion({task,assetDisplayName:asset.equipment_name||asset.asset_number,actor:req.user!,requestId,values,beforeFinalize:failureInjection});staged=null;
+    const updated=pmTaskById(task.id,'equipment')!;const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=? AND asset_library=?',[historyId,'equipment'])!;
+    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,noIssuesFound:values.completion.noIssuesFound,followUpRequired:values.followUpRequired,attachmentId:pmWorkOrderAttachment(historyId)?.id??null},reasonNote:values.completion.note});
+    if(values.override)recordPmAudit({action:'pm_meter_override',task:updated,asset,actor:req.user!,oldValue:{currentMeter:values.override.originalValue},newValue:{currentMeter:values.override.newValue,overrideType:values.override.type,completionRequestId:requestId},reasonNote:values.override.reason});
+    scheduleAutoBackup('equipment preventive maintenance completed',req.user!);res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});
+  }catch(error){pmWorkOrderStorage.discard(staged);res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.')});}
 });
 app.get('/api/equipment-library/preventive-maintenance/:pmId/history',requireAuth,requirePermission('equipment.view'),(req,res)=>{
   const task=pmTaskById(Number(req.params.pmId),'equipment');if(!task||!equipmentAssetById(task.asset_id))return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});res.json({ok:true,task:publicPmTask(task),history:all<PmHistoryRow>("SELECT * FROM pm_history WHERE pm_task_id=? AND asset_library='equipment' ORDER BY completion_date DESC,id DESC",[task.id]).map(publicPmHistory)});
 });
+app.get('/api/equipment-library/pm-history/:historyId/work-order-pdf',requireAuth,requirePermission('equipment.view'),(req,res)=>servePmWorkOrderPdf(res,Number(req.params.historyId),'equipment'));
 
 function equipmentDocumentAssetDirectory(assetId:number){return path.join(equipmentDocumentLibraryDir,`asset-${assetId}`);}
 function equipmentDocumentFilePath(assetId:number,storedFilename:string){const root=equipmentDocumentAssetDirectory(assetId);const resolved=path.resolve(root,path.basename(storedFilename));if(!resolved.startsWith(`${path.resolve(root)}${path.sep}`))throw new Error('Equipment document path is invalid.');return resolved;}
@@ -11038,6 +11170,7 @@ app.patch('/api/inventory/mit3-parts/:id/requisition', requireAuth, requirePermi
   }
 });
 try {
+  validatePmWorkOrderStorageIntegrity();
   validateMachineDocumentStorageIntegrity();
   refreshMachineDocumentRecoveryMetadata();
   facilityInfoService?.validateStorage();

@@ -33,7 +33,14 @@ CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGE
     {id:2,completion_date:'2026-01-11',completion_notes:'Legacy row B'},
   ]);
   assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='import_source_ref'));
+  assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='follow_up_required'));
+  assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='follow_up_reason'));
   assert.ok(database.prepare("PRAGMA table_info(pm_tasks)").all().some(column=>column.name==='asset_library'));
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM pm_work_order_attachments').get().count,0);
+  assert.deepEqual(database.prepare('SELECT id,follow_up_required,follow_up_reason FROM pm_history ORDER BY id').all().map(row=>({...row})),[
+    {id:1,follow_up_required:0,follow_up_reason:''},
+    {id:2,follow_up_required:0,follow_up_reason:''},
+  ]);
   database.exec("DROP INDEX IF EXISTS idx_pm_history_work_order_lookup; CREATE UNIQUE INDEX idx_pm_history_work_order ON pm_history (work_order_number COLLATE NOCASE) WHERE work_order_number<>'';");
   database.close();database=undefined;
 
@@ -58,7 +65,7 @@ CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGE
   assert.equal(new Set(repeated.map(row=>row.task_type)).size,2);
   assert.equal(new Set(repeated.map(row=>row.import_source_ref)).size,2);
   assert.equal(indexes.find(index=>index.name==='idx_pm_history_work_order_lookup')?.unique,0);
-  console.log('PM Excel migration tests passed: v1.4.6 history preservation, safe column/index ordering, removal of global work-order uniqueness, and repeated work-order retention across restarts.');
+  console.log('PM Excel migration tests passed: legacy history preservation, v1.5.2 follow-up/attachment schema defaults, safe column/index ordering, and repeated work-order retention across restarts.');
 }finally{
   if(database){database.close();database=undefined;}
   await stopServer(server);
