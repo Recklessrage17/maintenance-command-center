@@ -15,18 +15,52 @@ async function mockPmUi(page:Page,captured:{completion?:Record<string,unknown>;c
   await page.route(/\/api\/machine-library\/assets\/\d+\/(?:history|inspection-records|notes|component-images|document-folders|documents)$/,route=>route.fulfill({json:{ok:true,records:[],notes:[],images:[],folders:[],documents:[],summary:{folderCount:0,documentCount:0}}}));
 }
 
-test('presents PM card intervals, due states, and actions with semantic styling',async({page})=>{
+test('presents compact PM cards with semantic intervals, due states, and actions',async({page},testInfo)=>{
   const tasks=[
     task,
     {...task,id:701,title:'Thirty day inspection',intervalType:'days',intervalValue:30,lastCompletedDate:'2026-07-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-07-31',nextDueMeter:null,status:'Due Soon',countdown:'Due in 5 days'},
-    {...task,id:702,title:'Annual fluid service',intervalType:'days',intervalValue:365,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-08-01',nextDueMeter:null,status:'Overdue',countdown:'Past due by 4 days'},
+    {...task,id:702,title:'Sixty day service',intervalType:'days',intervalValue:60,lastCompletedDate:'2026-06-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-08-01',nextDueMeter:null,status:'Due Now',countdown:'Due in 0 days'},
+    {...task,id:703,title:'Ninety day service',intervalType:'days',intervalValue:90,lastCompletedDate:'2026-04-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-07-01',nextDueMeter:null,status:'Overdue',countdown:'Past due by 34 days'},
+    {...task,id:704,title:'One hundred eighty day service',intervalType:'days',intervalValue:180,lastCompletedDate:'2026-02-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-08-01',nextDueMeter:null,status:'Current',countdown:'Due in 60 days'},
+    {...task,id:705,title:'Annual days service',intervalType:'days',intervalValue:365,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-08-01',nextDueMeter:null,status:'Current',countdown:'Due in 128 days'},
+    {...task,id:706,title:'Annual fixed service',intervalType:'annual',intervalValue:1,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-08-01',nextDueMeter:null,status:'Current',countdown:'Due in 128 days'},
+    {...task,id:707,title:'Cycle service',intervalType:'cycles',intervalValue:5000,lastCompletedMeter:1000,currentMeter:1250,nextDueDate:null,nextDueMeter:6000,status:'Current',countdown:'4,750 cycles remaining'},
   ];
   await mockPmUi(page,{},tasks);await page.goto('/machine-library');await page.locator('.machine-asset-card .machine-asset-number-pill').click();await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();
-  const cards=page.locator('.pm-task-card');await expect(cards).toHaveCount(3);
-  await expect(cards.nth(0).locator('.pm-status')).toHaveClass(/pm-status--current/);await expect(cards.nth(0).locator('.pm-interval-value')).toHaveClass(/pm-interval-value--hours/);
-  await expect(cards.nth(1).locator('.pm-status')).toHaveClass(/pm-status--due-soon/);await expect(cards.nth(1).locator('.pm-interval-value')).toHaveClass(/pm-interval-value--30-days/);
-  await expect(cards.nth(2).locator('.pm-status')).toHaveClass(/pm-status--overdue/);await expect(cards.nth(2).locator('.pm-interval-value')).toHaveClass(/pm-interval-value--365-days/);await expect(cards.nth(2).locator('.pm-countdown')).toHaveText('Overdue: -4 days');
-  await expect(cards.nth(0).getByRole('button',{name:'Edit'})).toHaveClass(/glass-button--warning/);await expect(cards.nth(0).getByRole('button',{name:'Deactivate'})).toHaveClass(/glass-button--danger/);await expect(cards.nth(0).getByRole('button',{name:'Complete PM'})).toHaveClass(/glass-button--success/);await expect(cards.nth(0).getByRole('button',{name:'View',exact:true})).toHaveCSS('border-radius','999px');
+  const cards=page.locator('.pm-task-card');await expect(cards).toHaveCount(8);
+  const intervalTones=[['hours','rgb(121, 220, 255)'],['30-days','rgb(255, 135, 151)'],['60-days','rgb(255, 173, 112)'],['90-days','rgb(255, 210, 117)'],['180-days','rgb(112, 229, 208)'],['365-days','rgb(255, 230, 111)'],['annual','rgb(200, 175, 255)'],['cycles','rgb(196, 156, 255)']];
+  for(const [index,[tone,color]] of intervalTones.entries()){const value=cards.nth(index).locator('.pm-interval-value');await expect(value).toHaveClass(new RegExp(`pm-interval-value--${tone}`));await expect(value).toHaveCSS('color',color);}
+
+  const currentCountdown=cards.nth(0).locator('.pm-countdown');
+  await expect(currentCountdown).toHaveClass(/pm-countdown--current/);
+  await expect(currentCountdown.locator('.pm-countdown-value')).toHaveClass(/pm-countdown-value--current/);
+  await expect(currentCountdown.locator('.pm-countdown-value')).toHaveCSS('color','rgb(110, 235, 180)');
+  await expect(currentCountdown.locator('.pm-countdown-unit')).toHaveCSS('color','rgb(110, 235, 180)');
+  await expect(cards.nth(1).locator('.pm-countdown')).toHaveClass(/pm-countdown--due-soon/);
+  await expect(cards.nth(2).locator('.pm-countdown')).toHaveClass(/pm-countdown--due-now/);
+  await expect(cards.nth(3).locator('.pm-countdown')).toHaveClass(/pm-countdown--overdue/);
+  await expect(cards.nth(3).locator('.pm-countdown')).toHaveText('Overdue: -34 days');
+  await expect(cards.nth(3).locator('.pm-countdown-value')).toHaveText('-34');
+  const countdownParts=cards.nth(4).locator('.pm-countdown > *');
+  await expect(countdownParts).toHaveCount(4);
+  for(let index=0;index<await countdownParts.count();index++)await expect(countdownParts.nth(index)).toHaveCSS('display','inline');
+  const countdownFontSize=await cards.nth(4).locator('.pm-countdown').evaluate(element=>Number.parseFloat(getComputedStyle(element).fontSize));
+  expect(countdownFontSize).toBeLessThanOrEqual(14);
+
+  const actions=cards.nth(0).locator('.pm-card-actions');
+  await expect(actions.getByRole('button',{name:'View',exact:true})).toHaveClass(/pm-card-action--view/);
+  await expect(actions.getByRole('button',{name:/View History/})).toHaveClass(/pm-card-action--history/);
+  await expect(actions.getByRole('button',{name:'Edit'})).toHaveClass(/glass-button--warning.*pm-card-action--edit/);
+  await expect(actions.getByRole('button',{name:'Complete PM'})).toHaveClass(/glass-button--success.*pm-card-action--complete/);
+  await expect(actions.getByRole('button',{name:'Deactivate'})).toHaveClass(/glass-button--danger.*pm-card-action--deactivate/);
+  await expect(actions.getByRole('button',{name:'View',exact:true})).toHaveCSS('border-radius','999px');
+  const actionLayout=await actions.evaluate(element=>{const style=getComputedStyle(element);return {display:style.display,columns:style.gridTemplateColumns.split(' ').length,gap:style.gap};});
+  expect(actionLayout.display).toBe('grid');expect(actionLayout.gap).toBe('7px');
+  if(testInfo.project.name==='mobile-chromium')expect(actionLayout.columns).toBe(2);else expect(actionLayout.columns).toBe(6);
+  const actionButtons=await actions.getByRole('button').all();const expectedHeight=testInfo.project.name==='mobile-chromium'?42:40;
+  for(const button of actionButtons){const box=await button.evaluate(element=>({height:element.getBoundingClientRect().height,clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));expect(box.height).toBe(expectedHeight);expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth);}
+  const actionRows=await Promise.all(actionButtons.map(button=>button.evaluate(element=>Math.round(element.getBoundingClientRect().top))));
+  if(testInfo.project.name==='mobile-chromium'){expect(actionRows[0]).toBe(actionRows[1]);expect(actionRows[2]).toBe(actionRows[3]);expect(actionRows[4]).toBeGreaterThan(actionRows[3]);}else{expect(actionRows[0]).toBe(actionRows[1]);expect(actionRows[1]).toBe(actionRows[2]);expect(actionRows[3]).toBe(actionRows[4]);expect(actionRows[3]).toBeGreaterThan(actionRows[2]);}
 });
 
 test('disables Confirm Import when preview contains only rejected rows',async({page})=>{

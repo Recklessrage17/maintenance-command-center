@@ -1491,9 +1491,9 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-task-card {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  padding: 16px;
+  padding: 14px;
   border-color: rgba(83, 207, 242, 0.24);
   background: linear-gradient(150deg, rgba(14, 43, 59, 0.82), rgba(3, 17, 28, 0.9));
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.055);
@@ -1519,23 +1519,34 @@ button.mcc-resource-row__content { cursor: pointer; }
   overflow-wrap: anywhere;
 }
 
-.pm-interval-label {
+.pm-task-card .pm-interval-label {
+  display: inline;
+  margin: 0;
   color: #91acb9;
-  font-size: 0.74rem;
+  font-size: 0.8rem;
   font-weight: 800;
+  line-height: 1.35;
   letter-spacing: 0.01em;
 }
 
-.pm-interval-value { font-weight: 900; }
-.pm-interval-value--30-days { color: #ff8797; }
-.pm-interval-value--60-days { color: #ffad70; }
-.pm-interval-value--90-days { color: #ffd275; }
-.pm-interval-value--180-days { color: #70e5d0; }
-.pm-interval-value--365-days { color: #ffe66f; }
-.pm-interval-value--annual { color: #c8afff; }
-.pm-interval-value--hours { color: #79dcff; }
-.pm-interval-value--cycles { color: #c49cff; }
-.pm-interval-value--calendar { color: #9bd9e8; }
+.pm-task-card .pm-interval-label > span,
+.pm-task-card .pm-interval-value {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.pm-task-card .pm-interval-value { font-weight: 900; }
+.pm-task-card .pm-interval-value--30-days { color: #ff8797; }
+.pm-task-card .pm-interval-value--60-days { color: #ffad70; }
+.pm-task-card .pm-interval-value--90-days { color: #ffd275; }
+.pm-task-card .pm-interval-value--180-days { color: #70e5d0; }
+.pm-task-card .pm-interval-value--365-days { color: #ffe66f; }
+.pm-task-card .pm-interval-value--annual { color: #c8afff; }
+.pm-task-card .pm-interval-value--hours { color: #79dcff; }
+.pm-task-card .pm-interval-value--cycles { color: #c49cff; }
+.pm-task-card .pm-interval-value--calendar { color: #9bd9e8; }
 
 .pm-status {
   flex: 0 0 auto;
@@ -1606,22 +1617,38 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-metric-pill--inactive { border-color: rgba(207, 84, 105, 0.48); }
 .pm-metric-pill--hold { border-color: rgba(166, 139, 255, 0.5); }
 
-.pm-countdown {
+.pm-task-card .pm-countdown {
   margin: 0;
-  color: var(--glass-text);
-  min-height: 24px;
+  color: #9ab4c0;
+  min-height: 20px;
   font-size: 0.86rem;
   font-weight: 750;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
-.pm-countdown-value { font-size: 1.02em; font-weight: 950; }
-.pm-countdown--current { color: #9ff2c9; }
-.pm-countdown--due-soon { color: #ffe080; }
-.pm-countdown--due-now,
-.pm-countdown--inactive { color: #ff8da0; }
-.pm-countdown--overdue { color: #ff9dab; }
-.pm-countdown--hold { color: #d8caff; }
+.pm-task-card .pm-countdown > span,
+.pm-task-card .pm-countdown > strong {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.pm-task-card .pm-countdown-label,
+.pm-task-card .pm-countdown-tail { color: inherit; }
+.pm-task-card .pm-countdown-value,
+.pm-task-card .pm-countdown-unit { font-weight: 950; }
+.pm-task-card .pm-countdown-value--current,
+.pm-task-card .pm-countdown-unit--current { color: #6eebb4; }
+.pm-task-card .pm-countdown-value--due-soon,
+.pm-task-card .pm-countdown-unit--due-soon { color: #ffe080; }
+.pm-task-card .pm-countdown--due-now,
+.pm-task-card .pm-countdown-value--due-now,
+.pm-task-card .pm-countdown-unit--due-now { color: #ff9b61; }
+.pm-task-card .pm-countdown-value--overdue,
+.pm-task-card .pm-countdown-unit--overdue,
+.pm-task-card .pm-countdown--inactive { color: #ff7188; }
+.pm-task-card .pm-countdown--hold { color: #d8caff; }
 
 .pm-due-legend {
   display: flex;
@@ -1657,19 +1684,31 @@ button.mcc-resource-row__content { cursor: pointer; }
 
 .pm-card-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: auto;
-  padding-top: 2px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .pm-card-actions .glass-button {
   width: 100%;
-  min-height: 42px;
-  padding: 8px 13px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 8px;
   border-radius: 999px;
-  white-space: normal;
+  font-size: 0.76rem;
+  line-height: 1.1;
+  white-space: nowrap;
 }
+
+.pm-card-action--view,
+.pm-card-action--history,
+.pm-card-action--edit { grid-column: span 2; }
+.pm-card-action--complete,
+.pm-card-action--deactivate { grid-column: span 3; }
+.pm-card-actions:not(:has(.pm-card-action--edit)) .pm-card-action--view,
+.pm-card-actions:not(:has(.pm-card-action--edit)) .pm-card-action--history { grid-column: span 3; }
+.pm-card-actions .pm-card-action--deactivate:nth-child(4) { grid-column: 2 / span 4; }
 
 .pm-card-actions .pm-card-action--complete {
   box-shadow: 0 8px 18px rgba(5, 49, 36, 0.24), 0 0 14px rgba(67, 221, 157, 0.08), inset 0 1px 0 rgba(255,255,255,0.1);
@@ -2006,7 +2045,23 @@ button.mcc-resource-row__content { cursor: pointer; }
   }
 
   .pm-card-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .pm-card-actions .glass-button {
+    min-height: 42px;
+    padding: 7px 8px;
+  }
+
+  .pm-card-actions .pm-card-action {
+    grid-column: auto;
+  }
+
+  .pm-card-actions .pm-card-action--deactivate:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: calc(50% - 3.5px);
   }
 
   .pm-status {
