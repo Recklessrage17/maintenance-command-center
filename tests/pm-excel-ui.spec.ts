@@ -15,6 +15,11 @@ async function mockPmUi(page:Page,captured:{completion?:Record<string,unknown>;c
   await page.route(/\/api\/machine-library\/assets\/\d+\/(?:history|inspection-records|notes|component-images|document-folders|documents)$/,route=>route.fulfill({json:{ok:true,records:[],notes:[],images:[],folders:[],documents:[],summary:{folderCount:0,documentCount:0}}}));
 }
 
+test('disables Confirm Import when preview contains only rejected rows',async({page})=>{
+  const captured:{}={};await mockPmUi(page,captured);await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({json:{ok:true,preview:{token:'22222222-2222-4222-8222-222222222222',filename:'rejected-only.xlsx',expiresAt:'2026-08-04T13:00:00Z',additions:[],updates:[],historyAdditions:[],conflicts:[],warnings:[],rejectedRows:[{sheet:'Machine Pm Tracker',rowNumber:6,reason:'No active MCC machine asset matches this Asset Number.'}],summary:{additions:0,updates:0,historyAdditions:0,conflicts:0,warnings:0,rejectedRows:1}}}}));
+  await page.goto('/machine-library');await page.locator('.machine-asset-card .machine-asset-number-pill').click();await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();const sync=page.locator('.pm-excel-sync');await sync.locator('input[type=file]').setInputFiles(path.resolve('tests/fixtures/pm-report-sanitized.xlsx'));await sync.getByRole('button',{name:'Preview Changes'}).click();const preview=page.getByRole('dialog',{name:'PM Excel Import Preview'});await expect(preview).toContainText('0 additions');await expect(preview).toContainText('1 rejected');await expect(preview.getByRole('button',{name:'Confirm Import'})).toBeDisabled();
+});
+
 test('provides PM creation, Excel import, and completion workflows on plain HTTP without randomUUID',async({page})=>{
   await page.addInitScript(() => {
     Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined });

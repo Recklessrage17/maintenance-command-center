@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { normalizedPmKey, strictPressNumberAlias } from './pmAssetResolver.js';
+
+export { normalizedPmKey } from './pmAssetResolver.js';
 
 export const PM_TRACKER_SHEET = 'Machine Pm Tracker';
 export const PM_HISTORY_SHEET = 'PMHistory';
@@ -116,7 +119,6 @@ const trackerRequired:TrackerField[]=['taskTitle','intervalType','intervalValue'
 const historyRequired:HistoryField[]=['assetNumber','workOrderNumber','taskStatus','startDate','completionDate','workOrderType','performedBy','intervalType','taskType','taskNote'];
 
 function cleanText(value:unknown) { return String(value ?? '').replace(/\r/g,'').trim(); }
-export function normalizedPmKey(value:unknown) { return cleanText(value).replace(/[\u2010-\u2015]/g,'-').replace(/\s+/g,' ').toLowerCase(); }
 function normalizedHeader(value:unknown) { return normalizedPmKey(value).replace(/[^a-z0-9]+/g,'').replace(/cycles/g,'cycle'); }
 
 function cellRawValue(cell:ExcelJS.Cell):unknown {
@@ -398,7 +400,7 @@ async function extendHistoryTable(zip:JSZip,sheetPart:string,headerRow:number,ro
 }
 
 function trackerRowsByKey(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>) {
-  const map=new Map<string,number[]>();
+  const exact=new Map<string,number[]>();const aliases=new Map<string,number[]>();
   let section=trackerSectionBeforeHeader(sheet,header);
   for (let rowNumber=header.rowNumber+1;rowNumber<=sheet.rowCount;rowNumber+=1) {
     if(isTrackerHeaderRow(sheet,rowNumber,header))continue;
@@ -408,10 +410,12 @@ function trackerRowsByKey(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>
     const rawInterval=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.intervalType)));
     if (!asset&&!task&&!rawInterval) continue;
     let interval:WorkbookPmInterval;try{interval=normalizeWorkbookInterval(rawInterval);}catch{continue;}
-    const key=[normalizedPmKey(asset),normalizedPmKey(task),interval].join('\u001f');
-    map.set(key,[...(map.get(key)??[]),rowNumber]);
+    const taskKey=[normalizedPmKey(task),interval].join('\u001f');
+    const exactKey=[normalizedPmKey(asset),taskKey].join('\u001f');
+    exact.set(exactKey,[...(exact.get(exactKey)??[]),rowNumber]);
+    const alias=strictPressNumberAlias(asset);if(alias){const aliasKey=[alias,taskKey].join('\u001f');aliases.set(aliasKey,[...(aliases.get(aliasKey)??[]),rowNumber]);}
   }
-  return map;
+  return {exact,aliases};
 }
 
 function historyExistingKeys(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryField>) {
@@ -443,7 +447,8 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
     const trackerHeader=findHeader(tracker,trackerAliases,trackerRequired);const historyHeader=findHeader(history,historyAliases,historyRequired);const rowsByKey=trackerRowsByKey(tracker,trackerHeader);
     let changedCells=0;
     for (const update of input.trackerUpdates) {
-      const key=[normalizedPmKey(update.assetNumber),normalizedPmKey(update.matchTaskTitle??update.taskTitle),update.matchIntervalType??update.intervalType].join('\u001f');const matches=rowsByKey.get(key)??[];
+      const taskKey=[normalizedPmKey(update.matchTaskTitle??update.taskTitle),update.matchIntervalType??update.intervalType].join('\u001f');const exactKey=[normalizedPmKey(update.assetNumber),taskKey].join('\u001f');let matches=rowsByKey.exact.get(exactKey)??[];
+      if(!matches.length){const alias=strictPressNumberAlias(update.assetNumber);if(alias)matches=rowsByKey.aliases.get([alias,taskKey].join('\u001f'))??[];}
       if (matches.length!==1) throw new Error(matches.length?`Ambiguous Machine Pm Tracker match for ${update.assetNumber} / ${update.taskTitle}.`:`Machine Pm Tracker row not found for ${update.assetNumber} / ${update.taskTitle}.`);
       const row=matches[0];const meter=update.intervalType==='hourly'||update.intervalType==='cycles';
       const targets:Array<[TrackerField,unknown]>=[

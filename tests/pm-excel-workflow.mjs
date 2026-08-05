@@ -48,6 +48,16 @@ try {
   assert.equal(annual.intervalValue,365);
   assert.equal(calculateWorkbookPm({intervalType:annual.intervalType,intervalValue:annual.intervalValue,lastCompletedDate:annual.lastCompletedDate,currentDate:annual.currentDate}).nextDueDate,'2026-08-01');
 
+  const malformedHistoryWorkbook=new ExcelJS.Workbook();await malformedHistoryWorkbook.xlsx.readFile(fixturePath);const malformedHistory=malformedHistoryWorkbook.getWorksheet('PMHistory');
+  malformedHistory.getRow(11).values=['100','','Completed',new Date('2026-06-04T12:00:00Z'),new Date('2026-06-04T12:00:00Z'),'Preventive Maintenance','Sanitized Technician','Days','Inspect guards','Missing work order fixture row.'];
+  malformedHistory.getRow(12).values=['100','WO-MALFORMED-END-1','Completed',new Date('2026-06-05T12:00:00Z'),null,'Preventive Maintenance','Sanitized Technician','Days','Inspect guards','Missing completion fixture row.'];
+  malformedHistory.getRow(13).values=['200','WO-MALFORMED-END-2','Completed',new Date('2026-06-06T12:00:00Z'),null,'Preventive Maintenance','Sanitized Technician','Days','Inspect guards','Missing completion fixture row.'];
+  const malformedParsed=await inspectPmWorkbook(Buffer.from(await malformedHistoryWorkbook.xlsx.writeBuffer()));
+  assert.equal(malformedParsed.historyRows.length,4,'malformed history rows must not enter the valid history collection');
+  assert.equal(malformedParsed.rejectedRows.filter(row=>row.sheet==='PMHistory').length,3);
+  assert.ok(malformedParsed.rejectedRows.some(row=>row.rowNumber===11&&/Work-order Number is required/i.test(row.reason)));
+  assert.equal(malformedParsed.rejectedRows.filter(row=>[12,13].includes(row.rowNumber)&&/End\/Completion Date is required/i.test(row.reason)).length,2);
+
   const ambiguousWorkbook=new ExcelJS.Workbook();await ambiguousWorkbook.xlsx.readFile(fixturePath);ambiguousWorkbook.getWorksheet('Machine Pm Tracker').getCell('B14').value=null;
   const ambiguousBuffer=Buffer.from(await ambiguousWorkbook.xlsx.writeBuffer());const ambiguous=await inspectPmWorkbook(ambiguousBuffer);
   assert.ok(ambiguous.rejectedRows.some(row=>row.rowNumber===14&&/section heading is ambiguous/i.test(row.reason)));
@@ -65,12 +75,12 @@ try {
   const preparedHelperFormulas=new Map();for(let row=10;row<=12;row+=1)for(let column=11;column<=20;column+=1)preparedHelperFormulas.set(`${row}:${column}`,originalHistory.getCell(row,column).formula);
   const workOrderNumber='MCC-PM-UNIT00000001';
   const historyRows=[
-    {assetNumber:'M-100',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'hourly',taskType:'Hydraulic service verified',taskNote:'PM completed at 3,600 machine hours. No issues found.'},
-    {assetNumber:'M-100',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'annual',taskType:'Annual safety review',taskNote:'Annual PM completed. No issues found.'},
-    {assetNumber:'M-200',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'days',taskType:'Inspect guards',taskNote:'PM completed. No issues found.'},
+    {assetNumber:'Press 100',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'hourly',taskType:'Hydraulic service verified',taskNote:'PM completed at 3,600 machine hours. No issues found.'},
+    {assetNumber:'Press 100',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'annual',taskType:'Annual safety review',taskNote:'Annual PM completed. No issues found.'},
+    {assetNumber:'Press 200',workOrderNumber,taskStatus:'Completed',startDate:'2026-08-04',completionDate:'2026-08-04',workOrderType:'Preventive Maintenance',performedBy:'Sanitized Technician',intervalType:'days',taskType:'Inspect guards',taskNote:'PM completed. No issues found.'},
   ];
-  const update={assetNumber:'M-100',taskTitle:'Hydraulic service verified',matchTaskTitle:'Hydraulic service',intervalType:'hourly',intervalValue:3200,lastCompletedDate:null,lastCompletedMeter:3560,currentDate:null,currentMeter:3600,remaining:3160,status:'Current'};
-  const annualUpdate={assetNumber:'M-100',taskTitle:'Annual safety review',intervalType:'annual',intervalValue:365,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentDate:'2026-07-20',currentMeter:null,remaining:12,status:'Due Soon'};
+  const update={assetNumber:'Press 100',taskTitle:'Hydraulic service verified',matchTaskTitle:'Hydraulic service',intervalType:'hourly',intervalValue:3200,lastCompletedDate:null,lastCompletedMeter:3560,currentDate:null,currentMeter:3600,remaining:3160,status:'Current'};
+  const annualUpdate={assetNumber:'Press 100',taskTitle:'Annual safety review',intervalType:'annual',intervalValue:365,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentDate:'2026-07-20',currentMeter:null,remaining:12,status:'Due Soon'};
   let result=await synchronizePmWorkbook({sourcePath:fixturePath,destinationPath:destination,backupDir:backups,trackerUpdates:[update,annualUpdate],historyRows});
   assert.equal(result.appendedHistory,3,'same work order with different tasks/assets must append as distinct history rows');
   const changed=new ExcelJS.Workbook();await changed.xlsx.readFile(destination);
@@ -83,12 +93,12 @@ try {
   assert.equal(changedTracker.getCell('F6').formula,originalStatusFormula,'tracker status formula must remain intact');
   assert.equal(JSON.stringify(changedTracker.getCell('F6').dataValidation),originalValidation,'tracker dropdown must remain intact');
   assert.equal(changedTracker.getCell('B9').value,365,'Annual interval must remain 365');
-  assert.equal(changedTracker.getCell('A4').value,'Press:');assert.equal(changedTracker.getCell('B4').value,'M-100');
-  assert.equal(changedTracker.getCell('A14').value,'Press:');assert.equal(changedTracker.getCell('B14').value,'M-200');
-  for(const row of [6,7,8,9])assert.ok(!changedTracker.getRow(row).values.includes('M-100'),'carried machine identifiers must not be written into task rows');
-  for(const row of [16,17])assert.ok(!changedTracker.getRow(row).values.includes('M-200'),'carried machine identifiers must not be written into task rows');
+  assert.equal(changedTracker.getCell('A4').value,'Press:');assert.equal(changedTracker.getCell('B4').value,'100','Press section identifiers must not be rewritten during alias matching');
+  assert.equal(changedTracker.getCell('A14').value,'Press:');assert.equal(changedTracker.getCell('B14').value,'200','Press section identifiers must not be rewritten during alias matching');
+  for(const row of [6,7,8,9])assert.ok(!changedTracker.getRow(row).values.includes('100'),'carried machine identifiers must not be written into task rows');
+  for(const row of [16,17])assert.ok(!changedTracker.getRow(row).values.includes('200'),'carried machine identifiers must not be written into task rows');
   assert.deepEqual([changedHistory.getCell('B10').value,changedHistory.getCell('B11').value,changedHistory.getCell('B12').value],[workOrderNumber,workOrderNumber,workOrderNumber]);
-  assert.deepEqual([changedHistory.getCell('A10').value,changedHistory.getCell('A11').value,changedHistory.getCell('A12').value],['M-100','M-100','M-200']);
+  assert.deepEqual([changedHistory.getCell('A10').value,changedHistory.getCell('A11').value,changedHistory.getCell('A12').value],['Press 100','Press 100','Press 200']);
   assert.deepEqual([changedHistory.getCell('I10').value,changedHistory.getCell('I11').value,changedHistory.getCell('I12').value],['Hydraulic service verified','Annual safety review','Inspect guards']);
   for(const [key,formula] of preparedHelperFormulas){const [row,column]=key.split(':').map(Number);assert.equal(changedHistory.getCell(row,column).formula,formula,`pre-existing Helper formula ${changedHistory.getCell(row,column).address} must not be modified`);}
   assert.equal(changedHistory.getTable('PMHistoryTable').table.tableRef,'A5:T50','preformatted PMHistory table must not be shrunk while appending');
