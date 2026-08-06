@@ -28,19 +28,19 @@ styleHeader(5);
 tracker.getRow(6).values=['Hourly',100,0,5,{formula:'IF(OR(B6="",C6="",D6=""),"",B6-(D6-C6))',result:95},{formula:'IF(E6="","Needs Date",IF(E6<0,"Past Due",IF(E6=0,"Due Today",IF(E6<=7,"Due Soon","OK"))))',result:'OK'},'Header discovery task'];
 styleTask(6);
 
-tracker.getRow(108).values=['Press:','23','','Sanitized Press 23'];
-tracker.getRow(108).font={bold:true,color:{argb:'FF17445C'}};
-tracker.getRow(108).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFDDECF2'}};
-styleHeader(109);
-tracker.getCell('H109').value='Absolute helper';
-for(const [row,interval,last,current,title] of [[110,100,0,10,'Sanitized lubrication'],[111,150,0,20,'Sanitized inspection'],[112,200,0,12,'Final sanitized task']]){
+tracker.getRow(105).values=['Press:','23','','Sanitized Press 23'];
+tracker.getRow(105).font={bold:true,color:{argb:'FF17445C'}};
+tracker.getRow(105).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFDDECF2'}};
+styleHeader(106);
+tracker.getCell('H106').value='Absolute helper';
+for(const [row,interval,last,current,title] of [[107,75,0,5,'Sanitized filters'],[108,90,0,6,'Sanitized guards'],[109,100,0,10,'Sanitized lubrication'],[110,125,0,15,'Sanitized electrical'],[111,150,0,20,'Sanitized inspection'],[112,200,0,12,'Final sanitized task']]){
   const remaining=interval-(current-last);const status=remaining<0?'Past Due':remaining===0?'Due Today':remaining<=7?'Due Soon':'OK';
   tracker.getRow(row).values=['Hourly',interval,last,current,{formula:`IF(OR(B${row}="",C${row}="",D${row}=""),"",B${row}-(D${row}-C${row}))`,result:remaining},{formula:`IF(E${row}="","Needs Date",IF(E${row}<0,"Past Due",IF(E${row}=0,"Due Today",IF(E${row}<=7,"Due Soon","OK"))))`,result:status},title];
-  tracker.getCell(`H${row}`).value={formula:`B${row}+$C$6+$D${row}+E$6`,result:interval};
+  tracker.getCell(`H${row}`).value={formula:`IF("B${row}"="B${row}",SUM(B${row-5}:B${row})+'Reference Only'!$B$3,0)+$D${row}+E$6`,result:interval};
   styleTask(row);
 }
-tracker.addTable({name:'SanitizedPress23',ref:'A109',headerRow:true,totalsRow:false,style:{theme:'TableStyleMedium2',showRowStripes:true},columns:headers.map(name=>({name})),rows:[110,111,112].map(row=>tracker.getRow(row).values.slice(1,8))});
-tracker.addConditionalFormatting({ref:'F110:F112',rules:[{type:'expression',formulae:['F110="Past Due"'],style:{fill:{type:'pattern',pattern:'solid',bgColor:{argb:'FFFFC7CE'}}}}]});
+tracker.addTable({name:'SanitizedPress23',ref:'A106',headerRow:true,totalsRow:false,style:{theme:'TableStyleMedium2',showRowStripes:true},columns:headers.map(name=>({name})),rows:[107,108,109,110,111,112].map(row=>tracker.getRow(row).values.slice(1,8))});
+tracker.addConditionalFormatting({ref:'F107:F112',rules:[{type:'expression',formulae:['F107="Past Due"'],style:{fill:{type:'pattern',pattern:'solid',bgColor:{argb:'FFFFC7CE'}}}}]});
 tracker.pageSetup.printArea='A1:G112';
 
 const history=workbook.addWorksheet('PMHistory');
@@ -63,8 +63,8 @@ const formulas={
   E:row=>`IF(OR(B${row}="",C${row}="",D${row}=""),"",B${row}-(D${row}-C${row}))`,
   F:row=>`IF(E${row}="","Needs Date",IF(E${row}<0,"Past Due",IF(E${row}=0,"Due Today",IF(E${row}<=7,"Due Soon","OK"))))`,
 };
-for(const [column,index] of [['E',0],['F',1]])for(const row of [110,111,112]){
-  const address=`${column}${row}`;const pattern=new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>[\\s\\S]*?<\\/c>`);const cell=pattern.exec(sheetXml)?.[0];if(!cell)throw new Error(`Fixture cell ${address} is unavailable.`);const tag=row===110?`<f t="shared" ref="${column}110:${column}112" si="${index}">${escapeFormula(formulas[column](row))}</f>`:`<f t="shared" si="${index}"/>`;sheetXml=sheetXml.replace(cell,cell.replace(/<f\b[^>]*>[\s\S]*?<\/f>/,tag));
+for(const [column,index] of [['E',0],['F',1]])for(const row of [107,108,109,110,111,112]){
+  const address=`${column}${row}`;const pattern=new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>[\\s\\S]*?<\\/c>`);const cell=pattern.exec(sheetXml)?.[0];if(!cell)throw new Error(`Fixture cell ${address} is unavailable.`);const tag=row===107?`<f t="shared" ref="${column}107:${column}112" si="${index}">${escapeFormula(formulas[column](row))}</f>`:`<f t="shared" si="${index}"/>`;sheetXml=sheetXml.replace(cell,cell.replace(/<f\b[^>]*>[\s\S]*?<\/f>/,tag));
 }
 zip.file('xl/worksheets/sheet1.xml',sheetXml);
 for(const entry of Object.values(zip.files))entry.date=new Date('2026-01-01T00:00:00Z');
