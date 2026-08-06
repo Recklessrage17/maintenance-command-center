@@ -7513,7 +7513,7 @@ function streamRecoveryArchive(res:Response,fileName:string,build:(archive:Archi
 function appendPmPackageArchive(archive:Archiver) {
   if(!fs.existsSync(pmExcelLatestPath)||!fs.statSync(pmExcelLatestPath).isFile())throw new Error('No synchronized PM workbook is available yet.');
   validatePmWorkOrderStorageIntegrity();
-  archive.file(pmExcelLatestPath,{name:'PM_report.xlsx'});
+  archive.file(pmExcelLatestPath,{name:'PM_report_1.2v.xlsx'});
   archive.append('',{name:`${PM_WORK_ORDER_DIRECTORY_NAME}/`});
   function visit(folderPath:string,parts:string[]) {
     for(const entry of fs.readdirSync(folderPath,{withFileTypes:true}).sort((left,right)=>left.name.localeCompare(right.name))) {
@@ -8985,7 +8985,7 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
 app.get('/api/pm-excel/status',requireAuth,requirePermission('machine.view'),(_req,res)=>res.json({ok:true,sync:pmSyncState()}));
 app.get('/api/pm-excel/download',requireAuth,requirePermission('machine.view'),(_req,res)=>{
   if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
-  res.setHeader('Content-Type',PM_EXCEL_MIME);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename="PM_report.xlsx"');res.sendFile(pmExcelLatestPath);
+  res.setHeader('Content-Type',PM_EXCEL_MIME);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename="PM_report_1.2v.xlsx"');res.sendFile(pmExcelLatestPath);
 });
 app.get('/api/pm-excel/package/download',requireAuth,requirePermission('machine.view'),(_req,res)=>{
   if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
