@@ -59,6 +59,7 @@ export type ParsedPmWorkbook = {
 
 export type TrackerWorkbookUpdate = {
   assetNumber:string;
+  assetName?:string;
   taskTitle:string;
   intervalType:WorkbookPmInterval;
   matchTaskTitle?:string;
@@ -229,6 +230,7 @@ export function meaningfulPmNote(value:unknown) { const clean=cleanText(value);r
 
 type TrackerSectionContext = {assetNumber:string;rowNumber:number}|null;
 type TrackerSectionHeading = {matched:false}|{matched:true;assetNumber:string|null;reason?:string};
+type TrackerMachineSection = {assetNumber:string;headingRow:number;endRow:number;taskRows:ParsedTrackerRow[];malformedReason:string|null};
 
 function trackerSectionHeading(sheet:ExcelJS.Worksheet,rowNumber:number,header:HeaderMap<TrackerField>):TrackerSectionHeading {
   const values:Array<{column:number;text:string}>=[];
@@ -237,8 +239,8 @@ function trackerSectionHeading(sheet:ExcelJS.Worksheet,rowNumber:number,header:H
   const task=taskColumn?cleanText(cellRawValue(sheet.getCell(rowNumber,taskColumn))):'';
   const interval=intervalColumn?cleanText(cellRawValue(sheet.getCell(rowNumber,intervalColumn))):'';
   const explicitAsset=explicitAssetColumn?cleanText(cellRawValue(sheet.getCell(rowNumber,explicitAssetColumn))):'';
-  if(explicitAsset&&!task&&!interval)return {matched:true,assetNumber:explicitAsset};
   const labels=new Set(['press','pressnumber','pressno','machine','machinenumber','machineno','asset','assetnumber','assetno']);
+  if(explicitAsset&&!task&&!interval&&!labels.has(normalizedHeader(explicitAsset)))return {matched:true,assetNumber:explicitAsset};
   const candidates:string[]=[];let foundLabel=false;
   for(let index=0;index<values.length;index+=1){
     const item=values[index];const normalized=normalizedHeader(item.text);
@@ -393,11 +395,54 @@ function setWorksheetCell(xml:string,address:string,value:unknown,date1904:boole
   }
   return {xml:`${xml.slice(0,rowMatch.index)}${rowXml}${xml.slice((rowMatch.index??0)+rowMatch[0].length)}`,changed:true};
 }
+function worksheetCellHasFormula(xml:string,address:string){const rowNumber=Number(/\d+$/.exec(address)?.[0]??0);const row=rowXmlPattern(rowNumber).exec(xml)?.[0]??'';const cell=cellXmlPattern(address).exec(row)?.[0]??'';return /<f\b/i.test(cell);}
+function setWorksheetFormulaResult(xml:string,address:string,value:unknown,date1904:boolean){
+  const rowNumber=Number(/\d+$/.exec(address)?.[0]??0);const rowMatch=rowXmlPattern(rowNumber).exec(xml);if(!rowMatch)return {xml,changed:false};let rowXml=rowMatch[0];const existing=cellXmlPattern(address).exec(rowXml)?.[0];if(!existing||!/<f\b/i.test(existing))return {xml,changed:false};
+  let opening=existing.match(/^<c\b[^>]*>/)?.[0]??'';const formula=/<f\b[^>]*>[\s\S]*?<\/f>/.exec(existing)?.[0]??/<f\b[^>]*\/>/.exec(existing)?.[0];if(!opening||!formula)return {xml,changed:false};
+  opening=opening.replace(/\s+t="[^"]*"/g,'');let encoded='';if(value instanceof Date)encoded=String(excelSerial(value,date1904));else if(typeof value==='number')encoded=String(value);else{opening=opening.replace(/>$/, ' t="str">');encoded=xmlEscape(cleanText(value));}
+  const replacement=`${opening}${formula}<v>${encoded}</v></c>`;if(existing===replacement)return {xml,changed:false};rowXml=rowXml.replace(existing,replacement);
+  return {xml:`${xml.slice(0,rowMatch.index)}${rowXml}${xml.slice((rowMatch.index??0)+rowMatch[0].length)}`,changed:true};
+}
+type RangeInsertMode='structural'|'coverage';
+function shiftA1RangeForInsertion(value:string,insertionRow:number,templateRow:number,mode:RangeInsertMode) {
+  const match=/^(\$?[A-Z]{1,3})(\$?)(\d+)(?::(\$?[A-Z]{1,3})(\$?)(\d+))?$/i.exec(value);if(!match)return value;
+  const start=Number(match[3]);const end=Number(match[6]??match[3]);let nextStart=start;let nextEnd=end;
+  if(start>=insertionRow){nextStart+=1;nextEnd+=1;}else if(end>=insertionRow)nextEnd+=1;else if(mode==='coverage'&&start<=templateRow&&end>=templateRow)nextEnd+=1;
+  const first=`${match[1]}${match[2]}${nextStart}`;if(!match[4])return first;return `${first}:${match[4]}${match[5]}${nextEnd}`;
+}
+function shiftSqrefForInsertion(value:string,insertionRow:number,templateRow:number,mode:RangeInsertMode){return value.split(/\s+/).filter(Boolean).map(item=>shiftA1RangeForInsertion(item,insertionRow,templateRow,mode)).join(' ');}
+function shiftFormulaForInsertion(formula:string,insertionRow:number){return formula.replace(/(\$?[A-Z]{1,3})(\$?)(\d+)/g,(_match,column,absolute,row)=>`${column}${absolute}${Number(row)>=insertionRow?Number(row)+1:row}`);}
+function blankTemplateRowValues(rowXml:string){return rowXml.replace(/<c\b[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g,cell=>{if(/<f\b/i.test(cell))return cell;const opening=cell.match(/^<c\b[^>]*\/?>/)?.[0]??'';return opening.endsWith('/>')?opening:`${opening}</c>`;});}
+function insertWorksheetRow(xml:string,insertionRow:number,templateRow:number){
+  const template=rowXmlPattern(templateRow).exec(xml)?.[0];if(!template)throw new Error(`Machine Pm Tracker formatting row ${templateRow} is unavailable.`);
+  for(const match of xml.matchAll(/<mergeCell\b[^>]*\bref="([^"]+)"[^>]*\/>/g)){const range=/^(?:\$?[A-Z]{1,3})\$?(\d+):(?:\$?[A-Z]{1,3})\$?(\d+)$/i.exec(match[1]);if(range&&Number(range[1])!==Number(range[2])&&Number(range[1])<=templateRow&&Number(range[2])>=templateRow)throw new Error('Machine Pm Tracker formatting template uses a vertical merged range that cannot be copied safely.');}
+  xml=xml.replace(/<f(\b[^>]*)>([\s\S]*?)<\/f>/g,(_match,attributes,formula)=>`<f${attributes}>${shiftFormulaForInsertion(formula,insertionRow)}</f>`);
+  xml=xml.replace(/<row\b(?=[^>]*\br="(\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g,(rowXml,_row)=>{const row=Number(_row);if(row<insertionRow)return rowXml;const shifted=row+1;return rowXml.replace(new RegExp(`(<row\\b[^>]*\\br=")${row}("[^>]*>)`),`$1${shifted}$2`).replace(new RegExp(`(<c\\b[^>]*\\br="[A-Z]+)${row}("[^>]*>)`,'g'),`$1${shifted}$2`);});
+  xml=xml.replace(/(<dimension\b[^>]*\bref=")([^"]+)(")/g,(_match,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);
+  xml=xml.replace(/(<(?:conditionalFormatting|dataValidation|ignoredError|selection)\b[^>]*\bsqref=")([^"]+)(")/g,(_match,before,ref,after)=>`${before}${shiftSqrefForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);
+  xml=xml.replace(/(<(?:autoFilter)\b[^>]*\bref=")([^"]+)(")/g,(_match,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);
+  xml=xml.replace(/(<hyperlink\b[^>]*\bref=")([^"]+)(")/g,(_match,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'structural')}${after}`);
+  const clonedMerges:string[]=[];xml=xml.replace(/(<mergeCell\b[^>]*\bref=")([^"]+)("[^>]*\/>)/g,(_match,before,ref,after)=>{const rows=/^(?:\$?[A-Z]{1,3})\$?(\d+):(?:\$?[A-Z]{1,3})\$?(\d+)$/i.exec(ref);if(rows&&Number(rows[1])===templateRow&&Number(rows[2])===templateRow)clonedMerges.push(shiftA1RangeForInsertion(ref,insertionRow,templateRow,'structural').replace(/(\d+)/g,String(insertionRow)));return `${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'structural')}${after}`;});
+  if(clonedMerges.length)xml=xml.replace(/<mergeCells\b([^>]*)\bcount="(\d+)"([^>]*)>/,(_match,before,count,after)=>`<mergeCells${before}count="${Number(count)+clonedMerges.length}"${after}>`).replace('</mergeCells>',`${clonedMerges.map(ref=>`<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`);
+  xml=xml.replace(/(<brk\b[^>]*\bid=")(\d+)(")/g,(_match,before,row,after)=>`${before}${Number(row)>=insertionRow?Number(row)+1:row}${after}`);
+  let cloned=blankTemplateRowValues(shiftedTemplateRow(template,templateRow,insertionRow));const sheetDataEnd=xml.indexOf('</sheetData>');if(sheetDataEnd<0)throw new Error('Machine Pm Tracker worksheet data is unreadable.');let insertAt=sheetDataEnd;for(const match of xml.slice(0,sheetDataEnd).matchAll(/<row\b[^>]*\br="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)){if(Number(match[1])>insertionRow){insertAt=match.index??insertAt;break;}}xml=`${xml.slice(0,insertAt)}${cloned}${xml.slice(insertAt)}`;
+  return xml;
+}
 function extendWorksheetDimension(xml:string,rowNumber:number){return xml.replace(/<dimension\b([^>]*)\bref="([A-Z]+\d+):([A-Z]+)(\d+)"([^>]*)\/>/i,(tag,before,start,endColumn,endRow,after)=>rowNumber>Number(endRow)?`<dimension${before}ref="${start}:${endColumn}${rowNumber}"${after}/>`:tag);}
 async function extendHistoryTable(zip:JSZip,sheetPart:string,headerRow:number,rowNumber:number){
   const relationships=await zip.file(relationshipPart(sheetPart))?.async('string');if(!relationships)return;const tableParts:string[]=[];for(const match of relationships.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];if(!/\/table"?$/i.test(xmlAttribute(tag,'Type')))continue;const target=xmlAttribute(tag,'Target');if(target)tableParts.push(relationshipTarget(sheetPart,decodeXml(target)));}
   for(const name of tableParts){const file=zip.file(name);if(!file)continue;const xml=await file.async('string');const tableTag=/<table\b[^>]*>/.exec(xml)?.[0];if(!tableTag)continue;const ref=xmlAttribute(tableTag,'ref');const match=/^\$?[A-Z]+\$?(\d+):\$?[A-Z]+\$?(\d+)$/i.exec(ref);if(!match||Number(match[1])!==headerRow||rowNumber<=Number(match[2]))continue;const nextRef=ref.replace(/(\$?[A-Z]+\$?)\d+$/i,`$1${rowNumber}`);zip.file(name,xml.replace(new RegExp(`ref="${regexEscape(ref)}"`,'g'),`ref="${nextRef}"`));return;
   }
+}
+
+async function shiftTrackerTables(zip:JSZip,sheetPart:string,insertionRow:number,templateRow:number){
+  const relationships=await zip.file(relationshipPart(sheetPart))?.async('string');if(!relationships)return;
+  for(const match of relationships.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];if(!/\/table"?$/i.test(xmlAttribute(tag,'Type')))continue;const target=xmlAttribute(tag,'Target');if(!target)continue;const name=relationshipTarget(sheetPart,decodeXml(target));const file=zip.file(name);if(!file)continue;let xml=await file.async('string');xml=xml.replace(/(\bref=")([^"]+)(")/g,(_entry,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);xml=xml.replace(/<calculatedColumnFormula>([\s\S]*?)<\/calculatedColumnFormula>/g,(_entry,formula)=>`<calculatedColumnFormula>${shiftFormulaForInsertion(formula,insertionRow)}</calculatedColumnFormula>`);zip.file(name,xml);}
+}
+
+async function shiftWorkbookDefinedNames(zip:JSZip,sheetName:string,sheetIndex:number,insertionRow:number,templateRow:number){
+  const file=zip.file('xl/workbook.xml');if(!file)return;let xml=await file.async('string');const escapedName=sheetName.replace(/'/g,"''");
+  xml=xml.replace(/<definedName\b([^>]*)>([\s\S]*?)<\/definedName>/g,(entry,attributes,formula)=>{const local=/\blocalSheetId="(\d+)"/.exec(attributes);const qualified=new RegExp(`(?:'${regexEscape(escapedName)}'|${regexEscape(sheetName)})!`,'i').test(decodeXml(formula));if((local&&Number(local[1])===sheetIndex)||qualified){const shifted=formula.replace(/\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?/gi,(ref:string)=>shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage'));return `<definedName${attributes}>${shifted}</definedName>`;}return entry;});zip.file('xl/workbook.xml',xml);
 }
 
 function portableWorkOrderHyperlink(value:string) {
@@ -440,6 +485,44 @@ function trackerRowsByKey(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>
   return {exact,aliases};
 }
 
+function rowHasWorkbookContent(sheet:ExcelJS.Worksheet,rowNumber:number) {
+  for(let column=1;column<=Math.min(Math.max(sheet.columnCount,1),100);column+=1)if(cleanText(cellRawValue(sheet.getCell(rowNumber,column))))return true;
+  return false;
+}
+
+function trackerMachineSections(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>) {
+  const headings:Array<{rowNumber:number;assetNumber:string|null;reason?:string}>=[];
+  for(let rowNumber=1;rowNumber<=sheet.rowCount;rowNumber+=1){const heading=trackerSectionHeading(sheet,rowNumber,header);if(heading.matched)headings.push({rowNumber,assetNumber:heading.assetNumber,...(heading.reason?{reason:heading.reason}:{})});}
+  const sections:TrackerMachineSection[]=[];
+  for(let index=0;index<headings.length;index+=1){
+    const heading=headings[index];if(!heading.assetNumber)continue;
+    const endRow=(headings[index+1]?.rowNumber??(sheet.rowCount+1))-1;
+    const repeatedHeaders:number[]=[];for(let rowNumber=heading.rowNumber+1;rowNumber<=endRow;rowNumber+=1)if(isTrackerHeaderRow(sheet,rowNumber,header))repeatedHeaders.push(rowNumber);
+    let malformedReason:string|null=repeatedHeaders.length>1?'Machine/press section contains multiple tracker headers.':null;
+    const dataStart=(repeatedHeaders[0]??heading.rowNumber)+1;const taskRows:ParsedTrackerRow[]=[];let unrelatedRow:number|null=null;
+    for(let rowNumber=dataStart;rowNumber<=endRow;rowNumber+=1){
+      if(isTrackerHeaderRow(sheet,rowNumber,header))continue;
+      const task=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.taskTitle)));const interval=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.intervalType)));
+      if(!task&&!interval){if(rowHasWorkbookContent(sheet,rowNumber)&&taskRows.length)unrelatedRow??=rowNumber;continue;}
+      try{
+        const parsed=parseTrackerRow(sheet,rowNumber,header,{assetNumber:heading.assetNumber,rowNumber:heading.rowNumber});
+        if(parsed){if(unrelatedRow!==null)malformedReason=`Machine/press section has PM rows after unrelated content at row ${unrelatedRow}.`;taskRows.push(parsed);}
+      }catch(error){if(taskRows.length)unrelatedRow??=rowNumber;else malformedReason=error instanceof Error?error.message:'Machine/press section is malformed.';}
+    }
+    if(!taskRows.length&&!malformedReason)malformedReason='Machine/press section does not contain a PM row that can be used as a formatting template.';
+    sections.push({assetNumber:heading.assetNumber,headingRow:heading.rowNumber,endRow,taskRows,malformedReason});
+  }
+  return sections;
+}
+
+function resolveTrackerMachineSection(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>,assetNumber:string) {
+  const sections=trackerMachineSections(sheet,header);const exact=sections.filter(section=>normalizedPmKey(section.assetNumber)===normalizedPmKey(assetNumber));let matches=exact;
+  if(!matches.length){const alias=strictPressNumberAlias(assetNumber);if(alias)matches=sections.filter(section=>strictPressNumberAlias(section.assetNumber)===alias);}
+  if(matches.length!==1)throw new Error(matches.length?`Machine/press section is ambiguous for ${assetNumber}; the workbook was not changed.`:`Machine/press section could not be resolved for ${assetNumber}; the workbook was not changed.`);
+  const section=matches[0];if(section.malformedReason)throw new Error(`Machine/press section for ${assetNumber} is malformed: ${section.malformedReason} The workbook was not changed.`);
+  return section;
+}
+
 function historyExistingKeys(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryField>) {
   const keys=new Set<string>();
   for (let rowNumber=header.rowNumber+1;rowNumber<=sheet.rowCount;rowNumber+=1) {
@@ -466,14 +549,19 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
     if (!tracker||!history) throw new Error(`Workbook must contain ${PM_TRACKER_SHEET} and ${PM_HISTORY_SHEET}.`);
     const trackerPart=sheetParts.get(PM_TRACKER_SHEET);const historyPart=sheetParts.get(PM_HISTORY_SHEET);if(!trackerPart||!historyPart)throw new Error('Workbook worksheet package parts are unavailable.');
     let trackerXml=await zip.file(trackerPart)?.async('string');let historyXml=await zip.file(historyPart)?.async('string');if(!trackerXml||!historyXml)throw new Error('Workbook worksheet data is unreadable.');const date1904=Boolean(workbook.properties.date1904);
-    const trackerHeader=findHeader(tracker,trackerAliases,trackerRequired);const historyHeader=findHeader(history,historyAliases,historyRequired);const rowsByKey=trackerRowsByKey(tracker,trackerHeader);
+    const historyHeader=findHeader(history,historyAliases,historyRequired);
     let changedCells=0;
     for (const update of input.trackerUpdates) {
+      zip.file(trackerPart,trackerXml);const trackerViewBuffer=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:1}});const trackerViewWorkbook=new ExcelJS.Workbook();await trackerViewWorkbook.xlsx.load(trackerViewBuffer.buffer.slice(trackerViewBuffer.byteOffset,trackerViewBuffer.byteOffset+trackerViewBuffer.byteLength) as ArrayBuffer);const trackerView=trackerViewWorkbook.getWorksheet(PM_TRACKER_SHEET)!;const trackerHeader=findHeader(trackerView,trackerAliases,trackerRequired);const rowsByKey=trackerRowsByKey(trackerView,trackerHeader);
       const taskKey=[normalizedPmKey(update.matchTaskTitle??update.taskTitle),update.matchIntervalType??update.intervalType].join('\u001f');const exactKey=[normalizedPmKey(update.assetNumber),taskKey].join('\u001f');let matches=rowsByKey.exact.get(exactKey)??[];
       if(!matches.length){const alias=strictPressNumberAlias(update.assetNumber);if(alias)matches=rowsByKey.aliases.get([alias,taskKey].join('\u001f'))??[];}
-      if (matches.length!==1) throw new Error(matches.length?`Ambiguous Machine Pm Tracker match for ${update.assetNumber} / ${update.taskTitle}.`:`Machine Pm Tracker row not found for ${update.assetNumber} / ${update.taskTitle}.`);
-      const row=matches[0];const meter=update.intervalType==='hourly'||update.intervalType==='cycles';
+      if(matches.length>1)throw new Error(`Ambiguous Machine Pm Tracker match for ${update.assetNumber} / ${update.taskTitle}.`);
+      let row=matches[0]??0;let inserted=false;let templateRow=0;let sectionAssetNumber='';let inheritedAssetNumber=true;
+      if(!row){const section=resolveTrackerMachineSection(trackerView,trackerHeader,update.assetNumber);const lastTask=section.taskRows.reduce((latest,item)=>item.rowNumber>latest.rowNumber?item:latest);const meterUpdate=update.intervalType==='hourly'||update.intervalType==='cycles';const exactTemplates=section.taskRows.filter(item=>item.intervalType===update.intervalType);const categoryTemplates=section.taskRows.filter(item=>(item.intervalType==='hourly'||item.intervalType==='cycles')===meterUpdate);const template=(exactTemplates.length?exactTemplates:categoryTemplates.length?categoryTemplates:section.taskRows).reduce((latest,item)=>item.rowNumber>latest.rowNumber?item:latest);row=lastTask.rowNumber+1;templateRow=template.rowNumber;sectionAssetNumber=section.assetNumber;inheritedAssetNumber=template.assetNumberInherited;trackerXml=insertWorksheetRow(trackerXml,row,templateRow);await shiftTrackerTables(zip,trackerPart,row,templateRow);await shiftWorkbookDefinedNames(zip,PM_TRACKER_SHEET,workbook.worksheets.findIndex(sheet=>sheet.name===PM_TRACKER_SHEET),row,templateRow);inserted=true;}
+      const meter=update.intervalType==='hourly'||update.intervalType==='cycles';
       const targets:Array<[TrackerField,unknown]>=[
+        ...((inserted&&trackerHeader.columns.assetNumber&&!inheritedAssetNumber)?[['assetNumber',sectionAssetNumber] as [TrackerField,unknown]]:[]),
+        ...((inserted&&trackerHeader.columns.assetName&&update.assetName!==undefined)?[['assetName',update.assetName] as [TrackerField,unknown]]:[]),
         ['taskTitle',update.taskTitle],
         ['intervalType',update.intervalType==='cycles'?'Cycles':update.intervalType[0].toUpperCase()+update.intervalType.slice(1)],
         ['intervalValue',update.intervalValue],
@@ -482,7 +570,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
         ['due',meter?update.lastCompletedMeter===null?null:update.lastCompletedMeter+update.intervalValue:workbookValue(calculateWorkbookPm({intervalType:update.intervalType,intervalValue:update.intervalValue,lastCompletedDate:update.lastCompletedDate,currentDate:update.currentDate}).nextDueDate,true)],
         ['remaining',update.remaining],['status',update.status],
       ];
-      for (const [field,value] of targets) {const column=trackerHeader.columns[field];if(!column)continue;const cell=tracker.getCell(row,column);if(cell.type===ExcelJS.ValueType.Formula||sameCellValue(cell,value))continue;const patched=setWorksheetCell(trackerXml,cell.address,value,date1904);trackerXml=patched.xml;if(patched.changed){cell.value=value as ExcelJS.CellValue;changedCells+=1;}}
+      for (const [field,value] of targets) {const column=trackerHeader.columns[field];if(!column)continue;const address=trackerView.getCell(row,column).address;const formula=worksheetCellHasFormula(trackerXml,address);if(formula){if(!['current','due','remaining','status'].includes(field)){if(inserted)throw new Error(`Machine Pm Tracker ${address} cannot be populated because the formatting template contains a protected formula.`);continue;}const patched=setWorksheetFormulaResult(trackerXml,address,value,date1904);trackerXml=patched.xml;if(patched.changed)changedCells+=1;continue;}const cell=inserted?null:trackerView.getCell(row,column);if(cell&&sameCellValue(cell,value))continue;const patched=setWorksheetCell(trackerXml,address,value,date1904,inserted?trackerView.getCell(templateRow,column).address:undefined);trackerXml=patched.xml;if(patched.changed)changedCells+=1;}
     }
     const existing=historyExistingKeys(history,historyHeader);let appendedHistory=0;let previousHistoryRow=lastHistoryDataRow(history,historyHeader);let lastAppendedHistoryRow=previousHistoryRow;
     for (const row of input.historyRows) {
@@ -496,7 +584,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
       previousHistoryRow=rowNumber;lastAppendedHistoryRow=rowNumber;appendedHistory+=1;existing.add(`ref:${sourceRef}`);
     }
     historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);
-    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
+    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
     const validation=new ExcelJS.Workbook();await validation.xlsx.readFile(temporaryPath);
     if (!validation.getWorksheet(PM_TRACKER_SHEET)||!validation.getWorksheet(PM_HISTORY_SHEET)) throw new Error('Workbook validation failed after synchronization.');
     if (input.beforeReplace) await input.beforeReplace();
