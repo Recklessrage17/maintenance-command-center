@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { SaxesParser } from 'saxes';
 import { normalizedPmKey, strictPressNumberAlias } from './pmAssetResolver.js';
 
 export { normalizedPmKey } from './pmAssetResolver.js';
@@ -358,8 +359,10 @@ async function workbookSheetParts(zip:JSZip){
 }
 
 function xmlEscape(value:string){return value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
+function formulaXmlEscape(value:string){return value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function regexEscape(value:string){return value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function cellColumnNumber(address:string){const letters=/^[A-Z]+/i.exec(address)?.[0].toUpperCase()??'';let result=0;for(const letter of letters)result=result*26+letter.charCodeAt(0)-64;return result;}
+function cellColumnLetters(column:number){let result='';for(let value=column;value>0;value=Math.floor((value-1)/26))result=String.fromCharCode(65+(value-1)%26)+result;return result;}
 function excelSerial(value:Date,date1904:boolean){const epoch=date1904?Date.UTC(1904,0,1):Date.UTC(1899,11,30);return (value.getTime()-epoch)/86400000;}
 function xmlCellValue(value:unknown,date1904:boolean){
   if(value===null||value===undefined)return {type:'',body:''};
@@ -370,7 +373,27 @@ function xmlCellValue(value:unknown,date1904:boolean){
 }
 function rowXmlPattern(rowNumber:number){return new RegExp(`<row\\b(?=[^>]*\\br="${rowNumber}")[^>]*?(?:\\/>|>[\\s\\S]*?<\\/row>)`);}
 function cellXmlPattern(address:string){return new RegExp(`<c\\b(?=[^>]*\\br="${regexEscape(address)}")[^>]*?(?:\\/>|>[\\s\\S]*?<\\/c>)`);}
-function shiftFormulaRows(formula:string,delta:number){return formula.replace(/(\$?[A-Z]{1,3})(\$?)(\d+)/g,(_match,column,absolute,row)=>`${column}${absolute?'$':''}${absolute?row:Number(row)+delta}`);}
+function transformFormulaRows(formula:string,transform:(row:number,absolute:boolean)=>number){
+  let result='';let quoted=false;
+  for(let index=0;index<formula.length;){
+    if(formula[index]==='"'){
+      result+='"';index+=1;
+      if(quoted&&formula[index]==='"'){result+='"';index+=1;continue;}
+      quoted=!quoted;continue;
+    }
+    if(quoted){result+=formula[index];index+=1;continue;}
+    const match=/^(\$?[A-Z]{1,3})(\$?)(\d+)/i.exec(formula.slice(index));
+    if(match){
+      const before=index?formula[index-1]:'';const after=formula[index+match[0].length]??'';const column=cellColumnNumber(match[1]);
+      if(column>0&&column<=16384&&!/[A-Z0-9_.\]]/i.test(before)&&!/[A-Z0-9_![(]/i.test(after)){
+        result+=`${match[1]}${match[2]}${transform(Number(match[3]),Boolean(match[2]))}`;index+=match[0].length;continue;
+      }
+    }
+    result+=formula[index];index+=1;
+  }
+  return result;
+}
+function shiftFormulaRows(formula:string,delta:number){return transformFormulaRows(formula,(row,absolute)=>absolute?row:row+delta);}
 function shiftedTemplateRow(rowXml:string,sourceRow:number,targetRow:number){
   const delta=targetRow-sourceRow;let shifted=rowXml.replace(new RegExp(`(<row\\b[^>]*\\br=")${sourceRow}("[^>]*>)`),`$1${targetRow}$2`).replace(new RegExp(`(<c\\b[^>]*\\br="[A-Z]+)${sourceRow}("[^>]*>)`,'g'),`$1${targetRow}$2`);
   shifted=shifted.replace(/<f(\b[^>]*)>([\s\S]*?)<\/f>/g,(_match,attributes,formula)=>`<f${attributes}>${shiftFormulaRows(formula,delta)}</f>`);return shifted;
@@ -411,12 +434,28 @@ function shiftA1RangeForInsertion(value:string,insertionRow:number,templateRow:n
   const first=`${match[1]}${match[2]}${nextStart}`;if(!match[4])return first;return `${first}:${match[4]}${match[5]}${nextEnd}`;
 }
 function shiftSqrefForInsertion(value:string,insertionRow:number,templateRow:number,mode:RangeInsertMode){return value.split(/\s+/).filter(Boolean).map(item=>shiftA1RangeForInsertion(item,insertionRow,templateRow,mode)).join(' ');}
-function shiftFormulaForInsertion(formula:string,insertionRow:number){return formula.replace(/(\$?[A-Z]{1,3})(\$?)(\d+)/g,(_match,column,absolute,row)=>`${column}${absolute}${Number(row)>=insertionRow?Number(row)+1:row}`);}
-function blankTemplateRowValues(rowXml:string){return rowXml.replace(/<c\b[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g,cell=>{if(/<f\b/i.test(cell))return cell;const opening=cell.match(/^<c\b[^>]*\/?>/)?.[0]??'';return opening.endsWith('/>')?opening:`${opening}</c>`;});}
-function insertWorksheetRow(xml:string,insertionRow:number,templateRow:number){
+function shiftFormulaForInsertion(formula:string,insertionRow:number){return transformFormulaRows(decodeXml(formula),(row)=>row>=insertionRow?row+1:row);}
+function blankTemplateRowValues(rowXml:string){return rowXml.replace(/<c\b[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g,cell=>{const opening=cell.match(/^<c\b[^>]*\/?>/)?.[0]??'';return opening.endsWith('/>')?opening:`${opening}</c>`;});}
+function setWorksheetStandaloneFormula(xml:string,address:string,formula:string,templateAddress?:string){
+  const rowNumber=Number(/\d+$/.exec(address)?.[0]??0);const rowMatch=rowXmlPattern(rowNumber).exec(xml);if(!rowMatch)throw new Error(`Worksheet row ${rowNumber} is unavailable.`);let rowXml=rowMatch[0];const existing=cellXmlPattern(address).exec(rowXml)?.[0];
+  let opening=existing?.match(/^<c\b[^>]*\/?\s*>/)?.[0]??'';if(!opening&&templateAddress){const template=cellXmlPattern(templateAddress).exec(xml)?.[0];opening=template?.match(/^<c\b[^>]*\/?\s*>/)?.[0]??'';}
+  const attributes=opening.replace(/^<c\b|\/?>$/g,'').trim().replace(/(?:^|\s)r="[^"]*"/g,'').replace(/(?:^|\s)t="[^"]*"/g,'').trim();const normalized=formula.startsWith('=')?formula.slice(1):formula;
+  const replacement=`<c r="${address}"${attributes?` ${attributes}`:''}><f>${formulaXmlEscape(normalized)}</f></c>`;
+  if(existing)rowXml=rowXml.replace(existing,replacement);else{if(/<row\b[^>]*\/>$/.test(rowXml))rowXml=rowXml.replace(/\/>$/,'></row>');const targetColumn=cellColumnNumber(address);const cells=[...rowXml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)];const after=cells.find(match=>cellColumnNumber(match[1])>targetColumn);const insertAt=after?.index??rowXml.lastIndexOf('</row>');rowXml=`${rowXml.slice(0,insertAt)}${replacement}${rowXml.slice(insertAt)}`;}
+  return `${xml.slice(0,rowMatch.index)}${rowXml}${xml.slice((rowMatch.index??0)+rowMatch[0].length)}`;
+}
+function shiftWorksheetFormulasForInsertion(xml:string,insertionRow:number,templateRow:number){
+  return xml.replace(/<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/g,(_entry,rawAttributes,rawFormula)=>{
+    let attributes=rawAttributes;const ref=xmlAttribute(`<f${attributes}>`,'ref');if(ref)attributes=attributes.replace(/\bref="[^"]*"/,`ref="${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'structural')}"`);
+    if(rawFormula===undefined)return `<f${attributes}/>`;const formula=transformFormulaRows(decodeXml(rawFormula),(row)=>row>=insertionRow?row+1:row);return `<f${attributes}>${formulaXmlEscape(formula)}</f>`;
+  });
+}
+function sharedFormulaGroupsCrossingInsertion(xml:string,insertionRow:number){const indexes=new Set<string>();for(const cell of xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)){const formula=/<f\b([^>]*?)>([\s\S]*?)<\/f>/.exec(cell[0]);if(!formula||xmlAttribute(`<f${formula[1]}>`,'t')!=='shared')continue;const ref=xmlAttribute(`<f${formula[1]}>`,'ref');const si=xmlAttribute(`<f${formula[1]}>`,'si');const range=/^\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)$/i.exec(ref);if(si&&range&&Number(range[1])<insertionRow&&Number(range[2])>=insertionRow)indexes.add(si);}return indexes;}
+function deshareFormulaGroupsForInsertion(xml:string,worksheet:ExcelJS.Worksheet,insertionRow:number){const indexes=sharedFormulaGroupsCrossingInsertion(xml,insertionRow);if(!indexes.size)return xml;for(const cell of [...xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)]){const formula=/<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(cell[0]);if(!formula||!indexes.has(xmlAttribute(`<f${formula[1]}>`,'si')))continue;const resolved=worksheet.getCell(cell[1]).formula;if(typeof resolved!=='string'||!resolved)throw new Error(`Shared formula ${cell[1]} cannot be resolved before row insertion.`);xml=setWorksheetStandaloneFormula(xml,cell[1],resolved);}return xml;}
+function insertWorksheetRow(xml:string,insertionRow:number,templateRow:number,formulaTemplates:Map<number,string>){
   const template=rowXmlPattern(templateRow).exec(xml)?.[0];if(!template)throw new Error(`Machine Pm Tracker formatting row ${templateRow} is unavailable.`);
   for(const match of xml.matchAll(/<mergeCell\b[^>]*\bref="([^"]+)"[^>]*\/>/g)){const range=/^(?:\$?[A-Z]{1,3})\$?(\d+):(?:\$?[A-Z]{1,3})\$?(\d+)$/i.exec(match[1]);if(range&&Number(range[1])!==Number(range[2])&&Number(range[1])<=templateRow&&Number(range[2])>=templateRow)throw new Error('Machine Pm Tracker formatting template uses a vertical merged range that cannot be copied safely.');}
-  xml=xml.replace(/<f(\b[^>]*)>([\s\S]*?)<\/f>/g,(_match,attributes,formula)=>`<f${attributes}>${shiftFormulaForInsertion(formula,insertionRow)}</f>`);
+  xml=shiftWorksheetFormulasForInsertion(xml,insertionRow,templateRow);
   xml=xml.replace(/<row\b(?=[^>]*\br="(\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g,(rowXml,_row)=>{const row=Number(_row);if(row<insertionRow)return rowXml;const shifted=row+1;return rowXml.replace(new RegExp(`(<row\\b[^>]*\\br=")${row}("[^>]*>)`),`$1${shifted}$2`).replace(new RegExp(`(<c\\b[^>]*\\br="[A-Z]+)${row}("[^>]*>)`,'g'),`$1${shifted}$2`);});
   xml=xml.replace(/(<dimension\b[^>]*\bref=")([^"]+)(")/g,(_match,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);
   xml=xml.replace(/(<(?:conditionalFormatting|dataValidation|ignoredError|selection)\b[^>]*\bsqref=")([^"]+)(")/g,(_match,before,ref,after)=>`${before}${shiftSqrefForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);
@@ -426,6 +465,7 @@ function insertWorksheetRow(xml:string,insertionRow:number,templateRow:number){
   if(clonedMerges.length)xml=xml.replace(/<mergeCells\b([^>]*)\bcount="(\d+)"([^>]*)>/,(_match,before,count,after)=>`<mergeCells${before}count="${Number(count)+clonedMerges.length}"${after}>`).replace('</mergeCells>',`${clonedMerges.map(ref=>`<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`);
   xml=xml.replace(/(<brk\b[^>]*\bid=")(\d+)(")/g,(_match,before,row,after)=>`${before}${Number(row)>=insertionRow?Number(row)+1:row}${after}`);
   let cloned=blankTemplateRowValues(shiftedTemplateRow(template,templateRow,insertionRow));const sheetDataEnd=xml.indexOf('</sheetData>');if(sheetDataEnd<0)throw new Error('Machine Pm Tracker worksheet data is unreadable.');let insertAt=sheetDataEnd;for(const match of xml.slice(0,sheetDataEnd).matchAll(/<row\b[^>]*\br="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)){if(Number(match[1])>insertionRow){insertAt=match.index??insertAt;break;}}xml=`${xml.slice(0,insertAt)}${cloned}${xml.slice(insertAt)}`;
+  for(const [column,formula] of formulaTemplates)xml=setWorksheetStandaloneFormula(xml,`${cellColumnLetters(column)}${insertionRow}`,shiftFormulaRows(formula,insertionRow-templateRow),`${cellColumnLetters(column)}${templateRow}`);
   return xml;
 }
 function extendWorksheetDimension(xml:string,rowNumber:number){return xml.replace(/<dimension\b([^>]*)\bref="([A-Z]+\d+):([A-Z]+)(\d+)"([^>]*)\/>/i,(tag,before,start,endColumn,endRow,after)=>rowNumber>Number(endRow)?`<dimension${before}ref="${start}:${endColumn}${rowNumber}"${after}/>`:tag);}
@@ -437,8 +477,48 @@ async function extendHistoryTable(zip:JSZip,sheetPart:string,headerRow:number,ro
 
 async function shiftTrackerTables(zip:JSZip,sheetPart:string,insertionRow:number,templateRow:number){
   const relationships=await zip.file(relationshipPart(sheetPart))?.async('string');if(!relationships)return;
-  for(const match of relationships.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];if(!/\/table"?$/i.test(xmlAttribute(tag,'Type')))continue;const target=xmlAttribute(tag,'Target');if(!target)continue;const name=relationshipTarget(sheetPart,decodeXml(target));const file=zip.file(name);if(!file)continue;let xml=await file.async('string');xml=xml.replace(/(\bref=")([^"]+)(")/g,(_entry,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);xml=xml.replace(/<calculatedColumnFormula>([\s\S]*?)<\/calculatedColumnFormula>/g,(_entry,formula)=>`<calculatedColumnFormula>${shiftFormulaForInsertion(formula,insertionRow)}</calculatedColumnFormula>`);zip.file(name,xml);}
+  for(const match of relationships.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const tag=match[0];if(!/\/table"?$/i.test(xmlAttribute(tag,'Type')))continue;const target=xmlAttribute(tag,'Target');if(!target)continue;const name=relationshipTarget(sheetPart,decodeXml(target));const file=zip.file(name);if(!file)continue;let xml=await file.async('string');xml=xml.replace(/(\bref=")([^"]+)(")/g,(_entry,before,ref,after)=>`${before}${shiftA1RangeForInsertion(ref,insertionRow,templateRow,'coverage')}${after}`);xml=xml.replace(/<calculatedColumnFormula>([\s\S]*?)<\/calculatedColumnFormula>/g,(_entry,formula)=>`<calculatedColumnFormula>${formulaXmlEscape(shiftFormulaForInsertion(formula,insertionRow))}</calculatedColumnFormula>`);zip.file(name,xml);}
 }
+
+async function worksheetFormulaTemplates(zip:JSZip,sheetPart:string,worksheet:ExcelJS.Worksheet,templateRow:number){
+  const formulas=new Map<number,string>();
+  for(let column=1;column<=worksheet.columnCount;column+=1){const formula=worksheet.getCell(templateRow,column).formula;if(typeof formula==='string'&&formula)formulas.set(column,formula);}
+  const relationships=await zip.file(relationshipPart(sheetPart))?.async('string');if(!relationships)return formulas;
+  for(const match of relationships.matchAll(/<Relationship\b[^>]*\/?\s*>/g)){
+    const tag=match[0];if(!/\/table"?$/i.test(xmlAttribute(tag,'Type')))continue;const target=xmlAttribute(tag,'Target');if(!target)continue;const tableXml=await zip.file(relationshipTarget(sheetPart,decodeXml(target)))?.async('string');if(!tableXml)continue;
+    const tableTag=/<table\b[^>]*>/.exec(tableXml)?.[0];const range=/^(\$?[A-Z]{1,3})\$?(\d+):(\$?[A-Z]{1,3})\$?(\d+)$/i.exec(tableTag?xmlAttribute(tableTag,'ref'):'');if(!range||templateRow<Number(range[2])||templateRow>Number(range[4]))continue;const firstColumn=cellColumnNumber(range[1]);let offset=0;
+    for(const columnMatch of tableXml.matchAll(/<tableColumn\b[^>]*?(?:\/>|>[\s\S]*?<\/tableColumn>)/g)){const formula=/<calculatedColumnFormula\b[^>]*>([\s\S]*?)<\/calculatedColumnFormula>/.exec(columnMatch[0])?.[1];if(formula!==undefined&&!formulas.has(firstColumn+offset))formulas.set(firstColumn+offset,decodeXml(formula));offset+=1;}
+  }
+  return formulas;
+}
+
+type FormulaExpectation={sheetName:string;address:string;formula:string};
+type WorksheetFormulaRecord={address:string;cellType:string;formulaType:string;sharedIndex:string;sharedRef:string;formula:string;cachedValue:string|undefined};
+function worksheetFormulaRecords(xml:string){const records:WorksheetFormulaRecord[]=[];for(const cell of xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)){const formula=/<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(cell[0]);if(!formula)continue;const opening=cell[0].match(/^<c\b[^>]*>/)?.[0]??'';const attributes=`<f${formula[1]}>`;records.push({address:cell[1],cellType:xmlAttribute(opening,'t'),formulaType:xmlAttribute(attributes,'t'),sharedIndex:xmlAttribute(attributes,'si'),sharedRef:xmlAttribute(attributes,'ref'),formula:decodeXml(formula[2]??''),cachedValue:/(?:^|>)<v>([\s\S]*?)<\/v>/.exec(cell[0])?.[1]});}return records;}
+function addressInRange(address:string,range:string){const addressMatch=/^([A-Z]{1,3})(\d+)$/i.exec(address);const rangeMatch=/^\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)$/i.exec(range);if(!addressMatch||!rangeMatch)return false;const column=cellColumnNumber(addressMatch[1]);return column>=cellColumnNumber(rangeMatch[1])&&column<=cellColumnNumber(rangeMatch[3])&&Number(addressMatch[2])>=Number(rangeMatch[2])&&Number(addressMatch[2])<=Number(rangeMatch[4]);}
+function assertWellFormedXml(xml:string,part:string){try{const parser=new SaxesParser({xmlns:true});parser.write(xml).close();}catch(error){throw new Error(`${part} is not well-formed XML: ${error instanceof Error?error.message:String(error)}`);}}
+function validateWorksheetFormulaRecords(xml:string,part:string,expectations:FormulaExpectation[]){
+  assertWellFormedXml(xml,part);const records=worksheetFormulaRecords(xml);const masters=new Map<string,WorksheetFormulaRecord>();const followers:WorksheetFormulaRecord[]=[];
+  for(const record of records){
+    if(record.formula.includes('#REF!'))throw new Error(`${part} ${record.address} contains #REF!.`);
+    if(['inlineStr','s'].includes(record.cellType))throw new Error(`${part} ${record.address} has formula-incompatible cell type ${record.cellType}.`);
+    if(record.cellType==='b'&&record.cachedValue!==undefined&&!/^[01]$/.test(record.cachedValue))throw new Error(`${part} ${record.address} has an invalid Boolean cached formula result.`);
+    if(record.cellType==='e'&&record.cachedValue!==undefined&&!/^#(?:NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|GETTING_DATA)$/.test(decodeXml(record.cachedValue)))throw new Error(`${part} ${record.address} has invalid error result metadata.`);
+    if(!record.cellType&&record.cachedValue!==undefined&&record.cachedValue!==''&&!Number.isFinite(Number(decodeXml(record.cachedValue))))throw new Error(`${part} ${record.address} has a nonnumeric cached result without a cell type.`);
+    if(record.formulaType==='shared'){
+      if(!/^\d+$/.test(record.sharedIndex))throw new Error(`${part} ${record.address} has an invalid shared formula index.`);
+      if(record.formula){if(!record.sharedRef)throw new Error(`${part} ${record.address} is a shared formula master without a ref range.`);if(masters.has(record.sharedIndex))throw new Error(`${part} has duplicate shared formula masters for index ${record.sharedIndex}.`);masters.set(record.sharedIndex,record);}else followers.push(record);
+    }else if(!record.formula)throw new Error(`${part} ${record.address} has an empty standalone formula.`);
+  }
+  for(const master of masters.values())if(!addressInRange(master.address,master.sharedRef))throw new Error(`${part} shared formula master ${master.address} is outside ${master.sharedRef}.`);
+  for(const follower of followers){const master=masters.get(follower.sharedIndex);if(!master)throw new Error(`${part} ${follower.address} is an orphaned shared formula follower (si=${follower.sharedIndex}).`);if(!addressInRange(follower.address,master.sharedRef))throw new Error(`${part} ${follower.address} is outside shared formula range ${master.sharedRef}.`);}
+  const byAddress=new Map(records.map(record=>[record.address,record]));for(const expected of expectations){const record=byAddress.get(expected.address);if(!record)throw new Error(`${part} ${expected.address} is missing its expected formula.`);if(record.formulaType==='shared'&&!record.formula)throw new Error(`${part} ${expected.address} must contain a complete formula, not a shared follower.`);if(record.formula!==(expected.formula.startsWith('=')?expected.formula.slice(1):expected.formula))throw new Error(`${part} ${expected.address} formula mismatch: ${record.formula}`);if(record.cellType==='e'&&decodeXml(record.cachedValue??'')==='#N/A')throw new Error(`${part} ${expected.address} has an invalid #N/A cached result.`);}
+  return records;
+}
+export async function validatePmWorkbookOoxml(buffer:Buffer,expectations:FormulaExpectation[]=[]){
+  const zip=await JSZip.loadAsync(buffer);const sheetParts=await workbookSheetParts(zip);let formulaCells=0;for(const [sheetName,part] of sheetParts){const xml=await zip.file(part)?.async('string');if(!xml)throw new Error(`${part} is unavailable.`);formulaCells+=validateWorksheetFormulaRecords(xml,part,expectations.filter(item=>item.sheetName===sheetName)).length;}return {worksheets:sheetParts.size,formulaCells};
+}
+async function requestFullWorkbookCalculation(zip:JSZip){const file=zip.file('xl/workbook.xml');if(!file)return;let xml=await file.async('string');if(/<calcPr\b/.test(xml))xml=xml.replace(/<calcPr\b([^>]*?)\/?\s*>/,(_entry,attributes)=>{const clean=attributes.replace(/\s+(?:calcMode|fullCalcOnLoad|forceFullCalc)="[^"]*"/g,'');return `<calcPr${clean} calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>`;});else xml=xml.replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');zip.file('xl/workbook.xml',xml);}
 
 async function shiftWorkbookDefinedNames(zip:JSZip,sheetName:string,sheetIndex:number,insertionRow:number,templateRow:number){
   const file=zip.file('xl/workbook.xml');if(!file)return;let xml=await file.async('string');const escapedName=sheetName.replace(/'/g,"''");
@@ -550,14 +630,14 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
     const trackerPart=sheetParts.get(PM_TRACKER_SHEET);const historyPart=sheetParts.get(PM_HISTORY_SHEET);if(!trackerPart||!historyPart)throw new Error('Workbook worksheet package parts are unavailable.');
     let trackerXml=await zip.file(trackerPart)?.async('string');let historyXml=await zip.file(historyPart)?.async('string');if(!trackerXml||!historyXml)throw new Error('Workbook worksheet data is unreadable.');const date1904=Boolean(workbook.properties.date1904);
     const historyHeader=findHeader(history,historyAliases,historyRequired);
-    let changedCells=0;
+    let changedCells=0;const formulaExpectations:FormulaExpectation[]=[];
     for (const update of input.trackerUpdates) {
       zip.file(trackerPart,trackerXml);const trackerViewBuffer=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:1}});const trackerViewWorkbook=new ExcelJS.Workbook();await trackerViewWorkbook.xlsx.load(trackerViewBuffer.buffer.slice(trackerViewBuffer.byteOffset,trackerViewBuffer.byteOffset+trackerViewBuffer.byteLength) as ArrayBuffer);const trackerView=trackerViewWorkbook.getWorksheet(PM_TRACKER_SHEET)!;const trackerHeader=findHeader(trackerView,trackerAliases,trackerRequired);const rowsByKey=trackerRowsByKey(trackerView,trackerHeader);
       const taskKey=[normalizedPmKey(update.matchTaskTitle??update.taskTitle),update.matchIntervalType??update.intervalType].join('\u001f');const exactKey=[normalizedPmKey(update.assetNumber),taskKey].join('\u001f');let matches=rowsByKey.exact.get(exactKey)??[];
       if(!matches.length){const alias=strictPressNumberAlias(update.assetNumber);if(alias)matches=rowsByKey.aliases.get([alias,taskKey].join('\u001f'))??[];}
       if(matches.length>1)throw new Error(`Ambiguous Machine Pm Tracker match for ${update.assetNumber} / ${update.taskTitle}.`);
       let row=matches[0]??0;let inserted=false;let templateRow=0;let sectionAssetNumber='';let inheritedAssetNumber=true;
-      if(!row){const section=resolveTrackerMachineSection(trackerView,trackerHeader,update.assetNumber);const lastTask=section.taskRows.reduce((latest,item)=>item.rowNumber>latest.rowNumber?item:latest);const meterUpdate=update.intervalType==='hourly'||update.intervalType==='cycles';const exactTemplates=section.taskRows.filter(item=>item.intervalType===update.intervalType);const categoryTemplates=section.taskRows.filter(item=>(item.intervalType==='hourly'||item.intervalType==='cycles')===meterUpdate);const template=(exactTemplates.length?exactTemplates:categoryTemplates.length?categoryTemplates:section.taskRows).reduce((latest,item)=>item.rowNumber>latest.rowNumber?item:latest);row=lastTask.rowNumber+1;templateRow=template.rowNumber;sectionAssetNumber=section.assetNumber;inheritedAssetNumber=template.assetNumberInherited;trackerXml=insertWorksheetRow(trackerXml,row,templateRow);await shiftTrackerTables(zip,trackerPart,row,templateRow);await shiftWorkbookDefinedNames(zip,PM_TRACKER_SHEET,workbook.worksheets.findIndex(sheet=>sheet.name===PM_TRACKER_SHEET),row,templateRow);inserted=true;}
+      if(!row){const section=resolveTrackerMachineSection(trackerView,trackerHeader,update.assetNumber);const lastTask=section.taskRows.reduce((latest,item)=>item.rowNumber>latest.rowNumber?item:latest);const meterUpdate=update.intervalType==='hourly'||update.intervalType==='cycles';const exactTemplates=section.taskRows.filter(item=>item.intervalType===update.intervalType);const categoryTemplates=section.taskRows.filter(item=>(item.intervalType==='hourly'||item.intervalType==='cycles')===meterUpdate);const template=(exactTemplates.length?exactTemplates:categoryTemplates.length?categoryTemplates:section.taskRows).reduce((latest,item)=>item.rowNumber>latest.rowNumber?item:latest);row=lastTask.rowNumber+1;templateRow=template.rowNumber;sectionAssetNumber=section.assetNumber;inheritedAssetNumber=template.assetNumberInherited;const formulaTemplates=await worksheetFormulaTemplates(zip,trackerPart,trackerView,templateRow);for(const expectation of formulaExpectations){const expectationRow=Number(/\d+$/.exec(expectation.address)?.[0]??0);if(expectationRow>=row){expectation.address=`${expectation.address.replace(/\d+$/,'')}${expectationRow+1}`;expectation.formula=shiftFormulaForInsertion(expectation.formula,row);}}trackerXml=deshareFormulaGroupsForInsertion(trackerXml,trackerView,row);trackerXml=insertWorksheetRow(trackerXml,row,templateRow,formulaTemplates);for(const [column,formula] of formulaTemplates)formulaExpectations.push({sheetName:PM_TRACKER_SHEET,address:`${cellColumnLetters(column)}${row}`,formula:shiftFormulaRows(formula,row-templateRow)});await shiftTrackerTables(zip,trackerPart,row,templateRow);await shiftWorkbookDefinedNames(zip,PM_TRACKER_SHEET,workbook.worksheets.findIndex(sheet=>sheet.name===PM_TRACKER_SHEET),row,templateRow);inserted=true;}
       const meter=update.intervalType==='hourly'||update.intervalType==='cycles';
       const targets:Array<[TrackerField,unknown]>=[
         ...((inserted&&trackerHeader.columns.assetNumber&&!inheritedAssetNumber)?[['assetNumber',sectionAssetNumber] as [TrackerField,unknown]]:[]),
@@ -570,7 +650,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
         ['due',meter?update.lastCompletedMeter===null?null:update.lastCompletedMeter+update.intervalValue:workbookValue(calculateWorkbookPm({intervalType:update.intervalType,intervalValue:update.intervalValue,lastCompletedDate:update.lastCompletedDate,currentDate:update.currentDate}).nextDueDate,true)],
         ['remaining',update.remaining],['status',update.status],
       ];
-      for (const [field,value] of targets) {const column=trackerHeader.columns[field];if(!column)continue;const address=trackerView.getCell(row,column).address;const formula=worksheetCellHasFormula(trackerXml,address);if(formula){if(!['current','due','remaining','status'].includes(field)){if(inserted)throw new Error(`Machine Pm Tracker ${address} cannot be populated because the formatting template contains a protected formula.`);continue;}const patched=setWorksheetFormulaResult(trackerXml,address,value,date1904);trackerXml=patched.xml;if(patched.changed)changedCells+=1;continue;}const cell=inserted?null:trackerView.getCell(row,column);if(cell&&sameCellValue(cell,value))continue;const patched=setWorksheetCell(trackerXml,address,value,date1904,inserted?trackerView.getCell(templateRow,column).address:undefined);trackerXml=patched.xml;if(patched.changed)changedCells+=1;}
+      for (const [field,value] of targets) {const column=trackerHeader.columns[field];if(!column)continue;const address=trackerView.getCell(row,column).address;const formula=worksheetCellHasFormula(trackerXml,address);if(formula){if(!['current','due','remaining','status'].includes(field)){if(inserted)throw new Error(`Machine Pm Tracker ${address} cannot be populated because the formatting template contains a protected formula.`);continue;}if(inserted&&['due','remaining','status'].includes(field))continue;const patched=setWorksheetFormulaResult(trackerXml,address,value,date1904);trackerXml=patched.xml;if(patched.changed)changedCells+=1;continue;}const cell=inserted?null:trackerView.getCell(row,column);if(cell&&sameCellValue(cell,value))continue;const patched=setWorksheetCell(trackerXml,address,value,date1904,inserted?trackerView.getCell(templateRow,column).address:undefined);trackerXml=patched.xml;if(patched.changed)changedCells+=1;}
     }
     const existing=historyExistingKeys(history,historyHeader);let appendedHistory=0;let previousHistoryRow=lastHistoryDataRow(history,historyHeader);let lastAppendedHistoryRow=previousHistoryRow;
     for (const row of input.historyRows) {
@@ -583,8 +663,8 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
       if(row.workOrderHyperlink)historyXml=await addWorksheetExternalHyperlink(zip,historyPart,historyXml,history.getCell(rowNumber,historyHeader.columns.workOrderNumber).address,row.workOrderHyperlink);
       previousHistoryRow=rowNumber;lastAppendedHistoryRow=rowNumber;appendedHistory+=1;existing.add(`ref:${sourceRef}`);
     }
-    historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);
-    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
+    historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);await requestFullWorkbookCalculation(zip);
+    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});await validatePmWorkbookOoxml(generated,formulaExpectations);const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
     const validation=new ExcelJS.Workbook();await validation.xlsx.readFile(temporaryPath);
     if (!validation.getWorksheet(PM_TRACKER_SHEET)||!validation.getWorksheet(PM_HISTORY_SHEET)) throw new Error('Workbook validation failed after synchronization.');
     if (input.beforeReplace) await input.beforeReplace();

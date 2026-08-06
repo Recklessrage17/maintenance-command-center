@@ -17,6 +17,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.1",
     "pdf-lib": "^1.17.1",
+    "saxes": "^5.0.1",
     "xlsx-populate": "^1.21.0"
   },
   "devDependencies": {
