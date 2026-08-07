@@ -1,6 +1,6 @@
 {
   "name": "mcc-backend",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.1",
     "pdf-lib": "^1.17.1",
+    "saxes": "^5.0.1",
     "xlsx-populate": "^1.21.0"
   },
   "devDependencies": {
