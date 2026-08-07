@@ -148,7 +148,7 @@ function PmAlertCard({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   const accent=alert.status==='Due Soon'?'#F6BE3F':alert.status==='Due Now'?'#FF8A4C':'#FF4968';
   return <MccPillCard className={`dashboard-pm-alert status-${alert.status.toLowerCase().replace(/\s+/g,'-')}`} variant={tone} accentColor={accent} onActivate={onOpen} ariaLabel={`Open ${alert.title} preventive maintenance details for ${alert.assetNumber}`}>
     <div className="dashboard-pm-top"><div className="dashboard-pm-asset"><strong>{alert.assetNumber}</strong><span>{alert.brand||'Brand unknown'}</span></div><MccStatusPill variant={tone} className="dashboard-pm-status">{alert.status}</MccStatusPill></div>
-    <div className="dashboard-pm-task"><strong>{alert.title}</strong><span>{intervalSummary(alert)}</span></div>
+    <div className="dashboard-pm-task"><strong>{alert.title}</strong><span className={`dashboard-pm-interval${alert.intervalType==='hourly'?' dashboard-pm-interval--hourly':''}`}>{intervalSummary(alert)}</span></div>
     <div className="dashboard-pm-due"><span>{dueInformation(alert)}</span><i aria-hidden="true">·</i><strong>{alert.relativeMessage||alert.countdown}</strong><span className="dashboard-pm-open" aria-hidden="true" title="Open details">&rarr;</span></div>
   </MccPillCard>;
 }
@@ -164,7 +164,7 @@ function PmDetailModal({alert,performedBy,canEdit,onClose,onChanged}:{alert:PmAl
     <section className="mcc-card dashboard-pm-detail glass-modal-shell" role="dialog" aria-modal="true" aria-labelledby={`dashboard-pm-detail-${alert.id}`}>
       <div className="modal-heading"><div><p className="eyebrow">Preventive Maintenance</p><h2 id={`dashboard-pm-detail-${alert.id}`}>{alert.title}</h2><p>{alert.assetNumber} · {alert.brand||'Brand unknown'}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
       <div className="dashboard-pm-detail-grid">
-        <Detail label="Asset" value={`${alert.assetNumber}${alert.assetName?` · ${alert.assetName}`:''}`}/><Detail label="Brand" value={alert.brand||'Not set'}/><Detail label="Interval" value={intervalSummary(alert)}/><Detail label="Status" value={`${alert.status} · ${alert.relativeMessage||alert.countdown}`}/><Detail label="Last Completed" value={lastCompletedInformation(alert)}/><Detail label="Current Meter / Cycles" value={alert.currentMeter===null?'Not set':formatNumber(alert.currentMeter)}/><Detail label="Next Due" value={dueInformation(alert)}/>
+        <Detail label="Asset" value={`${alert.assetNumber}${alert.assetName?` · ${alert.assetName}`:''}`}/><Detail label="Brand" value={alert.brand||'Not set'}/><Detail label="Interval" value={intervalSummary(alert)} className={alert.intervalType==='hourly'?'dashboard-pm-detail-item--hourly':''}/><Detail label="Status" value={`${alert.status} · ${alert.relativeMessage||alert.countdown}`}/><Detail label="Last Completed" value={lastCompletedInformation(alert)}/><Detail label="Current Meter / Cycles" value={alert.currentMeter===null?'Not set':formatNumber(alert.currentMeter)}/><Detail label="Next Due" value={dueInformation(alert)}/>
       </div>
       <section className="dashboard-pm-copy"><h3>Instructions</h3><p>{alert.instructions||'No instructions provided.'}</p></section>
       <section className="dashboard-pm-copy"><h3>Notes</h3><p>{alert.notes||'No notes provided.'}</p></section>
@@ -174,7 +174,7 @@ function PmDetailModal({alert,performedBy,canEdit,onClose,onChanged}:{alert:PmAl
   </div>,document.body)}{workflow==='edit'?<PmFormModal asset={asset} task={task} apiBase={apiBase} onClose={()=>setWorkflow(null)} onSaved={onChanged}/>:workflow==='complete'?<PmCompleteWorkflowModal asset={asset} task={task} library={library} performedBy={performedBy} onClose={()=>setWorkflow(null)} onSaved={onChanged}/>:workflow==='history'?<PmHistoryModal task={task} apiBase={apiBase} onClose={()=>setWorkflow(null)}/>:null}</>;
 }
 
-function Detail({label,value}:{label:string;value:string}){return <div className="dashboard-pm-detail-item"><span>{label}</span><strong>{value}</strong></div>;}
+function Detail({label,value,className=''}:{label:string;value:string;className?:string}){return <div className={`dashboard-pm-detail-item${className?` ${className}`:''}`}><span>{label}</span><strong>{value}</strong></div>;}
 
 function PmWorkOrder({alert}:{alert:PmAlert}) {
   return <article className="pm-work-order-print" aria-label="Preventive Maintenance Work Order">

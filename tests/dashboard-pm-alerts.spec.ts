@@ -44,6 +44,8 @@ test('sorts attention PMs, opens details, excludes paused schedules, and prints 
   await expect(page.getByText('Inactive PM must be excluded')).toHaveCount(0);
   await expect(cards.nth(0)).toContainText('Press 51');
   await expect(cards.nth(0)).toContainText('Past due by 20 hours');
+  await expect(cards.nth(0).locator('.dashboard-pm-interval')).toHaveClass(/dashboard-pm-interval--hourly/);
+  await expect(cards.nth(0).locator('.dashboard-pm-interval')).toHaveCSS('color','rgb(168, 242, 205)');
   await expect(cards.nth(1)).toContainText('Press 53');
   await expect(cards.nth(2)).toContainText('Due Now');
   await expect(cards.nth(3)).toContainText('Due Soon');
@@ -53,6 +55,7 @@ test('sorts attention PMs, opens details, excludes paused schedules, and prints 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading',{name:'Machine Greasing'})).toBeVisible();
   await expect(dialog).toContainText('Press 51');
+  await expect(dialog.locator('.dashboard-pm-detail-item--hourly')).toContainText('Every 250 hours');
   await activate(dialog.getByRole('button',{name:'Print / Save PDF'}),mobile);
   expect(await page.evaluate(()=>(window as unknown as {__printCalls:number}).__printCalls)).toBe(1);
 
