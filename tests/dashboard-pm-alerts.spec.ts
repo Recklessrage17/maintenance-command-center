@@ -23,7 +23,7 @@ const fixtureAlerts=[
 
 async function mockDashboard(page:Page,alerts=fixtureAlerts) {
   await page.addInitScript(()=>{(window as unknown as {__printCalls:number}).__printCalls=0;window.print=()=>{(window as unknown as {__printCalls:number}).__printCalls+=1;};});
-  await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Dashboard Tester',email:'dashboard@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false}}}));
+  await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Dashboard Tester',email:'dashboard@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false,effectivePermissions:['machine.view','machine.pm_manage','equipment.view','equipment.pm_manage']}}}));
   await page.route('**/api/requisitions/summary',route=>route.fulfill({json:{ok:true,requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0}}));
   await page.route('**/api/dashboard/preventive-maintenance-due',route=>route.fulfill({json:{ok:true,alerts,summary:{}}}));
   await page.route(/\/api\/machine-library\/preventive-maintenance\/\d+\/history$/,route=>route.fulfill({json:{ok:true,history:[{id:1,completionDate:'2026-06-17',completedMeter:1000,performedBy:'Dashboard Tester',completionNotes:'Completed',createdAt:'2026-06-17T12:00:00Z'}]}}));
@@ -117,6 +117,13 @@ test('sorts attention PMs, opens details, excludes paused schedules, and prints 
   await testInfo.attach('normal-pm-work-order-no-background-graphics.pdf',{body:pdfWithoutBackgroundGraphics,contentType:'application/pdf'});
   const qaPdfPath=process.env.MCC_PM_QA_PDF?.replace('{project}',testInfo.project.name);
   if(qaPdfPath){await writeFile(qaPdfPath,pdf);await writeFile(qaPdfPath.replace(/\.pdf$/,'-no-background-graphics.pdf'),pdfWithoutBackgroundGraphics);}
+});
+
+test('opens the shared Edit, Complete, and History workflows from dashboard PM details',async({page})=>{
+  await mockDashboard(page,[fixtureAlerts[3]]);await page.goto('/');await page.locator('.dashboard-pm-alert').click();const detail=page.getByRole('dialog',{name:'Machine Greasing'});await expect(detail.getByRole('button',{name:'Edit PM'})).toBeVisible();await expect(detail.getByRole('button',{name:'Complete PM'})).toBeVisible();await expect(detail.getByRole('button',{name:'View History'})).toBeVisible();
+  await detail.getByRole('button',{name:'Edit PM'}).click();const edit=page.getByRole('dialog',{name:'Edit Preventive Maintenance Tracking'});await expect(edit.getByRole('textbox',{name:'PM Title'})).toHaveValue('Machine Greasing');await edit.getByRole('button',{name:'Close'}).click();
+  await detail.getByRole('button',{name:'Complete PM'}).click();const complete=page.getByRole('dialog',{name:'Complete Machine Greasing'});await expect(complete.locator('.pm-identity-chip--asset')).toHaveText('PRESS 51');await expect(complete.locator('.pm-identity-chip--brand')).toHaveText('TOYO');await expect(complete).toContainText('Dashboard Tester');await complete.getByRole('button',{name:'Close'}).click();
+  await detail.getByRole('button',{name:'View History'}).click();const history=page.getByRole('dialog',{name:'Machine Greasing'}).last();await expect(history).toContainText('Performed by Dashboard Tester');await history.getByRole('button',{name:'Close'}).first().click();
 });
 
 test('shows the compact empty state when no preventive maintenance needs attention',async({page})=>{

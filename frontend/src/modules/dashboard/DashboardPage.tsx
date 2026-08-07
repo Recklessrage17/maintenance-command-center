@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccPillCard, MccStatusPill } from '../../components/MccPills';
 import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
+import { PmCompleteWorkflowModal } from '../preventive-maintenance/PmWorkflowModals';
+import { PmFormModal, PmHistoryModal, type AssetIdentity, type AssetLibraryScope, type PmTask } from '../machine-library/PreventiveMaintenanceTracking';
 import { PM_UPDATED_EVENT } from '../machine-library/pmEvents';
 
 type RequisitionSummary = { requestedCount:number;orderedCount:number;receivedCount:number;canceledCount:number;activeCount:number };
@@ -16,7 +18,6 @@ type PmAlert = {
   lastCompletedDate:string|null;lastCompletedMeter:number|null;currentMeter:number|null;nextDueDate:string|null;nextDueMeter:number|null;
   historyCount:number;createdAt:string;updatedAt:string;
 };
-type PmHistory = { id:number;completionDate:string;completedMeter:number|null;performedBy:string;completionNotes:string;createdAt:string };
 
 const emptyRequisitionSummary:RequisitionSummary={requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0};
 const attentionStatuses=new Set<PmStatus>(['Due Soon','Due Now','Past Due']);
@@ -61,7 +62,7 @@ function workOrderFilename(alert:PmAlert) {
   return `${token(alert.assetNumber)}_${token(alert.title)}_PM_Work_Order_${new Date().toISOString().slice(0,10)}`;
 }
 
-export function DashboardPage({onOpenRequisitions}:{onOpenRequisitions:(view:DashboardRequisitionView)=>void}) {
+export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermissions=[]}:{onOpenRequisitions:(view:DashboardRequisitionView)=>void;userFullName?:string;effectivePermissions?:string[]}) {
   const [requisitionSummary,setRequisitionSummary]=useState<RequisitionSummary>(emptyRequisitionSummary);
   const [pmAlerts,setPmAlerts]=useState<PmAlert[]>([]);
   const [pmLoading,setPmLoading]=useState(true);
@@ -130,7 +131,7 @@ export function DashboardPage({onOpenRequisitions}:{onOpenRequisitions:(view:Das
       {!pmLoading&&!pmError&&!pmAlerts.length&&<p className="dashboard-pm-state success">No preventive maintenance is currently due.</p>}
       {!pmLoading&&!pmError&&pmAlerts.length>0&&<div className="dashboard-pm-grid">{pmAlerts.map(alert=><PmAlertCard key={alert.id} alert={alert} onOpen={()=>setSelectedPm(alert)}/>)}</div>}
     </section>
-    {selectedPm&&<PmDetailModal alert={selectedPm} onClose={()=>setSelectedPm(null)}/>}
+    {selectedPm&&<PmDetailModal alert={selectedPm} performedBy={userFullName} canEdit={effectivePermissions.includes(`${selectedPm.assetLibrary==='equipment'?'equipment':'machine'}.pm_manage`)} onClose={()=>setSelectedPm(null)} onChanged={async()=>{setSelectedPm(null);await loadPmAlerts();}}/>}
   </div>;
 }
 
@@ -152,13 +153,14 @@ function PmAlertCard({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   </MccPillCard>;
 }
 
-function PmDetailModal({alert,onClose}:{alert:PmAlert;onClose:()=>void}) {
-  const [history,setHistory]=useState<PmHistory[]|null>(null);
-  const [historyError,setHistoryError]=useState('');
+function dashboardTask(alert:PmAlert):PmTask{return {...alert,intervalType:alert.intervalType as PmTask['intervalType'],status:alert.status,scheduleStatus:alert.scheduleStatus};}
+function dashboardAsset(alert:PmAlert):AssetIdentity{return {id:alert.assetId,assetNumber:alert.assetNumber,assetName:alert.assetName,brand:alert.brand};}
+
+function PmDetailModal({alert,performedBy,canEdit,onClose,onChanged}:{alert:PmAlert;performedBy:string;canEdit:boolean;onClose:()=>void;onChanged:()=>void|Promise<void>}) {
+  const [workflow,setWorkflow]=useState<'edit'|'complete'|'history'|null>(null);const library:AssetLibraryScope=alert.assetLibrary==='equipment'?'equipment':'machine';const task=dashboardTask(alert);const asset=dashboardAsset(alert);const apiBase=`/api/${library}-library`;
   useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onClose();};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close);},[onClose]);
-  async function loadHistory(){setHistoryError('');try{const response=await fetch(`/api/${alert.assetLibrary==='equipment'?'equipment':'machine'}-library/preventive-maintenance/${alert.id}/history`,{credentials:'include'});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'PM history is unavailable.');setHistory(Array.isArray(data.history)?data.history:[]);}catch(error){setHistoryError((error as Error).message);}}
   function printWorkOrder(){const previous=document.title;const next=workOrderFilename(alert);const restore=()=>{document.title=previous;};document.title=next;window.addEventListener('afterprint',restore,{once:true});window.print();window.setTimeout(restore,1000);}
-  return createPortal(<div className="modal-backdrop glass-modal-backdrop dashboard-pm-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
+  return <>{createPortal(<div className="modal-backdrop glass-modal-backdrop dashboard-pm-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
     <section className="mcc-card dashboard-pm-detail glass-modal-shell" role="dialog" aria-modal="true" aria-labelledby={`dashboard-pm-detail-${alert.id}`}>
       <div className="modal-heading"><div><p className="eyebrow">Preventive Maintenance</p><h2 id={`dashboard-pm-detail-${alert.id}`}>{alert.title}</h2><p>{alert.assetNumber} · {alert.brand||'Brand unknown'}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
       <div className="dashboard-pm-detail-grid">
@@ -166,11 +168,10 @@ function PmDetailModal({alert,onClose}:{alert:PmAlert;onClose:()=>void}) {
       </div>
       <section className="dashboard-pm-copy"><h3>Instructions</h3><p>{alert.instructions||'No instructions provided.'}</p></section>
       <section className="dashboard-pm-copy"><h3>Notes</h3><p>{alert.notes||'No notes provided.'}</p></section>
-      {alert.historyCount>0&&<section className="dashboard-pm-history"><button className="secondary-button compact-button" type="button" onClick={()=>void loadHistory()}>View History</button>{historyError&&<p className="form-message error">{historyError}</p>}{history&&<div>{history.map(item=><p key={item.id}><strong>{formatDate(item.completionDate)}</strong> · {item.performedBy}{item.completionNotes?` · ${item.completionNotes}`:''}</p>)}</div>}</section>}
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="primary-button dashboard-pm-print-button" type="button" onClick={printWorkOrder}>Print / Save PDF</button></div>
+      <div className="modal-actions dashboard-pm-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button><button className="secondary-button" type="button" onClick={()=>setWorkflow('history')}>View History</button>{canEdit&&<button className="secondary-button glass-button glass-button--warning" type="button" onClick={()=>setWorkflow('edit')}>Edit PM</button>}{canEdit&&<button className="primary-button glass-button glass-button--success" type="button" onClick={()=>setWorkflow('complete')}>Complete PM</button>}<button className="secondary-button dashboard-pm-print-button" type="button" onClick={printWorkOrder}>Print / Save PDF</button></div>
       <PmWorkOrder alert={alert}/>
     </section>
-  </div>,document.body);
+  </div>,document.body)}{workflow==='edit'?<PmFormModal asset={asset} task={task} apiBase={apiBase} onClose={()=>setWorkflow(null)} onSaved={onChanged}/>:workflow==='complete'?<PmCompleteWorkflowModal asset={asset} task={task} library={library} performedBy={performedBy} onClose={()=>setWorkflow(null)} onSaved={onChanged}/>:workflow==='history'?<PmHistoryModal task={task} apiBase={apiBase} onClose={()=>setWorkflow(null)}/>:null}</>;
 }
 
 function Detail({label,value}:{label:string;value:string}){return <div className="dashboard-pm-detail-item"><span>{label}</span><strong>{value}</strong></div>;}

@@ -517,6 +517,68 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 @media (prefers-reduced-motion: reduce) {
   .maintenance-team-panel.maintenance-team-panel,.maintenance-team-row,.presence-dot { animation: none; transition: none; }
 }
+
+/* Issue #70 PM workflow: shared meters, team completion, tombstone deletion, and scan-first cards. */
+.pm-machine-meters { display:grid; gap:12px; padding:14px; border:1px solid rgba(75,209,239,.22); border-radius:16px; background:linear-gradient(145deg,rgba(6,29,48,.76),rgba(4,17,31,.66)); }
+.pm-machine-meters-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.pm-machine-meters-heading :where(h4,p) { margin:0; }
+.pm-machine-meter-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.pm-machine-meter-card { min-width:0; display:grid; grid-template-columns:minmax(150px,1fr) minmax(150px,.8fr) auto; align-items:end; gap:12px; padding:13px; }
+.pm-machine-meter-card > div:first-child { min-width:0; display:grid; gap:3px; }
+.pm-machine-meter-card > div:first-child > span { color:#8edcf1; font-size:.7rem; font-weight:900; letter-spacing:.07em; text-transform:uppercase; }
+.pm-machine-meter-card > div:first-child > strong { color:#f2fcff; font-size:1.35rem; }
+.pm-machine-meter-card > div:first-child > small { color:#9cb7c2; line-height:1.35; }
+.pm-meter-correction { grid-column:1/-1; display:grid; grid-template-columns:minmax(0,.7fr) minmax(0,1.3fr); gap:10px; padding:10px; border:1px solid rgba(255,151,91,.35); border-radius:12px; background:rgba(76,34,18,.36); }
+.pm-card-identity,.pm-complete-identity,.pm-technician-pills { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.pm-card-identity .glass-pill,.pm-identity-chip { min-height:24px; padding:4px 9px; font-size:.65rem; font-weight:900; letter-spacing:.05em; }
+.pm-card-asset,.pm-identity-chip--asset { color:#b9f0ff; border-color:rgba(65,216,255,.5); }
+.pm-card-brand,.pm-identity-chip--brand { color:#d7c8ff; border-color:rgba(158,126,255,.45); }
+.pm-task-metrics--meter { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.pm-metric-pill--current { border-color:rgba(68,215,255,.28); background:rgba(6,40,58,.52); }
+.pm-task-card .pm-card-actions { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.pm-task-card .pm-card-actions > :where(button,.pm-more-menu) { grid-column:auto; min-width:0; }
+.pm-task-card .pm-card-actions .glass-button { width:100%; min-width:0; }
+.pm-more-menu { position:relative; }
+.pm-more-menu > summary { display:grid; place-items:center; min-height:100%; cursor:pointer; list-style:none; }
+.pm-more-menu > summary::-webkit-details-marker { display:none; }
+.pm-more-menu-popover { position:absolute; z-index:12; right:0; bottom:calc(100% + 7px); width:max-content; min-width:170px; display:grid; gap:5px; padding:7px; border:1px solid rgba(133,197,220,.28); border-radius:11px; background:rgba(4,17,30,.98); box-shadow:0 16px 38px rgba(0,0,0,.42); }
+.pm-more-menu-popover button { min-height:36px; padding:7px 10px; border:1px solid rgba(137,190,210,.22); border-radius:8px; color:#dceef4; background:rgba(19,48,65,.65); text-align:left; cursor:pointer; }
+.pm-more-menu-popover .pm-more-delete { color:#ffc1cb; border-color:rgba(255,90,116,.4); background:rgba(81,24,38,.55); }
+.pm-more-menu :where(summary,button):focus-visible { outline:2px solid #69ddff; outline-offset:2px; }
+.pm-complete-workflow .modal-heading { align-items:flex-start; }
+.pm-complete-identity { margin-top:9px; }
+.pm-technician-picker { display:grid; gap:9px; padding:12px; border:1px solid rgba(73,210,239,.24); border-radius:14px; background:rgba(5,25,41,.62); }
+.pm-technician-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.pm-technician-heading > span { color:#9ce8fa; font-size:.72rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+.pm-technician-pill { display:inline-flex; align-items:center; gap:6px; color:#e6f7fb; }
+.pm-technician-pill--primary { color:#aef5d7; border-color:rgba(54,229,170,.42); }
+.pm-technician-pill small { opacity:.75; }
+.pm-technician-pill button { width:20px; height:20px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; color:#ffd6dd; background:rgba(255,90,116,.22); cursor:pointer; }
+.pm-technician-search { position:relative; display:grid; gap:7px; }
+.pm-technician-results { max-height:190px; overflow:auto; display:grid; gap:5px; padding:5px; border:1px solid rgba(134,202,225,.2); border-radius:10px; background:rgba(2,13,24,.78); }
+.pm-technician-results > button { display:grid; gap:2px; padding:8px 10px; border:1px solid rgba(133,199,220,.18); border-radius:8px; color:#eaf8fb; background:rgba(13,42,58,.7); text-align:left; cursor:pointer; }
+.pm-technician-results > button:hover,.pm-technician-results > button:focus-visible { border-color:rgba(68,215,255,.62); background:rgba(16,61,79,.8); }
+.pm-technician-results > span { padding:8px; color:#9bb6c0; }
+.pm-delete-modal { width:min(650px,100%); }
+.pm-delete-warning { padding:12px; border:1px solid rgba(255,91,117,.38); border-radius:12px; color:#ffd5dc; background:rgba(76,20,34,.48); line-height:1.5; }
+.pm-delete-confirm { display:flex; align-items:flex-start; gap:9px; color:#dcecf2; line-height:1.4; }
+.pm-delete-confirm input { margin-top:3px; }
+.pm-archived-pill { width:max-content; color:#ffd19a; border-color:rgba(255,171,91,.42); }
+.dashboard-pm-actions { flex-wrap:wrap; }
+
+@media (max-width: 980px) {
+  .pm-machine-meter-card { grid-template-columns:minmax(0,1fr); align-items:stretch; }
+  .pm-task-card .pm-card-actions { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .pm-task-card .pm-card-actions > :where(button,.pm-more-menu) { grid-column:auto; }
+}
+@media (max-width: 680px) {
+  .pm-machine-meter-grid,.pm-meter-correction,.pm-task-metrics--meter { grid-template-columns:minmax(0,1fr); }
+  .pm-task-card .pm-card-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .pm-more-menu-popover { right:auto; left:0; }
+  .pm-technician-heading { align-items:flex-start; flex-direction:column; }
+  .pm-technician-heading button { width:100%; }
+  .dashboard-pm-actions > button { width:100%; }
+}
 .user-table-card table { min-width: 1260px; }
 .user-actions { width: fit-content; max-width: 420px; }
 .user-actions button { width: auto; height: auto; flex: 0 0 auto; white-space: nowrap; }

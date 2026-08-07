@@ -22,6 +22,7 @@ try{
   legacy.exec(`CREATE TABLE pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);`);
   legacy.prepare("INSERT INTO pm_tasks (id,asset_id,title,interval_type,interval_value,active,hold,created_at,updated_at) VALUES (1,101,'Legacy task A','days',30,1,0,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'),(2,202,'Legacy task B','days',45,1,0,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
+  legacy.prepare("INSERT INTO pm_tasks (id,asset_id,title,interval_type,interval_value,last_completed_meter,current_meter,active,hold,created_at,updated_at) VALUES (3,303,'Legacy hourly active','hourly',500,100,1000,1,0,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'),(4,303,'Legacy hourly held','hourly',750,200,1200,1,1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
   legacy.prepare("INSERT INTO pm_history (id,pm_task_id,asset_id,completion_date,performed_by_name,completion_notes,created_at) VALUES (1,1,101,'2026-01-10','Legacy Technician','Legacy row A','2026-01-10T12:00:00Z'),(2,2,202,'2026-01-11','Legacy Technician','Legacy row B','2026-01-11T12:00:00Z')").run();
   legacy.close();
 
@@ -36,6 +37,13 @@ CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGE
   assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='follow_up_required'));
   assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='follow_up_reason'));
   assert.ok(database.prepare("PRAGMA table_info(pm_tasks)").all().some(column=>column.name==='asset_library'));
+  assert.ok(database.prepare("PRAGMA table_info(pm_tasks)").all().some(column=>column.name==='deleted'));
+  assert.ok(database.prepare("PRAGMA table_info(pm_tasks)").all().some(column=>column.name==='deleted_task_snapshot_json'));
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM pm_history_participants').get().count,0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM pm_asset_meters').get().count,1);
+  assert.equal(database.prepare('SELECT current_reading FROM pm_asset_meters WHERE asset_id=303 AND meter_type=\'hours\'').get().current_reading,1200);
+  assert.deepEqual(database.prepare('SELECT id,last_completed_meter,current_meter,hold FROM pm_tasks WHERE asset_id=303 ORDER BY id').all().map(row=>({...row})),[{id:3,last_completed_meter:100,current_meter:1200,hold:0},{id:4,last_completed_meter:200,current_meter:1200,hold:1}],'migration must converge legacy schedule readings without changing PM baselines or hold state');
+  const migratedMeterHistoryCount=database.prepare("SELECT COUNT(*) AS count FROM pm_meter_history WHERE source='migration'").get().count;assert.equal(migratedMeterHistoryCount,1);
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM pm_work_order_attachments').get().count,0);
   assert.deepEqual(database.prepare('SELECT id,follow_up_required,follow_up_reason FROM pm_history ORDER BY id').all().map(row=>({...row})),[
     {id:1,follow_up_required:0,follow_up_reason:''},
@@ -65,7 +73,8 @@ CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGE
   assert.equal(new Set(repeated.map(row=>row.task_type)).size,2);
   assert.equal(new Set(repeated.map(row=>row.import_source_ref)).size,2);
   assert.equal(indexes.find(index=>index.name==='idx_pm_history_work_order_lookup')?.unique,0);
-  console.log('PM Excel migration tests passed: legacy history preservation, v1.5.2 follow-up/attachment schema defaults, safe column/index ordering, and repeated work-order retention across restarts.');
+  const verification=new DatabaseSync(dbPath,{readOnly:true});const migrationMeterRows=verification.prepare("SELECT COUNT(*) AS count FROM pm_meter_history WHERE source='migration'").get().count;verification.close();assert.equal(migrationMeterRows,1,'repeated startup must not duplicate authoritative-meter migration audit rows');
+  console.log('PM Excel migration tests passed: legacy history preservation, v1.5.3 tombstone/participant/meter schema, authoritative meter convergence, safe column/index ordering, and repeated work-order retention across restarts.');
 }finally{
   if(database){database.close();database=undefined;}
   await stopServer(server);
