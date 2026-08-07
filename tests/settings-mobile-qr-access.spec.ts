@@ -72,6 +72,10 @@ test('renders a local accessible QR whose payload equals the displayed primary L
   const qr = panel.locator('svg[role="img"]');
   await expect(displayedUrl).toHaveText(lanUrl);
   await expect(qr).toHaveAttribute('data-qr-payload',lanUrl);
+  await expect(qr).toHaveAttribute('data-qr-size','176');
+  await expect(qr).toHaveAttribute('data-qr-level','H');
+  await expect(qr).toHaveAttribute('data-qr-brand','wrench');
+  await expect(qr.locator('image')).toHaveCount(1);
   await expect(qr).toHaveAttribute('aria-label',`QR code to open Maintenance Command Center at ${lanUrl}`);
   await expect(panel).toContainText('Scan while connected to the same plant Wi-Fi/network.');
   await expect(panel).toContainText('Do not use cellular data.');
@@ -126,30 +130,37 @@ test('the existing mobile URL Copy button remains usable', async ({page,context}
   expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(lanUrl);
 });
 
-test('desktop and stacked tablet/mobile layouts stay scannable without overflow', async ({page})=>{
+test('QR uses the smaller desktop and stacked mobile sizes without overflow', async ({page})=>{
   await mockSettings(page,[links(lanUrl)]);
   await page.goto('/settings');
   const panel = mobilePanel(page);
   const copy = panel.locator('.mobile-access-copy');
-  const qr = panel.locator('.mobile-access-qr');
+  const qrArea = panel.locator('.mobile-access-qr');
+  const qr = panel.locator('svg[role="img"]');
 
   await page.setViewportSize({width:1440,height:900});
   const desktopCopy = await copy.boundingBox();
+  const desktopQrArea = await qrArea.boundingBox();
   const desktopQr = await qr.boundingBox();
   expect(desktopCopy).not.toBeNull();
+  expect(desktopQrArea).not.toBeNull();
   expect(desktopQr).not.toBeNull();
-  expect(desktopQr!.x).toBeGreaterThan(desktopCopy!.x);
-  expect(desktopQr!.width).toBeGreaterThanOrEqual(180);
+  expect(desktopQrArea!.x).toBeGreaterThan(desktopCopy!.x);
+  expect(desktopQr!.width).toBeGreaterThanOrEqual(170);
+  expect(desktopQr!.width).toBeLessThanOrEqual(180);
   await expectNoHorizontalOverflow(page);
 
   for (const viewport of [{width:740,height:900},{width:390,height:844}]) {
     await page.setViewportSize(viewport);
     const stackedCopy = await copy.boundingBox();
+    const stackedQrArea = await qrArea.boundingBox();
     const stackedQr = await qr.boundingBox();
     expect(stackedCopy).not.toBeNull();
+    expect(stackedQrArea).not.toBeNull();
     expect(stackedQr).not.toBeNull();
-    expect(stackedQr!.y).toBeGreaterThan(stackedCopy!.y);
-    expect(stackedQr!.width).toBeGreaterThanOrEqual(180);
+    expect(stackedQrArea!.y).toBeGreaterThan(stackedCopy!.y);
+    expect(stackedQr!.width).toBeGreaterThanOrEqual(160);
+    expect(stackedQr!.width).toBeLessThanOrEqual(170);
     await expectNoHorizontalOverflow(page);
   }
 });

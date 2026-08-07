@@ -580,6 +580,8 @@ function selectPrimaryLanUrl(links:NetworkLinks|null) {
   return candidates.map(value=>value?.trim() ?? '').find(isUsableLanUrl) ?? '';
 }
 
+const qrWrenchBadge = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11.5" fill="#fff" stroke="#d7e7ee"/><path d="M14.7 5.3a4.5 4.5 0 0 0-5.5 5.5l-4.4 4.4a2.3 2.3 0 1 0 3.2 3.2l4.4-4.4a4.5 4.5 0 0 0 5.5-5.5l-2.7 2.7-2.4-.6-.6-2.4 2.5-2.9Z" fill="#07141d"/></svg>')}`;
+
 function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
   const qrLabel = `QR code to open Maintenance Command Center at ${url}`;
   return (
@@ -597,15 +599,19 @@ function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>voi
           <div className="mobile-access-qr-frame">
             <QRCodeSVG
               value={url}
-              size={200}
-              level="M"
+              size={176}
+              level="H"
               marginSize={4}
               bgColor="#ffffff"
               fgColor="#07141d"
+              imageSettings={{src:qrWrenchBadge,height:28,width:28,excavate:true}}
               role="img"
               aria-label={qrLabel}
               title={qrLabel}
               data-qr-payload={url}
+              data-qr-size="176"
+              data-qr-level="H"
+              data-qr-brand="wrench"
             />
           </div>
           <p>Scan while connected to the same plant Wi-Fi/network.</p>
