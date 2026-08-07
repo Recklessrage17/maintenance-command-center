@@ -74,6 +74,12 @@ export type TrackerWorkbookUpdate = {
   status:WorkbookPmStatus;
 };
 
+export type TrackerWorkbookRemoval = {
+  assetNumber:string;
+  taskTitle:string;
+  intervalType:WorkbookPmInterval;
+};
+
 export type HistoryWorkbookAppend = {
   assetNumber:string;
   workOrderNumber:string;
@@ -463,7 +469,10 @@ function shiftWorksheetFormulasForInsertion(xml:string,insertionRow:number,templ
   });
 }
 function sharedFormulaGroupsCrossingInsertion(xml:string,insertionRow:number){const indexes=new Set<string>();for(const cell of xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)){const formula=/<f\b([^>]*?)>([\s\S]*?)<\/f>/.exec(cell[0]);if(!formula||xmlAttribute(`<f${formula[1]}>`,'t')!=='shared')continue;const ref=xmlAttribute(`<f${formula[1]}>`,'ref');const si=xmlAttribute(`<f${formula[1]}>`,'si');const range=/^\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)$/i.exec(ref);if(si&&range&&Number(range[1])<insertionRow&&Number(range[2])>=insertionRow)indexes.add(si);}return indexes;}
-function deshareFormulaGroupsForInsertion(xml:string,worksheet:ExcelJS.Worksheet,insertionRow:number){const indexes=sharedFormulaGroupsCrossingInsertion(xml,insertionRow);if(!indexes.size)return xml;for(const cell of [...xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)]){const formula=/<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(cell[0]);if(!formula||!indexes.has(xmlAttribute(`<f${formula[1]}>`,'si')))continue;const resolved=worksheet.getCell(cell[1]).formula;if(typeof resolved!=='string'||!resolved)throw new Error(`Shared formula ${cell[1]} cannot be resolved before row insertion.`);xml=setWorksheetStandaloneFormula(xml,cell[1],resolved);}return xml;}
+function sharedFormulaGroupsContainingRow(xml:string,rowNumber:number){const indexes=new Set<string>();for(const cell of xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)){const formula=/<f\b([^>]*?)>([\s\S]*?)<\/f>/.exec(cell[0]);if(!formula||xmlAttribute(`<f${formula[1]}>`,'t')!=='shared')continue;const ref=xmlAttribute(`<f${formula[1]}>`,'ref');const si=xmlAttribute(`<f${formula[1]}>`,'si');const range=/^\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)$/i.exec(ref);if(si&&range&&Number(range[1])<=rowNumber&&Number(range[2])>=rowNumber)indexes.add(si);}return indexes;}
+function deshareFormulaGroups(xml:string,worksheet:ExcelJS.Worksheet,indexes:Set<string>,operation:string){if(!indexes.size)return xml;for(const cell of [...xml.matchAll(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g)]){const formula=/<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(cell[0]);if(!formula||!indexes.has(xmlAttribute(`<f${formula[1]}>`,'si')))continue;const resolved=worksheet.getCell(cell[1]).formula;if(typeof resolved!=='string'||!resolved)throw new Error(`Shared formula ${cell[1]} cannot be resolved before row ${operation}.`);xml=setWorksheetStandaloneFormula(xml,cell[1],resolved);}return xml;}
+function deshareFormulaGroupsForInsertion(xml:string,worksheet:ExcelJS.Worksheet,insertionRow:number){return deshareFormulaGroups(xml,worksheet,sharedFormulaGroupsCrossingInsertion(xml,insertionRow),'insertion');}
+function removeWorksheetRow(xml:string,worksheet:ExcelJS.Worksheet,rowNumber:number){xml=deshareFormulaGroups(xml,worksheet,sharedFormulaGroupsContainingRow(xml,rowNumber),'removal');const pattern=rowXmlPattern(rowNumber);if(!pattern.test(xml))throw new Error(`Machine Pm Tracker row ${rowNumber} is unavailable for removal.`);return xml.replace(pattern,'');}
 function insertWorksheetRow(xml:string,insertionRow:number,templateRow:number,formulaTemplates:Map<number,string>){
   const template=rowXmlPattern(templateRow).exec(xml)?.[0];if(!template)throw new Error(`Machine Pm Tracker formatting row ${templateRow} is unavailable.`);
   for(const match of xml.matchAll(/<mergeCell\b[^>]*\bref="([^"]+)"[^>]*\/>/g)){const range=/^(?:\$?[A-Z]{1,3})\$?(\d+):(?:\$?[A-Z]{1,3})\$?(\d+)$/i.exec(match[1]);if(range&&Number(range[1])!==Number(range[2])&&Number(range[1])<=templateRow&&Number(range[2])>=templateRow)throw new Error('Machine Pm Tracker formatting template uses a vertical merged range that cannot be copied safely.');}
@@ -643,7 +652,7 @@ function lastHistoryDataRow(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryFiel
   return header.rowNumber;
 }
 
-export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];historyRows:HistoryWorkbookAppend[];beforeReplace?:()=>void|Promise<void>}) {
+export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];beforeReplace?:()=>void|Promise<void>}) {
   const sourcePath=path.resolve(input.sourcePath);const destinationPath=path.resolve(input.destinationPath);const backupDir=path.resolve(input.backupDir);
   if (!fs.existsSync(sourcePath)||!fs.statSync(sourcePath).isFile()) throw new Error('The synchronized PM workbook source is unavailable.');
   fs.mkdirSync(path.dirname(destinationPath),{recursive:true});fs.mkdirSync(backupDir,{recursive:true});
@@ -657,6 +666,13 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
     let trackerXml=await zip.file(trackerPart)?.async('string');let historyXml=await zip.file(historyPart)?.async('string');if(!trackerXml||!historyXml)throw new Error('Workbook worksheet data is unreadable.');const date1904=Boolean(workbook.properties.date1904);
     const historyHeader=findHeader(history,historyAliases,historyRequired);
     let changedCells=0;const formulaExpectations:FormulaExpectation[]=[];
+    for (const removal of input.trackerRemovals??[]) {
+      zip.file(trackerPart,trackerXml);const trackerViewBuffer=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:1}});const trackerViewWorkbook=new ExcelJS.Workbook();await trackerViewWorkbook.xlsx.load(trackerViewBuffer.buffer.slice(trackerViewBuffer.byteOffset,trackerViewBuffer.byteOffset+trackerViewBuffer.byteLength) as ArrayBuffer);const trackerView=trackerViewWorkbook.getWorksheet(PM_TRACKER_SHEET)!;const trackerHeader=findHeader(trackerView,trackerAliases,trackerRequired);const rowsByKey=trackerRowsByKey(trackerView,trackerHeader);const taskKey=[normalizedPmKey(removal.taskTitle),removal.intervalType].join('\u001f');const exactKey=[normalizedPmKey(removal.assetNumber),taskKey].join('\u001f');let matches=rowsByKey.exact.get(exactKey)??[];
+      if(!matches.length){const alias=strictPressNumberAlias(removal.assetNumber);if(alias)matches=rowsByKey.aliases.get([alias,taskKey].join('\u001f'))??[];}
+      if(matches.length>1)throw new Error(`Ambiguous Machine Pm Tracker match for ${removal.assetNumber} / ${removal.taskTitle}.`);
+      if(!matches.length)continue;
+      trackerXml=removeWorksheetRow(trackerXml,trackerView,matches[0]);changedCells+=1;
+    }
     for (const update of input.trackerUpdates) {
       zip.file(trackerPart,trackerXml);const trackerViewBuffer=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:1}});const trackerViewWorkbook=new ExcelJS.Workbook();await trackerViewWorkbook.xlsx.load(trackerViewBuffer.buffer.slice(trackerViewBuffer.byteOffset,trackerViewBuffer.byteOffset+trackerViewBuffer.byteLength) as ArrayBuffer);const trackerView=trackerViewWorkbook.getWorksheet(PM_TRACKER_SHEET)!;const trackerHeader=findHeader(trackerView,trackerAliases,trackerRequired);const rowsByKey=trackerRowsByKey(trackerView,trackerHeader);
       const meter=update.intervalType==='hourly'||update.intervalType==='cycles';const taskKey=[normalizedPmKey(update.matchTaskTitle??update.taskTitle),update.matchIntervalType??update.intervalType].join('\u001f');const exactKey=[normalizedPmKey(update.assetNumber),taskKey].join('\u001f');let matches=rowsByKey.exact.get(exactKey)??[];
@@ -706,7 +722,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
       previousHistoryRow=rowNumber;lastAppendedHistoryRow=rowNumber;appendedHistory+=1;existing.add(`ref:${sourceRef}`);
     }
     historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);await removeWorkbookCalculationChain(zip);await requestFullWorkbookCalculation(zip);
-    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});await validatePmWorkbookOoxml(generated,formulaExpectations);const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
+    const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});await validatePmWorkbookOoxml(generated,formulaExpectations);const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}for(const removal of input.trackerRemovals??[]){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===removal.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(removal.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(removal.assetNumber));const alias=strictPressNumberAlias(removal.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length)throw new Error(`Workbook validation failed for ${removal.assetNumber} / ${removal.taskTitle}: deleted tracker row is still present.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
     const validation=new ExcelJS.Workbook();await validation.xlsx.readFile(temporaryPath);
     if (!validation.getWorksheet(PM_TRACKER_SHEET)||!validation.getWorksheet(PM_HISTORY_SHEET)) throw new Error('Workbook validation failed after synchronization.');
     if (input.beforeReplace) await input.beforeReplace();

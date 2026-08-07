@@ -1544,7 +1544,7 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-task-card .pm-interval-value--180-days { color: #70e5d0; }
 .pm-task-card .pm-interval-value--365-days { color: #ffe66f; }
 .pm-task-card .pm-interval-value--annual { color: #c8afff; }
-.pm-task-card .pm-interval-value--hours { color: #79dcff; }
+.pm-task-card .pm-interval-value--hours { color: #9af3c7; text-shadow: 0 0 13px rgba(83, 232, 161, 0.2); }
 .pm-task-card .pm-interval-value--cycles { color: #c49cff; }
 .pm-task-card .pm-interval-value--calendar { color: #9bd9e8; }
 
