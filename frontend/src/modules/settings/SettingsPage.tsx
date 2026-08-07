@@ -583,7 +583,6 @@ function selectPrimaryLanUrl(links:NetworkLinks|null) {
 const qrWrenchBadge = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11.5" fill="#fff" stroke="#d7e7ee"/><path d="M14.7 5.3a4.5 4.5 0 0 0-5.5 5.5l-4.4 4.4a2.3 2.3 0 1 0 3.2 3.2l4.4-4.4a4.5 4.5 0 0 0 5.5-5.5l-2.7 2.7-2.4-.6-.6-2.4 2.5-2.9Z" fill="#07141d"/></svg>')}`;
 
 function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
-  const qrLabel = `QR code to open Maintenance Command Center at ${url}`;
   return (
     <section className={`network-link-panel mobile-access-panel${url ? '' : ' is-unavailable'}`} aria-label="Mobile and tablet network access">
       <div className="mobile-access-copy">
@@ -594,8 +593,58 @@ function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>voi
           ? <CopyUrl url={url} onCopied={onCopied} />
           : <p className="form-help mobile-access-unavailable-message" role="status">A LAN/mobile URL could not currently be detected. Refresh the network links after connecting MCC to the plant network.</p>}
       </div>
-      {url ? (
-        <div className="mobile-access-qr">
+    </section>
+  );
+}
+
+function MobileQrTrigger({url,onOpen}:{url:string;onOpen:()=>void}) {
+  const available = Boolean(url);
+  const title = available ? 'Show mobile QR code' : 'No LAN/mobile URL detected';
+  return (
+    <section className={`network-link-panel mobile-qr-trigger-panel${available ? '' : ' is-unavailable'}`} aria-label="Mobile QR shortcut">
+      <button
+        className="mobile-qr-trigger"
+        type="button"
+        aria-label="Show mobile access QR code"
+        title={title}
+        disabled={!available}
+        onClick={onOpen}
+        data-qr-trigger-size="82"
+      >
+        <span className="mobile-qr-trigger-halo" aria-hidden="true" />
+        <span className="mobile-qr-trigger-glyph" aria-hidden="true">
+          <svg viewBox="0 0 40 40" focusable="false">
+            <path d="M3 3h13v13H3V3Zm4 4v5h5V7H7Zm17-4h13v13H24V3Zm4 4v5h5V7h-5ZM3 24h13v13H3V24Zm4 4v5h5v-5H7Zm17-7h5v5h-5v-5Zm8 0h5v9h-5v-9Zm-11 8h5v8h-5v-8Zm8 4h4v4h-4v-4Zm6 0h2v4h-2v-4Z" />
+          </svg>
+        </span>
+      </button>
+      <span className="mobile-qr-trigger-label">Mobile QR</span>
+    </section>
+  );
+}
+
+function MobileQrModal({url,refreshing,onCopied,onRefresh,onClose}:{url:string;refreshing:boolean;onCopied:(value:string)=>void;onRefresh:()=>void;onClose:()=>void}) {
+  const closeRef = useRef<HTMLButtonElement|null>(null);
+  const qrLabel = `QR code to open Maintenance Command Center at ${url}`;
+  useEffect(()=>{
+    closeRef.current?.focus();
+    function closeOnEscape(event:KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown',closeOnEscape);
+    return ()=>window.removeEventListener('keydown',closeOnEscape);
+  },[onClose]);
+  return (
+    <div className="modal-backdrop mobile-qr-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
+      <section className="mcc-card mobile-qr-modal" role="dialog" aria-modal="true" aria-labelledby="mobile-qr-modal-title">
+        <div className="modal-heading mobile-qr-modal-heading">
+          <div>
+            <p className="eyebrow">Network access</p>
+            <h3 id="mobile-qr-modal-title">Mobile / Tablet Access</h3>
+          </div>
+          <button ref={closeRef} className="secondary-button compact-button" type="button" onClick={onClose}>Close</button>
+        </div>
+        <div className="mobile-qr-modal-code">
           <div className="mobile-access-qr-frame">
             <QRCodeSVG
               value={url}
@@ -614,16 +663,16 @@ function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>voi
               data-qr-brand="wrench"
             />
           </div>
-          <p>Scan while connected to the same plant Wi-Fi/network.</p>
         </div>
-      ) : (
-        <div className="mobile-access-qr mobile-access-qr-unavailable" aria-label="Mobile access QR unavailable">
-          <div className="mobile-access-qr-placeholder" aria-hidden="true"><span>QR</span></div>
-          <strong>QR unavailable</strong>
-          <p>Connect MCC to the plant network, then refresh network links.</p>
+        <p className="mobile-qr-modal-helper">Scan while connected to the same plant Wi-Fi/network.</p>
+        <p className="mobile-qr-modal-warning">Wi-Fi/network access is required. Do not use cellular data.</p>
+        <CopyUrl url={url} onCopied={onCopied} />
+        <div className="modal-actions mobile-qr-modal-actions">
+          <button className="secondary-button" type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? 'Checking...' : 'Refresh network links'}</button>
+          <button className="secondary-button" type="button" onClick={onClose}>Close</button>
         </div>
-      )}
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -640,6 +689,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const systemUpdateRequestInFlight=useRef<'check'|'install'|null>(null);
   const systemUpdatePanelRef=useRef<HTMLElement|null>(null);
   const [links,setLinks]=useState<NetworkLinks|null>(null);
+  const [mobileQrOpen,setMobileQrOpen]=useState(false);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
   const [visibleBackupList,setVisibleBackupList]=useState<Exclude<BackupCategory, 'legacy'>|null>(null);
@@ -658,6 +708,9 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [resetModal,setResetModal]=useState<ResetModalState|null>(null);
   const detectedLanUrls = links?.detectedLanUrls ?? [];
   const primaryLanUrl = selectPrimaryLanUrl(links);
+  useEffect(()=>{
+    if (!primaryLanUrl) setMobileQrOpen(false);
+  },[primaryLanUrl]);
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
   const resetConfigs = useMemo<ResetConfig[]>(()=>[
@@ -1220,20 +1273,21 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
         </div>
 
         <div className="network-link-grid">
-          <section className="network-link-panel">
+          <section className="network-link-panel network-url-panel network-host-panel">
             <span>This MCC computer</span>
             <strong>Host PC URL</strong>
             <p>Use this only on the MCC host computer.</p>
             {links&&<CopyUrl url={links.localhostUrl} onCopied={value=>setMsg(`Copied ${value}`)} />}
           </section>
 
-          <section className="network-link-panel">
+          <section className="network-link-panel network-url-panel network-lan-panel">
             <span>Other PC on same network</span>
             <strong>Other PC URL</strong>
             <p>Use this from another Windows PC on the same network.</p>
             {primaryLanUrl ? <CopyUrl url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">No network IP detected. Open Command Prompt and run ipconfig, then use IPv4 Address with port 4273.</p>}
           </section>
 
+          <MobileQrTrigger url={primaryLanUrl} onOpen={()=>setMobileQrOpen(true)} />
           <MobileLanAccess url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} />
         </div>
 
@@ -1259,6 +1313,16 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
 
         {msg&&<p className="form-message">{msg}</p>}
       </article>
+
+      {mobileQrOpen&&primaryLanUrl&&(
+        <MobileQrModal
+          url={primaryLanUrl}
+          refreshing={loading}
+          onCopied={value=>setMsg(`Copied ${value}`)}
+          onRefresh={loadLinks}
+          onClose={()=>setMobileQrOpen(false)}
+        />
+      )}
 
       {backupCards.length>0&&(
         <article className="mcc-card wide-card backup-card backup-center-card">
