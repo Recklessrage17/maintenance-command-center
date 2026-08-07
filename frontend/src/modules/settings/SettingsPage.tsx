@@ -582,16 +582,19 @@ function selectPrimaryLanUrl(links:NetworkLinks|null) {
 
 const qrWrenchBadge = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11.5" fill="#fff" stroke="#d7e7ee"/><path d="M14.7 5.3a4.5 4.5 0 0 0-5.5 5.5l-4.4 4.4a2.3 2.3 0 1 0 3.2 3.2l4.4-4.4a4.5 4.5 0 0 0 5.5-5.5l-2.7 2.7-2.4-.6-.6-2.4 2.5-2.9Z" fill="#07141d"/></svg>')}`;
 
-function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
+function MobileLanAccess({url,onCopied,onQrOpen}:{url:string;onCopied:(value:string)=>void;onQrOpen:()=>void}) {
   return (
     <section className={`network-link-panel mobile-access-panel${url ? '' : ' is-unavailable'}`} aria-label="Mobile and tablet network access">
       <div className="mobile-access-copy">
         <span>Mobile / Tablet</span>
         <strong>Phone or tablet URL</strong>
         <p>Use this on phone/tablet when connected to the same Wi-Fi/network. Do not use cellular data.</p>
-        {url
-          ? <CopyUrl url={url} onCopied={onCopied} />
-          : <p className="form-help mobile-access-unavailable-message" role="status">A LAN/mobile URL could not currently be detected. Refresh the network links after connecting MCC to the plant network.</p>}
+        <div className={`mobile-access-control-group${url ? '' : ' is-unavailable'}`}>
+          {url
+            ? <CopyUrl url={url} onCopied={onCopied} />
+            : <p className="form-help mobile-access-unavailable-message" role="status">A LAN/mobile URL could not currently be detected. Refresh the network links after connecting MCC to the plant network.</p>}
+          <MobileQrTrigger url={url} onOpen={onQrOpen} />
+        </div>
       </div>
     </section>
   );
@@ -601,25 +604,22 @@ function MobileQrTrigger({url,onOpen}:{url:string;onOpen:()=>void}) {
   const available = Boolean(url);
   const title = available ? 'Show mobile QR code' : 'No LAN/mobile URL detected';
   return (
-    <section className={`network-link-panel mobile-qr-trigger-panel${available ? '' : ' is-unavailable'}`} aria-label="Mobile QR shortcut">
-      <button
-        className="mobile-qr-trigger"
-        type="button"
-        aria-label="Show mobile access QR code"
-        title={title}
-        disabled={!available}
-        onClick={onOpen}
-        data-qr-trigger-size="82"
-      >
-        <span className="mobile-qr-trigger-halo" aria-hidden="true" />
-        <span className="mobile-qr-trigger-glyph" aria-hidden="true">
-          <svg viewBox="0 0 40 40" focusable="false">
-            <path d="M3 3h13v13H3V3Zm4 4v5h5V7H7Zm17-4h13v13H24V3Zm4 4v5h5V7h-5ZM3 24h13v13H3V24Zm4 4v5h5v-5H7Zm17-7h5v5h-5v-5Zm8 0h5v9h-5v-9Zm-11 8h5v8h-5v-8Zm8 4h4v4h-4v-4Zm6 0h2v4h-2v-4Z" />
-          </svg>
-        </span>
-      </button>
-      <span className="mobile-qr-trigger-label">Mobile QR</span>
-    </section>
+    <button
+      className="mobile-qr-trigger"
+      type="button"
+      aria-label="Show mobile access QR code"
+      title={title}
+      disabled={!available}
+      onClick={onOpen}
+      data-qr-trigger-size="58"
+    >
+      <span className="mobile-qr-trigger-halo" aria-hidden="true" />
+      <span className="mobile-qr-trigger-glyph" aria-hidden="true">
+        <svg viewBox="0 0 40 40" focusable="false">
+          <path d="M3 3h13v13H3V3Zm4 4v5h5V7H7Zm17-4h13v13H24V3Zm4 4v5h5V7h-5ZM3 24h13v13H3V24Zm4 4v5h5v-5H7Zm17-7h5v5h-5v-5Zm8 0h5v9h-5v-9Zm-11 8h5v8h-5v-8Zm8 4h4v4h-4v-4Zm6 0h2v4h-2v-4Z" />
+        </svg>
+      </span>
+    </button>
   );
 }
 
@@ -1287,8 +1287,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             {primaryLanUrl ? <CopyUrl url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">No network IP detected. Open Command Prompt and run ipconfig, then use IPv4 Address with port 4273.</p>}
           </section>
 
-          <MobileQrTrigger url={primaryLanUrl} onOpen={()=>setMobileQrOpen(true)} />
-          <MobileLanAccess url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} />
+          <MobileLanAccess url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} onQrOpen={()=>setMobileQrOpen(true)} />
         </div>
 
         {links&&detectedLanUrls.length>1&&(

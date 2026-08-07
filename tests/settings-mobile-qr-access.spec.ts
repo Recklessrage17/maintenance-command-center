@@ -78,6 +78,7 @@ test('starts compact, then opens a local accessible QR with the displayed LAN UR
   const displayedUrl = mobilePanel(page).locator('.share-url-row code');
   await expect(displayedUrl).toHaveText(lanUrl);
   await expect(qrTrigger(page)).toBeVisible();
+  await expect(mobilePanel(page).locator('.mobile-access-control-group').getByRole('button',{name:'Show mobile access QR code'})).toBeVisible();
   await expect(qrTrigger(page)).toHaveAttribute('title','Show mobile QR code');
   await expect(page.locator('svg[data-qr-payload]')).toHaveCount(0);
 
@@ -123,6 +124,7 @@ for (const [label,value] of [
     await page.goto('/settings');
     await expect(qrTrigger(page)).toBeDisabled();
     await expect(qrTrigger(page)).toHaveAttribute('title','No LAN/mobile URL detected');
+    await expect(mobilePanel(page).locator('.mobile-access-control-group.is-unavailable')).toContainText('A LAN/mobile URL could not currently be detected.');
     await expect(page.locator('svg[data-qr-payload]')).toHaveCount(0);
     await expect(mobilePanel(page)).toContainText('A LAN/mobile URL could not currently be detected.');
     await expect(mobilePanel(page).locator('.share-url-row')).toHaveCount(0);
@@ -170,7 +172,7 @@ test('the existing mobile URL Copy button remains usable', async ({page,context}
   expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(lanUrl);
 });
 
-test('desktop, tablet, and mobile layouts keep the trigger compact and modal within the viewport', async ({page})=>{
+test('desktop, tablet, and mobile layouts keep the QR trigger integrated without overflow', async ({page})=>{
   await mockSettings(page,[links(lanUrl)]);
   await page.setViewportSize({width:1440,height:900});
   await page.goto('/settings');
@@ -178,22 +180,39 @@ test('desktop, tablet, and mobile layouts keep the trigger compact and modal wit
   const trigger = qrTrigger(page);
   const hostCard = page.locator('.network-host-panel');
   const lanCard = page.locator('.network-lan-panel');
+  const mobileCard = mobilePanel(page);
+  const controlGroup = mobileCard.locator('.mobile-access-control-group');
+  const urlRow = controlGroup.locator('.share-url-row');
   const desktopTrigger = await trigger.boundingBox();
   const desktopHost = await hostCard.boundingBox();
   const desktopLan = await lanCard.boundingBox();
-  expect(desktopTrigger?.width).toBe(82);
-  expect(desktopTrigger?.height).toBe(82);
+  const desktopMobile = await mobileCard.boundingBox();
+  const desktopGroup = await controlGroup.boundingBox();
+  const desktopUrl = await urlRow.boundingBox();
+  expect(desktopTrigger?.width).toBe(58);
+  expect(desktopTrigger?.height).toBe(58);
   expect(desktopHost).not.toBeNull();
   expect(desktopLan).not.toBeNull();
+  expect(desktopMobile).not.toBeNull();
+  expect(desktopGroup).not.toBeNull();
+  expect(desktopUrl).not.toBeNull();
   expect(desktopLan!.x).toBeGreaterThan(desktopHost!.x);
-  expect(desktopTrigger!.x).toBeGreaterThan(desktopLan!.x);
+  expect(desktopMobile!.y).toBeGreaterThan(desktopHost!.y);
+  expect(desktopTrigger!.x).toBeGreaterThan(desktopUrl!.x);
+  expect(desktopTrigger!.x + desktopTrigger!.width).toBeLessThanOrEqual(desktopGroup!.x + desktopGroup!.width);
+  expect(desktopTrigger!.y).toBeGreaterThanOrEqual(desktopGroup!.y);
+  expect(desktopTrigger!.y + desktopTrigger!.height).toBeLessThanOrEqual(desktopGroup!.y + desktopGroup!.height);
   await expectNoHorizontalOverflow(page);
 
   for (const viewport of [{width:820,height:900},{width:390,height:844}]) {
     await page.setViewportSize(viewport);
     const compactTrigger = await trigger.boundingBox();
-    expect(compactTrigger?.width).toBe(82);
-    expect(compactTrigger?.height).toBe(82);
+    const compactGroup = await controlGroup.boundingBox();
+    expect(compactTrigger?.width).toBe(58);
+    expect(compactTrigger?.height).toBe(58);
+    expect(compactGroup).not.toBeNull();
+    expect(compactTrigger!.x).toBeGreaterThanOrEqual(compactGroup!.x);
+    expect(compactTrigger!.x + compactTrigger!.width).toBeLessThanOrEqual(compactGroup!.x + compactGroup!.width);
     await expectNoHorizontalOverflow(page);
 
     await trigger.click();
