@@ -198,19 +198,42 @@ test('desktop, tablet, and mobile layouts keep the QR trigger integrated without
   expect(desktopUrl).not.toBeNull();
   expect(desktopLan!.x).toBeGreaterThan(desktopHost!.x);
   expect(desktopMobile!.y).toBeGreaterThan(desktopHost!.y);
+  expect(Math.abs(desktopMobile!.width-desktopHost!.width)).toBeLessThanOrEqual(1);
+  expect(desktopMobile!.width).toBeLessThan(desktopHost!.width+desktopLan!.width);
   expect(desktopTrigger!.x).toBeGreaterThan(desktopUrl!.x);
   expect(desktopTrigger!.x + desktopTrigger!.width).toBeLessThanOrEqual(desktopGroup!.x + desktopGroup!.width);
   expect(desktopTrigger!.y).toBeGreaterThanOrEqual(desktopGroup!.y);
   expect(desktopTrigger!.y + desktopTrigger!.height).toBeLessThanOrEqual(desktopGroup!.y + desktopGroup!.height);
+  const cardGeometry = await page.evaluate(()=>{
+    const styles = (selector:string)=>{
+      const style = getComputedStyle(document.querySelector(selector)!);
+      return {padding:style.padding,borderRadius:style.borderRadius};
+    };
+    return {host:styles('.network-host-panel'),mobile:styles('.mobile-access-panel')};
+  });
+  expect(cardGeometry.mobile).toEqual(cardGeometry.host);
   await expectNoHorizontalOverflow(page);
 
   for (const viewport of [{width:820,height:900},{width:390,height:844}]) {
     await page.setViewportSize(viewport);
     const compactTrigger = await trigger.boundingBox();
     const compactGroup = await controlGroup.boundingBox();
-    expect(compactTrigger?.width).toBe(58);
-    expect(compactTrigger?.height).toBe(58);
+    const compactHost = await hostCard.boundingBox();
+    const compactLan = await lanCard.boundingBox();
+    const compactMobile = await mobileCard.boundingBox();
+    expect(compactTrigger!.width).toBeGreaterThanOrEqual(58);
+    expect(compactTrigger!.width).toBeLessThanOrEqual(60);
+    expect(compactTrigger!.height).toBeGreaterThanOrEqual(58);
+    expect(compactTrigger!.height).toBeLessThanOrEqual(60);
     expect(compactGroup).not.toBeNull();
+    expect(compactHost).not.toBeNull();
+    expect(compactLan).not.toBeNull();
+    expect(compactMobile).not.toBeNull();
+    expect(Math.abs(compactLan!.x-compactHost!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(compactMobile!.x-compactHost!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(compactMobile!.width-compactHost!.width)).toBeLessThanOrEqual(1);
+    expect(compactLan!.y).toBeGreaterThan(compactHost!.y);
+    expect(compactMobile!.y).toBeGreaterThan(compactLan!.y);
     expect(compactTrigger!.x).toBeGreaterThanOrEqual(compactGroup!.x);
     expect(compactTrigger!.x + compactTrigger!.width).toBeLessThanOrEqual(compactGroup!.x + compactGroup!.width);
     await expectNoHorizontalOverflow(page);
