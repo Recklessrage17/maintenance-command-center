@@ -1,0 +1,155 @@
+import { expect, type Page, type Route, test } from '@playwright/test';
+
+type NetworkLinks = {
+  localPort: number;
+  localhostUrl: string;
+  detectedLanUrls: string[];
+  primaryLanUrl: string | null;
+};
+
+const lanUrl = 'http://10.1.2.188:4273';
+const refreshedLanUrl = 'http://10.1.2.199:4273';
+const user = {
+  id: 71,
+  fullName: 'Issue 71 Fixture',
+  email: 'issue71@example.com',
+  role: 'Manager',
+  isOwnerAdmin: false,
+  canViewSystemVersion: false,
+  forcePasswordChange: false,
+  effectivePermissions: [],
+};
+
+function fulfillJson(route:Route,json:unknown,status=200) {
+  return route.fulfill({status,contentType:'application/json',body:JSON.stringify(json)});
+}
+
+async function mockSettings(page:Page,networkResponses:NetworkLinks[]) {
+  let networkRequestCount = 0;
+  await page.route('**/api/**', route=>{
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/auth/status') return fulfillJson(route,{setupRequired:false,user});
+    if (path === '/api/settings/branding') return fulfillJson(route,{ok:true,branding:{}});
+    if (path === '/api/settings/network-links') {
+      const response = networkResponses[Math.min(networkRequestCount,networkResponses.length-1)];
+      networkRequestCount += 1;
+      return fulfillJson(route,response);
+    }
+    if (path === '/api/backup/status') return fulfillJson(route,{error:'Not available in fixture.'},403);
+    if (path === '/api/presence/heartbeat' || path === '/api/presence/disconnect') return fulfillJson(route,{ok:true});
+    return fulfillJson(route,{ok:true});
+  });
+  return {networkRequestCount:()=>networkRequestCount};
+}
+
+function links(primaryLanUrl:string|null,detectedLanUrls:string[] = primaryLanUrl ? [primaryLanUrl] : []):NetworkLinks {
+  return {localPort:4273,localhostUrl:'http://localhost:4273',detectedLanUrls,primaryLanUrl};
+}
+
+function mobilePanel(page:Page) {
+  return page.locator('.mobile-access-panel');
+}
+
+async function expectNoHorizontalOverflow(page:Page) {
+  const dimensions = await page.evaluate(()=>({
+    scrollWidth:document.documentElement.scrollWidth,
+    clientWidth:document.documentElement.clientWidth,
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+}
+
+test('renders a local accessible QR whose payload equals the displayed primary LAN URL', async ({page})=>{
+  const externalRequests:string[] = [];
+  page.on('request',request=>{
+    const hostname = new URL(request.url()).hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') externalRequests.push(request.url());
+  });
+  await mockSettings(page,[links(lanUrl)]);
+  await page.goto('/settings');
+
+  const panel = mobilePanel(page);
+  const displayedUrl = panel.locator('.share-url-row code');
+  const qr = panel.locator('svg[role="img"]');
+  await expect(displayedUrl).toHaveText(lanUrl);
+  await expect(qr).toHaveAttribute('data-qr-payload',lanUrl);
+  await expect(qr).toHaveAttribute('aria-label',`QR code to open Maintenance Command Center at ${lanUrl}`);
+  await expect(panel).toContainText('Scan while connected to the same plant Wi-Fi/network.');
+  await expect(panel).toContainText('Do not use cellular data.');
+  expect(await qr.getAttribute('data-qr-payload')).toBe(await displayedUrl.textContent());
+  expect(externalRequests).toEqual([]);
+});
+
+for (const [label,value] of [
+  ['localhost','http://localhost:4273'],
+  ['127.0.0.1','http://127.0.0.1:4273'],
+  ['::1','http://[::1]:4273'],
+] as const) {
+  test(`rejects ${label} and shows the unavailable state`, async ({page})=>{
+    await mockSettings(page,[links(value)]);
+    await page.goto('/settings');
+    const panel = mobilePanel(page);
+    await expect(panel.locator('svg')).toHaveCount(0);
+    await expect(panel).toContainText('A LAN/mobile URL could not currently be detected.');
+    await expect(panel.getByLabel('Mobile access QR unavailable')).toBeVisible();
+    await expect(panel.locator('.share-url-row')).toHaveCount(0);
+  });
+}
+
+test('falls back to a usable detected LAN URL when primary is unavailable', async ({page})=>{
+  await mockSettings(page,[links(null,[lanUrl])]);
+  await page.goto('/settings');
+  const panel = mobilePanel(page);
+  await expect(panel.locator('.share-url-row code')).toHaveText(lanUrl);
+  await expect(panel.locator('svg[role="img"]')).toHaveAttribute('data-qr-payload',lanUrl);
+});
+
+test('Refresh network links updates both displayed URL and QR without a reload', async ({page})=>{
+  const fixture = await mockSettings(page,[links(lanUrl),links(refreshedLanUrl)]);
+  await page.goto('/settings');
+  const panel = mobilePanel(page);
+  const qr = panel.locator('svg[role="img"]');
+  await expect(qr).toHaveAttribute('data-qr-payload',lanUrl);
+
+  await page.getByRole('button',{name:'Refresh network links'}).click();
+  await expect(qr).toHaveAttribute('data-qr-payload',refreshedLanUrl);
+  await expect(panel.locator('.share-url-row code')).toHaveText(refreshedLanUrl);
+  expect(fixture.networkRequestCount()).toBe(2);
+});
+
+test('the existing mobile URL Copy button remains usable', async ({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  await mockSettings(page,[links(lanUrl)]);
+  await page.goto('/settings');
+  const panel = mobilePanel(page);
+  await panel.getByRole('button',{name:`Copy ${lanUrl}`}).click();
+  await expect(page.getByText(`Copied ${lanUrl}`)).toBeVisible();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(lanUrl);
+});
+
+test('desktop and stacked tablet/mobile layouts stay scannable without overflow', async ({page})=>{
+  await mockSettings(page,[links(lanUrl)]);
+  await page.goto('/settings');
+  const panel = mobilePanel(page);
+  const copy = panel.locator('.mobile-access-copy');
+  const qr = panel.locator('.mobile-access-qr');
+
+  await page.setViewportSize({width:1440,height:900});
+  const desktopCopy = await copy.boundingBox();
+  const desktopQr = await qr.boundingBox();
+  expect(desktopCopy).not.toBeNull();
+  expect(desktopQr).not.toBeNull();
+  expect(desktopQr!.x).toBeGreaterThan(desktopCopy!.x);
+  expect(desktopQr!.width).toBeGreaterThanOrEqual(180);
+  await expectNoHorizontalOverflow(page);
+
+  for (const viewport of [{width:740,height:900},{width:390,height:844}]) {
+    await page.setViewportSize(viewport);
+    const stackedCopy = await copy.boundingBox();
+    const stackedQr = await qr.boundingBox();
+    expect(stackedCopy).not.toBeNull();
+    expect(stackedQr).not.toBeNull();
+    expect(stackedQr!.y).toBeGreaterThan(stackedCopy!.y);
+    expect(stackedQr!.width).toBeGreaterThanOrEqual(180);
+    await expectNoHorizontalOverflow(page);
+  }
+});

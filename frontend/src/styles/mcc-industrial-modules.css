@@ -2247,6 +2247,7 @@ body {
 
 .branding-preview,
 .network-link-panel,
+.mobile-access-qr-unavailable,
 .backup-status-panel,
 .backup-tier-card,
 .backup-list-row,
@@ -2258,6 +2259,18 @@ body {
   border-radius: var(--mcc-radius-sm);
   background: var(--mcc-surface-card-nested);
   box-shadow: var(--mcc-shadow-inset);
+}
+
+.settings-page .mobile-access-panel {
+  border-color: color-mix(in srgb, var(--mcc-accent-module-settings) 38%, var(--mcc-border-default));
+  background:
+    linear-gradient(135deg, rgba(var(--mcc-accent-module-settings-rgb), 0.1), transparent 72%),
+    var(--mcc-surface-card-nested);
+}
+
+.mobile-access-qr-unavailable {
+  color: var(--mcc-text-muted);
+  background: var(--mcc-surface-dense);
 }
 
 .backup-tier-heading,

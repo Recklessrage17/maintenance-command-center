@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { withJsonRequestDefaults } from '../../apiRequest';
 
 type NetworkLinks = {
@@ -553,6 +554,73 @@ function CopyUrl({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
   );
 }
 
+function isUsableLanUrl(value:string|undefined|null) {
+  if (!value?.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g,'').replace(/\.$/,'');
+    const loopbackIpv6 = hostname === '::1' || hostname === '0:0:0:0:0:0:0:1';
+    const loopbackIpv4 = hostname === '127.0.0.1' || hostname.startsWith('127.');
+    const localhost = hostname === 'localhost' || hostname.endsWith('.localhost');
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && !localhost
+      && !loopbackIpv4
+      && !loopbackIpv6
+      && !parsed.username
+      && !parsed.password
+      && !parsed.search
+      && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
+function selectPrimaryLanUrl(links:NetworkLinks|null) {
+  const candidates = [links?.primaryLanUrl, ...(links?.detectedLanUrls ?? [])];
+  return candidates.map(value=>value?.trim() ?? '').find(isUsableLanUrl) ?? '';
+}
+
+function MobileLanAccess({url,onCopied}:{url:string;onCopied:(value:string)=>void}) {
+  const qrLabel = `QR code to open Maintenance Command Center at ${url}`;
+  return (
+    <section className={`network-link-panel mobile-access-panel${url ? '' : ' is-unavailable'}`} aria-label="Mobile and tablet network access">
+      <div className="mobile-access-copy">
+        <span>Mobile / Tablet</span>
+        <strong>Phone or tablet URL</strong>
+        <p>Use this on phone/tablet when connected to the same Wi-Fi/network. Do not use cellular data.</p>
+        {url
+          ? <CopyUrl url={url} onCopied={onCopied} />
+          : <p className="form-help mobile-access-unavailable-message" role="status">A LAN/mobile URL could not currently be detected. Refresh the network links after connecting MCC to the plant network.</p>}
+      </div>
+      {url ? (
+        <div className="mobile-access-qr">
+          <div className="mobile-access-qr-frame">
+            <QRCodeSVG
+              value={url}
+              size={200}
+              level="M"
+              marginSize={4}
+              bgColor="#ffffff"
+              fgColor="#07141d"
+              role="img"
+              aria-label={qrLabel}
+              title={qrLabel}
+              data-qr-payload={url}
+            />
+          </div>
+          <p>Scan while connected to the same plant Wi-Fi/network.</p>
+        </div>
+      ) : (
+        <div className="mobile-access-qr mobile-access-qr-unavailable" aria-label="Mobile access QR unavailable">
+          <div className="mobile-access-qr-placeholder" aria-hidden="true"><span>QR</span></div>
+          <strong>QR unavailable</strong>
+          <p>Connect MCC to the plant network, then refresh network links.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{isOwnerAdmin?: boolean;canViewSystemVersion?: boolean}) {
   const [systemVersion,setSystemVersion]=useState<SystemVersionMetadata|null>(null);
   const [systemVersionLoading,setSystemVersionLoading]=useState(false);
@@ -583,7 +651,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [resetMsg,setResetMsg]=useState('');
   const [resetModal,setResetModal]=useState<ResetModalState|null>(null);
   const detectedLanUrls = links?.detectedLanUrls ?? [];
-  const primaryLanUrl = links?.primaryLanUrl ?? detectedLanUrls[0] ?? '';
+  const primaryLanUrl = selectPrimaryLanUrl(links);
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
   const resetConfigs = useMemo<ResetConfig[]>(()=>[
@@ -1160,12 +1228,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             {primaryLanUrl ? <CopyUrl url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">No network IP detected. Open Command Prompt and run ipconfig, then use IPv4 Address with port 4273.</p>}
           </section>
 
-          <section className="network-link-panel">
-            <span>Mobile / Tablet</span>
-            <strong>Phone or tablet URL</strong>
-            <p>Use this on phone/tablet when connected to the same Wi-Fi/network. Do not use cellular data.</p>
-            {primaryLanUrl ? <CopyUrl url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">No network IP detected. Open Command Prompt and run ipconfig, then use IPv4 Address with port 4273.</p>}
-          </section>
+          <MobileLanAccess url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} />
         </div>
 
         {links&&detectedLanUrls.length>1&&(
