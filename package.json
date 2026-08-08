@@ -42,6 +42,7 @@
     "test:pm-excel-workbook": "npm run build --prefix backend && node tests/pm-excel-workflow.mjs",
     "test:pm-excel-ooxml": "npm run build --prefix backend && node tests/pm-excel-ooxml-shared-formulas.mjs",
     "test:pm-excel-api": "npm run build --prefix backend && node tests/pm-excel-api.mjs",
+    "test:pm-excel-cross-platform": "npm run build --prefix backend && node tests/pm-excel-cross-platform.mjs",
     "test:pm-excel-migration": "npm run build --prefix backend && node tests/pm-excel-migration.mjs",
     "test:pm-excel-resolver": "npm run build --prefix backend && node tests/pm-excel-asset-resolver.mjs",
     "test:pm-excel-ui": "playwright test tests/pm-excel-ui.spec.ts",

@@ -7892,6 +7892,11 @@ function pmTaskValuesFromWorkbook(row:ParsedPmWorkbook['trackerRows'][number]) {
   const due=pmDueValues(row.intervalType,row.intervalValue,row.lastCompletedDate,row.lastCompletedMeter);
   return {title:row.taskTitle,intervalType:row.intervalType,intervalValue:row.intervalValue,lastCompletedDate:row.lastCompletedDate,lastCompletedMeter:row.lastCompletedMeter,currentMeter:meter?row.currentMeter:null,nextDueDate:due.nextDueDate,nextDueMeter:due.nextDueMeter};
 }
+function pmImportConfirmEligibility(trackerActions:PmImportTrackerAction[],historyActions:PmImportHistoryAction[],resolvedRows=new Set<number>()) {
+  const resolutionRequiredRows=trackerActions.filter(action=>action.decreasingMeter).map(action=>action.rowNumber).sort((left,right)=>left-right);
+  const importableRows=historyActions.length+trackerActions.filter(action=>!action.decreasingMeter||resolvedRows.has(action.rowNumber)).length;
+  return {importableRows,resolutionRequiredRows,canConfirm:importableRows>0};
+}
 function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:string,actor:User,options:{store?:boolean;token?:string;previewedAt?:string;importedByUserId?:number}={}):PmImportStage {
   const store=options.store!==false;
   if(store){cleanupPmImportStages();while (pmImportStages.size>=pmImportStageLimit) {const oldest=pmImportStages.keys().next().value;if(!oldest)break;pmImportStages.delete(oldest);}}
@@ -7950,7 +7955,7 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
     if (duplicate) {warnings.push({sheet:'PMHistory',rowNumber:row.rowNumber,message:'History row already exists in MCC and will not be duplicated.'});continue;}
     historyAdditions.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskType:row.taskType,completionDate:row.completionDate,...matchDetails});historyActions.push({row,assetId:asset.id,taskKey});
   }
-  const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,assetResolutions:[...aliasResolutionAudit.values()],summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length},sheetNames:parsed.sheetNames};
+  const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,assetResolutions:[...aliasResolutionAudit.values()],confirmEligibility:pmImportConfirmEligibility(trackerActions,historyActions),summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length},sheetNames:parsed.sheetNames};
   const stage={token,filename,sha256,buffer,parsed,importedByUserId:options.importedByUserId??actor.id,previewedAt,trackerActions,historyActions,preview};if(store)pmImportStages.set(token,stage);return stage;
 }
 function pmImportOverrideMap(value:unknown) {
@@ -9084,8 +9089,8 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
     const duplicate=one<{summary_json:string}>('SELECT summary_json FROM pm_excel_imports WHERE confirm_request_id=?',[requestId]);if(duplicate)return res.json({ok:true,duplicatePrevented:true,import:JSON.parse(duplicate.summary_json),sync:pmSyncState()});
     const previewStage=pmImportStages.get(token);if(!previewStage)throw new Error('The PM import preview expired. Upload the workbook and preview it again.');
     const parsed=await inspectPmWorkbook(previewStage.buffer);const revalidated=buildPmImportStage(parsed,previewStage.buffer,previewStage.filename,req.user!,{store:false,token:previewStage.token,previewedAt:previewStage.previewedAt,importedByUserId:previewStage.importedByUserId});
-    const overrides=pmImportOverrideMap(body);const stage={...revalidated,trackerActions:revalidated.trackerActions.filter(action=>!action.decreasingMeter||overrides.has(action.rowNumber))};
-    if(!stage.trackerActions.length&&!stage.historyActions.length)return res.status(409).json({ok:false,error:'This preview contains no valid additions, updates, or PM history rows to import.'});
+    const overrides=pmImportOverrideMap(body);const eligibility=pmImportConfirmEligibility(revalidated.trackerActions,revalidated.historyActions,new Set(overrides.keys()));const stage={...revalidated,trackerActions:revalidated.trackerActions.filter(action=>!action.decreasingMeter||overrides.has(action.rowNumber))};
+    if(!eligibility.canConfirm)return res.status(409).json({ok:false,error:'This preview contains no valid additions, updates, or PM history rows to import.'});
     const sourcePath=writePmImportSource(stage.buffer,stage.sha256);const timestamp=now();const changedTaskIds:number[]=[];const insertedHistoryIds:Array<{id:number;workbookAssetNumber:string}>=[];let added=0;let updated=0;let historyAdded=0;
     db.exec('BEGIN IMMEDIATE');
     try {

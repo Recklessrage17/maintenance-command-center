@@ -37,6 +37,14 @@ Runtime files default to `backend/data/pm-excel` and may be relocated with `MCC_
 
 For each write, MCC patches only approved cell XML inside a private ZIP copy of the original package. Existing formulas are not replaced. Prepared Helper 1–10 formulas/styles are left untouched; when a genuinely new history row is needed beyond prepared rows, the prior row template and table boundary are extended. All unrelated worksheet and package parts remain byte-for-byte unchanged. MCC then reopens and validates the temporary workbook, moves the prior synchronized workbook to a versioned backup, and renames the validated file into place. If replacement fails after the prior file is moved, MCC restores the backup.
 
+## Cross-platform behavior
+
+PM preview classification, confirm eligibility, confirm-time revalidation, and database writes run through the same backend business logic on Windows and Linux/Raspberry Pi. The frontend displays the backend's `confirmEligibility` result and sends only the preview token plus explicit meter overrides; it does not independently classify safe rows or vary behavior by host OS.
+
+Runtime filesystem locations are composed with Node's `path` APIs from `MCC_DATA_DIR` and `MCC_PM_EXCEL_DIR`. OOXML ZIP entry names use POSIX separators because that is the XLSX package format, not because of the host filesystem. Workbook date calculations use UTC and accepted text dates use explicit formats. Numeric parsing does not use the host locale.
+
+`npm run test:pm-excel-cross-platform` creates the same workbook and MCC database state in isolated environments, then compares additions, updates, history, conflicts, rejected rows, no-change rows, confirm eligibility/payload, confirm-time revalidation, and final writes under contrasting timezone and locale settings. The test runs unchanged on Windows and Linux and must be repeated on Linux staging before release.
+
 ## Matching and validation
 
 Tracker rows must resolve to exactly one normalized inherited-or-explicit machine identifier + PM Task + Interval Type row. Imported tasks resolve to exactly one active machine asset and one existing MCC PM task with the same normalized title and interval type. A same-title interval mismatch is reported as a conflict and that row is skipped instead of creating a duplicate schedule. Zero or multiple workbook matches are also skipped so an uncertain row is never written, while unrelated valid rows can still be imported.
