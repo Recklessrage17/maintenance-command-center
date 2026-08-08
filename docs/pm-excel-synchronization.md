@@ -19,7 +19,7 @@ The synchronized tracker supports `Hourly`, `Cycle` / `Cycles`, `Days`, and `Ann
 
 1. An authorized maintenance user selects an `.xlsx` workbook.
 2. **Preview Changes** validates both required sheets and reports additions, updates, inherited machine sections, history additions, conflicts, warnings, and rejected rows. Preview state is held in memory for 30 minutes and does not write PM or audit data.
-3. **Confirm Import** requires an explicit preview token and idempotency key. Ambiguous matches block confirmation. Decreasing meters require a replacement/correction/override type and meaningful audit reason.
+3. **Import Valid Rows** requires an explicit preview token and idempotency key. The backend reparses the server-held workbook and rebuilds the action plan against current MCC data before opening the transaction. Rejected and unresolved conflicting rows are skipped; valid, unambiguous rows remain importable. Decreasing-meter rows are imported only when supplied with a replacement/correction/override type and meaningful audit reason.
 4. Valid changes are committed to SQLite in one transaction and audited with both the previewing importer and confirming user IDs.
 5. Workbook synchronization runs after the database transaction. Failure does not roll back MCC data; the status becomes failed and the UI exposes **Retry Sync**.
 
@@ -39,6 +39,6 @@ For each write, MCC patches only approved cell XML inside a private ZIP copy of 
 
 ## Matching and validation
 
-Tracker rows must resolve to exactly one normalized inherited-or-explicit machine identifier + PM Task + Interval Type row. Imported tasks resolve to exactly one active machine asset and one existing MCC PM task with the same normalized title and interval type. A same-title interval mismatch is reported as a blocking conflict instead of creating a duplicate schedule. Zero or multiple workbook matches fail synchronization instead of changing an uncertain row.
+Tracker rows must resolve to exactly one normalized inherited-or-explicit machine identifier + PM Task + Interval Type row. Imported tasks resolve to exactly one active machine asset and one existing MCC PM task with the same normalized title and interval type. A same-title interval mismatch is reported as a conflict and that row is skipped instead of creating a duplicate schedule. Zero or multiple workbook matches are also skipped so an uncertain row is never written, while unrelated valid rows can still be imported.
 
 The production workbook is a private development reference and is not committed. Automated coverage uses `tests/fixtures/pm-report-sanitized.xlsx`, which mirrors repeated grouped machine blocks, real headers, Hourly/Cycle/Days/Annual 365 rows, repeated work orders, preformatted Helper 1–10 columns, and an unrelated preservation sheet. The private production reference is also exercised locally to verify all 67 tracker tasks are recognized and only the two approved worksheet XML parts change during a targeted synchronization.
