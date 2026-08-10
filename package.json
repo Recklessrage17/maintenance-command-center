@@ -1,6 +1,6 @@
 {
   "name": "maintenance-command-center",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "private": true,
   "description": "Maintenance Command Center website shell.",
   "scripts": {
@@ -14,6 +14,7 @@
     "version:set": "node scripts/version.mjs set",
     "test:system-version-api": "node tests/system-version-api.mjs",
     "test:system-version": "playwright test tests/settings-system-version.spec.ts",
+    "test:mobile-qr": "playwright test tests/settings-mobile-qr-access.spec.ts",
     "test:system-update-service": "npm run build --prefix backend && node tests/system-update-service.mjs",
     "test:system-update-api": "npm run build --prefix backend && node tests/system-update-api.mjs",
     "test:system-update-runner": "node tests/system-update-runner-validation.mjs",
