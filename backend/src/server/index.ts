@@ -7827,7 +7827,7 @@ function recordPmAudit(input:{action:string;task:PmTaskRow;asset:{id:number;asse
 }
 type PmImportTrackerAction={kind:'addition'|'update';rowNumber:number;assetId:number;taskId:number|null;decreasingMeter:boolean;row:ParsedPmWorkbook['trackerRows'][number]};
 type PmImportHistoryAction={row:ParsedPmWorkbook['historyRows'][number];assetId:number;taskKey:string};
-type PmImportStage={token:string;filename:string;sha256:string;buffer:Buffer;parsed:ParsedPmWorkbook;importedByUserId:number;previewedAt:string;trackerActions:PmImportTrackerAction[];historyActions:PmImportHistoryAction[];preview:Record<string,unknown>};
+type PmImportStage={token:string;filename:string;sha256:string;buffer:Buffer;parsed:ParsedPmWorkbook;importedByUserId:number;previewedAt:string;trackerActions:PmImportTrackerAction[];trackerSyncActions:PmImportTrackerAction[];historyActions:PmImportHistoryAction[];preview:Record<string,unknown>};
 type PmExcelSyncStateRow={status:string;attempted_at:string|null;synchronized_at:string|null;original_filename:string;source_path:string;error_message:string;changed_cells:number;appended_history:number;updated_by_user_id:number|null};
 const pmImportStages=new Map<string,PmImportStage>();
 const pmImportStageLifetimeMs=30*60*1000;
@@ -7892,17 +7892,12 @@ function pmTaskValuesFromWorkbook(row:ParsedPmWorkbook['trackerRows'][number]) {
   const due=pmDueValues(row.intervalType,row.intervalValue,row.lastCompletedDate,row.lastCompletedMeter);
   return {title:row.taskTitle,intervalType:row.intervalType,intervalValue:row.intervalValue,lastCompletedDate:row.lastCompletedDate,lastCompletedMeter:row.lastCompletedMeter,currentMeter:meter?row.currentMeter:null,nextDueDate:due.nextDueDate,nextDueMeter:due.nextDueMeter};
 }
-function pmImportConfirmEligibility(trackerActions:PmImportTrackerAction[],historyActions:PmImportHistoryAction[],resolvedRows=new Set<number>()) {
-  const resolutionRequiredRows=trackerActions.filter(action=>action.decreasingMeter).map(action=>action.rowNumber).sort((left,right)=>left-right);
-  const importableRows=historyActions.length+trackerActions.filter(action=>!action.decreasingMeter||resolvedRows.has(action.rowNumber)).length;
-  return {importableRows,resolutionRequiredRows,canConfirm:importableRows>0};
-}
-function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:string,actor:User,options:{store?:boolean;token?:string;previewedAt?:string;importedByUserId?:number}={}):PmImportStage {
+function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:string,importedByUserId:number,options:{token?:string;previewedAt?:string;store?:boolean}={}):PmImportStage {
   const store=options.store!==false;
-  if(store){cleanupPmImportStages();while (pmImportStages.size>=pmImportStageLimit) {const oldest=pmImportStages.keys().next().value;if(!oldest)break;pmImportStages.delete(oldest);}}
+  if(store){cleanupPmImportStages();while(pmImportStages.size>=pmImportStageLimit){const oldest=pmImportStages.keys().next().value;if(!oldest)break;pmImportStages.delete(oldest);}}
   const token=options.token??crypto.randomUUID();const sha256=workbookSha256(buffer);const previewedAt=options.previewedAt??now();
   const additions:Array<Record<string,unknown>>=[];const updates:Array<Record<string,unknown>>=[];const conflicts:Array<Record<string,unknown>>=[];const warnings=[...parsed.warnings];const rejectedRows=[...parsed.rejectedRows];
-  let trackerActions:PmImportTrackerAction[]=[];const historyActions:PmImportHistoryAction[]=[];
+  const trackerActions:PmImportTrackerAction[]=[];const historyActions:PmImportHistoryAction[]=[];
   const assetResolver=createPmMachineAssetResolver(all<MachineAssetRow>('SELECT * FROM machine_assets WHERE deleted=0 ORDER BY id'));
   const aliasResolutionAudit=new Map<string,{workbookIdentifier:string;resolvedAssetNumber:string;matchType:'press_alias';usages:Array<{sheet:string;rowNumber:number}>}>();
   const resolutionDetails=(workbookIdentifier:string,resolution:Extract<ReturnType<typeof assetResolver.resolve>,{status:'resolved'}>,sheet:string,rowNumber:number)=>{
@@ -7940,9 +7935,9 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   }
   const sharedReadings=new Map<string,{assetNumber:string;intervalType:'hourly'|'cycles';rows:number[];values:Set<number>}>();
   for(const row of parsed.trackerRows){if((row.intervalType!=='hourly'&&row.intervalType!=='cycles')||row.currentMeter===null)continue;const resolution=trackerAssetResolutions.get(row.rowNumber);if(!resolution||resolution.status!=='resolved')continue;const key=`${resolution.asset.id}:${row.intervalType}`;const group=sharedReadings.get(key)??{assetNumber:resolution.asset.asset_number,intervalType:row.intervalType,rows:[],values:new Set<number>()};group.rows.push(row.rowNumber);group.values.add(row.currentMeter);sharedReadings.set(key,group);}
-  const inconsistentMeterRows=new Set<number>();
-  for(const group of sharedReadings.values())if(group.values.size>1){group.rows.forEach(rowNumber=>inconsistentMeterRows.add(rowNumber));conflicts.push({sheet:'Machine Pm Tracker',rowNumbers:group.rows,assetNumber:group.assetNumber,code:'INCONSISTENT_SHARED_METER',message:`${group.assetNumber} has conflicting ${group.intervalType==='hourly'?'hour':'cycle'} readings on rows ${group.rows.join(', ')}. One physical machine meter must use one Current value.`});}
-  if(inconsistentMeterRows.size){trackerActions=trackerActions.filter(action=>!inconsistentMeterRows.has(action.rowNumber));for(const items of [additions,updates])for(let index=items.length-1;index>=0;index-=1)if(inconsistentMeterRows.has(Number(items[index].rowNumber)))items.splice(index,1);}
+  const trackerSyncActions=[...trackerActions];const sharedMeterConflictRows=new Set<number>();
+  for(const group of sharedReadings.values())if(group.values.size>1){for(const rowNumber of group.rows)sharedMeterConflictRows.add(rowNumber);conflicts.push({sheet:'Machine Pm Tracker',rowNumbers:group.rows,assetNumber:group.assetNumber,code:'INCONSISTENT_SHARED_METER',message:`${group.assetNumber} has conflicting ${group.intervalType==='hourly'?'hour':'cycle'} readings on rows ${group.rows.join(', ')}. One physical machine meter must use one Current value.`});}
+  if(sharedMeterConflictRows.size){for(let index=trackerActions.length-1;index>=0;index-=1)if(sharedMeterConflictRows.has(trackerActions[index].rowNumber))trackerActions.splice(index,1);for(const items of [additions,updates])for(let index=items.length-1;index>=0;index-=1)if(sharedMeterConflictRows.has(Number(items[index].rowNumber)))items.splice(index,1);for(let index=conflicts.length-1;index>=0;index-=1)if(conflicts[index].code==='DECREASING_METER'&&sharedMeterConflictRows.has(Number(conflicts[index].rowNumber)))conflicts.splice(index,1);}
   const seenHistory=new Set<string>();const historyAdditions:Array<Record<string,unknown>>=[];
   for (const row of parsed.historyRows) {
     if (seenHistory.has(row.sourceRef)) {warnings.push({sheet:'PMHistory',rowNumber:row.rowNumber,message:'Duplicate workbook history row ignored.'});continue;}seenHistory.add(row.sourceRef);
@@ -7955,8 +7950,9 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
     if (duplicate) {warnings.push({sheet:'PMHistory',rowNumber:row.rowNumber,message:'History row already exists in MCC and will not be duplicated.'});continue;}
     historyAdditions.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskType:row.taskType,completionDate:row.completionDate,...matchDetails});historyActions.push({row,assetId:asset.id,taskKey});
   }
-  const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,assetResolutions:[...aliasResolutionAudit.values()],confirmEligibility:pmImportConfirmEligibility(trackerActions,historyActions),summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length},sheetNames:parsed.sheetNames};
-  const stage={token,filename,sha256,buffer,parsed,importedByUserId:options.importedByUserId??actor.id,previewedAt,trackerActions,historyActions,preview};if(store)pmImportStages.set(token,stage);return stage;
+  const resolutionRequiredRows=[...new Set(trackerActions.filter(action=>action.decreasingMeter).map(action=>action.rowNumber))].sort((left,right)=>left-right);const importableRows=trackerActions.filter(action=>!action.decreasingMeter).length+historyActions.length;
+  const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,assetResolutions:[...aliasResolutionAudit.values()],confirmEligibility:{importableRows,resolutionRequiredRows,canConfirm:importableRows>0},summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length},sheetNames:parsed.sheetNames};
+  const stage={token,filename,sha256,buffer,parsed,importedByUserId,previewedAt,trackerActions,trackerSyncActions,historyActions,preview};if(store)pmImportStages.set(token,stage);return stage;
 }
 function pmImportOverrideMap(value:unknown) {
   const map=new Map<number,{type:string;reason:string}>();const rows=isRecord(value)&&Array.isArray(value.meterOverrides)?value.meterOverrides:[];
@@ -9077,7 +9073,7 @@ app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manag
   try {
     if(!req.file)throw new Error('Choose a PM Excel workbook to preview.');
     if(path.extname(req.file.originalname).toLowerCase()!=='.xlsx')throw new Error('PM synchronization accepts .xlsx workbooks only.');
-    const parsed=await inspectPmWorkbook(req.file.buffer);const stage=buildPmImportStage(parsed,Buffer.from(req.file.buffer),pmExcelSafeFilename(req.file.originalname),req.user!);
+    const parsed=await inspectPmWorkbook(req.file.buffer);const stage=buildPmImportStage(parsed,Buffer.from(req.file.buffer),pmExcelSafeFilename(req.file.originalname),req.user!.id);
     res.json({ok:true,preview:stage.preview});
   } catch(error) {res.status(400).json({ok:false,error:safeErrorMessage(error,[],'The PM workbook could not be previewed.')});}
 });
@@ -9088,9 +9084,9 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
     if(!/^[A-Za-z0-9._:-]{8,128}$/.test(requestId))throw new Error('A valid import confirmation request identifier is required.');
     const duplicate=one<{summary_json:string}>('SELECT summary_json FROM pm_excel_imports WHERE confirm_request_id=?',[requestId]);if(duplicate)return res.json({ok:true,duplicatePrevented:true,import:JSON.parse(duplicate.summary_json),sync:pmSyncState()});
     const previewStage=pmImportStages.get(token);if(!previewStage)throw new Error('The PM import preview expired. Upload the workbook and preview it again.');
-    const parsed=await inspectPmWorkbook(previewStage.buffer);const revalidated=buildPmImportStage(parsed,previewStage.buffer,previewStage.filename,req.user!,{store:false,token:previewStage.token,previewedAt:previewStage.previewedAt,importedByUserId:previewStage.importedByUserId});
-    const overrides=pmImportOverrideMap(body);const eligibility=pmImportConfirmEligibility(revalidated.trackerActions,revalidated.historyActions,new Set(overrides.keys()));const stage={...revalidated,trackerActions:revalidated.trackerActions.filter(action=>!action.decreasingMeter||overrides.has(action.rowNumber))};
-    if(!eligibility.canConfirm)return res.status(409).json({ok:false,error:'This preview contains no valid additions, updates, or PM history rows to import.'});
+    const reparsed=await inspectPmWorkbook(previewStage.buffer);const revalidated=buildPmImportStage(reparsed,previewStage.buffer,previewStage.filename,previewStage.importedByUserId,{token:previewStage.token,previewedAt:previewStage.previewedAt,store:false});const overrides=pmImportOverrideMap(body);
+    const stage={...revalidated,trackerActions:revalidated.trackerActions.filter(action=>!action.decreasingMeter||overrides.has(action.rowNumber))};
+    if(!stage.trackerActions.length&&!stage.historyActions.length)return res.status(409).json({ok:false,error:'This preview contains no valid additions, updates, or PM history rows to import.'});
     const sourcePath=writePmImportSource(stage.buffer,stage.sha256);const timestamp=now();const changedTaskIds:number[]=[];const insertedHistoryIds:Array<{id:number;workbookAssetNumber:string}>=[];let added=0;let updated=0;let historyAdded=0;
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -9110,9 +9106,7 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
       run('INSERT INTO pm_excel_imports (preview_token,confirm_request_id,workbook_sha256,original_filename,source_path,imported_by_user_id,confirmed_by_user_id,previewed_at,confirmed_at,summary_json) VALUES (?,?,?,?,?,?,?,?,?,?)',[token,requestId,stage.sha256,stage.filename,sourcePath,stage.importedByUserId,req.user!.id,stage.previewedAt,timestamp,JSON.stringify(summary)]);
       recordHistoryLog({section:'preventive_maintenance',action:'pm_excel_import_confirmed',entityType:'pm_excel_import',entityId:token,entityLabel:stage.filename,newValue:summary,reasonNote:'Explicit PM Excel import confirmation.',actor:req.user!});db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
-    pmImportStages.delete(token);const trackerUpdates:TrackerWorkbookUpdate[]=[];const syncTaskIds=new Set(changedTaskIds);const syncRowsByTaskId=new Map<number,ParsedPmWorkbook['trackerRows'][number]>();const syncAssetResolver=createPmMachineAssetResolver(all<MachineAssetRow>('SELECT * FROM machine_assets WHERE deleted=0 ORDER BY id'));
-    for(const row of stage.parsed.trackerRows){const resolution=syncAssetResolver.resolve(row.assetNumber);if(resolution.status!=='resolved')continue;const matching=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND deleted=0",[resolution.asset.id]).filter(task=>task.interval_type===row.intervalType&&normalizedPmKey(task.title)===normalizedPmKey(row.taskTitle));if(matching.length===1){syncTaskIds.add(matching[0].id);if(!syncRowsByTaskId.has(matching[0].id))syncRowsByTaskId.set(matching[0].id,row);}}
-    for(const taskId of syncTaskIds){const task=pmTaskById(taskId);if(!task)continue;const asset=machineAssetById(task.asset_id);if(!asset)continue;trackerUpdates.push(pmTrackerUpdate(task,asset.asset_number,syncRowsByTaskId.get(task.id)?.currentDate??undefined,undefined,asset.asset_name));}
+    pmImportStages.delete(token);const syncTaskIds=new Set(changedTaskIds);for(const action of revalidated.trackerSyncActions)if(action.taskId!==null)syncTaskIds.add(action.taskId);const trackerUpdates:TrackerWorkbookUpdate[]=[];for(const taskId of syncTaskIds){const task=pmTaskById(taskId);if(!task)continue;const asset=machineAssetById(task.asset_id);if(!asset)continue;const action=revalidated.trackerSyncActions.find(item=>item.taskId===task.id)||(stage.trackerActions.find(item=>item.assetId===task.asset_id&&item.row.intervalType===task.interval_type&&normalizedPmKey(item.row.taskTitle)===normalizedPmKey(task.title)));trackerUpdates.push(pmTrackerUpdate(task,asset.asset_number,action?.row.currentDate??undefined,undefined,asset.asset_name));}
     const historyRows:HistoryWorkbookAppend[]=[];for(const inserted of insertedHistoryIds){const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=?',[inserted.id]);if(!history)continue;const task=pmTaskById(history.pm_task_id);if(task)historyRows.push(pmHistoryWorkbookRow(history,task,inserted.workbookAssetNumber));}
     const sync=await performPmWorkbookSync({actor:req.user!,sourcePath,originalFilename:stage.filename,trackerUpdates,historyRows});scheduleAutoBackup('PM Excel import confirmed',req.user!);
     const imported=one<{summary_json:string}>('SELECT summary_json FROM pm_excel_imports WHERE confirm_request_id=?',[requestId])!;res.json({ok:true,import:JSON.parse(imported.summary_json),sync:sync.status,syncError:sync.ok?null:sync.error});
