@@ -10,10 +10,14 @@ export { normalizedPmKey } from './pmAssetResolver.js';
 
 export const PM_TRACKER_SHEET = 'Machine Pm Tracker';
 export const PM_HISTORY_SHEET = 'PMHistory';
+export const PM_CATALOG_SHEET = 'MCC PM Lists';
+export const PM_ASSET_CATALOG_NAME = 'MCC_PM_Assets';
+export const PM_INTERVAL_CATALOG_NAME = 'MCC_PM_Intervals';
 export const PM_EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-export type WorkbookPmInterval = 'hourly' | 'cycles' | 'days' | 'annual';
+export type WorkbookPmInterval = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | 'quarterly' | 'bi_annual' | 'annual' | 'cycles';
 export type WorkbookPmStatus = 'Current' | 'Due Soon' | 'Due Now' | 'Overdue';
+export type WorkbookCatalogChoice = {value:WorkbookPmInterval;label:string};
 
 export type ParsedTrackerRow = {
   rowNumber:number;
@@ -200,9 +204,17 @@ export function normalizeWorkbookInterval(value:unknown):WorkbookPmInterval {
   if (normalized==='hourly'||normalized==='hour'||normalized==='hours') return 'hourly';
   if (normalized==='cycle'||normalized==='cycles') return 'cycles';
   if (normalized==='day'||normalized==='days') return 'days';
+  if (normalized==='bi-weekly'||normalized==='bi weekly'||normalized==='biweekly'||normalized==='fortnightly') return 'bi_weekly';
+  if (normalized==='weekly'||normalized==='week'||normalized==='weeks') return 'weekly';
+  if (normalized==='monthly'||normalized==='month'||normalized==='months') return 'monthly';
+  if (normalized==='quarterly'||normalized==='quarter'||normalized==='quarters') return 'quarterly';
+  if (normalized==='bi-annual'||normalized==='bi annual'||normalized==='biannual'||normalized==='semi-annual'||normalized==='semi annual'||normalized==='semiannual') return 'bi_annual';
   if (normalized==='annual'||normalized==='annually'||normalized==='year'||normalized==='yearly') return 'annual';
-  throw new Error('Interval Type must be Hourly, Cycle/Cycles, Days, or Annual.');
+  throw new Error('Interval Type must be Hourly, Days, Bi-weekly, Weekly, Monthly, Quarterly, Bi-Annual, Annual, or Cycles.');
 }
+
+const defaultWorkbookIntervalLabels:Record<WorkbookPmInterval,string>={hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles'};
+function workbookIntervalLabel(intervalType:WorkbookPmInterval,choices:readonly WorkbookCatalogChoice[]=[]){return choices.find(choice=>choice.value===intervalType)?.label??defaultWorkbookIntervalLabels[intervalType];}
 
 function addDays(date:string,days:number) { const value=new Date(`${date}T12:00:00Z`);value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10); }
 function addMonths(date:string,months:number) { const value=new Date(`${date}T12:00:00Z`);const day=value.getUTCDate();value.setUTCDate(1);value.setUTCMonth(value.getUTCMonth()+months);const last=new Date(Date.UTC(value.getUTCFullYear(),value.getUTCMonth()+1,0,12)).getUTCDate();value.setUTCDate(Math.min(day,last));return value.toISOString().slice(0,10); }
@@ -221,7 +233,13 @@ export function calculateWorkbookPm(input:{intervalType:WorkbookPmInterval;inter
     return {nextDueDate:null,nextDueMeter:nextDue,remaining,status};
   }
   if (!input.lastCompletedDate||!input.currentDate) throw new Error('Last completed and current dates are required.');
-  const nextDueDate=intervalType==='annual'?(input.intervalValue===365?addDays(input.lastCompletedDate,365):addMonths(input.lastCompletedDate,input.intervalValue)):addDays(input.lastCompletedDate,input.intervalValue);
+  const nextDueDate=intervalType==='days'?addDays(input.lastCompletedDate,input.intervalValue)
+    :intervalType==='bi_weekly'?addDays(input.lastCompletedDate,14)
+    :intervalType==='weekly'?addDays(input.lastCompletedDate,input.intervalValue*7)
+    :intervalType==='monthly'?addMonths(input.lastCompletedDate,input.intervalValue)
+    :intervalType==='quarterly'?addMonths(input.lastCompletedDate,3)
+    :intervalType==='bi_annual'?addMonths(input.lastCompletedDate,6)
+    :input.intervalValue===365?addDays(input.lastCompletedDate,365):addMonths(input.lastCompletedDate,12);
   const remaining=dayDifference(nextDueDate,input.currentDate);
   const status:WorkbookPmStatus=remaining<0?'Overdue':remaining===0?'Due Now':remaining<=14?'Due Soon':'Current';
   return {nextDueDate,nextDueMeter:null,remaining,status};
@@ -261,6 +279,20 @@ function trackerSectionHeading(sheet:ExcelJS.Worksheet,rowNumber:number,header:H
   const unique=[...new Map(candidates.map(value=>[normalizedPmKey(value),value])).values()];
   if(unique.length!==1)return {matched:true,assetNumber:null,reason:'Machine/press section heading is ambiguous or missing its identifier.'};
   return {matched:true,assetNumber:unique[0]};
+}
+
+function trackerSectionAssetAddress(sheet:ExcelJS.Worksheet,rowNumber:number,header:HeaderMap<TrackerField>){
+  const explicitColumn=header.columns.assetNumber;const task=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.taskTitle)));const interval=cleanText(cellRawValue(sheet.getCell(rowNumber,header.columns.intervalType)));
+  if(explicitColumn&&cleanText(cellRawValue(sheet.getCell(rowNumber,explicitColumn)))&&!task&&!interval)return sheet.getCell(rowNumber,explicitColumn).address;
+  const labels=new Set(['press','pressnumber','pressno','machine','machinenumber','machineno','asset','assetnumber','assetno']);
+  for(let column=1;column<Math.min(Math.max(sheet.columnCount,1),100);column+=1){if(!labels.has(normalizedHeader(cellRawValue(sheet.getCell(rowNumber,column)))))continue;const next=cleanText(cellRawValue(sheet.getCell(rowNumber,column+1)));if(next&&!labels.has(normalizedHeader(next)))return sheet.getCell(rowNumber,column+1).address;}
+  return null;
+}
+
+function refreshTrackerCatalogValidations(worksheetXml:string,sheet:ExcelJS.Worksheet,parsed:ParsedPmWorkbook){
+  const header=findHeader(sheet,trackerAliases,trackerRequired);const intervalAddresses=parsed.trackerRows.map(row=>sheet.getCell(row.rowNumber,header.columns.intervalType).address);const assetAddresses:string[]=[];
+  for(const row of parsed.trackerRows)if(header.columns.assetNumber&&!row.assetNumberInherited)assetAddresses.push(sheet.getCell(row.rowNumber,header.columns.assetNumber).address);for(let rowNumber=1;rowNumber<=sheet.rowCount;rowNumber+=1)if(trackerSectionHeading(sheet,rowNumber,header).matched){const address=trackerSectionAssetAddress(sheet,rowNumber,header);if(address)assetAddresses.push(address);}
+  worksheetXml=replaceNamedListValidation(worksheetXml,PM_ASSET_CATALOG_NAME,assetAddresses,'Choose a current MCC Machine Library asset.');return replaceNamedListValidation(worksheetXml,PM_INTERVAL_CATALOG_NAME,intervalAddresses,'Choose a supported MCC PM interval type.');
 }
 
 function trackerSectionBeforeHeader(sheet:ExcelJS.Worksheet,header:HeaderMap<TrackerField>):TrackerSectionContext {
@@ -369,6 +401,41 @@ function formulaXmlEscape(value:string){return value.replace(/&/g,'&amp;').repla
 function regexEscape(value:string){return value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function cellColumnNumber(address:string){const letters=/^[A-Z]+/i.exec(address)?.[0].toUpperCase()??'';let result=0;for(const letter of letters)result=result*26+letter.charCodeAt(0)-64;return result;}
 function cellColumnLetters(column:number){let result='';for(let value=column;value>0;value=Math.floor((value-1)/26))result=String.fromCharCode(65+(value-1)%26)+result;return result;}
+function uniqueCatalogValues(values:readonly string[]){const found=new Map<string,string>();for(const value of values){const clean=cleanText(value);if(clean&&!found.has(normalizedPmKey(clean)))found.set(normalizedPmKey(clean),clean);}return [...found.values()].sort((left,right)=>left.localeCompare(right,'en',{numeric:true,sensitivity:'base'}));}
+function catalogWorksheetXml(assetChoices:readonly string[],intervalChoices:readonly WorkbookCatalogChoice[]){
+  const assets=uniqueCatalogValues(assetChoices);const intervals=[...new Map(intervalChoices.map(choice=>[choice.value,cleanText(choice.label)])).values()].filter(Boolean);const rows=Math.max(assets.length,intervals.length,1)+1;let sheetData='<row r="1"><c r="A1" t="inlineStr"><is><t>Asset Number</t></is></c><c r="B1" t="inlineStr"><is><t>Interval Type</t></is></c></row>';
+  for(let index=0;index<rows-1;index+=1){const row=index+2;const cells=[assets[index]!==undefined?`<c r="A${row}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(assets[index])}</t></is></c>`:'',intervals[index]!==undefined?`<c r="B${row}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(intervals[index])}</t></is></c>`:''].join('');sheetData+=`<row r="${row}">${cells}</row>`;}
+  return {assets,intervals,assetRef:`'${PM_CATALOG_SHEET}'!$A$2:$A$${Math.max(assets.length+1,2)}`,intervalRef:`'${PM_CATALOG_SHEET}'!$B$2:$B$${Math.max(intervals.length+1,2)}`,xml:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:B${rows}"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="2" width="24" customWidth="1"/></cols><sheetData>${sheetData}</sheetData></worksheet>`};
+}
+function replaceWorkbookDefinedName(workbookXml:string,name:string,formula:string){
+  const pattern=new RegExp(`<definedName\\b(?=[^>]*\\bname="${regexEscape(name)}")[^>]*>[\\s\\S]*?<\\/definedName>`,'gi');workbookXml=workbookXml.replace(pattern,'');const entry=`<definedName name="${name}">${formula}</definedName>`;
+  if(/<definedNames\b[^>]*>/.test(workbookXml))return workbookXml.replace('</definedNames>',`${entry}</definedNames>`);
+  return workbookXml.replace('</sheets>',`</sheets><definedNames>${entry}</definedNames>`);
+}
+async function refreshPmWorkbookCatalog(zip:JSZip,assetChoices:readonly string[],intervalChoices:readonly WorkbookCatalogChoice[]){
+  const catalog=catalogWorksheetXml(assetChoices,intervalChoices);let workbookXml=await zip.file('xl/workbook.xml')?.async('string');let relationshipsXml=await zip.file('xl/_rels/workbook.xml.rels')?.async('string');let contentTypesXml=await zip.file('[Content_Types].xml')?.async('string');if(!workbookXml||!relationshipsXml||!contentTypesXml)throw new Error('Workbook catalog package metadata is unavailable.');
+  const sheetParts=await workbookSheetParts(zip);let catalogPart=sheetParts.get(PM_CATALOG_SHEET);
+  if(!catalogPart){
+    let sheetNumber=1;do{catalogPart=`xl/worksheets/sheet${sheetNumber}.xml`;sheetNumber+=1;}while(zip.file(catalogPart));
+    const relationshipIds=new Set([...relationshipsXml.matchAll(/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\/?\s*>/g)].map(match=>match[1]));let relationshipNumber=1;while(relationshipIds.has(`rId${relationshipNumber}`))relationshipNumber+=1;const relationshipId=`rId${relationshipNumber}`;
+    const sheetIds=[...workbookXml.matchAll(/<sheet\b[^>]*\bsheetId="(\d+)"[^>]*\/?\s*>/g)].map(match=>Number(match[1]));const sheetId=Math.max(0,...sheetIds)+1;
+    workbookXml=workbookXml.replace('</sheets>',`<sheet name="${PM_CATALOG_SHEET}" sheetId="${sheetId}" state="veryHidden" r:id="${relationshipId}"/></sheets>`);
+    relationshipsXml=relationshipsXml.replace('</Relationships>',`<Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${xmlEscape(path.posix.relative('xl',catalogPart))}"/></Relationships>`);
+  }else{
+    workbookXml=workbookXml.replace(/<sheet\b[^>]*\/?\s*>/g,tag=>decodeXml(xmlAttribute(tag,'name'))===PM_CATALOG_SHEET?(/\bstate="/.test(tag)?tag.replace(/\bstate="[^"]*"/,'state="veryHidden"'):tag.replace(/\/>$/, ' state="veryHidden"/>')):tag);
+  }
+  const partName=`/${catalogPart}`;if(!new RegExp(`<Override\\b(?=[^>]*\\bPartName="${regexEscape(partName)}")`,'i').test(contentTypesXml))contentTypesXml=contentTypesXml.replace('</Types>',`<Override PartName="${partName}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
+  workbookXml=replaceWorkbookDefinedName(workbookXml,PM_ASSET_CATALOG_NAME,catalog.assetRef);workbookXml=replaceWorkbookDefinedName(workbookXml,PM_INTERVAL_CATALOG_NAME,catalog.intervalRef);
+  zip.file(catalogPart,catalog.xml);zip.file('xl/workbook.xml',workbookXml);zip.file('xl/_rels/workbook.xml.rels',relationshipsXml);zip.file('[Content_Types].xml',contentTypesXml);return catalog;
+}
+function compactWorksheetAddresses(addresses:readonly string[]){
+  const grouped=new Map<string,number[]>();for(const address of new Set(addresses)){const match=/^([A-Z]{1,3})(\d+)$/i.exec(address);if(!match)continue;const column=match[1].toUpperCase();grouped.set(column,[...(grouped.get(column)??[]),Number(match[2])]);}const ranges:string[]=[];
+  for(const [column,rawRows] of [...grouped].sort(([left],[right])=>cellColumnNumber(left)-cellColumnNumber(right))){const rows=[...new Set(rawRows)].sort((left,right)=>left-right);let start=rows[0];let end=rows[0];for(const row of rows.slice(1)){if(row===end+1){end=row;continue;}ranges.push(start===end?`${column}${start}`:`${column}${start}:${column}${end}`);start=row;end=row;}if(start!==undefined)ranges.push(start===end?`${column}${start}`:`${column}${start}:${column}${end}`);}return ranges.join(' ');
+}
+function replaceNamedListValidation(worksheetXml:string,name:string,addresses:readonly string[],error:string){
+  const containerPattern=/<dataValidations\b[^>]*>[\s\S]*?<\/dataValidations>/;const existing=containerPattern.exec(worksheetXml)?.[0]??'';const entries=existing?[...existing.matchAll(/<dataValidation\b[^>]*?(?:\/>|>[\s\S]*?<\/dataValidation>)/g)].map(match=>match[0]).filter(entry=>!new RegExp(`<formula1>\\s*${regexEscape(name)}\\s*<\\/formula1>`,'i').test(entry)):[];const sqref=compactWorksheetAddresses(addresses);if(sqref)entries.push(`<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Invalid choice" error="${xmlEscape(error)}" sqref="${sqref}"><formula1>${name}</formula1></dataValidation>`);const replacement=entries.length?`<dataValidations count="${entries.length}">${entries.join('')}</dataValidations>`:'';
+  if(existing)return worksheetXml.replace(existing,replacement);if(!replacement)return worksheetXml;const insertion=worksheetXml.search(/<(?:hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|drawing|legacyDrawing|tableParts|extLst)\b|<\/worksheet>/);if(insertion<0)throw new Error('Machine Pm Tracker data-validation location is unavailable.');return `${worksheetXml.slice(0,insertion)}${replacement}${worksheetXml.slice(insertion)}`;
+}
 function excelSerial(value:Date,date1904:boolean){const epoch=date1904?Date.UTC(1904,0,1):Date.UTC(1899,11,30);const dateOnly=Date.UTC(value.getUTCFullYear(),value.getUTCMonth(),value.getUTCDate());return Math.round((dateOnly-epoch)/86400000);}
 function xmlCellValue(value:unknown,date1904:boolean){
   if(value===null||value===undefined)return {type:'',body:''};
@@ -525,6 +592,13 @@ function trackerFormulaCachedResult(field:TrackerField,formula:string|undefined,
   if(field==='status'&&/^IF\(E(\d+)="","NEEDSDATE",IF\(E\1<0,"PASTDUE",IF\(E\1=0,"DUETODAY",IF\(E\1<=7,"DUESOON","OK"\)\)\)\)$/.test(normalized)){const value=update.remaining<0?'Past Due':update.remaining===0?'Due Today':update.remaining<=7?'Due Soon':'OK';return {known:true as const,value};}
   return {known:false as const,value:undefined};
 }
+function authoritativeCalendarDueFormula(update:TrackerWorkbookUpdate,header:HeaderMap<TrackerField>,row:number){
+  if(update.intervalType==='hourly'||update.intervalType==='cycles'||update.intervalType==='days'||update.intervalType==='bi_weekly'||(update.intervalType==='annual'&&update.intervalValue===365))return null;
+  const last=cellColumnLetters(header.columns.lastCompleted)+row;const interval=cellColumnLetters(header.columns.intervalValue)+row;
+  if(update.intervalType==='weekly')return `${last}+(${interval}*7)`;
+  if(update.intervalType==='monthly')return `EDATE(${last},${interval})`;
+  const months=update.intervalType==='quarterly'?3:update.intervalType==='bi_annual'?6:12;return `EDATE(${last},${months})`;
+}
 
 type FormulaExpectation={sheetName:string;address:string;formula:string};
 type WorksheetFormulaRecord={address:string;cellType:string;formulaType:string;sharedIndex:string;sharedRef:string;formula:string;cachedValue:string|undefined};
@@ -550,7 +624,9 @@ function validateWorksheetFormulaRecords(xml:string,part:string,expectations:For
   return records;
 }
 export async function validatePmWorkbookOoxml(buffer:Buffer,expectations:FormulaExpectation[]=[]){
-  const zip=await JSZip.loadAsync(buffer);if(zip.file('xl/calcChain.xml'))throw new Error('xl/calcChain.xml must be removed after formula synchronization.');const workbookRelationships=await zip.file('xl/_rels/workbook.xml.rels')?.async('string');if(workbookRelationships&&/calcChain/i.test(workbookRelationships))throw new Error('The workbook calc-chain relationship must be removed after formula synchronization.');const contentTypes=await zip.file('[Content_Types].xml')?.async('string');if(contentTypes&&/calcChain/i.test(contentTypes))throw new Error('The calc-chain content-type entry must be removed after formula synchronization.');const sheetParts=await workbookSheetParts(zip);let formulaCells=0;for(const [sheetName,part] of sheetParts){const xml=await zip.file(part)?.async('string');if(!xml)throw new Error(`${part} is unavailable.`);formulaCells+=validateWorksheetFormulaRecords(xml,part,expectations.filter(item=>item.sheetName===sheetName)).length;}return {worksheets:sheetParts.size,formulaCells};
+  const zip=await JSZip.loadAsync(buffer);if(zip.file('xl/calcChain.xml'))throw new Error('xl/calcChain.xml must be removed after formula synchronization.');const workbookRelationships=await zip.file('xl/_rels/workbook.xml.rels')?.async('string');if(workbookRelationships&&/calcChain/i.test(workbookRelationships))throw new Error('The workbook calc-chain relationship must be removed after formula synchronization.');const contentTypes=await zip.file('[Content_Types].xml')?.async('string');if(contentTypes&&/calcChain/i.test(contentTypes))throw new Error('The calc-chain content-type entry must be removed after formula synchronization.');const workbookXml=await zip.file('xl/workbook.xml')?.async('string');if(!workbookXml)throw new Error('xl/workbook.xml is unavailable.');if(/<definedName\b[^>]*>[\s\S]*?#REF![\s\S]*?<\/definedName>/i.test(workbookXml))throw new Error('Workbook defined names must not contain #REF!.');const sheetParts=await workbookSheetParts(zip);let formulaCells=0;for(const [sheetName,part] of sheetParts){const xml=await zip.file(part)?.async('string');if(!xml)throw new Error(`${part} is unavailable.`);formulaCells+=validateWorksheetFormulaRecords(xml,part,expectations.filter(item=>item.sheetName===sheetName)).length;}
+  if(sheetParts.has(PM_CATALOG_SHEET)){const catalogTag=[...workbookXml.matchAll(/<sheet\b[^>]*\/?\s*>/g)].map(match=>match[0]).find(tag=>decodeXml(xmlAttribute(tag,'name'))===PM_CATALOG_SHEET);if(!catalogTag||xmlAttribute(catalogTag,'state')!=='veryHidden')throw new Error('The MCC PM catalog sheet must remain very hidden.');for(const name of [PM_ASSET_CATALOG_NAME,PM_INTERVAL_CATALOG_NAME])if(!new RegExp(`<definedName\\b(?=[^>]*\\bname="${name}")[^>]*>[\\s\\S]+?<\\/definedName>`,'i').test(workbookXml))throw new Error(`Workbook catalog defined name ${name} is unavailable.`);const trackerPart=sheetParts.get(PM_TRACKER_SHEET);const trackerXml=trackerPart?await zip.file(trackerPart)?.async('string'):'';for(const name of [PM_ASSET_CATALOG_NAME,PM_INTERVAL_CATALOG_NAME])if(!new RegExp(`<formula1>\\s*${name}\\s*<\\/formula1>`,'i').test(trackerXml??''))throw new Error(`Machine Pm Tracker validation list ${name} is unavailable.`);}
+  return {worksheets:sheetParts.size,formulaCells};
 }
 async function requestFullWorkbookCalculation(zip:JSZip){const file=zip.file('xl/workbook.xml');if(!file)return;let xml=await file.async('string');if(/<calcPr\b/.test(xml))xml=xml.replace(/<calcPr\b([^>]*?)\/?\s*>/,(_entry,attributes)=>{const clean=attributes.replace(/\s+(?:calcMode|fullCalcOnLoad|forceFullCalc)="[^"]*"/g,'');return `<calcPr${clean} calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>`;});else xml=xml.replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');zip.file('xl/workbook.xml',xml);}
 async function removeWorkbookCalculationChain(zip:JSZip){
@@ -656,7 +732,7 @@ function lastHistoryDataRow(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryFiel
   return header.rowNumber;
 }
 
-export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];beforeReplace?:()=>void|Promise<void>;onStage?:(stage:'backing_up'|'replacing_active_workbook'|'verifying')=>void|Promise<void>}) {
+export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];assetChoices?:string[];intervalChoices?:WorkbookCatalogChoice[];beforeReplace?:()=>void|Promise<void>;onStage?:(stage:'backing_up'|'replacing_active_workbook'|'verifying')=>void|Promise<void>}) {
   const sourcePath=path.resolve(input.sourcePath);const destinationPath=path.resolve(input.destinationPath);const backupDir=path.resolve(input.backupDir);
   if (!fs.existsSync(sourcePath)||!fs.statSync(sourcePath).isFile()) throw new Error('The synchronized PM workbook source is unavailable.');
   fs.mkdirSync(path.dirname(destinationPath),{recursive:true});fs.mkdirSync(backupDir,{recursive:true});
@@ -695,7 +771,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
         ...((inserted&&trackerHeader.columns.assetNumber&&!inheritedAssetNumber)?[['assetNumber',sectionAssetNumber] as [TrackerField,unknown]]:[]),
         ...((inserted&&trackerHeader.columns.assetName&&update.assetName!==undefined)?[['assetName',update.assetName] as [TrackerField,unknown]]:[]),
         ['taskTitle',update.taskTitle],
-        ['intervalType',update.intervalType==='cycles'?'Cycles':update.intervalType[0].toUpperCase()+update.intervalType.slice(1)],
+        ['intervalType',workbookIntervalLabel(update.intervalType,input.intervalChoices)],
         ['intervalValue',update.intervalValue],
         ['lastCompleted',meter?update.lastCompletedMeter:workbookValue(update.lastCompletedDate,true)],
         ['current',meter?update.currentMeter:workbookValue(update.currentDate,true)],
@@ -710,6 +786,10 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
           if(inserted&&!formulaExpectations.some(item=>item.sheetName===PM_TRACKER_SHEET&&item.address===address))formulaExpectations.push({sheetName:PM_TRACKER_SHEET,address,formula:'TODAY()'});
           const patched=setWorksheetFormulaResult(trackerXml,address,value,date1904);trackerXml=patched.xml;if(trackerXml!==before)changedCells+=1;continue;
         }
+        if(!meter&&field==='due'){
+          const dueFormula=authoritativeCalendarDueFormula(update,trackerHeader,row);
+          if(dueFormula){const before:string=trackerXml;trackerXml=setWorksheetStandaloneFormula(trackerXml,address,dueFormula,templateAddress);const existingExpectation=formulaExpectations.find(item=>item.sheetName===PM_TRACKER_SHEET&&item.address===address);if(existingExpectation)existingExpectation.formula=dueFormula;else formulaExpectations.push({sheetName:PM_TRACKER_SHEET,address,formula:dueFormula});const patched=setWorksheetFormulaResult(trackerXml,address,value,date1904);trackerXml=patched.xml;if(trackerXml!==before)changedCells+=1;continue;}
+        }
         const formula=worksheetCellHasFormula(trackerXml,address);if(formula){if(!['current','due','remaining','status'].includes(field)){if(inserted)throw new Error(`Machine Pm Tracker ${address} cannot be populated because the formatting template contains a protected formula.`);continue;}const expectedFormula=formulaExpectations.find(item=>item.sheetName===PM_TRACKER_SHEET&&item.address===address)?.formula;const modelFormula=trackerView.getCell(row,column).formula;const cached=trackerFormulaCachedResult(field,expectedFormula??(typeof modelFormula==='string'?modelFormula:undefined),update);if(inserted&&['due','remaining','status'].includes(field)&&!cached.known)continue;const patched=setWorksheetFormulaResult(trackerXml,address,cached.known?cached.value:value,date1904);trackerXml=patched.xml;if(patched.changed)changedCells+=1;continue;}
         const cell=inserted?null:trackerView.getCell(row,column);if(cell&&sameCellValue(cell,value))continue;const patched=setWorksheetCell(trackerXml,address,value,date1904,templateAddress);trackerXml=patched.xml;if(patched.changed)changedCells+=1;
       }
@@ -720,12 +800,14 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
       const sourceRef=historySourceRef({assetNumber:base.assetNumber,workOrderNumber:base.workOrderNumber,taskStatus:base.taskStatus,startDate:base.startDate,completionDate:base.completionDate,workOrderType:base.workOrderType,performedBy:base.performedBy,intervalType:base.intervalType,taskType:base.taskType,taskNote:base.taskNote});
       if (existing.has(`ref:${sourceRef}`)) continue;
       const rowNumber=previousHistoryRow+1;historyXml=ensureWorksheetRow(historyXml,rowNumber,previousHistoryRow>historyHeader.rowNumber?previousHistoryRow:null);historyXml=stripPmHistoryHelperCells(historyXml,rowNumber);
-      const values:Record<HistoryField,unknown>={assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskStatus:row.taskStatus,startDate:workbookValue(row.startDate,true),completionDate:workbookValue(row.completionDate,true),workOrderType:row.workOrderType,performedBy:row.performedBy,intervalType:row.intervalType==='cycles'?'Cycles':row.intervalType[0].toUpperCase()+row.intervalType.slice(1),taskType:row.taskType,taskNote:row.taskNote};
+      const values:Record<HistoryField,unknown>={assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskStatus:row.taskStatus,startDate:workbookValue(row.startDate,true),completionDate:workbookValue(row.completionDate,true),workOrderType:row.workOrderType,performedBy:row.performedBy,intervalType:workbookIntervalLabel(row.intervalType,input.intervalChoices),taskType:row.taskType,taskNote:row.taskNote};
       for(const [field,column] of Object.entries(historyHeader.columns) as Array<[HistoryField,number]>){const address=history.getCell(rowNumber,column).address;const templateAddress=history.getCell(previousHistoryRow,column).address;const patched=setWorksheetCell(historyXml,address,values[field],date1904,templateAddress);if(!patched.changed)throw new Error(`PMHistory ${address} cannot be updated because it contains a protected formula.`);historyXml=patched.xml;}
       if(row.workOrderHyperlink)historyXml=await addWorksheetExternalHyperlink(zip,historyPart,historyXml,history.getCell(rowNumber,historyHeader.columns.workOrderNumber).address,row.workOrderHyperlink);
       previousHistoryRow=rowNumber;lastAppendedHistoryRow=rowNumber;appendedHistory+=1;existing.add(`ref:${sourceRef}`);
     }
-    historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);await removeWorkbookCalculationChain(zip);await requestFullWorkbookCalculation(zip);
+    historyXml=extendWorksheetDimension(historyXml,lastAppendedHistoryRow);zip.file(trackerPart,trackerXml);zip.file(historyPart,historyXml);if(appendedHistory)await extendHistoryTable(zip,historyPart,historyHeader.rowNumber,lastAppendedHistoryRow);
+    if(input.assetChoices||input.intervalChoices){await refreshPmWorkbookCatalog(zip,input.assetChoices??[],input.intervalChoices??[]);const catalogViewBuffer=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:1}});const catalogParsed=await inspectPmWorkbook(catalogViewBuffer);const catalogWorkbook=new ExcelJS.Workbook();await catalogWorkbook.xlsx.load(catalogViewBuffer.buffer.slice(catalogViewBuffer.byteOffset,catalogViewBuffer.byteOffset+catalogViewBuffer.byteLength) as ArrayBuffer);const catalogTracker=catalogWorkbook.getWorksheet(PM_TRACKER_SHEET);if(!catalogTracker)throw new Error('Machine Pm Tracker is unavailable while refreshing MCC validation lists.');trackerXml=refreshTrackerCatalogValidations(trackerXml,catalogTracker,catalogParsed);zip.file(trackerPart,trackerXml);}
+    await removeWorkbookCalculationChain(zip);await requestFullWorkbookCalculation(zip);
     const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});await validatePmWorkbookOoxml(generated,formulaExpectations);const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}for(const removal of input.trackerRemovals??[]){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===removal.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(removal.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(removal.assetNumber));const alias=strictPressNumberAlias(removal.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length)throw new Error(`Workbook validation failed for ${removal.assetNumber} / ${removal.taskTitle}: deleted tracker row is still present.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
     const validation=new ExcelJS.Workbook();await validation.xlsx.readFile(temporaryPath);
     if (!validation.getWorksheet(PM_TRACKER_SHEET)||!validation.getWorksheet(PM_HISTORY_SHEET)) throw new Error('Workbook validation failed after synchronization.');
