@@ -7600,7 +7600,7 @@ function recordMachineDocumentHistory(action:string,actor:User,asset:MachineAsse
   recordMachineAssetHistory({action,actor,row:asset,newValue:details,reasonNote});
 }
 const pmIntervalLabels: Record<PmIntervalType,string> = { hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles' };
-const pmIntervalTypes = Object.keys(pmIntervalLabels) as PmIntervalType[];
+const pmIntervalTypes:PmIntervalType[] = ['hourly','cycles','days','annual'];
 const pmMeterIntervals = new Set<PmIntervalType>(['hourly','cycles']);
 const pmCalendarDueSoonDays = 14;
 const pmMeterDueSoonRatio = 0.1;

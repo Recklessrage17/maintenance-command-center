@@ -24,7 +24,7 @@ type PmDraftErrorKey='title'|'intervalType'|'interval'|'date'|'lastMeter'|'curre
 type PmDuePreview={label:string;value:string;legend:string;tone:'current'|'due-soon'|'due-now'|'overdue'|'hold'|'inactive'|'incomplete'};
 
 const intervalOptions:Array<{key:PmIntervalType;label:string}>=[
-  {key:'hourly',label:'Hourly'},{key:'days',label:'Days'},{key:'bi_weekly',label:'Bi-weekly'},{key:'weekly',label:'Weekly'},{key:'monthly',label:'Monthly'},{key:'quarterly',label:'Quarterly'},{key:'bi_annual',label:'Bi-Annual'},{key:'annual',label:'Annual'},{key:'cycles',label:'Cycles'},
+  {key:'hourly',label:'Hourly'},{key:'cycles',label:'Cycles'},{key:'days',label:'Days'},{key:'annual',label:'Annual'},
 ];
 const meterIntervals=new Set<string>(['hourly','cycles']);
 const calendarDueSoonDays=14;
