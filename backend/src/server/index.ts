@@ -228,6 +228,8 @@ CREATE TABLE IF NOT EXISTS pm_asset_meters (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS pm_meter_history (id INTEGER PRIMARY KEY AUTOINCREMENT, meter_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', meter_type TEXT NOT NULL, previous_reading REAL, new_reading REAL NOT NULL, change_type TEXT NOT NULL DEFAULT 'normal', reason TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'manual', user_id INTEGER, user_name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY(meter_id) REFERENCES pm_asset_meters(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_excel_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, preview_token TEXT NOT NULL UNIQUE, confirm_request_id TEXT NOT NULL UNIQUE, workbook_sha256 TEXT NOT NULL, original_filename TEXT NOT NULL, source_path TEXT NOT NULL, imported_by_user_id INTEGER NOT NULL, confirmed_by_user_id INTEGER NOT NULL, previewed_at TEXT NOT NULL, confirmed_at TEXT NOT NULL, summary_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS pm_excel_sync_state (id INTEGER PRIMARY KEY CHECK(id=1), status TEXT NOT NULL DEFAULT 'never', attempted_at TEXT, synchronized_at TEXT, original_filename TEXT NOT NULL DEFAULT '', source_path TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '', changed_cells INTEGER NOT NULL DEFAULT 0, appended_history INTEGER NOT NULL DEFAULT 0, updated_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS pm_excel_operations (id TEXT PRIMARY KEY, operation_type TEXT NOT NULL DEFAULT 'replacement', stage TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', message TEXT NOT NULL DEFAULT '', original_filename TEXT NOT NULL DEFAULT '', preview_token TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT, error_message TEXT NOT NULL DEFAULT '', is_current INTEGER NOT NULL DEFAULT 0);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_excel_operations_current ON pm_excel_operations (is_current) WHERE is_current=1;
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS history_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, section TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, entity_label TEXT, work_order_number TEXT, part_number TEXT, requisition_number TEXT, asset_id TEXT, machine_name TEXT, equipment_name TEXT, location_name TEXT, vendor_name TEXT, old_value_json TEXT, new_value_json TEXT, quantity_before REAL, quantity_after REAL, quantity_delta REAL, reason_note TEXT, user_id INTEGER, user_name TEXT, user_email TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_inventory_parts_mit3_item_id ON inventory_parts (mit3_item_id);
@@ -509,6 +511,8 @@ CREATE TABLE IF NOT EXISTS pm_asset_meters (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS pm_meter_history (id INTEGER PRIMARY KEY AUTOINCREMENT, meter_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', meter_type TEXT NOT NULL, previous_reading REAL, new_reading REAL NOT NULL, change_type TEXT NOT NULL DEFAULT 'normal', reason TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'manual', user_id INTEGER, user_name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY(meter_id) REFERENCES pm_asset_meters(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_excel_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, preview_token TEXT NOT NULL UNIQUE, confirm_request_id TEXT NOT NULL UNIQUE, workbook_sha256 TEXT NOT NULL, original_filename TEXT NOT NULL, source_path TEXT NOT NULL, imported_by_user_id INTEGER NOT NULL, confirmed_by_user_id INTEGER NOT NULL, previewed_at TEXT NOT NULL, confirmed_at TEXT NOT NULL, summary_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS pm_excel_sync_state (id INTEGER PRIMARY KEY CHECK(id=1), status TEXT NOT NULL DEFAULT 'never', attempted_at TEXT, synchronized_at TEXT, original_filename TEXT NOT NULL DEFAULT '', source_path TEXT NOT NULL DEFAULT '', error_message TEXT NOT NULL DEFAULT '', changed_cells INTEGER NOT NULL DEFAULT 0, appended_history INTEGER NOT NULL DEFAULT 0, updated_by_user_id INTEGER);
+CREATE TABLE IF NOT EXISTS pm_excel_operations (id TEXT PRIMARY KEY, operation_type TEXT NOT NULL DEFAULT 'replacement', stage TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', message TEXT NOT NULL DEFAULT '', original_filename TEXT NOT NULL DEFAULT '', preview_token TEXT, created_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT, error_message TEXT NOT NULL DEFAULT '', is_current INTEGER NOT NULL DEFAULT 0);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_excel_operations_current ON pm_excel_operations (is_current) WHERE is_current=1;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_completion_request ON pm_history (completion_request_id) WHERE completion_request_id IS NOT NULL AND completion_request_id<>'';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_history_import_source ON pm_history (import_source_ref) WHERE import_source_ref IS NOT NULL AND import_source_ref<>'';
 DROP INDEX IF EXISTS idx_pm_history_work_order;
@@ -528,6 +532,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_tasks_live_asset ON pm_tasks (asset_library,as
   run(`UPDATE pm_tasks SET current_meter=(SELECT meter.current_reading FROM pm_asset_meters meter WHERE meter.asset_library=pm_tasks.asset_library AND meter.asset_id=pm_tasks.asset_id AND meter.meter_type=CASE pm_tasks.interval_type WHEN 'hourly' THEN 'hours' ELSE 'cycles' END)
     WHERE deleted=0 AND interval_type IN ('hourly','cycles') AND EXISTS (SELECT 1 FROM pm_asset_meters meter WHERE meter.asset_library=pm_tasks.asset_library AND meter.asset_id=pm_tasks.asset_id AND meter.meter_type=CASE pm_tasks.interval_type WHEN 'hourly' THEN 'hours' ELSE 'cycles' END)`);
   run("INSERT OR IGNORE INTO pm_excel_sync_state (id,status,original_filename,source_path,error_message) VALUES (1,'never','','','')");
+  run("UPDATE pm_excel_operations SET stage='failed',status='failed',message='Operation interrupted before completion.',error_message='Operation interrupted before completion.',completed_at=?,updated_at=? WHERE status='active'",[now(),now()]);
   if (!machineAssetColumns.has('screw_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('barrel_rebuild_repaired')) run('ALTER TABLE machine_assets ADD COLUMN barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0');
   if (!machineAssetColumns.has('screw_condition_status')) run("ALTER TABLE machine_assets ADD COLUMN screw_condition_status TEXT NOT NULL DEFAULT 'new'");
@@ -7829,9 +7834,49 @@ type PmImportTrackerAction={kind:'addition'|'update';rowNumber:number;assetId:nu
 type PmImportHistoryAction={row:ParsedPmWorkbook['historyRows'][number];assetId:number;taskKey:string};
 type PmImportStage={token:string;filename:string;sha256:string;buffer:Buffer;parsed:ParsedPmWorkbook;importedByUserId:number;previewedAt:string;trackerActions:PmImportTrackerAction[];trackerSyncActions:PmImportTrackerAction[];historyActions:PmImportHistoryAction[];preview:Record<string,unknown>};
 type PmExcelSyncStateRow={status:string;attempted_at:string|null;synchronized_at:string|null;original_filename:string;source_path:string;error_message:string;changed_cells:number;appended_history:number;updated_by_user_id:number|null};
+type PmExcelOperationStage='preparing'|'uploading'|'validating'|'analyzing'|'preview_ready'|'importing'|'database_update'|'workbook_sync'|'backing_up'|'replacing_active_workbook'|'verifying'|'succeeded'|'failed';
+type PmExcelOperationRow={id:string;operation_type:string;stage:PmExcelOperationStage;status:'active'|'succeeded'|'failed';message:string;original_filename:string;preview_token:string|null;created_by_user_id:number|null;created_at:string;updated_at:string;completed_at:string|null;error_message:string;is_current:number};
 const pmImportStages=new Map<string,PmImportStage>();
 const pmImportStageLifetimeMs=30*60*1000;
 const pmImportStageLimit=20;
+let pmWorkbookLockTail:Promise<void>=Promise.resolve();
+
+async function acquirePmWorkbookLock(){
+  const previous=pmWorkbookLockTail;let release!:()=>void;pmWorkbookLockTail=new Promise<void>(resolve=>{release=resolve;});await previous;return release;
+}
+
+const pmOperationMessages:Record<PmExcelOperationStage,string>={
+  preparing:'Preparing workbook replacement...',uploading:'Uploading workbook...',validating:'Validating workbook...',analyzing:'Analyzing workbook changes...',preview_ready:'Workbook preview is ready.',importing:'Importing valid workbook rows...',database_update:'Updating the MCC database...',workbook_sync:'Synchronizing Excel...',backing_up:'Backing up the active workbook...',replacing_active_workbook:'Replacing the active workbook...',verifying:'Verifying workbook...',succeeded:'PM workbook replacement succeeded.',failed:'PM workbook replacement failed.',
+};
+
+function publicPmExcelOperation(row:PmExcelOperationRow|undefined){
+  if(!row)return null;
+  return {id:row.id,type:row.operation_type,stage:row.stage,status:row.status,message:row.message||pmOperationMessages[row.stage],originalFilename:row.original_filename,createdAt:row.created_at,updatedAt:row.updated_at,completedAt:row.completed_at,errorMessage:row.error_message,active:row.status==='active'};
+}
+function pmExcelOperation(operationId?:string){
+  const row=operationId?one<PmExcelOperationRow>('SELECT * FROM pm_excel_operations WHERE id=?',[operationId]):one<PmExcelOperationRow>('SELECT * FROM pm_excel_operations WHERE is_current=1 ORDER BY created_at DESC LIMIT 1');
+  return publicPmExcelOperation(row);
+}
+function updatePmExcelOperation(operationId:string,stage:PmExcelOperationStage,input:{message?:string;errorMessage?:string;previewToken?:string|null}={}){
+  const timestamp=now();const terminal=stage==='succeeded'||stage==='failed';const status=stage==='succeeded'?'succeeded':stage==='failed'?'failed':'active';
+  run(`UPDATE pm_excel_operations SET stage=?,status=?,message=?,error_message=?,preview_token=COALESCE(?,preview_token),updated_at=?,completed_at=? WHERE id=?`,[stage,status,input.message??pmOperationMessages[stage],input.errorMessage??'',input.previewToken??null,timestamp,terminal?timestamp:null,operationId]);
+}
+function beginPmExcelOperation(operationId:string,filename:string,actor:User,stage:PmExcelOperationStage='validating'){
+  const timestamp=now();
+  pmImportStages.clear();
+  const existing=one<PmExcelOperationRow>('SELECT * FROM pm_excel_operations WHERE id=? AND is_current=1 AND created_by_user_id=?',[operationId,actor.id]);
+  if(existing){run('UPDATE pm_excel_operations SET stage=?,status=\'active\',message=?,original_filename=?,preview_token=NULL,error_message=\'\',updated_at=?,completed_at=NULL WHERE id=?',[stage,pmOperationMessages[stage],filename,timestamp,operationId]);return;}
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    run("UPDATE pm_excel_operations SET stage='failed',status='failed',message='Superseded by a newer PM workbook upload.',error_message='Superseded by a newer PM workbook upload.',completed_at=?,updated_at=? WHERE is_current=1 AND status='active'",[timestamp,timestamp]);
+    run('UPDATE pm_excel_operations SET is_current=0 WHERE is_current=1');
+    run(`INSERT INTO pm_excel_operations (id,operation_type,stage,status,message,original_filename,created_by_user_id,created_at,updated_at,is_current) VALUES (?,'replacement',?,'active',?,?,?,?,?,1)`,[operationId,stage,pmOperationMessages[stage],filename,actor.id,timestamp,timestamp]);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+function failPmExcelOperation(operationId:string,actor:User,error:unknown){
+  const message=safeErrorMessage(error,[],'The PM workbook replacement failed.');updatePmExcelOperation(operationId,'failed',{message,errorMessage:message});recordPmWorkbookAudit(actor,'pm_excel_operation_failed',{operationId,error:message},message);return message;
+}
 
 function cleanupPmImportStages() {
   const cutoff=Date.now()-pmImportStageLifetimeMs;
@@ -7866,19 +7911,26 @@ function updatePmSyncState(input:{status:'success'|'failed'|'syncing';actor:User
 function recordPmWorkbookAudit(actor:User,action:string,state:Record<string,unknown>,reasonNote='') {
   recordHistoryLog({section:'preventive_maintenance',action,entityType:'pm_excel_workbook',entityId:'latest',entityLabel:'PM Excel synchronization',newValue:state,reasonNote,actor});
 }
-async function performPmWorkbookSync(input:{actor:User;sourcePath:string;originalFilename:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[]}) {
+async function performPmWorkbookSyncUnlocked(input:{actor:User;sourcePath:string;originalFilename:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];operationId?:string}) {
   updatePmSyncState({status:'syncing',actor:input.actor,sourcePath:input.sourcePath,originalFilename:input.originalFilename});
+  if(input.operationId)updatePmExcelOperation(input.operationId,'workbook_sync');
   try {
-    const result=await synchronizePmWorkbook({sourcePath:input.sourcePath,destinationPath:pmExcelLatestPath,backupDir:pmExcelBackupDir,trackerUpdates:input.trackerUpdates,trackerRemovals:input.trackerRemovals,historyRows:input.historyRows});
+    const result=await synchronizePmWorkbook({sourcePath:input.sourcePath,destinationPath:pmExcelLatestPath,backupDir:pmExcelBackupDir,trackerUpdates:input.trackerUpdates,trackerRemovals:input.trackerRemovals,historyRows:input.historyRows,onStage:input.operationId?(stage)=>updatePmExcelOperation(input.operationId!,stage):undefined});
     updatePmSyncState({status:'success',actor:input.actor,sourcePath:pmExcelLatestPath,originalFilename:input.originalFilename,changedCells:result.changedCells,appendedHistory:result.appendedHistory});
+    if(input.operationId)updatePmExcelOperation(input.operationId,'succeeded');
     recordPmWorkbookAudit(input.actor,'pm_excel_sync_succeeded',{changedCells:result.changedCells,appendedHistory:result.appendedHistory,originalFilename:input.originalFilename,backupCreated:Boolean(result.backupPath)});
     return {ok:true as const,...result,status:pmSyncState()};
   } catch (error) {
     const message=safeErrorMessage(error,[],'The PM workbook could not be synchronized.');
     updatePmSyncState({status:'failed',actor:input.actor,sourcePath:input.sourcePath,originalFilename:input.originalFilename,errorMessage:message});
+    if(input.operationId)updatePmExcelOperation(input.operationId,'failed',{message,errorMessage:message});
     recordPmWorkbookAudit(input.actor,'pm_excel_sync_failed',{originalFilename:input.originalFilename,error:message},message);
     return {ok:false as const,error:message,status:pmSyncState()};
   }
+}
+async function performPmWorkbookSync(input:{actor:User;sourcePath:string;originalFilename:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];operationId?:string;lockHeld?:boolean}) {
+  if(input.lockHeld)return performPmWorkbookSyncUnlocked(input);
+  const release=await acquirePmWorkbookLock();try{return await performPmWorkbookSyncUnlocked(input);}finally{release();}
 }
 function writePmImportSource(buffer:Buffer,sha256:string) {
   const destination=path.join(pmExcelSourceDir,`${sha256}.xlsx`);if (fs.existsSync(destination)) return destination;
@@ -7951,7 +8003,8 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
     historyAdditions.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskType:row.taskType,completionDate:row.completionDate,...matchDetails});historyActions.push({row,assetId:asset.id,taskKey});
   }
   const resolutionRequiredRows=[...new Set(trackerActions.filter(action=>action.decreasingMeter).map(action=>action.rowNumber))].sort((left,right)=>left-right);const importableRows=trackerActions.filter(action=>!action.decreasingMeter).length+historyActions.length;
-  const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,assetResolutions:[...aliasResolutionAudit.values()],confirmEligibility:{importableRows,resolutionRequiredRows,canConfirm:importableRows>0},summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length},sheetNames:parsed.sheetNames};
+  const replacementEligible=parsed.trackerRows.length>0&&conflicts.length===0&&rejectedRows.length===0;
+  const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,assetResolutions:[...aliasResolutionAudit.values()],confirmEligibility:{importableRows,resolutionRequiredRows,...(replacementEligible?{replacementEligible:true}:{}),canConfirm:importableRows>0||replacementEligible},summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length},sheetNames:parsed.sheetNames};
   const stage={token,filename,sha256,buffer,parsed,importedByUserId,previewedAt,trackerActions,trackerSyncActions,historyActions,preview};if(store)pmImportStages.set(token,stage);return stage;
 }
 function pmImportOverrideMap(value:unknown) {
@@ -9059,7 +9112,13 @@ app.delete('/api/machine-library/inspection-records/:id', requireAuth, requirePe
   scheduleAutoBackup('machine inspection record deleted',req.user!);
   res.json({ok:true});
 });
-app.get('/api/pm-excel/status',requireAuth,requirePermission('machine.view'),(_req,res)=>res.json({ok:true,sync:pmSyncState()}));
+app.post('/api/pm-excel/selection',requireAuth,requirePermission('machine.pm_manage'),async(req:AuthRequest,res)=>{
+  const release=await acquirePmWorkbookLock();try{const body=isRecord(req.body)?req.body:{};const requested=String(body.operationId??'').trim();const operationId=/^[0-9a-f-]{36}$/i.test(requested)?requested:crypto.randomUUID();const filename=pmExcelSafeFilename(String(body.filename??'PM_report.xlsx'));beginPmExcelOperation(operationId,filename,req.user!,'preparing');res.json({ok:true,operation:pmExcelOperation(operationId)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'The PM workbook replacement could not be prepared.')});}finally{release();}
+});
+app.post('/api/pm-excel/operations/:operationId/cancel',requireAuth,requirePermission('machine.pm_manage'),async(req:AuthRequest,res)=>{
+  const release=await acquirePmWorkbookLock();try{const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE id=? AND is_current=1 AND created_by_user_id=? AND status='active'",[String(req.params.operationId),req.user!.id]);if(!operation)return res.json({ok:true,operation:pmExcelOperation(String(req.params.operationId))});if(operation.preview_token)pmImportStages.delete(operation.preview_token);updatePmExcelOperation(operation.id,'failed',{message:'Workbook replacement canceled.',errorMessage:''});recordPmWorkbookAudit(req.user!,'pm_excel_operation_canceled',{operationId:operation.id,originalFilename:operation.original_filename});res.json({ok:true,operation:pmExcelOperation(operation.id)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'The PM workbook replacement could not be canceled.')});}finally{release();}
+});
+app.get('/api/pm-excel/status',requireAuth,requirePermission('machine.view'),(req,res)=>{const operationId=typeof req.query.operationId==='string'?req.query.operationId:undefined;res.json({ok:true,sync:pmSyncState(),operation:pmExcelOperation(operationId)});});
 app.get('/api/pm-excel/download',requireAuth,requirePermission('machine.view'),(_req,res)=>{
   if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
   res.setHeader('Content-Type',PM_EXCEL_MIME);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename="PM_report_1.2v.xlsx"');res.sendFile(pmExcelLatestPath);
@@ -9069,26 +9128,34 @@ app.get('/api/pm-excel/package/download',requireAuth,requirePermission('machine.
   try{streamRecoveryArchive(res,`PM_Package_${new Date().toISOString().slice(0,10)}.zip`,appendPmPackageArchive);}
   catch(error){if(!res.headersSent)res.status(500).json({ok:false,error:safeErrorMessage(error,[],'The PM package could not be created.')});else res.destroy(error instanceof Error?error:new Error(String(error)));}
 });
-app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manage'),pmExcelUpload.single('file'),async(req:AuthRequest,res)=>{
+app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manage'),(req:AuthRequest,_res,next)=>{const operationId=String(req.get('X-PM-Operation-Id')??'').trim();const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE id=? AND is_current=1 AND created_by_user_id=? AND status='active'",[operationId,req.user!.id]);if(operation)updatePmExcelOperation(operation.id,'uploading');next();},pmExcelUpload.single('file'),async(req:AuthRequest,res)=>{
+  const release=await acquirePmWorkbookLock();let operationId='';let operationStarted=false;
   try {
     if(!req.file)throw new Error('Choose a PM Excel workbook to preview.');
+    const requestedOperationId=String(req.get('X-PM-Operation-Id')??'').trim();operationId=/^[0-9a-f-]{36}$/i.test(requestedOperationId)?requestedOperationId:crypto.randomUUID();
+    beginPmExcelOperation(operationId,pmExcelSafeFilename(req.file.originalname),req.user!);operationStarted=true;
     if(path.extname(req.file.originalname).toLowerCase()!=='.xlsx')throw new Error('PM synchronization accepts .xlsx workbooks only.');
-    const parsed=await inspectPmWorkbook(req.file.buffer);const stage=buildPmImportStage(parsed,Buffer.from(req.file.buffer),pmExcelSafeFilename(req.file.originalname),req.user!.id);
-    res.json({ok:true,preview:stage.preview});
-  } catch(error) {res.status(400).json({ok:false,error:safeErrorMessage(error,[],'The PM workbook could not be previewed.')});}
+    updatePmExcelOperation(operationId,'validating');const parsed=await inspectPmWorkbook(req.file.buffer);updatePmExcelOperation(operationId,'analyzing');const stage=buildPmImportStage(parsed,Buffer.from(req.file.buffer),pmExcelSafeFilename(req.file.originalname),req.user!.id);
+    updatePmExcelOperation(operationId,'preview_ready',{previewToken:stage.token});
+    res.json({ok:true,preview:stage.preview,operation:pmExcelOperation(operationId)});
+  } catch(error) {const message=operationStarted?failPmExcelOperation(operationId,req.user!,error):safeErrorMessage(error,[],'The PM workbook could not be previewed.');res.status(400).json({ok:false,error:message});}
+  finally{release();}
 });
 app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manage'),async(req:AuthRequest,res)=>{
+  const release=await acquirePmWorkbookLock();let operationId='';
   try {
     cleanupPmImportStages();const body=isRecord(req.body)?req.body:{};const token=String(body.previewToken??'').trim();const requestId=String(req.get('Idempotency-Key')??'').trim();
     if(!/^[0-9a-f-]{36}$/i.test(token))throw new Error('A valid PM import preview token is required.');
     if(!/^[A-Za-z0-9._:-]{8,128}$/.test(requestId))throw new Error('A valid import confirmation request identifier is required.');
     const duplicate=one<{summary_json:string}>('SELECT summary_json FROM pm_excel_imports WHERE confirm_request_id=?',[requestId]);if(duplicate)return res.json({ok:true,duplicatePrevented:true,import:JSON.parse(duplicate.summary_json),sync:pmSyncState()});
     const previewStage=pmImportStages.get(token);if(!previewStage)throw new Error('The PM import preview expired. Upload the workbook and preview it again.');
-    const reparsed=await inspectPmWorkbook(previewStage.buffer);const revalidated=buildPmImportStage(reparsed,previewStage.buffer,previewStage.filename,previewStage.importedByUserId,{token:previewStage.token,previewedAt:previewStage.previewedAt,store:false});const overrides=pmImportOverrideMap(body);
+    const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE preview_token=? AND is_current=1 AND status='active'",[token]);if(!operation)throw new Error('This PM workbook preview was superseded. Upload and preview the workbook again.');operationId=operation.id;
+    updatePmExcelOperation(operationId,'importing');updatePmExcelOperation(operationId,'validating');const reparsed=await inspectPmWorkbook(previewStage.buffer);updatePmExcelOperation(operationId,'analyzing');const revalidated=buildPmImportStage(reparsed,previewStage.buffer,previewStage.filename,previewStage.importedByUserId,{token:previewStage.token,previewedAt:previewStage.previewedAt,store:false});const overrides=pmImportOverrideMap(body);
     const stage={...revalidated,trackerActions:revalidated.trackerActions.filter(action=>!action.decreasingMeter||overrides.has(action.rowNumber))};
-    if(!stage.trackerActions.length&&!stage.historyActions.length)return res.status(409).json({ok:false,error:'This preview contains no valid additions, updates, or PM history rows to import.'});
+    const replacementEligible=Boolean((stage.preview.confirmEligibility as Record<string,unknown>)?.replacementEligible);
+    if(!stage.trackerActions.length&&!stage.historyActions.length&&!replacementEligible)return res.status(409).json({ok:false,error:'This preview contains no valid additions, updates, or PM history rows to import.'});
     const sourcePath=writePmImportSource(stage.buffer,stage.sha256);const timestamp=now();const changedTaskIds:number[]=[];const insertedHistoryIds:Array<{id:number;workbookAssetNumber:string}>=[];let added=0;let updated=0;let historyAdded=0;
-    db.exec('BEGIN IMMEDIATE');
+    updatePmExcelOperation(operationId,'database_update');db.exec('BEGIN IMMEDIATE');
     try {
       for(const action of stage.trackerActions){const row=action.row;const values=pmTaskValuesFromWorkbook(row);let task:PmTaskRow;
         if(action.kind==='addition'){
@@ -9108,9 +9175,10 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
     }catch(error){db.exec('ROLLBACK');throw error;}
     pmImportStages.delete(token);const syncTaskIds=new Set(changedTaskIds);for(const action of revalidated.trackerSyncActions)if(action.taskId!==null)syncTaskIds.add(action.taskId);const trackerUpdates:TrackerWorkbookUpdate[]=[];for(const taskId of syncTaskIds){const task=pmTaskById(taskId);if(!task)continue;const asset=machineAssetById(task.asset_id);if(!asset)continue;const action=revalidated.trackerSyncActions.find(item=>item.taskId===task.id)||(stage.trackerActions.find(item=>item.assetId===task.asset_id&&item.row.intervalType===task.interval_type&&normalizedPmKey(item.row.taskTitle)===normalizedPmKey(task.title)));trackerUpdates.push(pmTrackerUpdate(task,asset.asset_number,action?.row.currentDate??undefined,undefined,asset.asset_name));}
     const historyRows:HistoryWorkbookAppend[]=[];for(const inserted of insertedHistoryIds){const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=?',[inserted.id]);if(!history)continue;const task=pmTaskById(history.pm_task_id);if(task)historyRows.push(pmHistoryWorkbookRow(history,task,inserted.workbookAssetNumber));}
-    const sync=await performPmWorkbookSync({actor:req.user!,sourcePath,originalFilename:stage.filename,trackerUpdates,historyRows});scheduleAutoBackup('PM Excel import confirmed',req.user!);
+    const sync=await performPmWorkbookSync({actor:req.user!,sourcePath,originalFilename:stage.filename,trackerUpdates,historyRows,operationId,lockHeld:true});scheduleAutoBackup('PM Excel import confirmed',req.user!);
     const imported=one<{summary_json:string}>('SELECT summary_json FROM pm_excel_imports WHERE confirm_request_id=?',[requestId])!;res.json({ok:true,import:JSON.parse(imported.summary_json),sync:sync.status,syncError:sync.ok?null:sync.error});
-  }catch(error){const message=safeErrorMessage(error,[],'The PM workbook import could not be confirmed.');res.status(/expired|valid|required/i.test(message)?400:409).json({ok:false,error:message});}
+  }catch(error){const message=operationId?failPmExcelOperation(operationId,req.user!,error):safeErrorMessage(error,[],'The PM workbook import could not be confirmed.');res.status(/expired|valid|required/i.test(message)?400:409).json({ok:false,error:message});}
+  finally{release();}
 });
 app.post('/api/pm-excel/sync/retry',requireAuth,requirePermission('machine.pm_manage'),async(req:AuthRequest,res)=>{try{const sync=await retryPmWorkbookSync(req.user!);res.status(sync.ok?200:500).json({ok:sync.ok,sync:sync.status,...(!sync.ok?{error:sync.error}:{})});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'PM workbook synchronization could not be retried.')});}});
 

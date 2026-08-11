@@ -596,6 +596,10 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .pm-action-spinner,.pm-action-button-spinner { flex:0 0 auto; width:18px; height:18px; border:2px solid rgba(181,248,220,.25); border-top-color:#83efbd; border-radius:50%; animation:pm-action-spin .75s linear infinite; }
 .pm-action-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
 .pm-action-button-spinner { width:14px; height:14px; }
+.pm-excel-operation-progress { min-width:0; display:flex; align-items:center; gap:11px; margin:12px 0; padding:11px 13px; border:1px solid rgba(68,215,255,.32); border-radius:15px; color:#e4f8ff; background:linear-gradient(135deg,rgba(10,63,84,.58),rgba(5,28,43,.7)); box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 20px rgba(68,215,255,.07); animation:pm-progress-enter .18s ease-out both; }
+.pm-excel-operation-progress > span:last-child { min-width:0; display:grid; gap:2px; }
+.pm-excel-operation-progress strong { color:#ecfbff; font-size:.82rem; line-height:1.25; }
+.pm-excel-operation-progress small { color:#9ecddd; font-size:.7rem; line-height:1.3; }
 .pm-task-grid { transition:opacity .18s ease,filter .18s ease; }
 .pm-task-grid--refreshing { opacity:.72; filter:saturate(.82); pointer-events:none; }
 .dashboard-pm-interval--hourly,.dashboard-pm-detail-item--hourly strong { color:#a8f2cd !important; text-shadow:0 0 12px rgba(70,223,153,.17); }

@@ -423,6 +423,10 @@ function ensureWorksheetRow(xml:string,rowNumber:number,templateRowNumber:number
   let insertAt=sheetDataEnd;for(const match of xml.slice(0,sheetDataEnd).matchAll(/<row\b[^>]*\br="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)){if(Number(match[1])>rowNumber){insertAt=match.index??insertAt;break;}}
   return `${xml.slice(0,insertAt)}${rowXml}${xml.slice(insertAt)}`;
 }
+function stripPmHistoryHelperCells(xml:string,rowNumber:number){
+  const rowMatch=rowXmlPattern(rowNumber).exec(xml);if(!rowMatch)return xml;const rowXml=rowMatch[0].replace(/<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g,(cell,address)=>cellColumnNumber(address)>10?'':cell);
+  return `${xml.slice(0,rowMatch.index)}${rowXml}${xml.slice((rowMatch.index??0)+rowMatch[0].length)}`;
+}
 function setWorksheetCell(xml:string,address:string,value:unknown,date1904:boolean,templateAddress?:string,replaceFormula=false){
   const rowNumber=Number(/\d+$/.exec(address)?.[0]??0);const rowMatch=rowXmlPattern(rowNumber).exec(xml);if(!rowMatch)throw new Error(`Worksheet row ${rowNumber} is unavailable.`);let rowXml=rowMatch[0];const existing=cellXmlPattern(address).exec(rowXml)?.[0];if(existing&&/<f\b/i.test(existing)&&!replaceFormula)return {xml,changed:false};
   let opening=existing?.match(/^<c\b[^>]*\/?\s*>/)?.[0]??'';
@@ -652,7 +656,7 @@ function lastHistoryDataRow(sheet:ExcelJS.Worksheet,header:HeaderMap<HistoryFiel
   return header.rowNumber;
 }
 
-export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];beforeReplace?:()=>void|Promise<void>}) {
+export async function synchronizePmWorkbook(input:{sourcePath:string;destinationPath:string;backupDir:string;trackerUpdates:TrackerWorkbookUpdate[];trackerRemovals?:TrackerWorkbookRemoval[];historyRows:HistoryWorkbookAppend[];beforeReplace?:()=>void|Promise<void>;onStage?:(stage:'backing_up'|'replacing_active_workbook'|'verifying')=>void|Promise<void>}) {
   const sourcePath=path.resolve(input.sourcePath);const destinationPath=path.resolve(input.destinationPath);const backupDir=path.resolve(input.backupDir);
   if (!fs.existsSync(sourcePath)||!fs.statSync(sourcePath).isFile()) throw new Error('The synchronized PM workbook source is unavailable.');
   fs.mkdirSync(path.dirname(destinationPath),{recursive:true});fs.mkdirSync(backupDir,{recursive:true});
@@ -715,7 +719,7 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
       const base={...row,rowNumber:0,sourceRef:''};
       const sourceRef=historySourceRef({assetNumber:base.assetNumber,workOrderNumber:base.workOrderNumber,taskStatus:base.taskStatus,startDate:base.startDate,completionDate:base.completionDate,workOrderType:base.workOrderType,performedBy:base.performedBy,intervalType:base.intervalType,taskType:base.taskType,taskNote:base.taskNote});
       if (existing.has(`ref:${sourceRef}`)) continue;
-      const rowNumber=previousHistoryRow+1;historyXml=ensureWorksheetRow(historyXml,rowNumber,previousHistoryRow>historyHeader.rowNumber?previousHistoryRow:null);
+      const rowNumber=previousHistoryRow+1;historyXml=ensureWorksheetRow(historyXml,rowNumber,previousHistoryRow>historyHeader.rowNumber?previousHistoryRow:null);historyXml=stripPmHistoryHelperCells(historyXml,rowNumber);
       const values:Record<HistoryField,unknown>={assetNumber:row.assetNumber,workOrderNumber:row.workOrderNumber,taskStatus:row.taskStatus,startDate:workbookValue(row.startDate,true),completionDate:workbookValue(row.completionDate,true),workOrderType:row.workOrderType,performedBy:row.performedBy,intervalType:row.intervalType==='cycles'?'Cycles':row.intervalType[0].toUpperCase()+row.intervalType.slice(1),taskType:row.taskType,taskNote:row.taskNote};
       for(const [field,column] of Object.entries(historyHeader.columns) as Array<[HistoryField,number]>){const address=history.getCell(rowNumber,column).address;const templateAddress=history.getCell(previousHistoryRow,column).address;const patched=setWorksheetCell(historyXml,address,values[field],date1904,templateAddress);if(!patched.changed)throw new Error(`PMHistory ${address} cannot be updated because it contains a protected formula.`);historyXml=patched.xml;}
       if(row.workOrderHyperlink)historyXml=await addWorksheetExternalHyperlink(zip,historyPart,historyXml,history.getCell(rowNumber,historyHeader.columns.workOrderNumber).address,row.workOrderHyperlink);
@@ -725,13 +729,20 @@ export async function synchronizePmWorkbook(input:{sourcePath:string;destination
     const generated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});await validatePmWorkbookOoxml(generated,formulaExpectations);const parsedValidation=await inspectPmWorkbook(generated);for(const update of input.trackerUpdates){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===update.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(update.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(update.assetNumber));const alias=strictPressNumberAlias(update.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length!==1)throw new Error(`Workbook validation failed for ${update.assetNumber} / ${update.taskTitle}: expected exactly one synchronized tracker row.`);}for(const removal of input.trackerRemovals??[]){const matching=parsedValidation.trackerRows.filter(row=>row.intervalType===removal.intervalType&&normalizedPmKey(row.taskTitle)===normalizedPmKey(removal.taskTitle));const exact=matching.filter(row=>normalizedPmKey(row.assetNumber)===normalizedPmKey(removal.assetNumber));const alias=strictPressNumberAlias(removal.assetNumber);const resolved=exact.length?exact:alias?matching.filter(row=>strictPressNumberAlias(row.assetNumber)===alias):[];if(resolved.length)throw new Error(`Workbook validation failed for ${removal.assetNumber} / ${removal.taskTitle}: deleted tracker row is still present.`);}fs.writeFileSync(temporaryPath,generated,{flag:'wx'});
     const validation=new ExcelJS.Workbook();await validation.xlsx.readFile(temporaryPath);
     if (!validation.getWorksheet(PM_TRACKER_SHEET)||!validation.getWorksheet(PM_HISTORY_SHEET)) throw new Error('Workbook validation failed after synchronization.');
-    if (input.beforeReplace) await input.beforeReplace();
+    if (input.beforeReplace) await input.beforeReplace();await input.onStage?.('backing_up');
     if (fs.existsSync(destinationPath)) {
       const stamp=new Date().toISOString().replace(/[:.]/g,'-');backupPath=path.join(backupDir,`PM_report_${stamp}_${crypto.randomUUID().slice(0,8)}.xlsx`);
       fs.renameSync(destinationPath,backupPath);destinationMoved=true;
     }
-    try { fs.renameSync(temporaryPath,destinationPath); }
-    catch (error) { if (destinationMoved&&backupPath&&fs.existsSync(backupPath)&&!fs.existsSync(destinationPath)) fs.renameSync(backupPath,destinationPath);throw error; }
+    try {
+      await input.onStage?.('replacing_active_workbook');fs.renameSync(temporaryPath,destinationPath);await input.onStage?.('verifying');
+      const promoted=fs.readFileSync(destinationPath);await validatePmWorkbookOoxml(promoted);await inspectPmWorkbook(promoted);
+    }
+    catch (error) {
+      if(destinationMoved&&backupPath&&fs.existsSync(backupPath)){if(fs.existsSync(destinationPath))fs.rmSync(destinationPath,{force:true});fs.renameSync(backupPath,destinationPath);}
+      else if(!destinationMoved&&fs.existsSync(destinationPath))fs.rmSync(destinationPath,{force:true});
+      throw error;
+    }
     return {changedCells,appendedHistory,backupPath};
   } finally { if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath,{force:true}); }
 }

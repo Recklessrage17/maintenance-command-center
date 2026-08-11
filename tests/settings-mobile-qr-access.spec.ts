@@ -216,11 +216,20 @@ test('desktop, tablet, and mobile layouts keep the QR trigger integrated without
 
   for (const viewport of [{width:820,height:900},{width:390,height:844}]) {
     await page.setViewportSize(viewport);
-    const compactTrigger = await trigger.boundingBox();
-    const compactGroup = await controlGroup.boundingBox();
-    const compactHost = await hostCard.boundingBox();
-    const compactLan = await lanCard.boundingBox();
-    const compactMobile = await mobileCard.boundingBox();
+    const compactGeometry = await page.evaluate(()=>{
+      const bounds = (selector:string)=>{
+        const rect = document.querySelector(selector)?.getBoundingClientRect();
+        return rect ? {x:rect.x,y:rect.y,width:rect.width,height:rect.height} : null;
+      };
+      return {
+        trigger:bounds('.mobile-qr-trigger'),
+        group:bounds('.mobile-access-control-group'),
+        host:bounds('.network-host-panel'),
+        lan:bounds('.network-lan-panel'),
+        mobile:bounds('.mobile-access-panel'),
+      };
+    });
+    const {trigger:compactTrigger,group:compactGroup,host:compactHost,lan:compactLan,mobile:compactMobile} = compactGeometry;
     expect(compactTrigger!.width).toBeGreaterThanOrEqual(58);
     expect(compactTrigger!.width).toBeLessThanOrEqual(60);
     expect(compactTrigger!.height).toBeGreaterThanOrEqual(58);

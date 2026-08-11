@@ -15,13 +15,17 @@ The synchronized tracker supports `Hourly`, `Cycle` / `Cycles`, `Days`, and `Ann
 
 `PMHistory` work-order numbers are not globally unique. Imported row identity uses a composite source hash containing the asset, task, interval, dates, work order, status, performer, type, and note. MCC completions use their completion request ID. This preserves multiple valid task rows under one work order while blocking exact repeated imports and submissions.
 
+The officially supported `PMHistory` layout is the simplified ten-column A:J contract: Asset Number, Work-order Number, Task Status, Start Date, End/Completion Date, Work-order Type, Performed By, Interval Type, Task Type, and Task Note. Legacy workbooks may retain existing Helper 1-10 columns as historical content, but MCC never creates, copies, or extends those helper formulas. New history rows remain formula-free beyond column J, preventing legacy `K6 #REF!` failures from being reintroduced.
+
 ## Controlled workflow
 
-1. An authorized maintenance user selects an `.xlsx` workbook.
-2. **Preview Changes** validates both required sheets and reports additions, updates, inherited machine sections, history additions, conflicts, warnings, and rejected rows. Preview state is held in memory for 30 minutes and does not write PM or audit data.
-3. **Import Valid Rows** requires an explicit preview token and idempotency key. The backend reparses the server-held workbook and rebuilds the action plan against current MCC data before opening the transaction. Rejected and unresolved conflicting rows are skipped; valid, unambiguous rows remain importable. Decreasing-meter rows are imported only when supplied with a replacement/correction/override type and meaningful audit reason.
+1. An authorized maintenance user selects an `.xlsx` workbook. Selection starts a replacement operation, invalidates any older preview token, and separates the new operation status from a previous workbook's synchronization failure.
+2. **Preview Changes** stages the upload without touching the active workbook, validates both required sheets, and reports additions, updates, inherited machine sections, history additions, conflicts, warnings, and rejected rows. Preview state is held in memory for 30 minutes and does not write PM or audit data.
+3. **Import Valid Rows** requires an explicit preview token and idempotency key. The backend reparses the server-held workbook and rebuilds the action plan against current MCC data before opening the transaction. Rejected and unresolved conflicting rows are skipped; valid, unambiguous rows remain importable. Decreasing-meter rows are imported only when supplied with a replacement/correction/override type and meaningful audit reason. A fully valid no-change workbook may still replace the active workbook.
 4. Valid changes are committed to SQLite in one transaction and audited with both the previewing importer and confirming user IDs.
-5. Workbook synchronization runs after the database transaction. Failure does not roll back MCC data; the status becomes failed and the UI exposes **Retry Sync**.
+5. Workbook synchronization runs after the database transaction. The previous active workbook is backed up only after the staged replacement passes validation. MCC atomically promotes the staged workbook, verifies the promoted file, and restores the previous active workbook if promotion or final verification fails. Database data remains authoritative if a later workbook synchronization fails.
+
+Each replacement has persistent operation metadata with a current stage and message. Stages cover preparing, uploading, validating, analyzing, preview ready, importing, database update, workbook synchronization, backup, active-workbook replacement, verification, success, and failure. The PM Excel card polls an active operation about every 2.5 seconds, displays its current message, locks conflicting controls, refreshes PM data after success, and stops polling at success or failure. Superseded and failed records remain available for audit history even though their stale error text is not shown as the status of a newer workbook.
 
 PM completion uses the same post-transaction synchronization boundary and a unique completion request ID. Repeated requests return the original completion instead of appending another MCC or `PMHistory` row. Manual in-app edits use the prior task title and interval as the workbook match, then update only mapped non-formula task, interval, baseline/current, due, remaining, and status cells on that row.
 
@@ -31,11 +35,13 @@ The implementation parses workbook semantics with the existing Linux-compatible 
 
 Runtime files default to `backend/data/pm-excel` and may be relocated with `MCC_PM_EXCEL_DIR`. That directory contains:
 
-- `PM_report_latest.xlsx` — the downloadable synchronized workbook
+- `PM_report_latest.xlsx` — the only active/downloadable synchronized workbook
 - `sources/` — accepted import source versions used for recovery/retry
 - `backups/` — prior known-good synchronized workbooks
 
-For each write, MCC patches only approved cell XML inside a private ZIP copy of the original package. Existing formulas are not replaced. Prepared Helper 1–10 formulas/styles are left untouched; when a genuinely new history row is needed beyond prepared rows, the prior row template and table boundary are extended. All unrelated worksheet and package parts remain byte-for-byte unchanged. MCC then reopens and validates the temporary workbook, moves the prior synchronized workbook to a versioned backup, and renames the validated file into place. If replacement fails after the prior file is moved, MCC restores the backup.
+For each write, MCC patches only approved cell XML inside a private ZIP copy of the original package. Existing tracker formulas are not replaced. PM history writes target only A:J and do not propagate legacy Helper 1-10 formulas. All unrelated worksheet and package parts remain byte-for-byte unchanged. MCC validates the temporary workbook, moves the prior synchronized workbook to a versioned backup, renames the validated file into place, and verifies the promoted workbook. If replacement or verification fails after the prior file is moved, MCC restores the backup.
+
+All workbook-changing operations use one serialized backend workflow. Concurrent imports, replacements, PM completions, meter updates, and retries cannot overwrite one another.
 
 ## Cross-platform behavior
 
@@ -49,4 +55,4 @@ Runtime filesystem locations are composed with Node's `path` APIs from `MCC_DATA
 
 Tracker rows must resolve to exactly one normalized inherited-or-explicit machine identifier + PM Task + Interval Type row. Imported tasks resolve to exactly one active machine asset and one existing MCC PM task with the same normalized title and interval type. A same-title interval mismatch is reported as a conflict and that row is skipped instead of creating a duplicate schedule. Zero or multiple workbook matches are also skipped so an uncertain row is never written, while unrelated valid rows can still be imported.
 
-The production workbook is a private development reference and is not committed. Automated coverage uses `tests/fixtures/pm-report-sanitized.xlsx`, which mirrors repeated grouped machine blocks, real headers, Hourly/Cycle/Days/Annual 365 rows, repeated work orders, preformatted Helper 1–10 columns, and an unrelated preservation sheet. The private production reference is also exercised locally to verify all 67 tracker tasks are recognized and only the two approved worksheet XML parts change during a targeted synchronization.
+The production workbook is a private development reference and is not committed. Automated coverage uses `tests/fixtures/pm-report-sanitized.xlsx`, which mirrors repeated grouped machine blocks, real headers, Hourly/Cycle/Days/Annual 365 rows, repeated work orders, legacy helper columns, and an unrelated preservation sheet. Tests also generate an official simplified A:J-only `PMHistory` workbook and verify MCC never adds Helper columns or formulas. The private production reference is also exercised locally to verify all 67 tracker tasks are recognized and only the two approved worksheet XML parts change during a targeted synchronization.
