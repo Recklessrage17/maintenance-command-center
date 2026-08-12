@@ -15,6 +15,7 @@
     "test:system-version-api": "node tests/system-version-api.mjs",
     "test:system-version": "playwright test tests/settings-system-version.spec.ts",
     "test:mobile-qr": "playwright test tests/settings-mobile-qr-access.spec.ts",
+    "test:network-access": "npm run build --prefix backend && node tests/network-access-url-generation.mjs",
     "test:system-update-service": "npm run build --prefix backend && node tests/system-update-service.mjs",
     "test:system-update-api": "npm run build --prefix backend && node tests/system-update-api.mjs",
     "test:system-update-runner": "node tests/system-update-runner-validation.mjs",

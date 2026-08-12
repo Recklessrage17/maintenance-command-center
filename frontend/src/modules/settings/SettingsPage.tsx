@@ -3,10 +3,12 @@ import { QRCodeSVG } from 'qrcode.react';
 import { withJsonRequestDefaults } from '../../apiRequest';
 
 type NetworkLinks = {
-  localPort: number;
-  localhostUrl: string;
-  detectedLanUrls: string[];
-  primaryLanUrl: string | null;
+  accessMode?: 'https' | 'development';
+  canonicalUrl?: string | null;
+  localPort?: number | null;
+  localhostUrl?: string | null;
+  detectedLanUrls?: string[];
+  primaryLanUrl?: string | null;
 };
 
 type SystemVersionMetadata = {
@@ -580,15 +582,40 @@ function selectPrimaryLanUrl(links:NetworkLinks|null) {
   return candidates.map(value=>value?.trim() ?? '').find(isUsableLanUrl) ?? '';
 }
 
+function isCanonicalHttpsUrl(value:string|undefined|null) {
+  if (!value?.trim()) return false;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'https:'
+      && parsed.hostname.toLowerCase().endsWith('.local')
+      && !parsed.port
+      && parsed.pathname === '/'
+      && !parsed.username
+      && !parsed.password
+      && !parsed.search
+      && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
+function selectSharedNetworkUrl(links:NetworkLinks|null) {
+  if (links?.accessMode === 'https') {
+    return isCanonicalHttpsUrl(links.canonicalUrl) ? links.canonicalUrl!.trim() : '';
+  }
+  return selectPrimaryLanUrl(links);
+}
+
 const qrWrenchBadge = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11.5" fill="#fff" stroke="#d7e7ee"/><path d="M14.7 5.3a4.5 4.5 0 0 0-5.5 5.5l-4.4 4.4a2.3 2.3 0 1 0 3.2 3.2l4.4-4.4a4.5 4.5 0 0 0 5.5-5.5l-2.7 2.7-2.4-.6-.6-2.4 2.5-2.9Z" fill="#07141d"/></svg>')}`;
 
-function MobileLanAccess({url,onCopied,onQrOpen}:{url:string;onCopied:(value:string)=>void;onQrOpen:()=>void}) {
+function MobileLanAccess({url,httpsAccess,onCopied,onQrOpen}:{url:string;httpsAccess:boolean;onCopied:(value:string)=>void;onQrOpen:()=>void}) {
   return (
     <section className={`network-link-panel mobile-access-panel${url ? '' : ' is-unavailable'}`} aria-label="Mobile and tablet network access">
       <div className="mobile-access-copy">
         <span>Mobile / Tablet</span>
         <strong>Phone or tablet URL</strong>
-        <p>Use this on phone/tablet when connected to the same Wi-Fi/network. Do not use cellular data.</p>
+        <p>{httpsAccess ? 'Use the canonical HTTPS address while connected to the same Wi-Fi/network.' : 'Use this on phone/tablet when connected to the same Wi-Fi/network. Do not use cellular data.'}</p>
+        {httpsAccess&&<p className="form-help">This device must trust the MCC CA when the site uses the internal-CA deployment.</p>}
         <div className={`mobile-access-control-group${url ? '' : ' is-unavailable'}`}>
           {url
             ? <CopyUrl url={url} onCopied={onCopied} />
@@ -623,7 +650,7 @@ function MobileQrTrigger({url,onOpen}:{url:string;onOpen:()=>void}) {
   );
 }
 
-function MobileQrModal({url,refreshing,onCopied,onRefresh,onClose}:{url:string;refreshing:boolean;onCopied:(value:string)=>void;onRefresh:()=>void;onClose:()=>void}) {
+function MobileQrModal({url,httpsAccess,refreshing,onCopied,onRefresh,onClose}:{url:string;httpsAccess:boolean;refreshing:boolean;onCopied:(value:string)=>void;onRefresh:()=>void;onClose:()=>void}) {
   const closeRef = useRef<HTMLButtonElement|null>(null);
   const qrLabel = `QR code to open Maintenance Command Center at ${url}`;
   useEffect(()=>{
@@ -666,6 +693,7 @@ function MobileQrModal({url,refreshing,onCopied,onRefresh,onClose}:{url:string;r
         </div>
         <p className="mobile-qr-modal-helper">Scan while connected to the same plant Wi-Fi/network.</p>
         <p className="mobile-qr-modal-warning">Wi-Fi/network access is required. Do not use cellular data.</p>
+        {httpsAccess&&<p className="form-help">The phone or tablet must trust the MCC CA when using the internal-CA deployment.</p>}
         <CopyUrl url={url} onCopied={onCopied} />
         <div className="modal-actions mobile-qr-modal-actions">
           <button className="secondary-button" type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? 'Checking...' : 'Refresh network links'}</button>
@@ -706,11 +734,13 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [resetStatus,setResetStatus]=useState<ResetStatus|null>(null);
   const [resetMsg,setResetMsg]=useState('');
   const [resetModal,setResetModal]=useState<ResetModalState|null>(null);
-  const detectedLanUrls = links?.detectedLanUrls ?? [];
-  const primaryLanUrl = selectPrimaryLanUrl(links);
+  const httpsAccess = links?.accessMode === 'https';
+  const detectedLanUrls = httpsAccess ? [] : links?.detectedLanUrls ?? [];
+  const sharedNetworkUrl = selectSharedNetworkUrl(links);
+  const hostUrl = httpsAccess ? sharedNetworkUrl : links?.localhostUrl?.trim() ?? '';
   useEffect(()=>{
-    if (!primaryLanUrl) setMobileQrOpen(false);
-  },[primaryLanUrl]);
+    if (!sharedNetworkUrl) setMobileQrOpen(false);
+  },[sharedNetworkUrl]);
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
   const resetConfigs = useMemo<ResetConfig[]>(()=>[
@@ -1267,7 +1297,9 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
           <div>
             <span>Network access</span>
             <strong>Share MCC to another device</strong>
-            <p>MCC runs on port {links?.localPort ?? 4273}. Use these links only on devices connected to the same plant network.</p>
+            <p>{httpsAccess
+              ? 'Use the canonical HTTPS address on the plant LAN. Client access is through HTTPS ports 80/443; Node remains loopback-only.'
+              : `Development access uses the local Node service${links?.localPort ? ` on port ${links.localPort}` : ''}.`}</p>
           </div>
           <button className="secondary-button compact-button" type="button" onClick={loadLinks} disabled={loading}>{loading ? 'Checking...' : 'Refresh network links'}</button>
         </div>
@@ -1276,21 +1308,21 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
           <section className="network-link-panel network-url-panel network-host-panel">
             <span>This MCC computer</span>
             <strong>Host PC URL</strong>
-            <p>Use this only on the MCC host computer.</p>
-            {links&&<CopyUrl url={links.localhostUrl} onCopied={value=>setMsg(`Copied ${value}`)} />}
+            <p>{httpsAccess ? 'Use the same trusted HTTPS address on the MCC host.' : 'Use this only on the MCC host computer.'}</p>
+            {hostUrl&&<CopyUrl url={hostUrl} onCopied={value=>setMsg(`Copied ${value}`)} />}
           </section>
 
           <section className="network-link-panel network-url-panel network-lan-panel">
             <span>Other PC on same network</span>
             <strong>Other PC URL</strong>
-            <p>Use this from another Windows PC on the same network.</p>
-            {primaryLanUrl ? <CopyUrl url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">No network IP detected. Open Command Prompt and run ipconfig, then use IPv4 Address with port 4273.</p>}
+            <p>{httpsAccess ? 'The Windows PC must trust the MCC internal CA or receive it through Group Policy.' : 'Use this from another PC on the same development network.'}</p>
+            {sharedNetworkUrl ? <CopyUrl url={sharedNetworkUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">{httpsAccess ? 'The canonical HTTPS hostname is unavailable. Check MCC_HTTPS_HOSTNAME on the server.' : 'No development LAN URL is currently available.'}</p>}
           </section>
 
-          <MobileLanAccess url={primaryLanUrl} onCopied={value=>setMsg(`Copied ${value}`)} onQrOpen={()=>setMobileQrOpen(true)} />
+          <MobileLanAccess url={sharedNetworkUrl} httpsAccess={httpsAccess} onCopied={value=>setMsg(`Copied ${value}`)} onQrOpen={()=>setMobileQrOpen(true)} />
         </div>
 
-        {links&&detectedLanUrls.length>1&&(
+        {!httpsAccess&&links&&detectedLanUrls.length>1&&(
           <section className="network-link-panel">
             <span>Detected network URLs</span>
             <strong>All detected LAN links</strong>
@@ -1306,16 +1338,19 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             <li>MCC computer must stay on.</li>
             <li>MCC Website must be running.</li>
             <li>Other devices must be on same network/Wi-Fi.</li>
-            <li>If it does not open, Windows Firewall may need port 4273 allowed.</li>
+            {httpsAccess&&<li>LAN browser access is served by HTTPS on standard ports 80/443; Node ports are not exposed.</li>}
+            {httpsAccess&&<li>Windows PCs must trust the MCC internal CA or receive it through GPO.</li>}
+            {httpsAccess&&<li>Phones and tablets must trust the MCC CA on that device when using the internal-CA deployment.</li>}
           </ul>
         </section>
 
         {msg&&<p className="form-message">{msg}</p>}
       </article>
 
-      {mobileQrOpen&&primaryLanUrl&&(
+      {mobileQrOpen&&sharedNetworkUrl&&(
         <MobileQrModal
-          url={primaryLanUrl}
+          url={sharedNetworkUrl}
+          httpsAccess={httpsAccess}
           refreshing={loading}
           onCopied={value=>setMsg(`Copied ${value}`)}
           onRefresh={loadLinks}

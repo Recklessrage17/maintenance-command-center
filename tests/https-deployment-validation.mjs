@@ -24,6 +24,7 @@ assert.match(httpsEnvironment, /^MCC_HTTPS_HOSTNAME=mcc\.local$/m);
 assert.match(httpsEnvironment, /^MCC_HTTPS_UPSTREAM=127\.0\.0\.1:4273$/m);
 assert.doesNotMatch(httpsEnvironment, /^MCC_HTTPS_UPSTREAM=(?!127\.0\.0\.1:)/m, 'Example upstream must remain on IPv4 loopback.');
 assert.match(caddyDropIn, /^EnvironmentFile=\/etc\/mcc-https\.env$/m);
+assert.match(mccDropIn, /^EnvironmentFile=\/etc\/mcc-https\.env$/m, 'Node must consume the same canonical hostname configuration as Caddy.');
 assert.match(mccDropIn, /^Environment=MCC_BIND_HOST=127\.0\.0\.1$/m);
 
 assert.match(backend, /app\.set\('trust proxy', 'loopback'\)/, 'Express must trust proxy headers only from loopback.');
@@ -34,6 +35,11 @@ assert.match(rootInstaller, /ComputeHash\(\$certificate\.RawData\)/, 'CA install
 assert.match(rootInstaller, /StoreLocation\]::LocalMachine/, 'CA trust must be machine-wide for managed Windows clients.');
 assert.match(rootInstaller, /CertificateAuthority/, 'CA installer must reject non-CA certificates.');
 assert.doesNotMatch(rootInstaller + clientCheck, /DangerousAcceptAnyServerCertificateValidator|ServerCertificateCustomValidationCallback|--insecure|-k\b/, 'Client tooling must never bypass certificate validation.');
+assert.match(clientCheck, /Add-Type -AssemblyName System\.Net\.Http/, 'Windows PowerShell 5.1 must load System.Net.Http explicitly.');
+assert.ok(
+  clientCheck.indexOf('Add-Type -AssemblyName System.Net.Http') < clientCheck.indexOf('[Net.Http.HttpClientHandler]'),
+  'System.Net.Http must load before HttpClientHandler is referenced.',
+);
 assert.match(clientCheck, /https:\/\/\$Hostname\/api\/health/, 'Client verification must exercise the HTTPS health route.');
 assert.match(clientCheck, /301, 302, 307, 308/, 'Client verification must require an HTTP redirect.');
 assert.match(piValidator, /MCC_HTTPS_HOSTNAME.*\\\.local/, 'Pi validator must require the supported .local trust model.');

@@ -18,6 +18,7 @@ import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpe
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { safeDocumentDisplayName, sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
 import { createPmMachineAssetResolver } from './pmAssetResolver.js';
+import { canonicalHttpsUrl } from './networkAccess.js';
 import { createPmWorkOrderStorage, DEFAULT_PM_WORK_ORDER_MAX_BYTES, PM_WORK_ORDER_DIRECTORY_NAME, PM_WORK_ORDER_MIME, validatePmFollowUp, validatePmWorkOrderNumber, type StagedPmWorkOrder, type StoredPmWorkOrder } from './pmWorkOrders.js';
 import {
   PM_EXCEL_MIME,
@@ -76,6 +77,7 @@ const bindHost = process.env.MCC_BIND_HOST?.trim() || '0.0.0.0';
 app.set('trust proxy', 'loopback');
 const configuredPort = Number(process.env.PORT ?? 4273);
 const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 4273;
+const canonicalSharedUrl = canonicalHttpsUrl(process.env.MCC_HTTPS_HOSTNAME);
 const appName = 'Maintenance Command Center';
 function readApplicationVersion() {
   try {
@@ -10357,8 +10359,17 @@ app.post('/api/admin/reset/section', requireAuth, requireOwnerAdmin, (req:AuthRe
   }
 });
 app.get('/api/settings/network-links', requireAuth, requirePermission('settings.view'), (_req,res)=>{
+  if (canonicalSharedUrl) {
+    res.json({
+      accessMode: 'https',
+      canonicalUrl: canonicalSharedUrl,
+    });
+    return;
+  }
   const lanUrls = detectedLanUrls();
   res.json({
+    accessMode: 'development',
+    canonicalUrl: null,
     localPort: port,
     localhostUrl: `http://localhost:${port}`,
     detectedLanUrls: lanUrls,

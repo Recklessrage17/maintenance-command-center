@@ -12,6 +12,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Add-Type -AssemblyName System.Net.Http
+
 $handler = [Net.Http.HttpClientHandler]::new()
 $handler.AllowAutoRedirect = $false
 $client = [Net.Http.HttpClient]::new($handler)

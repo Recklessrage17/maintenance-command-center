@@ -1,14 +1,17 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 type NetworkLinks = {
-  localPort: number;
-  localhostUrl: string;
-  detectedLanUrls: string[];
-  primaryLanUrl: string | null;
+  accessMode?: 'https' | 'development';
+  canonicalUrl?: string | null;
+  localPort?: number | null;
+  localhostUrl?: string | null;
+  detectedLanUrls?: string[];
+  primaryLanUrl?: string | null;
 };
 
+const stagingUrl = 'https://mcc-stage.local';
+const productionUrl = 'https://mcc.local';
 const lanUrl = 'http://10.1.2.188:4273';
-const refreshedLanUrl = 'http://10.1.2.199:4273';
 const user = {
   id: 71,
   fullName: 'Issue 71 Fixture',
@@ -43,7 +46,11 @@ async function mockSettings(page:Page,networkResponses:NetworkLinks[]) {
 }
 
 function links(primaryLanUrl:string|null,detectedLanUrls:string[] = primaryLanUrl ? [primaryLanUrl] : []):NetworkLinks {
-  return {localPort:4273,localhostUrl:'http://localhost:4273',detectedLanUrls,primaryLanUrl};
+  return {accessMode:'development',canonicalUrl:null,localPort:4273,localhostUrl:'http://localhost:4273',detectedLanUrls,primaryLanUrl};
+}
+
+function httpsLinks(canonicalUrl:string):NetworkLinks {
+  return {accessMode:'https',canonicalUrl};
 }
 
 function mobilePanel(page:Page) {
@@ -66,17 +73,27 @@ async function expectNoHorizontalOverflow(page:Page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 }
 
-test('starts compact, then opens a local accessible QR with the displayed LAN URL', async ({page})=>{
+test('staging uses one canonical HTTPS value for display, copy, and QR without exposing Node ports', async ({page})=>{
   const externalRequests:string[] = [];
   page.on('request',request=>{
     const hostname = new URL(request.url()).hostname;
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') externalRequests.push(request.url());
   });
-  await mockSettings(page,[links(lanUrl)]);
+  await mockSettings(page,[httpsLinks(stagingUrl)]);
   await page.goto('/settings');
 
   const displayedUrl = mobilePanel(page).locator('.share-url-row code');
-  await expect(displayedUrl).toHaveText(lanUrl);
+  await expect(displayedUrl).toHaveText(stagingUrl);
+  await expect(page.locator('.network-host-panel .share-url-row code')).toHaveText(stagingUrl);
+  await expect(page.locator('.network-lan-panel .share-url-row code')).toHaveText(stagingUrl);
+  const networkCard = page.locator('.share-card').filter({hasText:'Network access'});
+  await expect(networkCard).toContainText('HTTPS ports 80/443');
+  await expect(networkCard).toContainText('Node remains loopback-only');
+  await expect(networkCard).toContainText('Windows PCs must trust the MCC internal CA or receive it through GPO.');
+  await expect(networkCard).toContainText('Phones and tablets must trust the MCC CA on that device');
+  await expect(networkCard).not.toContainText('4273');
+  await expect(networkCard).not.toContainText('4274');
+  await expect(networkCard).not.toContainText('Windows Firewall');
   await expect(qrTrigger(page)).toBeVisible();
   await expect(mobilePanel(page).locator('.mobile-access-control-group').getByRole('button',{name:'Show mobile access QR code'})).toBeVisible();
   await expect(qrTrigger(page)).toHaveAttribute('title','Show mobile QR code');
@@ -86,21 +103,22 @@ test('starts compact, then opens a local accessible QR with the displayed LAN UR
   const dialog = qrDialog(page);
   const qr = dialog.locator('svg[role="img"]');
   await expect(dialog).toBeVisible();
-  await expect(qr).toHaveAttribute('data-qr-payload',lanUrl);
+  await expect(qr).toHaveAttribute('data-qr-payload',stagingUrl);
   await expect(qr).toHaveAttribute('data-qr-size','176');
   await expect(qr).toHaveAttribute('data-qr-level','H');
   await expect(qr).toHaveAttribute('data-qr-brand','wrench');
   await expect(qr.locator('image')).toHaveCount(1);
-  await expect(qr).toHaveAttribute('aria-label',`QR code to open Maintenance Command Center at ${lanUrl}`);
+  await expect(qr).toHaveAttribute('aria-label',`QR code to open Maintenance Command Center at ${stagingUrl}`);
   await expect(dialog).toContainText('Scan while connected to the same plant Wi-Fi/network.');
   await expect(dialog).toContainText('Do not use cellular data.');
-  await expect(dialog.locator('.share-url-row code')).toHaveText(lanUrl);
+  await expect(dialog).toContainText('must trust the MCC CA');
+  await expect(dialog.locator('.share-url-row code')).toHaveText(stagingUrl);
   expect(await qr.getAttribute('data-qr-payload')).toBe(await displayedUrl.textContent());
   expect(externalRequests).toEqual([]);
 });
 
 test('Close and Escape dismiss the QR dialog', async ({page})=>{
-  await mockSettings(page,[links(lanUrl)]);
+  await mockSettings(page,[httpsLinks(stagingUrl)]);
   await page.goto('/settings');
   await qrTrigger(page).click();
   await qrDialog(page).getByRole('button',{name:'Close'}).last().click();
@@ -109,6 +127,16 @@ test('Close and Escape dismiss the QR dialog', async ({page})=>{
   await qrTrigger(page).click();
   await page.keyboard.press('Escape');
   await expect(qrDialog(page)).toHaveCount(0);
+});
+
+test('production selects the production canonical HTTPS hostname', async ({page})=>{
+  await mockSettings(page,[httpsLinks(productionUrl)]);
+  await page.goto('/settings');
+  await expect(page.locator('.network-host-panel .share-url-row code')).toHaveText(productionUrl);
+  await expect(page.locator('.network-lan-panel .share-url-row code')).toHaveText(productionUrl);
+  await expect(mobilePanel(page).locator('.share-url-row code')).toHaveText(productionUrl);
+  await qrTrigger(page).click();
+  await expect(qrDialog(page).locator('svg[role="img"]')).toHaveAttribute('data-qr-payload',productionUrl);
 });
 
 for (const [label,value] of [
@@ -141,6 +169,24 @@ test('rejects unsafe or malformed LAN URLs without generating a QR', async ({pag
   await expect(page.locator('svg[data-qr-payload]')).toHaveCount(0);
 });
 
+test('HTTPS mode fails closed instead of falling back to direct Node URLs', async ({page})=>{
+  await mockSettings(page,[{
+    accessMode:'https',
+    canonicalUrl:'http://mcc-stage.local:4274',
+    localPort:4274,
+    localhostUrl:'http://localhost:4274',
+    detectedLanUrls:['http://10.1.2.188:4274'],
+    primaryLanUrl:'http://10.1.2.188:4274',
+  }]);
+  await page.goto('/settings');
+  const networkCard = page.locator('.share-card').filter({hasText:'Network access'});
+  await expect(qrTrigger(page)).toBeDisabled();
+  await expect(networkCard.locator('.share-url-row')).toHaveCount(0);
+  await expect(networkCard).toContainText('canonical HTTPS hostname is unavailable');
+  await expect(networkCard).not.toContainText('http://10.1.2.188:4274');
+  await expect(page.locator('svg[data-qr-payload]')).toHaveCount(0);
+});
+
 test('falls back to a usable detected LAN URL when primary is unavailable', async ({page})=>{
   await mockSettings(page,[links(null,[lanUrl])]);
   await page.goto('/settings');
@@ -149,31 +195,33 @@ test('falls back to a usable detected LAN URL when primary is unavailable', asyn
   await expect(qrDialog(page).locator('svg[role="img"]')).toHaveAttribute('data-qr-payload',lanUrl);
 });
 
-test('Refresh network links reactively updates an open QR without a reload', async ({page})=>{
-  const fixture = await mockSettings(page,[links(lanUrl),links(refreshedLanUrl)]);
+test('Refresh network links reactively updates an open canonical QR without a reload', async ({page})=>{
+  const fixture = await mockSettings(page,[httpsLinks(stagingUrl),httpsLinks(productionUrl)]);
   await page.goto('/settings');
   await qrTrigger(page).click();
   const qr = qrDialog(page).locator('svg[role="img"]');
-  await expect(qr).toHaveAttribute('data-qr-payload',lanUrl);
+  await expect(qr).toHaveAttribute('data-qr-payload',stagingUrl);
 
   await qrDialog(page).getByRole('button',{name:'Refresh network links'}).click();
-  await expect(qr).toHaveAttribute('data-qr-payload',refreshedLanUrl);
-  await expect(mobilePanel(page).locator('.share-url-row code')).toHaveText(refreshedLanUrl);
-  await expect(qrDialog(page).locator('.share-url-row code')).toHaveText(refreshedLanUrl);
+  await expect(qr).toHaveAttribute('data-qr-payload',productionUrl);
+  await expect(mobilePanel(page).locator('.share-url-row code')).toHaveText(productionUrl);
+  await expect(qrDialog(page).locator('.share-url-row code')).toHaveText(productionUrl);
   expect(fixture.networkRequestCount()).toBe(2);
 });
 
-test('the existing mobile URL Copy button remains usable', async ({page,context})=>{
+test('other PC and mobile Copy buttons write the canonical HTTPS URL', async ({page,context})=>{
   await context.grantPermissions(['clipboard-read','clipboard-write']);
-  await mockSettings(page,[links(lanUrl)]);
+  await mockSettings(page,[httpsLinks(stagingUrl)]);
   await page.goto('/settings');
-  await mobilePanel(page).getByRole('button',{name:`Copy ${lanUrl}`}).click();
-  await expect(page.getByText(`Copied ${lanUrl}`)).toBeVisible();
-  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(lanUrl);
+  await page.locator('.network-lan-panel').getByRole('button',{name:`Copy ${stagingUrl}`}).click();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(stagingUrl);
+  await mobilePanel(page).getByRole('button',{name:`Copy ${stagingUrl}`}).click();
+  await expect(page.getByText(`Copied ${stagingUrl}`)).toBeVisible();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(stagingUrl);
 });
 
 test('desktop, tablet, and mobile layouts keep the QR trigger integrated without overflow', async ({page})=>{
-  await mockSettings(page,[links(lanUrl)]);
+  await mockSettings(page,[httpsLinks(stagingUrl)]);
   await page.setViewportSize({width:1440,height:900});
   await page.goto('/settings');
 

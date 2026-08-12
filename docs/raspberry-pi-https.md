@@ -95,7 +95,7 @@ curl --fail --silent --show-error http://127.0.0.1:4273/api/health
 sudo ss -ltnp | grep -E ':(80|443|4273)\b'
 ```
 
-The expected listeners are Caddy on LAN-capable port 80/443 and Node only on `127.0.0.1:4273`. A listener such as `0.0.0.0:4273` or `[::]:4273` is a failed deployment and must be corrected before client testing.
+The drop-in also loads `/etc/mcc-https.env` so Settings > Network Access uses the same canonical hostname as Caddy. The expected listeners are Caddy on LAN-capable ports 80/443 and Node only on `127.0.0.1:4273`. A listener such as `0.0.0.0:4273` or `[::]:4273` is a failed deployment and must be corrected before client testing.
 
 ## Certificate trust
 
@@ -138,10 +138,11 @@ Apply the loopback environment to the actual staging service name (for example `
 
 ```ini
 [Service]
+EnvironmentFile=/etc/mcc-https.env
 Environment=MCC_BIND_HOST=127.0.0.1
 ```
 
-Then validate/restart Caddy and the staging MCC service. Verify all of the following from a Windows staging client before production rollout:
+This makes `MCC_HTTPS_HOSTNAME=mcc-stage.local` the staging UI's canonical shared URL; production uses the same configuration path with `MCC_HTTPS_HOSTNAME=mcc.local`. Then validate/restart Caddy and the staging MCC service. Verify all of the following from a Windows staging client before production rollout:
 
 The supported browser URL becomes `https://mcc-stage.local` with no port. `http://mcc-stage.local` redirects to it. The former explicit `http://mcc-stage.local:4274` URL becomes unreachable from the LAN because 4274 is deliberately loopback-only; update saved bookmarks rather than re-exposing that Node port.
 
