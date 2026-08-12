@@ -12,6 +12,7 @@ import ExcelJS from 'exceljs';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf-lib';
+import JSZip from 'jszip';
 import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
@@ -26,6 +27,7 @@ import {
   meaningfulPmNote,
   normalizedPmKey,
   synchronizePmWorkbook,
+  validatePmWorkbookForDownload,
   workbookSha256,
   type HistoryWorkbookAppend,
   type ParsedPmWorkbook,
@@ -115,6 +117,7 @@ const pmExcelDir = path.resolve(process.env.MCC_PM_EXCEL_DIR || path.join(dataDi
 const pmExcelSourceDir = path.join(pmExcelDir, 'sources');
 const pmExcelBackupDir = path.join(pmExcelDir, 'backups');
 const pmExcelLatestPath = path.join(pmExcelDir, 'PM_report_latest.xlsx');
+const pmExcelDownloadFilename = 'PM_report_1.2v.xlsx';
 const pmWorkOrderDir = path.resolve(process.env.MCC_PM_WORK_ORDER_DIR || path.join(dataDir, PM_WORK_ORDER_DIRECTORY_NAME));
 const configuredPmWorkOrderMaxMb=Number(process.env.MCC_PM_WORK_ORDER_MAX_MB??DEFAULT_PM_WORK_ORDER_MAX_BYTES/1024/1024);
 const pmWorkOrderMaxBytes=Number.isFinite(configuredPmWorkOrderMaxMb)&&configuredPmWorkOrderMaxMb>0&&configuredPmWorkOrderMaxMb<=100?Math.floor(configuredPmWorkOrderMaxMb*1024*1024):DEFAULT_PM_WORK_ORDER_MAX_BYTES;
@@ -7547,20 +7550,24 @@ function streamRecoveryArchive(res:Response,fileName:string,build:(archive:Archi
   res.setHeader('Cache-Control','private, no-store');
   archive.pipe(res);build(archive);void archive.finalize();
 }
-function appendPmPackageArchive(archive:Archiver) {
-  if(!fs.existsSync(pmExcelLatestPath)||!fs.statSync(pmExcelLatestPath).isFile())throw new Error('No synchronized PM workbook is available yet.');
-  validatePmWorkOrderStorageIntegrity();
-  archive.file(pmExcelLatestPath,{name:'PM_report_1.2v.xlsx'});
-  archive.append('',{name:`${PM_WORK_ORDER_DIRECTORY_NAME}/`});
-  function visit(folderPath:string,parts:string[]) {
-    for(const entry of fs.readdirSync(folderPath,{withFileTypes:true}).sort((left,right)=>left.name.localeCompare(right.name))) {
+async function buildVerifiedPmPackage(workbook:Buffer,requestId:string){
+  pmDownloadLog(requestId,'package_generation_start',{workbookBytes:workbook.length});validatePmWorkOrderStorageIntegrity();
+  const zip=new JSZip();zip.file(pmExcelDownloadFilename,workbook);zip.folder(PM_WORK_ORDER_DIRECTORY_NAME);const includedFiles:string[]=[];
+  function visit(folderPath:string,parts:string[]){
+    if(!fs.existsSync(folderPath))return;
+    for(const entry of fs.readdirSync(folderPath,{withFileTypes:true}).sort((left,right)=>left.name.localeCompare(right.name))){
       if(entry.name==='.staging'||entry.isSymbolicLink())continue;
       const entryPath=path.join(folderPath,entry.name);const nextParts=[...parts,entry.name];
       if(entry.isDirectory())visit(entryPath,nextParts);
-      else if(entry.isFile())archive.file(entryPath,{name:[PM_WORK_ORDER_DIRECTORY_NAME,...nextParts].join('/')});
+      else if(entry.isFile()){const archivePath=[PM_WORK_ORDER_DIRECTORY_NAME,...nextParts].join('/');zip.file(archivePath,fs.readFileSync(entryPath));includedFiles.push(archivePath);}
     }
   }
-  visit(pmWorkOrderDir,[]);
+  visit(pmWorkOrderDir,[]);const buffer=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',compressionOptions:{level:6}});if(!buffer.length)throw new Error('Generated PM package is empty.');
+  let verified:JSZip;try{verified=await JSZip.loadAsync(buffer);}catch(error){throw new Error(`Generated PM package is not a valid ZIP: ${error instanceof Error?error.message:String(error)}`);}
+  const packagedWorkbook=await verified.file(pmExcelDownloadFilename)?.async('nodebuffer');if(!packagedWorkbook||!packagedWorkbook.equals(workbook))throw new Error('Generated PM package does not contain the exact verified active workbook.');
+  for(const archivePath of includedFiles)if(!verified.file(archivePath))throw new Error(`Generated PM package is missing ${archivePath}.`);
+  for(const attachment of all<Pick<PmWorkOrderAttachmentRow,'stored_relative_path'>>('SELECT stored_relative_path FROM pm_work_order_attachments ORDER BY id'))if(!verified.file(attachment.stored_relative_path))throw new Error(`Generated PM package is missing work-order attachment ${attachment.stored_relative_path}.`);
+  pmDownloadLog(requestId,'package_generation_end',{packageBytes:buffer.length,workOrderFiles:includedFiles.length});return buffer;
 }
 function validateMachineDocumentStorageIntegrity() {
   const missing:string[]=[];
@@ -7842,8 +7849,40 @@ const pmImportStageLifetimeMs=30*60*1000;
 const pmImportStageLimit=20;
 let pmWorkbookLockTail:Promise<void>=Promise.resolve();
 
-async function acquirePmWorkbookLock(){
-  const previous=pmWorkbookLockTail;let release!:()=>void;pmWorkbookLockTail=new Promise<void>(resolve=>{release=resolve;});await previous;return release;
+const configuredPmWorkbookLockTimeoutMs=Number(process.env.MCC_PM_WORKBOOK_LOCK_TIMEOUT_MS??120000);
+const pmWorkbookLockTimeoutMs=Number.isFinite(configuredPmWorkbookLockTimeoutMs)&&configuredPmWorkbookLockTimeoutMs>=1000?configuredPmWorkbookLockTimeoutMs:120000;
+function pmDownloadLog(requestId:string,event:string,details:Record<string,unknown>={}){
+  console.info(JSON.stringify({timestamp:now(),scope:'pm_download',requestId,event,...details}));
+}
+async function acquirePmWorkbookLock(context='pm-workbook',requestId='internal'){
+  const previous=pmWorkbookLockTail;let openGate!:()=>void;let gateOpened=false;
+  const open=()=>{if(gateOpened)return;gateOpened=true;openGate();};
+  pmWorkbookLockTail=new Promise<void>(resolve=>{openGate=resolve;});
+  pmDownloadLog(requestId,'lock_acquisition_start',{context,timeoutMs:pmWorkbookLockTimeoutMs});
+  let timeout:NodeJS.Timeout|undefined;
+  try{
+    await Promise.race([previous,new Promise<never>((_resolve,reject)=>{timeout=setTimeout(()=>reject(new Error(`Timed out waiting ${pmWorkbookLockTimeoutMs} ms for the PM workbook lock.`)),pmWorkbookLockTimeoutMs);})]);
+  }catch(error){
+    if(timeout)clearTimeout(timeout);
+    void previous.finally(()=>{open();pmDownloadLog(requestId,'lock_release',{context,reason:'wait_timeout'});});
+    pmDownloadLog(requestId,'lock_acquisition_error',{context,error:safeErrorMessage(error,[],'The PM workbook lock could not be acquired.')});
+    throw error;
+  }
+  if(timeout)clearTimeout(timeout);
+  pmDownloadLog(requestId,'lock_acquisition_end',{context});
+  return ()=>{if(gateOpened)return;open();pmDownloadLog(requestId,'lock_release',{context,reason:'completed'});};
+}
+
+function observePmDownloadResponse(req:Request,res:Response,requestId:string,kind:'workbook'|'package'){
+  let finished=false;
+  res.once('finish',()=>{finished=true;pmDownloadLog(requestId,'response_finish',{kind,statusCode:res.statusCode});});
+  req.once('aborted',()=>pmDownloadLog(requestId,'connection_abort',{kind,phase:'request'}));
+  res.once('error',error=>pmDownloadLog(requestId,'connection_error',{kind,error:error.message}));
+  res.once('close',()=>{if(!finished)pmDownloadLog(requestId,'connection_abort',{kind,phase:'response',statusCode:res.statusCode});});
+}
+function sendPmDownloadBuffer(res:Response,requestId:string,kind:'workbook'|'package',buffer:Buffer,mimeType:string,filename:string){
+  pmDownloadLog(requestId,'response_start',{kind,byteSize:buffer.length,filename});
+  res.status(200);res.setHeader('Content-Type',mimeType);res.setHeader('Content-Length',String(buffer.length));res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition',`attachment; filename="${filename.replace(/["\\\r\n]/g,'_')}"`);res.end(buffer);
 }
 
 const pmOperationMessages:Record<PmExcelOperationStage,string>={
@@ -8044,6 +8083,29 @@ async function retryPmWorkbookSync(actor:User,lockHeld=false) {
   for(const task of all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND deleted=1 ORDER BY id")){const asset=machineAssetById(task.asset_id,true);if(asset)taskWorkbookAssets.set(task.id,asset.asset_number);}
   for (const [taskId,workbookAssetNumber] of taskWorkbookAssets) {const task=pmTaskById(taskId,'machine',true)!;for(const history of all<PmHistoryRow>("SELECT * FROM pm_history WHERE pm_task_id=? AND asset_library='machine' ORDER BY id",[task.id])) historyRows.push(pmHistoryWorkbookRow(history,task,workbookAssetNumber));}
   return performPmWorkbookSync({actor,sourcePath,originalFilename:state?.original_filename||'PM_report.xlsx',trackerUpdates,trackerRemovals,historyRows,lockHeld});
+}
+async function generateVerifiedPmDownloadWorkbook(actor:User,requestId:string,forcedFailure=false){
+  pmDownloadLog(requestId,'workbook_generation_start',{activePath:pmExcelLatestPath});
+  if(!fs.existsSync(pmExcelLatestPath)||!fs.statSync(pmExcelLatestPath).isFile())throw new Error('No synchronized PM workbook is available yet.');
+  const sync=await retryPmWorkbookSync(actor,true);
+  if(!sync.ok)throw new Error(sync.error);
+  pmDownloadLog(requestId,'active_workbook_replacement',{activePath:pmExcelLatestPath,changedCells:sync.changedCells,appendedHistory:sync.appendedHistory});
+  if(forcedFailure)throw new Error('Forced PM workbook generation failure for regression testing.');
+  const workbook=fs.readFileSync(pmExcelLatestPath);
+  pmDownloadLog(requestId,'workbook_generated_bytes',{byteSize:workbook.length});
+  const assetChoices=all<Pick<MachineAssetRow,'asset_number'>>("SELECT asset_number FROM machine_assets WHERE deleted=0 AND status IN ('active','down') ORDER BY asset_number COLLATE NOCASE,id").map(asset=>asset.asset_number);
+  const intervalChoices=pmIntervalTypes.map(value=>({value,label:pmIntervalLabels[value]}));
+  try{
+    const validation=await validatePmWorkbookForDownload(workbook,assetChoices,intervalChoices);
+    const reread=fs.readFileSync(pmExcelLatestPath);
+    if(!reread.equals(workbook))throw new Error('The active PM workbook changed while it was being verified.');
+    pmDownloadLog(requestId,'workbook_validation_result',{ok:true,...validation});
+    pmDownloadLog(requestId,'workbook_generation_end',{byteSize:workbook.length,sha256:validation.sha256});
+    return {workbook,validation};
+  }catch(error){
+    pmDownloadLog(requestId,'workbook_validation_result',{ok:false,error:safeErrorMessage(error,[],'Workbook validation failed.')});
+    throw error;
+  }
 }
 function pmCompletionRequestId(req:AuthRequest) {
   const value=String(req.get('Idempotency-Key')??'').trim();
@@ -9142,18 +9204,30 @@ app.post('/api/pm-excel/operations/:operationId/cancel',requireAuth,requirePermi
 });
 app.get('/api/pm-excel/status',requireAuth,requirePermission('machine.view'),(req,res)=>{const operationId=typeof req.query.operationId==='string'?req.query.operationId:undefined;res.json({ok:true,sync:pmSyncState(),operation:pmExcelOperation(operationId)});});
 app.get('/api/pm-excel/download',requireAuth,requirePermission('machine.view'),async(req:AuthRequest,res)=>{
-  const release=await acquirePmWorkbookLock();
+  const requestId=crypto.randomUUID();let release:(()=>void)|null=null;observePmDownloadResponse(req,res,requestId,'workbook');pmDownloadLog(requestId,'request_start',{kind:'workbook',path:req.path});
   try{
-    if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
-    const sync=await retryPmWorkbookSync(req.user!,true);if(!sync.ok)return res.status(500).json({ok:false,error:sync.error,sync:sync.status});const workbook=fs.readFileSync(pmExcelLatestPath);
-    res.setHeader('Content-Type',PM_EXCEL_MIME);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename="PM_report_1.2v.xlsx"');res.send(workbook);
-  }catch(error){res.status(500).json({ok:false,error:safeErrorMessage(error,[],'The latest PM workbook could not be generated for download.')});}
-  finally{release();}
+    release=await acquirePmWorkbookLock('excel-download',requestId);
+    const forced=process.env.NODE_ENV==='test'&&req.get('X-MCC-Test-PM-Download-Failure')==='workbook';
+    const artifact=await generateVerifiedPmDownloadWorkbook(req.user!,requestId,forced);
+    release();release=null;
+    if(req.aborted||res.destroyed)return;
+    sendPmDownloadBuffer(res,requestId,'workbook',artifact.workbook,PM_EXCEL_MIME,pmExcelDownloadFilename);
+  }catch(error){const message=safeErrorMessage(error,[],'The latest PM workbook could not be generated for download.');pmDownloadLog(requestId,'request_error',{kind:'workbook',error:message});if(!res.headersSent&&!res.destroyed)res.status(/No synchronized PM workbook/i.test(message)?404:500).json({ok:false,error:message});}
+  finally{release?.();}
 });
-app.get('/api/pm-excel/package/download',requireAuth,requirePermission('machine.view'),(_req,res)=>{
-  if(!fs.existsSync(pmExcelLatestPath))return res.status(404).json({ok:false,error:'No synchronized PM workbook is available yet.'});
-  try{streamRecoveryArchive(res,`PM_Package_${new Date().toISOString().slice(0,10)}.zip`,appendPmPackageArchive);}
-  catch(error){if(!res.headersSent)res.status(500).json({ok:false,error:safeErrorMessage(error,[],'The PM package could not be created.')});else res.destroy(error instanceof Error?error:new Error(String(error)));}
+app.get('/api/pm-excel/package/download',requireAuth,requirePermission('machine.view'),async(req:AuthRequest,res)=>{
+  const requestId=crypto.randomUUID();let release:(()=>void)|null=null;observePmDownloadResponse(req,res,requestId,'package');pmDownloadLog(requestId,'request_start',{kind:'package',path:req.path});
+  try{
+    release=await acquirePmWorkbookLock('package-download',requestId);
+    const artifact=await generateVerifiedPmDownloadWorkbook(req.user!,requestId,false);
+    if(process.env.NODE_ENV==='test'&&req.get('X-MCC-Test-PM-Download-Failure')==='package')throw new Error('Forced PM package generation failure for regression testing.');
+    let pmPackage:Buffer;
+    try{pmPackage=await buildVerifiedPmPackage(artifact.workbook,requestId);}catch(error){pmDownloadLog(requestId,'package_generation_error',{error:safeErrorMessage(error,[],'The PM package could not be created.')});throw error;}
+    release();release=null;
+    if(req.aborted||res.destroyed)return;
+    sendPmDownloadBuffer(res,requestId,'package',pmPackage,'application/zip',`PM_Package_${new Date().toISOString().slice(0,10)}.zip`);
+  }catch(error){const message=safeErrorMessage(error,[],'The PM package could not be created.');pmDownloadLog(requestId,'request_error',{kind:'package',error:message});if(!res.headersSent&&!res.destroyed)res.status(/No synchronized PM workbook/i.test(message)?404:500).json({ok:false,error:message});}
+  finally{release?.();}
 });
 app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manage'),(req:AuthRequest,_res,next)=>{const operationId=String(req.get('X-PM-Operation-Id')??'').trim();const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE id=? AND is_current=1 AND created_by_user_id=? AND status='active'",[operationId,req.user!.id]);if(operation)updatePmExcelOperation(operation.id,'uploading');next();},pmExcelUpload.single('file'),async(req:AuthRequest,res)=>{
   const release=await acquirePmWorkbookLock();let operationId='';let operationStarted=false;

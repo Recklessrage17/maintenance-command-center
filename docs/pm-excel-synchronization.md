@@ -45,6 +45,12 @@ For each write, MCC patches only approved cell XML inside a private ZIP copy of 
 
 All workbook-changing operations use one serialized backend workflow. Concurrent imports, replacements, PM completions, meter updates, and retries cannot overwrite one another.
 
+## Verified download lifecycle
+
+Excel-only and PM package downloads run inside the same bounded PM workbook lock. MCC first regenerates `PM_report_latest.xlsx` from current SQLite state, atomically promotes it, rereads it, and validates the complete XLSX package before setting any success response headers. Download validation requires non-empty XLSX bytes, the tracker and history sheets, no `#REF!`, no `PMTaskList` dependency, no legacy `PMHistory` K:T helper content, the current MCC machine catalog, and only Hourly, Cycles, Days, and Annual interval choices. The response body is the exact verified active-workbook buffer and includes an explicit content type, disposition, and length.
+
+PM package generation uses that same verified in-memory workbook rather than reopening a mutable workbook path. MCC reads the preserved work-order/PDF tree, builds the entire ZIP in memory, reopens it, verifies the exact workbook bytes and every registered attachment, and only then starts the ZIP response. Generation or validation failures return JSON with a non-success status before download headers are sent. Lock release is guaranteed on success, validation failure, package failure, timeout, and connection abort; structured `pm_download` logs record request, lock, generation, validation, replacement, byte size, response, abort, and error events.
+
 ## Cross-platform behavior
 
 PM preview classification, confirm eligibility, confirm-time revalidation, and database writes run through the same backend business logic on Windows and Linux/Raspberry Pi. The frontend displays the backend's `confirmEligibility` result and sends only the preview token plus explicit meter overrides; it does not independently classify safe rows or vary behavior by host OS.

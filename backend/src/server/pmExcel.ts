@@ -658,6 +658,31 @@ export async function validatePmWorkbookOoxml(buffer:Buffer,expectations:Formula
   if(sheetParts.has(PM_CATALOG_SHEET)){const catalogTag=[...workbookXml.matchAll(/<sheet\b[^>]*\/?\s*>/g)].map(match=>match[0]).find(tag=>decodeXml(xmlAttribute(tag,'name'))===PM_CATALOG_SHEET);if(!catalogTag||xmlAttribute(catalogTag,'state')!=='veryHidden')throw new Error('The MCC PM catalog sheet must remain very hidden.');for(const name of [PM_ASSET_CATALOG_NAME,PM_INTERVAL_CATALOG_NAME])if(!new RegExp(`<definedName\\b(?=[^>]*\\bname="${name}")[^>]*>[\\s\\S]+?<\\/definedName>`,'i').test(workbookXml))throw new Error(`Workbook catalog defined name ${name} is unavailable.`);const trackerPart=sheetParts.get(PM_TRACKER_SHEET);const trackerXml=trackerPart?await zip.file(trackerPart)?.async('string'):'';for(const name of [PM_ASSET_CATALOG_NAME,PM_INTERVAL_CATALOG_NAME])if(!new RegExp(`<formula1>\\s*${name}\\s*<\\/formula1>`,'i').test(trackerXml??''))throw new Error(`Machine Pm Tracker validation list ${name} is unavailable.`);}
   return {worksheets:sheetParts.size,formulaCells};
 }
+export async function validatePmWorkbookForDownload(buffer:Buffer,expectedAssets:readonly string[],expectedIntervals:readonly WorkbookCatalogChoice[]){
+  if(!Buffer.isBuffer(buffer)||buffer.length===0)throw new Error('Generated PM workbook is empty.');
+  let zip:JSZip;
+  try{zip=await JSZip.loadAsync(buffer);}catch(error){throw new Error(`Generated PM workbook is not a valid XLSX ZIP package: ${error instanceof Error?error.message:String(error)}`);}
+  if(!zip.file('[Content_Types].xml')||!zip.file('xl/workbook.xml'))throw new Error('Generated PM workbook is missing required XLSX package parts.');
+  const ooxml=await validatePmWorkbookOoxml(buffer);const parsed=await inspectPmWorkbook(buffer);
+  if(!parsed.sheetNames.includes(PM_TRACKER_SHEET)||!parsed.sheetNames.includes(PM_HISTORY_SHEET))throw new Error(`Generated PM workbook must contain ${PM_TRACKER_SHEET} and ${PM_HISTORY_SHEET}.`);
+  if(parsed.sheetNames.some(name=>name.toLowerCase()==='pmtasklist'))throw new Error('Generated PM workbook retains the legacy PMTaskList dependency.');
+  for(const file of Object.values(zip.files)){
+    if(file.dir||!/(?:\.xml|\.rels)$/i.test(file.name))continue;
+    const xml=await file.async('string');
+    if(/#REF!/i.test(xml))throw new Error(`Generated PM workbook contains #REF! in ${file.name}.`);
+    if(/<(?:f|formula1|formula2|calculatedColumnFormula|totalsRowFormula)\b[^>]*>[\s\S]*?PMTaskList[\s\S]*?<\/(?:f|formula1|formula2|calculatedColumnFormula|totalsRowFormula)>/i.test(xml))throw new Error(`Generated PM workbook retains a PMTaskList formula dependency in ${file.name}.`);
+  }
+  const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength) as ArrayBuffer);
+  const history=workbook.getWorksheet(PM_HISTORY_SHEET);const catalog=workbook.getWorksheet(PM_CATALOG_SHEET);
+  if(!history||!catalog)throw new Error('Generated PM workbook is missing its required history or MCC catalog worksheet.');
+  for(let row=1;row<=history.rowCount;row+=1)for(let column=11;column<=20;column+=1)if(cleanText(cellRawValue(history.getCell(row,column)))!=='')throw new Error(`Generated PM workbook retains legacy PMHistory helper content at ${history.getCell(row,column).address}.`);
+  const actualAssets:string[]=[];const actualIntervals:string[]=[];
+  for(let row=2;row<=catalog.rowCount;row+=1){const asset=cleanText(cellRawValue(catalog.getCell(row,1)));const interval=cleanText(cellRawValue(catalog.getCell(row,2)));if(asset)actualAssets.push(asset);if(interval)actualIntervals.push(interval);}
+  const requiredAssets=uniqueCatalogValues(expectedAssets);const requiredIntervals=[...new Map(expectedIntervals.map(choice=>[choice.value,cleanText(choice.label)])).values()].filter(Boolean);
+  if(JSON.stringify(actualAssets)!==JSON.stringify(requiredAssets))throw new Error('Generated PM workbook machine dropdown catalog does not match current MCC assets.');
+  if(JSON.stringify(actualIntervals)!==JSON.stringify(requiredIntervals))throw new Error(`Generated PM workbook interval catalog must contain only ${requiredIntervals.join(', ')}.`);
+  return {byteSize:buffer.length,sha256:workbookSha256(buffer),worksheets:ooxml.worksheets,formulaCells:ooxml.formulaCells,assetChoices:actualAssets.length,intervalChoices:actualIntervals};
+}
 async function requestFullWorkbookCalculation(zip:JSZip){const file=zip.file('xl/workbook.xml');if(!file)return;let xml=await file.async('string');if(/<calcPr\b/.test(xml))xml=xml.replace(/<calcPr\b([^>]*?)\/?\s*>/,(_entry,attributes)=>{const clean=attributes.replace(/\s+(?:calcMode|fullCalcOnLoad|forceFullCalc)="[^"]*"/g,'');return `<calcPr${clean} calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>`;});else xml=xml.replace('</workbook>','<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>');zip.file('xl/workbook.xml',xml);}
 async function removeWorkbookCalculationChain(zip:JSZip){
   zip.remove('xl/calcChain.xml');
