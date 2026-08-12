@@ -204,13 +204,8 @@ export function normalizeWorkbookInterval(value:unknown):WorkbookPmInterval {
   if (normalized==='hourly'||normalized==='hour'||normalized==='hours') return 'hourly';
   if (normalized==='cycle'||normalized==='cycles') return 'cycles';
   if (normalized==='day'||normalized==='days') return 'days';
-  if (normalized==='bi-weekly'||normalized==='bi weekly'||normalized==='biweekly'||normalized==='fortnightly') return 'bi_weekly';
-  if (normalized==='weekly'||normalized==='week'||normalized==='weeks') return 'weekly';
-  if (normalized==='monthly'||normalized==='month'||normalized==='months') return 'monthly';
-  if (normalized==='quarterly'||normalized==='quarter'||normalized==='quarters') return 'quarterly';
-  if (normalized==='bi-annual'||normalized==='bi annual'||normalized==='biannual'||normalized==='semi-annual'||normalized==='semi annual'||normalized==='semiannual') return 'bi_annual';
   if (normalized==='annual'||normalized==='annually'||normalized==='year'||normalized==='yearly') return 'annual';
-  throw new Error('Interval Type must be Hourly, Days, Bi-weekly, Weekly, Monthly, Quarterly, Bi-Annual, Annual, or Cycles.');
+  throw new Error('Interval Type must be Hourly, Cycles, Days, or Annual.');
 }
 
 const defaultWorkbookIntervalLabels:Record<WorkbookPmInterval,string>={hourly:'Hourly',days:'Days',bi_weekly:'Bi-weekly',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',bi_annual:'Bi-Annual',annual:'Annual',cycles:'Cycles'};
