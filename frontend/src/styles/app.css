@@ -596,6 +596,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .pm-action-spinner,.pm-action-button-spinner { flex:0 0 auto; width:18px; height:18px; border:2px solid rgba(181,248,220,.25); border-top-color:#83efbd; border-radius:50%; animation:pm-action-spin .75s linear infinite; }
 .pm-action-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
 .pm-action-button-spinner { width:14px; height:14px; }
+.pm-excel-download-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+.pm-excel-download-button:disabled[aria-busy="true"] { opacity:.86; filter:none; }
 .pm-excel-operation-progress { min-width:0; display:flex; align-items:center; gap:11px; margin:12px 0; padding:11px 13px; border:1px solid rgba(68,215,255,.32); border-radius:15px; color:#e4f8ff; background:linear-gradient(135deg,rgba(10,63,84,.58),rgba(5,28,43,.7)); box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 20px rgba(68,215,255,.07); animation:pm-progress-enter .18s ease-out both; }
 .pm-excel-operation-progress > span:last-child { min-width:0; display:grid; gap:2px; }
 .pm-excel-operation-progress strong { color:#ecfbff; font-size:.82rem; line-height:1.25; }
@@ -627,6 +629,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pm-action-progress,.pm-more-menu-popover button,.pm-task-grid { animation:none; transition:none; }
+  .pm-excel-download-button,.pm-excel-download-button .pm-action-button-spinner { animation:none; transition:none; }
+  .pm-excel-download-button .pm-action-button-spinner { border-color:rgba(181,248,220,.42); border-top-color:#83efbd; }
 }
 .user-table-card table { min-width: 1260px; }
 .user-actions { width: fit-content; max-width: 420px; }
