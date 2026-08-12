@@ -113,6 +113,10 @@ sudo mcc-update
 
 The manual command uses the same fixed repository, clean-tree check, backup, build, health check, and rollback sequence.
 
+The health check deliberately remains direct loopback HTTP and does not depend
+on LAN DNS, Caddy, or certificate state. The supported browser path terminates
+trusted HTTPS separately; see [Trusted HTTPS for Raspberry Pi and LAN deployments](raspberry-pi-https.md).
+
 If the repository becomes private, configure a read-only deploy key in the production account's Git configuration. Keep the private key outside MCC, its database, `.env`, request/status files, and History.
 
 ## Raspberry Pi update and rollback sequence

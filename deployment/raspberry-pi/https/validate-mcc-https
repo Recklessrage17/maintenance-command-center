@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CONFIG_FILE="/etc/mcc-https.env"
+readonly CADDYFILE="/etc/caddy/Caddyfile"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Run this validator as root." >&2
+  exit 77
+fi
+if [[ ! -r "${CONFIG_FILE}" || ! -r "${CADDYFILE}" ]]; then
+  echo "Missing ${CONFIG_FILE} or ${CADDYFILE}." >&2
+  exit 78
+fi
+for protected_path in "${CONFIG_FILE}" "${CADDYFILE}"; do
+  if [[ "$(stat -c '%U:%G:%a' "${protected_path}")" != "root:root:644" ]]; then
+    echo "${protected_path} must be owned by root:root with mode 0644." >&2
+    exit 78
+  fi
+done
+
+# This file is root-owned and contains only the two non-secret values validated
+# below. It is also consumed by the root-owned caddy.service drop-in.
+# shellcheck source=/dev/null
+source "${CONFIG_FILE}"
+: "${MCC_HTTPS_HOSTNAME:?MCC_HTTPS_HOSTNAME is required}"
+: "${MCC_HTTPS_UPSTREAM:?MCC_HTTPS_UPSTREAM is required}"
+
+if [[ ! "${MCC_HTTPS_HOSTNAME}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.local$ ]]; then
+  echo "MCC_HTTPS_HOSTNAME must be a valid .local hostname without a scheme or port." >&2
+  exit 65
+fi
+if [[ ! "${MCC_HTTPS_UPSTREAM}" =~ ^127\.0\.0\.1:(4273|4274)$ ]]; then
+  echo "MCC_HTTPS_UPSTREAM must be 127.0.0.1:4273 (production) or 127.0.0.1:4274 (staging)." >&2
+  exit 65
+fi
+
+/usr/sbin/runuser -u caddy -- /usr/bin/env \
+  HOME=/var/lib/caddy \
+  MCC_HTTPS_HOSTNAME="${MCC_HTTPS_HOSTNAME}" \
+  MCC_HTTPS_UPSTREAM="${MCC_HTTPS_UPSTREAM}" \
+  /usr/bin/caddy validate --config "${CADDYFILE}" --adapter caddyfile
+
+echo "MCC HTTPS configuration is valid for ${MCC_HTTPS_HOSTNAME} -> ${MCC_HTTPS_UPSTREAM}."

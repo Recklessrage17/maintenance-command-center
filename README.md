@@ -30,6 +30,11 @@ npm start
 
 Then open <http://localhost:4273>.
 
+Raspberry Pi/LAN production and staging deployments use Caddy as the trusted
+HTTPS endpoint while Node remains on loopback. See
+[`docs/raspberry-pi-https.md`](docs/raspberry-pi-https.md); direct HTTP is a
+development/updater-health path, not the supported browser path on the Pi.
+
 On Windows, use `Start MCC Website.cmd` to start the backend website and open the browser. Use `Stop MCC Website.cmd` to stop only processes listening on port `4273`.
 
 ## Backend Endpoints

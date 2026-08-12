@@ -81,7 +81,7 @@ const isWindows = process.platform === 'win32';
 const npmCommand = 'npm';
 const server = spawn(npmCommand, ['start'], {
   stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, HOST: '127.0.0.1' },
+  env: { ...process.env, MCC_BIND_HOST: '127.0.0.1' },
   detached: !isWindows,
   shell: isWindows,
   windowsHide: isWindows,

@@ -1,0 +1,16 @@
+{
+	# MCC uses infrequent, validated service restarts for configuration changes.
+	# Disabling the unauthenticated local admin API removes an unnecessary local
+	# mutation endpoint; certificate renewal continues automatically.
+	admin off
+}
+
+{$MCC_HTTPS_HOSTNAME:mcc.local} {
+	# .local names cannot receive ordinary publicly trusted certificates. Caddy
+	# manages a dedicated internal CA and renews the server certificate for us.
+	tls internal
+
+	# The upstream must remain a loopback address. Caddy preserves Host and sets
+	# trusted X-Forwarded-For/Host/Proto headers without changing download bodies.
+	reverse_proxy {$MCC_HTTPS_UPSTREAM:127.0.0.1:4273}
+}

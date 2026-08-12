@@ -66,6 +66,14 @@ if (fs.existsSync(rootEnvPath)) {
 }
 
 const app = express();
+// Caddy is the supported LAN-facing endpoint. Production/staging set this to
+// 127.0.0.1 so the Node port is reachable only by local health checks/proxies.
+// Keep the development default compatible with the existing local launchers.
+const bindHost = process.env.MCC_BIND_HOST?.trim() || '0.0.0.0';
+// Only a proxy connected over loopback may supply client/protocol information.
+// Direct LAN clients cannot spoof X-Forwarded-* values if a legacy deployment
+// has not yet enabled the loopback-only bind.
+app.set('trust proxy', 'loopback');
 const configuredPort = Number(process.env.PORT ?? 4273);
 const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 4273;
 const appName = 'Maintenance Command Center';
@@ -11470,8 +11478,8 @@ try {
 } catch {
   console.log('MCC update audit reconciliation needs attention.');
 }
-const httpServer=app.listen(port,()=>{
-  console.log(`${appName} running at http://localhost:${port}`);
+const httpServer=app.listen(port,bindHost,()=>{
+  console.log(`${appName} running on ${bindHost}:${port}`);
   console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);
   console.log(`SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
   startBackupSchedulers();
