@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly SOURCE_ROOT="/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt"
+readonly DESTINATION_DIR="/var/lib/mcc-onboarding"
+readonly DESTINATION_ROOT="${DESTINATION_DIR}/mcc-root-ca.crt"
+
+fail() {
+  echo "MCC root export failed: $*" >&2
+  exit 1
+}
+
+[[ "${EUID}" -eq 0 ]] || fail "run as root"
+[[ -r "${SOURCE_ROOT}" ]] || fail "missing Caddy public root certificate ${SOURCE_ROOT}"
+[[ "$(basename "${SOURCE_ROOT}")" == "root.crt" ]] || fail "source must be the public root.crt"
+openssl x509 -in "${SOURCE_ROOT}" -noout -subject -issuer -dates >/dev/null \
+  || fail "source is not a readable X.509 certificate"
+openssl x509 -in "${SOURCE_ROOT}" -noout -text | grep -A1 'Basic Constraints' | grep -Fq 'CA:TRUE' \
+  || fail "source certificate is not a CA"
+
+install -d -o root -g caddy -m 0755 "${DESTINATION_DIR}"
+install -o root -g caddy -m 0644 "${SOURCE_ROOT}" "${DESTINATION_ROOT}"
+fingerprint="$(openssl x509 -in "${DESTINATION_ROOT}" -noout -fingerprint -sha256 | cut -d= -f2)"
+echo "Exported public root certificate only: ${DESTINATION_ROOT}"
+echo "SHA-256 fingerprint (verify through a separate authenticated channel): ${fingerprint}"
+echo "The private root.key was not copied and must never be distributed."

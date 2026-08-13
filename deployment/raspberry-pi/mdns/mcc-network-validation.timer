@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically validate MCC LAN HTTPS and mDNS advertisement
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=mcc-network-validation.service
+
+[Install]
+WantedBy=timers.target

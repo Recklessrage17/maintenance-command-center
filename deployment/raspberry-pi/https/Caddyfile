@@ -15,3 +15,7 @@
 	# trusted X-Forwarded-For/Host/Proto headers without changing download bodies.
 	reverse_proxy {$MCC_HTTPS_UPSTREAM:127.0.0.1:4273}
 }
+
+# Internal-CA onboarding may optionally serve only the public root certificate
+# over the Pi IP before a client trusts HTTPS or resolves the .local name.
+import {$MCC_HTTPS_ONBOARDING_CONFIG:/etc/caddy/mcc-onboarding-disabled.caddy}

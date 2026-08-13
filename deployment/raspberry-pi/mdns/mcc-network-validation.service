@@ -1,0 +1,8 @@
+[Unit]
+Description=Validate MCC mDNS, proxy listeners, and trusted HTTPS health
+Wants=network-online.target avahi-daemon.service caddy.service
+After=network-online.target avahi-daemon.service caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/validate-mcc-network

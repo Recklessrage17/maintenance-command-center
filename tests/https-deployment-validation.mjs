@@ -9,6 +9,9 @@ const publicHttpsEnvironment = read('deployment/raspberry-pi/https/mcc-https-pub
 const internalTls = read('deployment/raspberry-pi/https/mcc-tls-internal.caddy');
 const publicDnsTls = read('deployment/raspberry-pi/https/mcc-tls-public-dns.caddy.example');
 const dnsEnvironment = read('deployment/raspberry-pi/https/mcc-https-dns.env.example');
+const onboardingDisabled = read('deployment/raspberry-pi/https/mcc-onboarding-disabled.caddy');
+const onboardingHttp = read('deployment/raspberry-pi/https/mcc-onboarding-http.caddy.example');
+const rootExporter = read('deployment/raspberry-pi/https/export-mcc-root-onboarding');
 const caddyDropIn = read('deployment/raspberry-pi/https/caddy.service.d/mcc-https.conf');
 const mccDropIn = read('deployment/raspberry-pi/https/mcc.service.d/https-loopback.conf');
 const rootInstaller = read('deployment/raspberry-pi/https/Install-MccRootCA.ps1');
@@ -22,11 +25,13 @@ assert.match(caddyfile, /admin off/, 'Caddy local admin API must remain disabled
 assert.match(caddyfile, /\{\$MCC_HTTPS_HOSTNAME:mcc\.local\}/, 'Caddy hostname must come from deployment-owned configuration.');
 assert.match(caddyfile, /import \{\$MCC_HTTPS_TLS_CONFIG:\/etc\/caddy\/mcc-tls-internal\.caddy\}/, 'Caddy must import the selected root-owned TLS mode.');
 assert.match(caddyfile, /reverse_proxy \{\$MCC_HTTPS_UPSTREAM:127\.0\.0\.1:4273\}/, 'Caddy upstream must default to the production loopback port.');
+assert.match(caddyfile, /import \{\$MCC_HTTPS_ONBOARDING_CONFIG:\/etc\/caddy\/mcc-onboarding-disabled\.caddy\}/, 'LAN-IP certificate onboarding must be explicitly selected.');
 assert.doesNotMatch(caddyfile, /tls_insecure_skip_verify|auto_https\s+off|disable_redirects/, 'HTTPS configuration must not weaken TLS or redirects.');
 
 assert.match(httpsEnvironment, /^MCC_HTTPS_MODE=internal$/m);
 assert.match(httpsEnvironment, /^MCC_HTTPS_HOSTNAME=mcc\.local$/m);
 assert.match(httpsEnvironment, /^MCC_HTTPS_TLS_CONFIG=\/etc\/caddy\/mcc-tls-internal\.caddy$/m);
+assert.match(httpsEnvironment, /^MCC_HTTPS_ONBOARDING_CONFIG=\/etc\/caddy\/mcc-onboarding-disabled\.caddy$/m);
 assert.match(httpsEnvironment, /^MCC_HTTPS_UPSTREAM=127\.0\.0\.1:4273$/m);
 assert.doesNotMatch(httpsEnvironment, /^MCC_HTTPS_UPSTREAM=(?!127\.0\.0\.1:)/m, 'Example upstream must remain on IPv4 loopback.');
 assert.match(internalTls, /^tls internal$/m, 'The .local fallback must use Caddy\'s managed internal CA.');
@@ -34,11 +39,19 @@ assert.match(internalTls, /^tls internal$/m, 'The .local fallback must use Caddy
 assert.match(publicHttpsEnvironment, /^MCC_HTTPS_MODE=public$/m);
 assert.match(publicHttpsEnvironment, /^MCC_HTTPS_HOSTNAME=mcc\.example$/m, 'Public template must use a reserved placeholder, never a guessed company domain.');
 assert.match(publicHttpsEnvironment, /^MCC_HTTPS_TLS_CONFIG=\/etc\/caddy\/mcc-tls-public-dns\.caddy$/m);
+assert.match(publicHttpsEnvironment, /^MCC_HTTPS_ONBOARDING_CONFIG=\/etc\/caddy\/mcc-onboarding-disabled\.caddy$/m);
 assert.match(publicHttpsEnvironment, /^MCC_HTTPS_UPSTREAM=127\.0\.0\.1:4273$/m);
 assert.match(publicDnsTls, /dns DNS_PROVIDER_NAME \{env\.DNS_PROVIDER_API_TOKEN\}/, 'Public template must require administrator-selected provider syntax.');
 assert.doesNotMatch(publicDnsTls, /cloudflare|route53|godaddy|azure|google|digitalocean/i, 'The deployment must not hardcode a DNS provider.');
 assert.match(dnsEnvironment, /mode 0600/, 'DNS secrets must be documented as root-only.');
 assert.match(dnsEnvironment, /^DNS_PROVIDER_API_TOKEN=replace-with-a-least-privilege-dns-api-token$/m, 'Only a non-secret credential placeholder may be committed.');
+assert.doesNotMatch(onboardingDisabled, /http:\/\//, 'IP onboarding must be disabled by default.');
+assert.match(onboardingHttp, /^http:\/\/\{\$MCC_ONBOARDING_IP\}/m);
+assert.match(onboardingHttp, /@root_ca path \/mcc-root-ca\.crt/, 'The optional IP site may distribute only the public CA root path.');
+assert.doesNotMatch(onboardingHttp, /reverse_proxy/, 'The IP onboarding endpoint must never proxy MCC or Node.');
+assert.match(rootExporter, /\/root\.crt/);
+assert.match(rootExporter, /CA:TRUE/);
+assert.doesNotMatch(rootExporter, /install[^\n]*root\.key|cp[^\n]*root\.key/, 'The private CA key must never be distributed.');
 assert.match(caddyDropIn, /^EnvironmentFile=\/etc\/mcc-https\.env$/m);
 assert.match(caddyDropIn, /^EnvironmentFile=-\/etc\/mcc-https-dns\.env$/m);
 assert.match(mccDropIn, /^EnvironmentFile=\/etc\/mcc-https\.env$/m, 'Node must consume the same canonical hostname configuration as Caddy.');
@@ -66,6 +79,8 @@ assert.match(piValidator, /Internal mode requires a \.local/, 'Pi validator must
 assert.match(piValidator, /Public mode requires a real public DNS hostname/, 'Pi validator must require a non-reserved public hostname.');
 assert.match(piValidator, /dns\.providers\.\$\{dns_provider\}/, 'Pi validator must verify the selected provider plugin is installed.');
 assert.match(piValidator, /root:root:600/, 'Pi validator must require root-only DNS credentials.');
+assert.match(piValidator, /MCC_HTTPS_ONBOARDING_CONFIG.*mcc-onboarding-\(disabled\|http\)/, 'Only reviewed onboarding fragments may be selected.');
+assert.match(piValidator, /Public certificate mode must disable internal-CA root onboarding/, 'Public mode must not serve internal-CA onboarding material.');
 assert.match(piValidator, /127\\\.0\\\.0\\\.1:\(4273\|4274\)/, 'Pi validator must reject non-loopback or unexpected upstreams.');
 assert.match(piValidator, /root:root:644/, 'Pi validator must reject writable or incorrectly owned deployment configuration.');
 assert.match(piValidator, /caddy validate/, 'Pi validator must invoke Caddy configuration validation.');

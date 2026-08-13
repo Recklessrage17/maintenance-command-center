@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CONFIG_FILE="/etc/mcc-mdns.env"
+readonly AVAHI_HOSTS="/etc/avahi/hosts"
+readonly BACKUP_FILE="/var/backups/mcc-avahi-hosts.preinstall"
+
+fail() {
+  echo "MCC mDNS install failed: $*" >&2
+  exit 1
+}
+
+if [[ "${EUID}" -ne 0 ]]; then
+  fail "run as root"
+fi
+if [[ ! -r "${CONFIG_FILE}" || "$(stat -c '%U:%G:%a' "${CONFIG_FILE}")" != "root:root:644" ]]; then
+  fail "${CONFIG_FILE} must be readable and owned by root:root with mode 0644"
+fi
+
+# shellcheck source=/dev/null
+source "${CONFIG_FILE}"
+: "${MCC_MDNS_HOSTNAME:?MCC_MDNS_HOSTNAME is required}"
+: "${MCC_MDNS_ADDRESS:?MCC_MDNS_ADDRESS is required}"
+: "${MCC_MDNS_INTERFACE:?MCC_MDNS_INTERFACE is required}"
+
+MCC_MDNS_HOSTNAME="${MCC_MDNS_HOSTNAME,,}"
+if [[ ! "${MCC_MDNS_HOSTNAME}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.local$ ]]; then
+  fail "MCC_MDNS_HOSTNAME must be a valid .local FQDN"
+fi
+if [[ ! "${MCC_MDNS_ADDRESS}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  fail "MCC_MDNS_ADDRESS must be an IPv4 address"
+fi
+IFS=. read -r address_a address_b address_c address_d <<< "${MCC_MDNS_ADDRESS}"
+for octet in "${address_a}" "${address_b}" "${address_c}" "${address_d}"; do
+  (( 10#${octet} <= 255 )) || fail "MCC_MDNS_ADDRESS contains an invalid IPv4 octet"
+done
+if [[ ! "${MCC_MDNS_INTERFACE}" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+  fail "MCC_MDNS_INTERFACE contains unsupported characters"
+fi
+command -v avahi-resolve-host-name >/dev/null || fail "install avahi-utils"
+dpkg-query -W -f='${db:Status-Status}' avahi-daemon 2>/dev/null | grep -Fxq 'installed' || fail "install avahi-daemon"
+ip link show dev "${MCC_MDNS_INTERFACE}" >/dev/null 2>&1 || fail "interface ${MCC_MDNS_INTERFACE} does not exist"
+ip -4 -o addr show dev "${MCC_MDNS_INTERFACE}" scope global | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "${MCC_MDNS_ADDRESS}" \
+  || fail "${MCC_MDNS_ADDRESS} is not assigned to ${MCC_MDNS_INTERFACE}; correct the reservation/configuration before advertising"
+
+systemctl enable --now avahi-daemon.service
+
+# Refuse to take a name already advertised by another address. A timeout or
+# not-found result is expected before the first installation.
+existing_resolution="$(timeout 5 avahi-resolve-host-name -4 "${MCC_MDNS_HOSTNAME}" 2>/dev/null || true)"
+if [[ -n "${existing_resolution}" ]]; then
+  while read -r resolved_name resolved_address _; do
+    [[ -z "${resolved_name:-}" ]] && continue
+    if [[ "${resolved_address}" != "${MCC_MDNS_ADDRESS}" ]]; then
+      fail "hostname conflict: ${MCC_MDNS_HOSTNAME} already resolves to ${resolved_address}"
+    fi
+  done <<< "${existing_resolution}"
+fi
+
+install -d -o root -g root -m 0755 /etc/avahi /var/backups
+if [[ -e "${AVAHI_HOSTS}" && ! -e "${BACKUP_FILE}" ]]; then
+  install -o root -g root -m 0644 "${AVAHI_HOSTS}" "${BACKUP_FILE}"
+fi
+
+temporary_hosts="$(mktemp /etc/avahi/hosts.mcc.XXXXXX)"
+trap 'rm -f "${temporary_hosts:-}"' EXIT
+if [[ -r "${AVAHI_HOSTS}" ]]; then
+  awk -v target="${MCC_MDNS_HOSTNAME}" '
+    {
+      remove = 0
+      for (field = 2; field <= NF; field++) {
+        if (tolower($field) == target) remove = 1
+      }
+      if (!remove) print
+    }
+  ' "${AVAHI_HOSTS}" > "${temporary_hosts}"
+fi
+printf '%s %s\n' "${MCC_MDNS_ADDRESS}" "${MCC_MDNS_HOSTNAME}" >> "${temporary_hosts}"
+install -o root -g root -m 0644 "${temporary_hosts}" "${AVAHI_HOSTS}"
+rm -f "${temporary_hosts}"
+trap - EXIT
+
+systemctl restart avahi-daemon.service
+sleep 2
+/usr/local/sbin/validate-mcc-network
+echo "MCC mDNS advertisement installed: ${MCC_MDNS_HOSTNAME} -> ${MCC_MDNS_ADDRESS}."

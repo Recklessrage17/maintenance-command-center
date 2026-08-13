@@ -1,0 +1,14 @@
+# Internal-CA fallback only. MCC_ONBOARDING_IP must be the Pi's approved LAN IP.
+# This HTTP site serves one public certificate file and never proxies to Node.
+http://{$MCC_ONBOARDING_IP} {
+	@root_ca path /mcc-root-ca.crt
+	handle @root_ca {
+		root * /var/lib/mcc-onboarding
+		header Content-Type application/x-x509-ca-cert
+		header Content-Disposition "attachment; filename=mcc-root-ca.crt"
+		header Cache-Control "no-store"
+		header X-Content-Type-Options "nosniff"
+		file_server
+	}
+	respond "Not found" 404
+}

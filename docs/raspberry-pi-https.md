@@ -71,6 +71,7 @@ Install the provider-neutral MCC configuration and service files:
 ```bash
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/Caddyfile /etc/caddy/Caddyfile
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/mcc-tls-internal.caddy /etc/caddy/mcc-tls-internal.caddy
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/mcc-onboarding-disabled.caddy /etc/caddy/mcc-onboarding-disabled.caddy
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/https/validate-mcc-https /usr/local/sbin/validate-mcc-https
 sudo install -d -o root -g root -m 0755 /etc/systemd/system/caddy.service.d
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/caddy.service.d/mcc-https.conf /etc/systemd/system/caddy.service.d/mcc-https.conf
@@ -160,6 +161,123 @@ MCC_HTTPS_UPSTREAM=127.0.0.1:4273
 
 Staging uses `mcc-stage.local` and `127.0.0.1:4274`. Run `sudo validate-mcc-https`, restart Caddy, and distribute trust as described below. Public CAs do not issue ordinary Web PKI certificates for `.local`; do not remove client trust requirements or use browser exceptions.
 
+## mDNS and .local deployment
+
+`.local` is the mDNS/Bonjour namespace. A Windows hosts-file entry proves only that one PC can map the name; it does not advertise the name to the LAN. On the Issue #86 staging PC, normal resolution succeeded because `C:\Windows\System32\drivers\etc\hosts` contained `10.1.2.188 mcc-stage.local`; direct DNS without that file returned NXDOMAIN from `10.1.2.6`. With the hosts file explicitly bypassed, `mcc-stage.local` still failed while the Pi's existing `mcc-server.local` Avahi name resolved to `10.1.2.188`. This proves current PC-to-Pi mDNS multicast works and isolates the missing component to the canonical `mcc-stage.local` advertisement. Certificate trust and name resolution are independent and must both pass.
+
+For the internal-CA fallback, install Avahi's supported daemon and validation utilities on the Pi:
+
+```bash
+sudo apt update
+sudo apt install avahi-daemon avahi-utils
+sudo systemctl enable --now avahi-daemon.service
+```
+
+MCC publishes its canonical alias through Avahi's supported `/etc/avahi/hosts` static-host mechanism. This does not rename the Pi: the operating-system hostname remains `mcc-server`. Install the deployment files:
+
+```bash
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-mdns.env.example /etc/mcc-mdns.env
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/install-mcc-mdns /usr/local/sbin/install-mcc-mdns
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/validate-mcc-network /usr/local/sbin/validate-mcc-network
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-network-validation.service /etc/systemd/system/mcc-network-validation.service
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-network-validation.timer /etc/systemd/system/mcc-network-validation.timer
+```
+
+Configure staging in `/etc/mcc-mdns.env`:
+
+```dotenv
+MCC_MDNS_HOSTNAME=mcc-stage.local
+MCC_MDNS_ADDRESS=10.1.2.188
+MCC_MDNS_INTERFACE=wlan0
+```
+
+The IP must be a DHCP reservation or otherwise stable, assigned to the named interface, and identical to the Pi LAN address used for Caddy. Production uses `MCC_MDNS_HOSTNAME=mcc.local` and the administrator-approved production address. Do not put a scheme, port, or path in the hostname.
+
+Install and validate the advertisement:
+
+```bash
+sudo install-mcc-mdns
+sudo systemctl daemon-reload
+sudo systemctl enable --now mcc-network-validation.timer
+sudo systemctl start mcc-network-validation.service
+sudo systemctl status avahi-daemon.service mcc-network-validation.service mcc-network-validation.timer --no-pager
+```
+
+The installer aborts if the exact FQDN already resolves to another IPv4 address. It preserves unrelated `/etc/avahi/hosts` entries and takes a first-install backup at `/var/backups/mcc-avahi-hosts.preinstall`. Avahi probes unique mDNS records; the MCC validator additionally fails if the canonical name resolves to any unexpected address. Never accept an automatically suffixed name such as `mcc-stage-2.local`, because the certificate, Settings URL, and QR payload require the exact canonical name.
+
+Avahi starts at boot and retains the static alias independently of MCC and Caddy restarts. It republishes after interface reconnects; the persistent timer rechecks the active Wi-Fi address, UDP 5353, exact mDNS answer, Caddy listeners, Node loopback binding, and HTTPS health every five minutes.
+
+From a second mDNS-capable client on the same DM Wi-Fi, verify `mcc-stage.local` resolves to `10.1.2.188`. If it does not, confirm the access point permits IPv4 multicast `224.0.0.251:5353` between wireless clients and that client isolation, multicast suppression, VLAN boundaries, or secure-DNS policy is not blocking local discovery. Avahi cannot cross routed VLANs without an approved mDNS gateway/reflector; do not enable Avahi reflector mode casually.
+
+## Internal-CA client onboarding
+
+Only the public certificate `/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt` may be distributed. The private `/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.key` must never be copied, served, emailed, committed, or installed on a client.
+
+Export a read-only onboarding copy and record its SHA-256 fingerprint:
+
+```bash
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/https/export-mcc-root-onboarding /usr/local/sbin/export-mcc-root-onboarding
+sudo export-mcc-root-onboarding
+sudo openssl x509 -in /var/lib/mcc-onboarding/mcc-root-ca.crt -noout -subject -issuer -dates -fingerprint -sha256
+```
+
+Communicate the entire fingerprint through a separate authenticated channel. The user must compare it before trusting the root.
+
+For a new client with neither name resolution nor trust, an administrator may explicitly enable the restricted IP onboarding endpoint:
+
+```bash
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/mcc-onboarding-http.caddy.example /etc/caddy/mcc-onboarding-http.caddy
+```
+
+Then add these staging values to `/etc/mcc-https.env`:
+
+```dotenv
+MCC_ONBOARDING_IP=10.1.2.188
+MCC_HTTPS_ONBOARDING_CONFIG=/etc/caddy/mcc-onboarding-http.caddy
+```
+
+Run `sudo validate-mcc-https`, restart Caddy, and download only `http://10.1.2.188/mcc-root-ca.crt`. Every other path on that IP-only HTTP site returns 404; it never proxies the MCC app or Node. Because HTTP cannot authenticate the certificate file, independently compare its SHA-256 fingerprint before installation. Disable this optional endpoint after onboarding by restoring `MCC_HTTPS_ONBOARDING_CONFIG=/etc/caddy/mcc-onboarding-disabled.caddy` and restarting Caddy.
+
+## Windows second-PC onboarding
+
+1. Connect the PC to the same approved DM LAN/Wi-Fi.
+2. Before adding any hosts entry, run `Resolve-DnsName mcc-stage.local` or `ping mcc-stage.local` and require `10.1.2.188`. A hosts entry is not acceptable for mDNS acceptance.
+3. Obtain `mcc-root-ca.crt` through the approved administrative channel or restricted onboarding endpoint. Compare all 64 SHA-256 hexadecimal digits through a separate authenticated channel.
+4. Copy `Install-MccRootCA.ps1` and `Test-MccHttpsClient.ps1` locally. From elevated Windows PowerShell:
+
+```powershell
+.\Install-MccRootCA.ps1 -CertificatePath .\mcc-root-ca.crt -ExpectedSha256 'PASTE_VERIFIED_64_HEX_FINGERPRINT'
+.\Test-MccHttpsClient.ps1 -Hostname mcc-stage.local
+.\Test-MccWindowsLanClient.ps1 -Hostname mcc-stage.local -ExpectedAddress 10.1.2.188 -NodePort 4274 -RequireNoHostsOverride
+```
+
+5. Close every Edge/Chrome/Brave/Firefox window, reopen the browser, and open `https://mcc-stage.local`.
+
+Domain-managed Windows PCs should receive the independently verified public root through a computer-scoped Trusted Root Certification Authorities GPO. Never distribute `root.key`.
+
+## iPhone and iPad onboarding
+
+1. Join the same DM Wi-Fi and turn off cellular data temporarily for the acceptance test.
+2. Before installing a certificate, open `http://mcc-stage.local` or use a Bonjour/mDNS discovery tool to prove the name reaches `10.1.2.188`. A timeout is a resolution/multicast problem, not a certificate problem.
+3. Download only `mcc-root-ca.crt` through the administrator-approved method. Verify its SHA-256 fingerprint separately.
+4. After Safari downloads the certificate profile, open **Settings > General > VPN & Device Management** (or **Profile Downloaded**), select the MCC certificate profile, review it, and install it.
+5. Manual profile installation does not enable TLS trust automatically. Open **Settings > General > About > Certificate Trust Settings**, then enable full trust for the verified MCC root. If the full-trust section is absent, the root profile was not installed.
+6. Open `https://mcc-stage.local/api/health`, require JSON containing `"ok":true`, then open the QR/canonical application URL.
+
+Apple recommends Apple Configurator or MDM for managed certificate deployment. Those mechanisms are preferable to repeated manual onboarding.
+
+## Android onboarding
+
+Android menus vary by manufacturer and release. On current Pixel/Android, start at **Settings > Security & privacy > More security settings > Encryption & credentials > Install a certificate**. Select **CA certificate** for a web trust anchor—not **Wi-Fi certificate** unless the certificate is specifically for enterprise Wi-Fi—and choose the independently verified `mcc-root-ca.crt`. A device PIN/pattern/password may be required.
+
+After installation:
+
+1. Confirm the device is on DM Wi-Fi and that `mcc-stage.local` resolves/reaches `10.1.2.188` independently of certificate trust.
+2. Open `https://mcc-stage.local/api/health` in Chrome and require `"ok":true` without a warning.
+3. Open the Settings QR URL and verify normal application/login/download behavior.
+
+Some vendor browsers or managed-app policies do not trust user-installed roots. Use the organization's Android Enterprise/MDM certificate policy when manual trust is unavailable; do not disable Chrome security checks.
+
 ## Bind the Node service to loopback
 
 For production `mcc.service`:
@@ -238,7 +356,10 @@ Also run `Test-MccHttpsClient.ps1` and a real mobile browser check against the c
 Back up through the protected system backup process:
 
 - `/etc/caddy/Caddyfile` and the selected `/etc/caddy/mcc-tls-*.caddy` fragment
+- `/etc/caddy/mcc-onboarding-*.caddy` and `/var/lib/mcc-onboarding/mcc-root-ca.crt` when internal-CA onboarding is enabled
 - `/etc/mcc-https.env`
+- `/etc/mcc-mdns.env`, `/etc/avahi/hosts`, and `/var/backups/mcc-avahi-hosts.preinstall` for `.local` deployments
+- `/etc/systemd/system/mcc-network-validation.service` and `.timer`
 - `/etc/mcc-https-dns.env` in public mode, encrypted and access-restricted
 - `/etc/systemd/system/caddy.service.d/mcc-https.conf`
 - the relevant MCC service loopback drop-in
@@ -255,6 +376,35 @@ If the internal CA key may be compromised, remove the old root from all trust st
 
 To roll back public mode to the internal fallback, schedule the DNS/origin change, select `MCC_HTTPS_MODE=internal`, a `.local` hostname, and the internal TLS fragment, then distribute CA trust before users switch. Rollback never includes re-exposing Node ports.
 
+## mDNS recovery and conflicts
+
+If `.local` resolution fails after reboot or Wi-Fi reconnect:
+
+```bash
+ip -4 -o addr show dev wlan0 scope global
+sudo systemctl status avahi-daemon.service mcc-network-validation.service mcc-network-validation.timer --no-pager
+sudo journalctl -b -u avahi-daemon.service -u mcc-network-validation.service --no-pager
+grep -n 'mcc-stage.local' /etc/avahi/hosts
+avahi-resolve-host-name -4 mcc-stage.local
+sudo validate-mcc-network
+```
+
+- If the interface address differs from `/etc/mcc-mdns.env`, correct the DHCP reservation/network configuration first. Do not advertise a stale address.
+- If the name resolves to another address or Avahi reports a collision, stop and identify/remove or rename the conflicting device. Do not change MCC to an automatically suffixed hostname and do not weaken the certificate hostname check.
+- If local Pi resolution passes but iPhone/Android/another PC times out, investigate DM Wi-Fi multicast, client isolation, VLAN boundaries, and mDNS gateway policy. Restarting Caddy or Node will not repair multicast.
+- If trust fails while resolution succeeds, compare the served certificate chain and independently verified root fingerprint. Do not edit hosts/DNS to mask a certificate problem.
+- If resolution fails while trust is installed, repair Avahi/network discovery. Reinstalling the same root cannot repair name resolution.
+
+To restore the original Avahi static-host file from the first-install backup, inspect both exact paths first, then during a maintenance window:
+
+```bash
+sudo systemctl stop avahi-daemon.service
+sudo install -o root -g root -m 0644 /var/backups/mcc-avahi-hosts.preinstall /etc/avahi/hosts
+sudo systemctl start avahi-daemon.service
+```
+
+This removes the MCC alias if it was absent from the original file. Settings and the QR code intentionally continue to show the configured canonical HTTPS hostname, so complete recovery by reinstalling a correct advertisement or deliberately changing the whole approved hostname/certificate configuration. Never recover by exposing Node 4273/4274 or using an IP/HTTP QR URL.
+
 ## Validation and troubleshooting
 
 Repository checks:
@@ -262,6 +412,7 @@ Repository checks:
 ```bash
 npm run test:network-access
 npm run test:https-deployment
+npm run test:mdns-deployment
 npm run test:mobile-qr
 npm run build
 npm run smoke
@@ -286,4 +437,4 @@ Common failures:
 - **HTTP does not redirect:** confirm Caddy owns 80/443 and no `auto_https` override was added.
 - **Wrong client IP in auditing/rate limits:** confirm Node is loopback-only and Caddy is the immediate peer; never broaden Express proxy trust.
 
-Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), and [Caddy systemd operation](https://caddyserver.com/docs/running).
+Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), [Caddy systemd operation](https://caddyserver.com/docs/running), [Raspberry Pi mDNS guidance](https://www.raspberrypi.com/documentation/computers/remote-access.html#resolve-raspberrypilocal-with-mdns), [Avahi static host mappings](https://manpages.debian.org/bookworm/avahi-daemon/avahi.hosts.5.en.html), [Apple manual root trust](https://support.apple.com/102390), and [Google/Pixel certificate management](https://support.google.com/pixelphone/answer/2844832).
