@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly DEFAULT_CONFIG_FILE="/etc/mcc-https.env"
+readonly DEFAULT_BACKUP_FILE="/var/backups/mcc-https.env.pre-mdns-migration"
+
+fail() {
+  echo "MCC HTTPS environment migration failed: $*" >&2
+  exit 1
+}
+
+render_config() {
+  local source_file="$1"
+  local key count
+
+  [[ -r "${source_file}" ]] || fail "missing readable ${source_file}"
+  for key in MCC_HTTPS_MODE MCC_HTTPS_HOSTNAME MCC_HTTPS_TLS_CONFIG MCC_HTTPS_ONBOARDING_CONFIG MCC_HTTPS_UPSTREAM; do
+    count="$(grep -Ec "^[[:space:]]*${key}=" "${source_file}" || true)"
+    (( count <= 1 )) || fail "${source_file} contains duplicate ${key} assignments"
+  done
+
+  unset MCC_HTTPS_MODE MCC_HTTPS_HOSTNAME MCC_HTTPS_TLS_CONFIG MCC_HTTPS_ONBOARDING_CONFIG MCC_HTTPS_UPSTREAM
+  # shellcheck source=/dev/null
+  source "${source_file}"
+
+  local hostname="${MCC_HTTPS_HOSTNAME:-}"
+  local upstream="${MCC_HTTPS_UPSTREAM:-}"
+  local mode="${MCC_HTTPS_MODE:-}"
+  local tls_config="${MCC_HTTPS_TLS_CONFIG:-}"
+  local onboarding_config="${MCC_HTTPS_ONBOARDING_CONFIG:-}"
+
+  hostname="${hostname,,}"
+  mode="${mode,,}"
+  [[ -n "${hostname}" ]] || fail "MCC_HTTPS_HOSTNAME is required"
+  [[ -n "${upstream}" ]] || fail "MCC_HTTPS_UPSTREAM is required"
+  if (( ${#hostname} > 253 )) || [[ "${hostname}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || [[ ! "${hostname}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]]; then
+    fail "MCC_HTTPS_HOSTNAME must be a valid DNS hostname"
+  fi
+  [[ "${upstream}" =~ ^127\.0\.0\.1:(4273|4274)$ ]] \
+    || fail "MCC_HTTPS_UPSTREAM must remain loopback-only on 4273 or 4274"
+
+  if [[ -z "${mode}" ]]; then
+    [[ "${hostname}" == *.local ]] \
+      || fail "cannot infer MCC_HTTPS_MODE for non-.local hostname ${hostname}; configure it explicitly"
+    mode="internal"
+  fi
+  [[ "${mode}" == "internal" || "${mode}" == "public" ]] \
+    || fail 'MCC_HTTPS_MODE must be "internal" or "public"'
+
+  if [[ -z "${tls_config}" ]]; then
+    [[ "${mode}" == "internal" ]] \
+      || fail "cannot infer MCC_HTTPS_TLS_CONFIG for public mode"
+    tls_config="/etc/caddy/mcc-tls-internal.caddy"
+  fi
+  if [[ "${mode}" == "internal" ]]; then
+    [[ "${hostname}" == *.local ]] || fail "internal mode requires a .local hostname"
+    [[ "${tls_config}" == "/etc/caddy/mcc-tls-internal.caddy" ]] \
+      || fail "internal mode requires /etc/caddy/mcc-tls-internal.caddy"
+  else
+    [[ "${hostname}" != *.local ]] || fail "public mode cannot use a .local hostname"
+    [[ "${tls_config}" =~ ^/etc/caddy/[A-Za-z0-9._-]+\.caddy$ ]] \
+      || fail "public MCC_HTTPS_TLS_CONFIG must name a Caddy fragment"
+  fi
+
+  if [[ -z "${onboarding_config}" ]]; then
+    onboarding_config="/etc/caddy/mcc-onboarding-disabled.caddy"
+  fi
+  [[ "${onboarding_config}" =~ ^/etc/caddy/mcc-onboarding-(disabled|http)\.caddy$ ]] \
+    || fail "MCC_HTTPS_ONBOARDING_CONFIG is not supported"
+  if [[ "${mode}" == "public" && "${onboarding_config}" != "/etc/caddy/mcc-onboarding-disabled.caddy" ]]; then
+    fail "public mode must keep internal-CA onboarding disabled"
+  fi
+
+  awk \
+    -v mode="${mode}" \
+    -v hostname="${hostname}" \
+    -v tls_config="${tls_config}" \
+    -v onboarding_config="${onboarding_config}" \
+    -v upstream="${upstream}" '
+      BEGIN {
+        values["MCC_HTTPS_MODE"] = mode
+        values["MCC_HTTPS_HOSTNAME"] = hostname
+        values["MCC_HTTPS_TLS_CONFIG"] = tls_config
+        values["MCC_HTTPS_ONBOARDING_CONFIG"] = onboarding_config
+        values["MCC_HTTPS_UPSTREAM"] = upstream
+        order[1] = "MCC_HTTPS_MODE"
+        order[2] = "MCC_HTTPS_HOSTNAME"
+        order[3] = "MCC_HTTPS_TLS_CONFIG"
+        order[4] = "MCC_HTTPS_ONBOARDING_CONFIG"
+        order[5] = "MCC_HTTPS_UPSTREAM"
+      }
+      {
+        replaced = 0
+        for (key in values) {
+          if ($0 ~ "^[[:space:]]*" key "=") {
+            print key "=" values[key]
+            seen[key] = 1
+            replaced = 1
+            break
+          }
+        }
+        if (!replaced) print
+      }
+      END {
+        for (position = 1; position <= 5; position++) {
+          key = order[position]
+          if (!seen[key]) print key "=" values[key]
+        }
+      }
+    ' "${source_file}"
+}
+
+if [[ "${1:-}" == "--render" ]]; then
+  [[ "$#" -eq 2 ]] || fail "usage: migrate-mcc-https-env --render <environment-file>"
+  render_config "$2"
+  exit 0
+fi
+[[ "$#" -eq 0 ]] || fail "usage: migrate-mcc-https-env [--render <environment-file>]"
+[[ "${EUID}" -eq 0 ]] || fail "run as root"
+[[ -r "${DEFAULT_CONFIG_FILE}" ]] || fail "missing ${DEFAULT_CONFIG_FILE}"
+[[ "$(stat -c '%U:%G:%a' "${DEFAULT_CONFIG_FILE}")" == "root:root:644" ]] \
+  || fail "${DEFAULT_CONFIG_FILE} must be owned by root:root with mode 0644"
+
+install -d -o root -g root -m 0755 /var/backups
+temporary_config="$(mktemp /etc/mcc-https.env.migrate.XXXXXX)"
+trap 'rm -f "${temporary_config:-}"' EXIT
+render_config "${DEFAULT_CONFIG_FILE}" > "${temporary_config}"
+if cmp --silent "${DEFAULT_CONFIG_FILE}" "${temporary_config}"; then
+  echo "MCC HTTPS environment already uses the current schema; no migration needed."
+  exit 0
+fi
+if [[ ! -e "${DEFAULT_BACKUP_FILE}" ]]; then
+  install -o root -g root -m 0644 "${DEFAULT_CONFIG_FILE}" "${DEFAULT_BACKUP_FILE}"
+fi
+install -o root -g root -m 0644 "${temporary_config}" "${DEFAULT_CONFIG_FILE}"
+echo "Migrated ${DEFAULT_CONFIG_FILE}; preserved hostname/upstream and added controlled HTTPS defaults."

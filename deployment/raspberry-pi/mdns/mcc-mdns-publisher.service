@@ -1,0 +1,28 @@
+[Unit]
+Description=Publish the canonical MCC mDNS alias without replacing the Pi reverse identity
+Wants=network-online.target
+Requires=avahi-daemon.service
+After=network-online.target avahi-daemon.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/sbin/publish-mcc-mdns
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=5s
+TimeoutStartSec=30s
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

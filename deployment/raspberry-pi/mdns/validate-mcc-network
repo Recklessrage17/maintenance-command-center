@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly MDNS_CONFIG="/etc/mcc-mdns.env"
 readonly HTTPS_CONFIG="/etc/mcc-https.env"
 readonly AVAHI_HOSTS="/etc/avahi/hosts"
+readonly PUBLISHER_SERVICE="mcc-mdns-publisher.service"
 readonly INTERNAL_ROOT="/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt"
 readonly ONBOARDING_ROOT="/var/lib/mcc-onboarding/mcc-root-ca.crt"
 
@@ -15,7 +16,7 @@ fail() {
 if [[ "${EUID}" -ne 0 ]]; then
   fail "run as root"
 fi
-for protected_path in "${MDNS_CONFIG}" "${HTTPS_CONFIG}" "${AVAHI_HOSTS}"; do
+for protected_path in "${MDNS_CONFIG}" "${HTTPS_CONFIG}"; do
   [[ -r "${protected_path}" ]] || fail "missing ${protected_path}"
   [[ "$(stat -c '%U:%G:%a' "${protected_path}")" == "root:root:644" ]] \
     || fail "${protected_path} must be owned by root:root with mode 0644"
@@ -23,11 +24,19 @@ done
 
 # shellcheck source=/dev/null
 source "${MDNS_CONFIG}"
-mdns_hostname="${MCC_MDNS_HOSTNAME,,}"
-mdns_address="${MCC_MDNS_ADDRESS}"
-mdns_interface="${MCC_MDNS_INTERFACE}"
+mdns_hostname="${MCC_MDNS_HOSTNAME:-}"
+mdns_address="${MCC_MDNS_ADDRESS:-}"
+mdns_interface="${MCC_MDNS_INTERFACE:-}"
+[[ -n "${mdns_hostname}" ]] || fail "MCC_MDNS_HOSTNAME is missing from ${MDNS_CONFIG}"
+[[ -n "${mdns_address}" ]] || fail "MCC_MDNS_ADDRESS is missing from ${MDNS_CONFIG}"
+[[ -n "${mdns_interface}" ]] || fail "MCC_MDNS_INTERFACE is missing from ${MDNS_CONFIG}"
+mdns_hostname="${mdns_hostname,,}"
 # shellcheck source=/dev/null
 source "${HTTPS_CONFIG}"
+for required_variable in MCC_HTTPS_MODE MCC_HTTPS_HOSTNAME MCC_HTTPS_TLS_CONFIG MCC_HTTPS_ONBOARDING_CONFIG MCC_HTTPS_UPSTREAM; do
+  [[ -n "${!required_variable:-}" ]] \
+    || fail "${required_variable} is missing from ${HTTPS_CONFIG}; run sudo migrate-mcc-https-env"
+done
 https_hostname="${MCC_HTTPS_HOSTNAME,,}"
 https_mode="${MCC_HTTPS_MODE,,}"
 https_upstream="${MCC_HTTPS_UPSTREAM}"
@@ -42,26 +51,68 @@ ip -4 -o addr show dev "${mdns_interface}" scope global | awk '{print $4}' | cut
 systemctl is-enabled --quiet avahi-daemon.service || fail "avahi-daemon.service is not enabled"
 systemctl is-active --quiet avahi-daemon.service || fail "avahi-daemon.service is not active"
 ss -lunH | awk '$4 ~ /:5353$/ { found=1 } END { exit !found }' || fail "nothing is listening on UDP 5353"
+systemctl is-enabled --quiet "${PUBLISHER_SERVICE}" || fail "${PUBLISHER_SERVICE} is not enabled"
+systemctl is-active --quiet "${PUBLISHER_SERVICE}" || fail "${PUBLISHER_SERVICE} is not active; inspect its journal for a hostname collision"
 
-mapping_count="$(awk -v target="${mdns_hostname}" '
-  {
-    for (field = 2; field <= NF; field++) {
-      if (tolower($field) == target) print $1
+if [[ -e "${AVAHI_HOSTS}" ]]; then
+  [[ -r "${AVAHI_HOSTS}" && "$(stat -c '%U:%G:%a' "${AVAHI_HOSTS}")" == "root:root:644" ]] \
+    || fail "${AVAHI_HOSTS} must be readable and owned by root:root with mode 0644"
+  if awk -v target="${mdns_hostname}" '
+    {
+      for (field = 2; field <= NF; field++) {
+        if ($field ~ /^#/) break
+        if (tolower($field) == target) found = 1
+      }
     }
-  }
-' "${AVAHI_HOSTS}" | tee /run/mcc-mdns-mappings.$$ | wc -l)"
-trap 'rm -f /run/mcc-mdns-mappings.$$' EXIT
-[[ "${mapping_count}" == "1" ]] || fail "${AVAHI_HOSTS} must contain exactly one mapping for ${mdns_hostname}"
-grep -Fxq "${mdns_address}" /run/mcc-mdns-mappings.$$ || fail "Avahi hosts mapping does not use ${mdns_address}"
+    END { exit !found }
+  ' "${AVAHI_HOSTS}"; then
+    fail "obsolete ${AVAHI_HOSTS} mapping for ${mdns_hostname} remains; rerun sudo install-mcc-mdns"
+  fi
+fi
+
+publisher_main_pid="$(systemctl show --property=MainPID --value "${PUBLISHER_SERVICE}")"
+[[ "${publisher_main_pid}" =~ ^[1-9][0-9]*$ && -r "/proc/${publisher_main_pid}/task/${publisher_main_pid}/children" ]] \
+  || fail "cannot inspect ${PUBLISHER_SERVICE} publisher process"
+publisher_child_count=0
+for child_pid in $(<"/proc/${publisher_main_pid}/task/${publisher_main_pid}/children"); do
+  [[ -r "/proc/${child_pid}/cmdline" ]] || continue
+  mapfile -d '' -t publisher_args < "/proc/${child_pid}/cmdline"
+  [[ "${publisher_args[0]##*/}" == "avahi-publish-address" ]] || continue
+  ((publisher_child_count+=1))
+  printf '%s\n' "${publisher_args[@]}" | grep -Fxq -- '--no-reverse' \
+    || fail "alias publisher is missing --no-reverse"
+  printf '%s\n' "${publisher_args[@]}" | grep -Fxq -- '--no-fail' \
+    || fail "alias publisher is not configured to reconnect to Avahi"
+  printf '%s\n' "${publisher_args[@]}" | grep -Fxq -- "${mdns_hostname}" \
+    || fail "alias publisher is not using ${mdns_hostname}"
+  printf '%s\n' "${publisher_args[@]}" | grep -Fxq -- "${mdns_address}" \
+    || fail "alias publisher is not using ${mdns_address}"
+done
+[[ "${publisher_child_count}" == "1" ]] || fail "expected exactly one no-reverse Avahi publisher process"
 
 resolution="$(timeout 8 avahi-resolve-host-name -4 "${mdns_hostname}" 2>/dev/null)" || fail "Avahi did not resolve ${mdns_hostname}"
 resolved_count=0
 while read -r resolved_name resolved_address _; do
   [[ -z "${resolved_name:-}" ]] && continue
+  resolved_name="${resolved_name%.}"
   ((resolved_count+=1))
+  [[ "${resolved_name,,}" == "${mdns_hostname}" ]] || fail "Avahi returned unexpected name ${resolved_name} for ${mdns_hostname}"
   [[ "${resolved_address}" == "${mdns_address}" ]] || fail "hostname conflict: ${mdns_hostname} resolved to ${resolved_address}"
 done <<< "${resolution}"
 (( resolved_count > 0 )) || fail "Avahi returned no IPv4 result for ${mdns_hostname}"
+
+system_short_hostname="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+system_mdns_hostname="${system_short_hostname%.local}.local"
+system_resolution="$(timeout 8 avahi-resolve-host-name -4 "${system_mdns_hostname}" 2>/dev/null)" \
+  || fail "Pi system mDNS name ${system_mdns_hostname} no longer resolves"
+awk -v expected="${mdns_address}" '$2 == expected { found=1 } END { exit !found }' <<< "${system_resolution}" \
+  || fail "Pi system mDNS name ${system_mdns_hostname} does not include ${mdns_address}"
+reverse_resolution="$(timeout 8 avahi-resolve-address "${mdns_address}" 2>/dev/null)" \
+  || fail "Avahi reverse lookup failed for ${mdns_address}"
+reverse_hostname="$(awk 'NR == 1 { print tolower($2) }' <<< "${reverse_resolution}")"
+reverse_hostname="${reverse_hostname%.}"
+[[ "${reverse_hostname}" == "${system_mdns_hostname}" ]] \
+  || fail "reverse identity changed: ${mdns_address} resolves to ${reverse_hostname}, expected ${system_mdns_hostname} (the MCC alias must use --no-reverse)"
 
 systemctl is-active --quiet caddy.service || fail "caddy.service is not active"
 listeners="$(ss -ltnH)"
@@ -88,16 +139,15 @@ if [[ "${MCC_HTTPS_ONBOARDING_CONFIG:-}" == "/etc/caddy/mcc-onboarding-http.cadd
   cmp --silent "${INTERNAL_ROOT}" "${ONBOARDING_ROOT}" || fail "onboarding root does not match Caddy's current public root.crt"
   [[ ! -e "/var/lib/mcc-onboarding/root.key" ]] || fail "private root.key must never exist in the onboarding directory"
   downloaded_root="$(mktemp /run/mcc-root-ca.XXXXXX)"
-  trap 'rm -f /run/mcc-mdns-mappings.$$ "${downloaded_root:-}"' EXIT
+  trap 'rm -f "${downloaded_root:-}"' EXIT
   curl --fail --silent --show-error --max-time 10 \
     "http://${mdns_address}/mcc-root-ca.crt" -o "${downloaded_root}" \
     || fail "HTTP public-root onboarding download failed"
   cmp --silent "${INTERNAL_ROOT}" "${downloaded_root}" || fail "downloaded onboarding root does not match Caddy's current public root.crt"
 fi
 
-rm -f /run/mcc-mdns-mappings.$$
 if [[ -n "${downloaded_root:-}" ]]; then
   rm -f "${downloaded_root}"
 fi
 trap - EXIT
-echo "PASS: ${mdns_hostname} advertises ${mdns_address}; Avahi/5353, Caddy 80/443, loopback Node ${node_port}, and trusted HTTPS health are valid."
+echo "PASS: ${mdns_hostname} advertises ${mdns_address} without reverse takeover; ${system_mdns_hostname}, Avahi/5353, Caddy 80/443, loopback Node ${node_port}, and trusted HTTPS health are valid."

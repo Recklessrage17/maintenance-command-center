@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CONFIG_FILE="/etc/mcc-mdns.env"
+publisher_pid=""
+
+fail() {
+  echo "MCC mDNS publisher failed: $*" >&2
+  exit 1
+}
+
+collision() {
+  echo "MCC mDNS publisher collision: $*" >&2
+  exit 78
+}
+
+stop_publisher() {
+  if [[ -n "${publisher_pid}" ]] && kill -0 "${publisher_pid}" 2>/dev/null; then
+    kill "${publisher_pid}" 2>/dev/null || true
+    wait "${publisher_pid}" 2>/dev/null || true
+  fi
+}
+
+on_stop() {
+  stop_publisher
+  exit 0
+}
+
+trap stop_publisher EXIT
+trap on_stop TERM INT
+
+[[ "${EUID}" -eq 0 ]] || fail "run as root"
+[[ -r "${CONFIG_FILE}" ]] || fail "missing ${CONFIG_FILE}"
+[[ "$(stat -c '%U:%G:%a' "${CONFIG_FILE}")" == "root:root:644" ]] \
+  || fail "${CONFIG_FILE} must be owned by root:root with mode 0644"
+
+# shellcheck source=/dev/null
+source "${CONFIG_FILE}"
+hostname="${MCC_MDNS_HOSTNAME:-}"
+address="${MCC_MDNS_ADDRESS:-}"
+interface="${MCC_MDNS_INTERFACE:-}"
+hostname="${hostname,,}"
+[[ "${hostname}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.local$ ]] \
+  || fail "MCC_MDNS_HOSTNAME must be a valid .local FQDN"
+[[ "${address}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "MCC_MDNS_ADDRESS must be an IPv4 address"
+IFS=. read -r address_a address_b address_c address_d <<< "${address}"
+for octet in "${address_a}" "${address_b}" "${address_c}" "${address_d}"; do
+  (( 10#${octet} <= 255 )) || fail "MCC_MDNS_ADDRESS contains an invalid IPv4 octet"
+done
+[[ "${interface}" =~ ^[A-Za-z0-9_.:-]+$ ]] || fail "MCC_MDNS_INTERFACE contains unsupported characters"
+ip link show dev "${interface}" >/dev/null 2>&1 || fail "interface ${interface} does not exist"
+ip -4 -o addr show dev "${interface}" scope global | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "${address}" \
+  || fail "${address} is not assigned to ${interface}"
+
+for required_command in /usr/bin/avahi-publish-address /usr/bin/avahi-resolve-host-name /usr/bin/stdbuf /usr/bin/systemd-notify /usr/bin/timeout; do
+  [[ -x "${required_command}" ]] || fail "missing ${required_command}"
+done
+
+check_exact_resolution() {
+  local resolution resolved_name resolved_address extra
+  local resolved_count=0
+  resolution="$(/usr/bin/timeout 5 /usr/bin/avahi-resolve-host-name -4 "${hostname}" 2>/dev/null || true)"
+  [[ -n "${resolution}" ]] || return 1
+  while read -r resolved_name resolved_address extra; do
+    [[ -z "${resolved_name:-}" ]] && continue
+    resolved_name="${resolved_name%.}"
+    ((resolved_count+=1))
+    [[ "${resolved_name,,}" == "${hostname}" ]] || return 1
+    [[ "${resolved_address}" == "${address}" ]] || return 1
+  done <<< "${resolution}"
+  (( resolved_count > 0 ))
+}
+
+preflight_resolution="$(/usr/bin/timeout 5 /usr/bin/avahi-resolve-host-name -4 "${hostname}" 2>/dev/null || true)"
+if [[ -n "${preflight_resolution}" ]]; then
+  while read -r resolved_name resolved_address extra; do
+    [[ -z "${resolved_name:-}" ]] && continue
+    resolved_name="${resolved_name%.}"
+    [[ "${resolved_name,,}" == "${hostname}" ]] \
+      || fail "preflight returned unexpected name ${resolved_name} for ${hostname}"
+    [[ "${resolved_address}" == "${address}" ]] \
+      || collision "external hostname collision: ${hostname} already resolves to ${resolved_address}, expected ${address}"
+  done <<< "${preflight_resolution}"
+fi
+
+coproc AVAHI_PUBLISHER {
+  exec /usr/bin/stdbuf -oL -eL /usr/bin/avahi-publish-address \
+    --no-reverse --no-fail "${hostname}" "${address}" 2>&1
+}
+publisher_pid="${AVAHI_PUBLISHER_PID}"
+publisher_output_fd="${AVAHI_PUBLISHER[0]}"
+ready=false
+
+while IFS= read -r line <&"${publisher_output_fd}"; do
+  echo "avahi-publish-address: ${line}"
+  if [[ "${line}" == *"Name collision, picking new name"* ]]; then
+    collision "exact hostname collision; refusing Avahi's automatically renamed alias: ${line}"
+  fi
+  if [[ "${line}" == "Established under name '${hostname}'" ]]; then
+    resolved=false
+    for attempt in 1 2 3 4 5; do
+      if check_exact_resolution; then
+        resolved=true
+        break
+      fi
+      sleep 1
+    done
+    [[ "${resolved}" == "true" ]] \
+      || fail "publisher reported established, but ${hostname} did not resolve exactly to ${address}"
+    if [[ "${ready}" != "true" ]]; then
+      /usr/bin/systemd-notify --ready --status="Published ${hostname} -> ${address} without a reverse PTR"
+      ready=true
+    else
+      /usr/bin/systemd-notify --status="Republished ${hostname} -> ${address} after Avahi reconnect"
+    fi
+  elif [[ "${line}" == "Established under name '"* ]]; then
+    collision "publisher established an unexpected alias instead of ${hostname}: ${line}"
+  fi
+done
+
+wait "${publisher_pid}" || publisher_status=$?
+publisher_pid=""
+fail "avahi-publish-address exited unexpectedly with status ${publisher_status:-0}"

@@ -156,6 +156,7 @@ Install the tracked internal environment example as `/etc/mcc-https.env` and sel
 MCC_HTTPS_MODE=internal
 MCC_HTTPS_HOSTNAME=mcc.local
 MCC_HTTPS_TLS_CONFIG=/etc/caddy/mcc-tls-internal.caddy
+MCC_HTTPS_ONBOARDING_CONFIG=/etc/caddy/mcc-onboarding-disabled.caddy
 MCC_HTTPS_UPSTREAM=127.0.0.1:4273
 ```
 
@@ -173,12 +174,17 @@ sudo apt install avahi-daemon avahi-utils
 sudo systemctl enable --now avahi-daemon.service
 ```
 
-MCC publishes its canonical alias through Avahi's supported `/etc/avahi/hosts` static-host mechanism. This does not rename the Pi: the operating-system hostname remains `mcc-server`. Install the deployment files:
+MCC publishes its canonical alias with Avahi's supported `avahi-publish-address --no-reverse` operation. The publisher is supervised by systemd, reconnects when Avahi restarts, and deliberately does not register a reverse PTR for the MCC alias. The operating-system and reverse mDNS identity therefore remain `mcc-server` / `mcc-server.local`. Do not use `/etc/avahi/hosts` for an additional name on the Pi's own address: that path also attempts reverse registration and caused the real staging `Local name collision` failure.
+
+Install the deployment files:
 
 ```bash
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-mdns.env.example /etc/mcc-mdns.env
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/migrate-mcc-https-env /usr/local/sbin/migrate-mcc-https-env
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/publish-mcc-mdns /usr/local/sbin/publish-mcc-mdns
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/install-mcc-mdns /usr/local/sbin/install-mcc-mdns
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/validate-mcc-network /usr/local/sbin/validate-mcc-network
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-mdns-publisher.service /etc/systemd/system/mcc-mdns-publisher.service
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-network-validation.service /etc/systemd/system/mcc-network-validation.service
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-network-validation.timer /etc/systemd/system/mcc-network-validation.timer
 ```
@@ -197,15 +203,40 @@ Install and validate the advertisement:
 
 ```bash
 sudo install-mcc-mdns
-sudo systemctl daemon-reload
 sudo systemctl enable --now mcc-network-validation.timer
 sudo systemctl start mcc-network-validation.service
-sudo systemctl status avahi-daemon.service mcc-network-validation.service mcc-network-validation.timer --no-pager
+sudo systemctl status avahi-daemon.service mcc-mdns-publisher.service mcc-network-validation.service mcc-network-validation.timer --no-pager
 ```
 
-The installer aborts if the exact FQDN already resolves to another IPv4 address. It preserves unrelated `/etc/avahi/hosts` entries and takes a first-install backup at `/var/backups/mcc-avahi-hosts.preinstall`. Avahi probes unique mDNS records; the MCC validator additionally fails if the canonical name resolves to any unexpected address. Never accept an automatically suffixed name such as `mcc-stage-2.local`, because the certificate, Settings URL, and QR payload require the exact canonical name.
+`install-mcc-mdns` first runs the idempotent HTTPS environment migrator. An older internal-CA file containing only `MCC_HTTPS_HOSTNAME` and `MCC_HTTPS_UPSTREAM` retains those exact deployment values and gains `MCC_HTTPS_MODE=internal`, the internal TLS fragment, and disabled onboarding. The first changed file is backed up at `/var/backups/mcc-https.env.pre-mdns-migration`. Non-`.local` files are never guessed into a certificate mode.
 
-Avahi starts at boot and retains the static alias independently of MCC and Caddy restarts. It republishes after interface reconnects; the persistent timer rechecks the active Wi-Fi address, UDP 5353, exact mDNS answer, Caddy listeners, Node loopback binding, and HTTPS health every five minutes.
+The installer removes only the configured MCC hostname from `/etc/avahi/hosts`, preserves unrelated static hosts/aliases, and retains the existing first-install backup at `/var/backups/mcc-avahi-hosts.preinstall`. It then enables the root-owned `mcc-mdns-publisher.service`. The publisher preflights the exact FQDN, aborts if it resolves to another IPv4 address, uses `--no-reverse --no-fail`, and refuses Avahi's automatic `-2`/`-3` collision rename. It reports ready only after the exact canonical name resolves to the configured address. A collision uses a non-restarting service exit so it cannot loop while briefly attempting suffixed names; after removing the external conflict, rerun `sudo install-mcc-mdns` or reset/restart the publisher explicitly. Never accept a suffixed name such as `mcc-stage-2.local`, because the certificate, Settings URL, and QR payload require the exact canonical name.
+
+Avahi and the publisher start at boot independently of MCC and Caddy. `--no-fail` reconnects and republishes after an Avahi restart, and the Avahi entry remains registered across Wi-Fi reconnects. The persistent timer rechecks the active Wi-Fi address, UDP 5353, publisher process/flags, exact alias answer, normal Pi hostname, unchanged reverse identity, Caddy listeners, Node loopback binding, and trusted HTTPS health every five minutes. Missing HTTPS variables produce a controlled migration message instead of a `set -u` crash.
+
+### Upgrade the partially deployed Issue #86 staging Pi
+
+After pulling the corrected release-branch commit into the existing staging checkout, keep the validation timer disabled until the one-time migration succeeds, then run from the repository root:
+
+```bash
+sudo systemctl disable --now mcc-network-validation.timer
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/migrate-mcc-https-env /usr/local/sbin/migrate-mcc-https-env
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/publish-mcc-mdns /usr/local/sbin/publish-mcc-mdns
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/install-mcc-mdns /usr/local/sbin/install-mcc-mdns
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/mdns/validate-mcc-network /usr/local/sbin/validate-mcc-network
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-mdns-publisher.service /etc/systemd/system/mcc-mdns-publisher.service
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-network-validation.service /etc/systemd/system/mcc-network-validation.service
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/mdns/mcc-network-validation.timer /etc/systemd/system/mcc-network-validation.timer
+sudo systemctl daemon-reload
+sudo install-mcc-mdns
+sudo systemctl reset-failed mcc-network-validation.service
+sudo systemctl enable --now mcc-network-validation.timer
+sudo systemctl start mcc-network-validation.service
+sudo systemctl status avahi-daemon.service mcc-mdns-publisher.service mcc-network-validation.service mcc-network-validation.timer caddy.service --no-pager
+sudo journalctl -b -u mcc-mdns-publisher.service -u mcc-network-validation.service --no-pager
+```
+
+Before running `install-mcc-mdns`, confirm `/etc/mcc-mdns.env` still contains staging hostname `mcc-stage.local`, address `10.1.2.188`, and interface `wlan0`. The migrator does not replace `MCC_HTTPS_HOSTNAME=mcc-stage.local` or `MCC_HTTPS_UPSTREAM=127.0.0.1:4274`.
 
 From a second mDNS-capable client on the same DM Wi-Fi, verify `mcc-stage.local` resolves to `10.1.2.188`. If it does not, confirm the access point permits IPv4 multicast `224.0.0.251:5353` between wireless clients and that client isolation, multicast suppression, VLAN boundaries, or secure-DNS policy is not blocking local discovery. Avahi cannot cross routed VLANs without an approved mDNS gateway/reflector; do not enable Avahi reflector mode casually.
 
@@ -358,8 +389,8 @@ Back up through the protected system backup process:
 - `/etc/caddy/Caddyfile` and the selected `/etc/caddy/mcc-tls-*.caddy` fragment
 - `/etc/caddy/mcc-onboarding-*.caddy` and `/var/lib/mcc-onboarding/mcc-root-ca.crt` when internal-CA onboarding is enabled
 - `/etc/mcc-https.env`
-- `/etc/mcc-mdns.env`, `/etc/avahi/hosts`, and `/var/backups/mcc-avahi-hosts.preinstall` for `.local` deployments
-- `/etc/systemd/system/mcc-network-validation.service` and `.timer`
+- `/etc/mcc-mdns.env`, the root-owned MCC publisher scripts/unit, `/etc/avahi/hosts`, `/var/backups/mcc-avahi-hosts.preinstall`, and `/var/backups/mcc-https.env.pre-mdns-migration` for `.local` deployments
+- `/etc/systemd/system/mcc-mdns-publisher.service`, `mcc-network-validation.service`, and `.timer`
 - `/etc/mcc-https-dns.env` in public mode, encrypted and access-restricted
 - `/etc/systemd/system/caddy.service.d/mcc-https.conf`
 - the relevant MCC service loopback drop-in
@@ -383,14 +414,18 @@ If `.local` resolution fails after reboot or Wi-Fi reconnect:
 ```bash
 ip -4 -o addr show dev wlan0 scope global
 sudo systemctl status avahi-daemon.service mcc-network-validation.service mcc-network-validation.timer --no-pager
-sudo journalctl -b -u avahi-daemon.service -u mcc-network-validation.service --no-pager
-grep -n 'mcc-stage.local' /etc/avahi/hosts
+sudo systemctl status mcc-mdns-publisher.service --no-pager
+sudo journalctl -b -u avahi-daemon.service -u mcc-mdns-publisher.service -u mcc-network-validation.service --no-pager
+grep -n 'mcc-stage.local' /etc/avahi/hosts || true
 avahi-resolve-host-name -4 mcc-stage.local
+avahi-resolve-host-name -4 mcc-server.local
+avahi-resolve-address 10.1.2.188
 sudo validate-mcc-network
 ```
 
 - If the interface address differs from `/etc/mcc-mdns.env`, correct the DHCP reservation/network configuration first. Do not advertise a stale address.
-- If the name resolves to another address or Avahi reports a collision, stop and identify/remove or rename the conflicting device. Do not change MCC to an automatically suffixed hostname and do not weaken the certificate hostname check.
+- If the name resolves to another address or the publisher journal reports a collision/attempted rename, stop and identify/remove or rename the conflicting device. Do not change MCC to an automatically suffixed hostname and do not weaken the certificate hostname check.
+- `avahi-resolve-address 10.1.2.188` must continue returning `mcc-server.local`, not `mcc-stage.local`. A reverse takeover means the obsolete static-host path or another incorrect publisher remains.
 - If local Pi resolution passes but iPhone/Android/another PC times out, investigate DM Wi-Fi multicast, client isolation, VLAN boundaries, and mDNS gateway policy. Restarting Caddy or Node will not repair multicast.
 - If trust fails while resolution succeeds, compare the served certificate chain and independently verified root fingerprint. Do not edit hosts/DNS to mask a certificate problem.
 - If resolution fails while trust is installed, repair Avahi/network discovery. Reinstalling the same root cannot repair name resolution.
@@ -398,12 +433,12 @@ sudo validate-mcc-network
 To restore the original Avahi static-host file from the first-install backup, inspect both exact paths first, then during a maintenance window:
 
 ```bash
-sudo systemctl stop avahi-daemon.service
+sudo systemctl stop mcc-mdns-publisher.service avahi-daemon.service
 sudo install -o root -g root -m 0644 /var/backups/mcc-avahi-hosts.preinstall /etc/avahi/hosts
 sudo systemctl start avahi-daemon.service
 ```
 
-This removes the MCC alias if it was absent from the original file. Settings and the QR code intentionally continue to show the configured canonical HTTPS hostname, so complete recovery by reinstalling a correct advertisement or deliberately changing the whole approved hostname/certificate configuration. Never recover by exposing Node 4273/4274 or using an IP/HTTP QR URL.
+This disables the supervised MCC alias and restores the original static-host state. Settings and the QR code intentionally continue to show the configured canonical HTTPS hostname, so complete recovery by rerunning `sudo install-mcc-mdns` or deliberately changing the whole approved hostname/certificate configuration. Never recover by exposing Node 4273/4274 or using an IP/HTTP QR URL.
 
 ## Validation and troubleshooting
 
@@ -437,4 +472,4 @@ Common failures:
 - **HTTP does not redirect:** confirm Caddy owns 80/443 and no `auto_https` override was added.
 - **Wrong client IP in auditing/rate limits:** confirm Node is loopback-only and Caddy is the immediate peer; never broaden Express proxy trust.
 
-Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), [Caddy systemd operation](https://caddyserver.com/docs/running), [Raspberry Pi mDNS guidance](https://www.raspberrypi.com/documentation/computers/remote-access.html#resolve-raspberrypilocal-with-mdns), [Avahi static host mappings](https://manpages.debian.org/bookworm/avahi-daemon/avahi.hosts.5.en.html), [Apple manual root trust](https://support.apple.com/102390), and [Google/Pixel certificate management](https://support.google.com/pixelphone/answer/2844832).
+Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), [Caddy systemd operation](https://caddyserver.com/docs/running), [Raspberry Pi mDNS guidance](https://www.raspberrypi.com/documentation/computers/remote-access.html#resolve-raspberrypilocal-with-mdns), [Debian Bookworm Avahi publisher source](https://sources.debian.org/src/avahi/0.8-10%2Bdeb12u1/avahi-utils/avahi-publish.c/), [Apple manual root trust](https://support.apple.com/102390), and [Google/Pixel certificate management](https://support.google.com/pixelphone/answer/2844832).
