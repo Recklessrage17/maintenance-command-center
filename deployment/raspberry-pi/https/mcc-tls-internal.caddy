@@ -1,0 +1,2 @@
+# Managed-LAN fallback for .local names. Clients must trust the MCC CA.
+tls internal

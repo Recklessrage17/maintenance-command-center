@@ -6,9 +6,10 @@
 }
 
 {$MCC_HTTPS_HOSTNAME:mcc.local} {
-	# .local names cannot receive ordinary publicly trusted certificates. Caddy
-	# manages a dedicated internal CA and renews the server certificate for us.
-	tls internal
+	# The root-owned imported fragment selects either Caddy's internal CA or a
+	# public ACME DNS-01 issuer. Provider-specific syntax and credentials stay
+	# outside this shared reverse-proxy configuration.
+	import {$MCC_HTTPS_TLS_CONFIG:/etc/caddy/mcc-tls-internal.caddy}
 
 	# The upstream must remain a loopback address. Caddy preserves Host and sets
 	# trusted X-Forwarded-For/Host/Proto headers without changing download bodies.

@@ -2,44 +2,60 @@
 
 ## Architecture decision
 
-The supported MCC path for the current `.local` hostname is Caddy TLS termination with a deployment-specific internal certificate authority (CA):
+MCC supports two explicit Caddy certificate modes:
 
 ```text
-Windows + Brave/Chromium
-  -> trusted HTTPS on TCP 443 (Caddy)
+Windows / Firefox / iPhone / iPad / Android / tablet
+  -> canonical HTTPS hostname on TCP 443 (Caddy)
   -> loopback HTTP (127.0.0.1:4273 production or :4274 staging)
   -> existing Node/Express MCC service
 
-HTTP on TCP 80 -> permanent HTTPS redirect (Caddy)
+HTTP on TCP 80 -> HTTPS redirect (Caddy)
 Updater health -> direct loopback HTTP on 127.0.0.1:4273
 ```
 
-Public CAs do not issue ordinary Web PKI certificates for private `.local` names. Caddy's `tls internal` mode manages the server certificate and its renewal, while intended Windows clients explicitly trust the CA root. This is a trusted private PKI deployment, not a browser exception and not a permanently untrusted self-signed leaf certificate.
+`public` is preferred when unmanaged phones or tablets must work without installing an MCC CA. It uses a real registered DNS hostname and a publicly trusted certificate. DNS-01 lets Caddy issue and renew the certificate without making MCC reachable from the public Internet: only the temporary public `_acme-challenge` TXT record and outbound ACME/DNS-provider API traffic are required.
 
-This choice has the lowest ongoing operational cost for the existing plant/LAN name and managed Windows clients. If MCC later receives a real organizational DNS name and the organization can securely automate DNS-01 validation, prefer Caddy's public ACME certificate flow and remove `tls internal`; that avoids distributing a private trust root. Do not point a public DNS name at a private address without the network/DNS owner approving the split-DNS design.
+`internal` preserves the managed-LAN `.local` fallback. Caddy uses its internal CA, and every client must trust that CA. It is suitable for centrally managed clients, but it is not a universal zero-setup mobile solution.
 
-Caddy preserves the request method, URI, body, response stream, `Host`, and cookies, and supplies `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto`. Express trusts those headers only when the immediate peer is loopback. Excel and ZIP bodies are not regenerated, transformed, or moved into Caddy storage.
+Caddy preserves request methods, URIs, bodies, downloads, `Host`, cookies, and the normal forwarding headers. Express trusts proxy headers only from loopback. Excel and PM package bodies are not regenerated or moved into Caddy storage.
 
 ## Security boundaries
 
-- Expose only Caddy ports 80 and 443 to the plant LAN. Never expose Node ports 4273/4274 or Caddy's admin API.
-- `MCC_BIND_HOST=127.0.0.1` is enforced by a root-owned systemd drop-in. The Node default remains compatible with existing development/Windows launchers.
-- Caddy's local admin API is disabled. Validate configuration and restart the service for the infrequent configuration change.
-- The updater continues to check `http://127.0.0.1:4273/`. Updates and rollbacks therefore do not depend on DNS, Caddy, or CA availability.
-- The CA root certificate is public material; its `root.key` is highly sensitive. Never copy, email, serve, or install the private key on a client.
-- Trusting an internal CA authorizes that CA to identify TLS sites to its clients. Limit trust to managed MCC clients and protect the Pi and its Caddy data accordingly.
+- Expose Caddy ports 80/443 only to approved LAN subnets. Do not expose them through the Internet router/NAT.
+- Never expose Node ports 4273/4274 to the LAN or Internet. `MCC_BIND_HOST=127.0.0.1` is enforced by the systemd drop-in.
+- Caddy's unauthenticated local admin API remains disabled.
+- The updater and rollback health check remains `http://127.0.0.1:4273/`; it does not depend on DNS, ACME, or Caddy.
+- DNS API credentials stay in `/etc/mcc-https-dns.env`, owned by `root:root` with mode `0600`. Never commit them or write literal secrets into a Caddyfile.
+- Give the DNS credential only the record permissions needed for ACME TXT creation/deletion in the relevant zone. Do not use a global account key when a scoped token is available.
+- Keep Caddy certificate data persistent and protected. Internal-CA private keys and DNS API credentials are secrets.
+
+## Administrator inputs required before public issuance
+
+Do not start public certificate issuance until the administrator/network owner supplies and approves all of the following:
+
+1. The registered parent domain and exact MCC FQDN for each environment. Use a separate staging FQDN if staging will be tested with a public certificate.
+2. The authoritative DNS provider and zone that owns the FQDN.
+3. The exact Caddy DNS module name and provider configuration syntax. Determine this from the selected provider module's documentation; MCC does not hardcode a provider.
+4. The provider-required credential variable name(s) and a least-privilege API token/credential that can manage the `_acme-challenge` TXT record.
+5. The internal DNS owner and split-horizon record that resolves the FQDN to the Pi's stable LAN address. DNS-01 does not require a public A/AAAA record. Do not publish an Internet-routable MCC address.
+6. The ACME account contact email and any approved CA requirement. If a CAA record exists, confirm it permits the selected public CA.
+7. Confirmation that the Pi has outbound DNS, ACME HTTPS, and DNS-provider API access, and that LAN clients use DNS that can resolve the private MCC address.
+8. Whether a single-host certificate is sufficient. Prefer it; request a wildcard only for a documented operational need.
+
+The domain and DNS provider are deployment inputs, not source defaults. `mcc.example` in the example file is an intentionally reserved placeholder and is rejected by validation.
 
 ## Prerequisites
 
-1. Confirm the Pi has a stable LAN address and that the chosen `.local` name resolves to it from every intended Windows client. `mcc-stage.local` and `mcc.local` are distinct certificate names.
-2. Confirm TCP 80/443 are unused on the Pi. Keep 4273 for production and 4274 for staging; port 4173 remains reserved for MIT3.
-3. Confirm the MCC service runs with `NODE_ENV=production` and a persistent `SESSION_SECRET`.
-4. Arrange an administrator-approved way to distribute the CA root and its SHA-256 fingerprint separately, or use Windows Group Policy.
-5. Take a system/configuration backup before changing services. Do not deploy this branch to production until staging passes the checks below.
+1. Give the Pi a stable LAN address and ensure the selected hostname resolves to it from every intended LAN/Wi-Fi client.
+2. Confirm TCP 80/443 are unused on the Pi. Production Node remains 4273; staging remains 4274; MIT3 remains 4173.
+3. Confirm MCC runs with `NODE_ENV=production`, a persistent `SESSION_SECRET`, and persistent application data.
+4. Take a protected system/configuration backup before changing services.
+5. Test on Raspberry Pi staging and representative Windows, Firefox, iOS/iPadOS, and Android clients before production rollout.
 
-## Install Caddy on Raspberry Pi OS
+## Install the shared Caddy service
 
-Use the official stable Debian/Raspbian package. The package creates the `caddy` account and `caddy.service` and keeps Caddy updates in the normal package workflow.
+Install the official Caddy Debian/Raspbian package for its service account and systemd support files:
 
 ```bash
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -50,41 +66,103 @@ sudo apt update
 sudo apt install caddy
 ```
 
-Install the tracked configuration from the approved MCC checkout:
+Install the provider-neutral MCC configuration and service files:
 
 ```bash
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/Caddyfile /etc/caddy/Caddyfile
-sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/mcc-https.env.example /etc/mcc-https.env
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/mcc-tls-internal.caddy /etc/caddy/mcc-tls-internal.caddy
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/https/validate-mcc-https /usr/local/sbin/validate-mcc-https
 sudo install -d -o root -g root -m 0755 /etc/systemd/system/caddy.service.d
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/caddy.service.d/mcc-https.conf /etc/systemd/system/caddy.service.d/mcc-https.conf
 ```
 
-Edit only the root-owned environment file. Values are plain host/address values, without URL schemes:
+The shared Caddyfile imports the root-owned TLS fragment selected by `MCC_HTTPS_TLS_CONFIG` and always proxies to `MCC_HTTPS_UPSTREAM`. The validator only permits a TLS fragment directly under `/etc/caddy` and an upstream of `127.0.0.1:4273` or `127.0.0.1:4274`.
+
+## Public-CA DNS-01 deployment
+
+### Select and install the DNS provider module
+
+The standard Caddy package does not contain every DNS provider module. After the authoritative DNS provider is supplied:
+
+1. Locate that provider under the Caddy DNS modules and record its exact module/package name, supported credential method, and an approved version/tag or commit.
+2. Build or download a Caddy binary containing only that required provider module. With `xcaddy`, the provider-specific form is `xcaddy build <approved-caddy-version> --with <provider-go-module>@<approved-provider-version>`.
+3. On Debian/Raspberry Pi OS, use Caddy's documented `dpkg-divert`/`update-alternatives` procedure so package support files remain installed while `/usr/bin/caddy` selects the custom binary.
+4. Verify the result before configuring credentials:
 
 ```bash
-sudoedit /etc/mcc-https.env
-sudo chown root:root /etc/caddy/Caddyfile /etc/mcc-https.env /etc/systemd/system/caddy.service.d/mcc-https.conf /usr/local/sbin/validate-mcc-https
-sudo chmod 0644 /etc/caddy/Caddyfile /etc/mcc-https.env /etc/systemd/system/caddy.service.d/mcc-https.conf
-sudo chmod 0755 /usr/local/sbin/validate-mcc-https
+caddy version
+caddy list-modules | grep '^dns.providers.'
 ```
 
-Before starting Caddy, verify that the upstream begins with `127.0.0.1:` and validate the expanded configuration:
+The selected module must appear as `dns.providers.<selected-name>`. Rebuild and re-verify the custom binary whenever Caddy is upgraded; an ordinary provider-less binary cannot renew DNS-01 certificates.
+
+### Configure public mode
+
+Create the provider fragment from the tracked example, then replace both placeholders with the exact syntax from the selected module documentation:
 
 ```bash
+sudo install -o root -g root -m 0644 deployment/raspberry-pi/https/mcc-tls-public-dns.caddy.example /etc/caddy/mcc-tls-public-dns.caddy
+sudoedit /etc/caddy/mcc-tls-public-dns.caddy
+```
+
+The result has this shape; provider names and argument counts vary:
+
+```caddyfile
+tls {
+    dns <selected-provider-name> {env.<SELECTED_PROVIDER_CREDENTIAL_VARIABLE>}
+}
+```
+
+Create the non-secret deployment file from `mcc-https-public.env.example`. Replace the reserved example hostname with the administrator-approved FQDN:
+
+```dotenv
+MCC_HTTPS_MODE=public
+MCC_HTTPS_HOSTNAME=<real-mcc-fqdn>
+MCC_HTTPS_TLS_CONFIG=/etc/caddy/mcc-tls-public-dns.caddy
+MCC_HTTPS_UPSTREAM=127.0.0.1:4273
+```
+
+Install it as `/etc/mcc-https.env` with `root:root` mode `0644`. Create `/etc/mcc-https-dns.env` with the exact credential variable name(s) referenced by the provider fragment. Values must use shell-safe/systemd-compatible assignment syntax because systemd loads the file for Caddy and the root validator loads it for offline config validation:
+
+```dotenv
+<SELECTED_PROVIDER_CREDENTIAL_VARIABLE>='administrator-supplied-secret'
+```
+
+```bash
+sudo chown root:root /etc/mcc-https.env /etc/mcc-https-dns.env /etc/caddy/Caddyfile /etc/caddy/mcc-tls-public-dns.caddy
+sudo chmod 0644 /etc/mcc-https.env /etc/caddy/Caddyfile /etc/caddy/mcc-tls-public-dns.caddy
+sudo chmod 0600 /etc/mcc-https-dns.env
 sudo systemctl daemon-reload
-sudo systemctl show caddy.service --property=Environment --no-pager
 sudo validate-mcc-https
 sudo systemctl restart caddy.service
 sudo systemctl enable caddy.service
 sudo systemctl status caddy.service --no-pager
 ```
 
-If the validation command reports an invalid environment value, correct `/etc/mcc-https.env`; do not weaken the Caddyfile. Restrict firewall rules for 80/443 to the intended plant LAN. Firewall syntax is site-specific, so have the network owner approve the actual subnet rule.
+DNS-01 needs no inbound Internet connection to ports 80/443. The public CA queries authoritative DNS for the TXT challenge while Caddy makes outbound requests. Restrict the Pi firewall and upstream router so MCC 80/443 remain reachable only from approved LANs. Confirm no public A/AAAA/NAT/port-forward exposes MCC.
+
+### Private LAN DNS
+
+Create an internal/split-horizon A record for the exact FQDN pointing to the Pi's stable LAN IPv4 address. Add AAAA only if IPv6 routing and firewalling are intentionally supported. Test the same FQDN on every supported Wi-Fi/VLAN; do not rely on `.local`/mDNS in public mode.
+
+Public authoritative DNS must remain able to publish the ACME TXT record. The MCC A/AAAA record may exist only in internal DNS. If the organization uses browser/device secure-DNS policies, ensure they still resolve the approved internal record; otherwise the certificate can be valid while the device cannot find MCC.
+
+## Internal-CA .local fallback
+
+Install the tracked internal environment example as `/etc/mcc-https.env` and select the internal fragment:
+
+```dotenv
+MCC_HTTPS_MODE=internal
+MCC_HTTPS_HOSTNAME=mcc.local
+MCC_HTTPS_TLS_CONFIG=/etc/caddy/mcc-tls-internal.caddy
+MCC_HTTPS_UPSTREAM=127.0.0.1:4273
+```
+
+Staging uses `mcc-stage.local` and `127.0.0.1:4274`. Run `sudo validate-mcc-https`, restart Caddy, and distribute trust as described below. Public CAs do not issue ordinary Web PKI certificates for `.local`; do not remove client trust requirements or use browser exceptions.
 
 ## Bind the Node service to loopback
 
-For the production `mcc.service`:
+For production `mcc.service`:
 
 ```bash
 sudo install -d -o root -g root -m 0755 /etc/systemd/system/mcc.service.d
@@ -95,120 +173,96 @@ curl --fail --silent --show-error http://127.0.0.1:4273/api/health
 sudo ss -ltnp | grep -E ':(80|443|4273)\b'
 ```
 
-The drop-in also loads `/etc/mcc-https.env` so Settings > Network Access uses the same canonical hostname as Caddy. The expected listeners are Caddy on LAN-capable ports 80/443 and Node only on `127.0.0.1:4273`. A listener such as `0.0.0.0:4273` or `[::]:4273` is a failed deployment and must be corrected before client testing.
+The MCC drop-in loads the same `MCC_HTTPS_MODE` and `MCC_HTTPS_HOSTNAME` used by Caddy, so Settings > Network Access, every Copy action, and the phone/tablet QR code use the canonical HTTPS URL. Expected listeners are Caddy on LAN-approved 80/443 and Node only on `127.0.0.1:4273` (or staging `:4274`). `0.0.0.0:4273`, `[::]:4273`, or equivalent staging listeners are deployment failures.
 
 ## Certificate trust
 
-After Caddy starts successfully, its public root certificate is normally at:
+Public mode uses the normal public Web PKI. Current standard Windows browsers, Firefox, iPhone/iPad Safari, Android Chrome, and tablets should need no MCC-specific CA installation when the certificate chain and device clocks are valid.
+
+Internal mode requires explicit trust. Caddy's public root is normally:
 
 ```text
 /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
 ```
 
-On the Pi, export only `root.crt` and record its SHA-256 fingerprint:
-
-```bash
-sudo openssl x509 -in /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt -noout -subject -issuer -dates -fingerprint -sha256
-sudo install -o root -g root -m 0644 /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt /var/tmp/mcc-root-ca.crt
-```
-
-Transfer `mcc-root-ca.crt` through the approved administrative channel. Communicate the fingerprint through a separate authenticated channel and compare all 64 hexadecimal digits before trusting it. Never transfer `root.key`.
-
-For one managed Windows client, copy `Install-MccRootCA.ps1`, `Test-MccHttpsClient.ps1`, and the root certificate locally. From elevated PowerShell:
+Export only `root.crt`, verify its SHA-256 fingerprint through a separate authenticated channel, and use `Install-MccRootCA.ps1` or a restricted Windows GPO. Never transfer `root.key`. Manually managed phones/tablets require platform-specific profile/root installation and trust enablement; this is why internal mode is only a fallback.
 
 ```powershell
-.\Install-MccRootCA.ps1 -CertificatePath .\mcc-root-ca.crt -ExpectedSha256 'PASTE_THE_VERIFIED_64_HEX_DIGIT_FINGERPRINT'
+.\Install-MccRootCA.ps1 -CertificatePath .\mcc-root-ca.crt -ExpectedSha256 'PASTE_VERIFIED_64_HEX_FINGERPRINT'
 .\Test-MccHttpsClient.ps1 -Hostname mcc-stage.local
 ```
 
-The installer rejects a fingerprint mismatch, expired/not-yet-valid certificate, non-CA certificate, non-self-issued certificate, or non-elevated session. It installs into `Cert:\LocalMachine\Root`, which Chromium's certificate verifier consumes as a locally managed Windows trust decision. Close all Brave windows and restart Brave after first installation.
-
-For multiple domain-managed clients, use Computer Configuration Group Policy to publish this same verified certificate under **Trusted Root Certification Authorities**. Keep the GPO limited to the computers intended to use MCC and record the approved fingerprint in the change ticket. Do not email an unverified root and ask users to click through browser warnings.
+`Test-MccHttpsClient.ps1` always uses normal certificate validation; it has no bypass switch and works with either certificate mode.
 
 ## Staging deployment
 
-Use the current staging name and internal port in `/etc/mcc-https.env`:
+Use a staging-only FQDN and port 4274. For public mode, do not request a certificate until the staging DNS name, provider module, scoped credential, internal A/AAAA behavior, CAA policy, and outbound access are approved. Apply the loopback drop-in to the actual staging service and verify:
 
-```dotenv
-MCC_HTTPS_HOSTNAME=mcc-stage.local
-MCC_HTTPS_UPSTREAM=127.0.0.1:4274
-```
+1. `sudo validate-mcc-https` passes and Caddy logs show successful issuance/renewal state.
+2. Direct `curl http://127.0.0.1:4274/api/health` and trusted `https://<staging-fqdn>/api/health` return `ok=true`.
+3. HTTP redirects to the exact canonical HTTPS hostname.
+4. `ss` confirms Node 4274 is loopback-only and there is no Internet port-forward.
+5. Windows Edge/Chrome/Brave, Firefox, iPhone/iPad Safari, Android Chrome, and representative tablets open MCC without a warning. Public mode must not require a custom CA.
+6. Settings > Network Access display, Copy actions, and QR payload all equal `https://<staging-fqdn>` with no Node port.
+7. Login, logout, authentication, sessions, presence, secure cookies, CSRF-protected updater controls, and reconnect behavior work.
+8. Excel-only and PM package downloads complete, open successfully, and show no insecure-download warning.
+9. Updater check/apply/health and a staged rollback exercise still work through their documented loopback paths.
 
-Apply the loopback environment to the actual staging service name (for example `mcc-stage.service`) with a root-owned drop-in containing:
-
-```ini
-[Service]
-EnvironmentFile=/etc/mcc-https.env
-Environment=MCC_BIND_HOST=127.0.0.1
-```
-
-This makes `MCC_HTTPS_HOSTNAME=mcc-stage.local` the staging UI's canonical shared URL; production uses the same configuration path with `MCC_HTTPS_HOSTNAME=mcc.local`. Then validate/restart Caddy and the staging MCC service. Verify all of the following from a Windows staging client before production rollout:
-
-The supported browser URL becomes `https://mcc-stage.local` with no port. `http://mcc-stage.local` redirects to it. The former explicit `http://mcc-stage.local:4274` URL becomes unreachable from the LAN because 4274 is deliberately loopback-only; update saved bookmarks rather than re-exposing that Node port.
-
-1. `Test-MccHttpsClient.ps1 -Hostname mcc-stage.local` passes without a certificate bypass.
-2. `http://mcc-stage.local` redirects to `https://mcc-stage.local/`.
-3. Brave shows a normal trusted connection with a certificate SAN for `mcc-stage.local`.
-4. Login, refresh, logout, CSRF-protected updater status/check UI, and presence updates still work.
-5. `Download Excel Only` downloads `PM_report_1.2v.xlsx` without **Insecure download blocked**.
-6. PM Package ZIP download succeeds without the warning; open and inspect both artifacts.
-7. The stage service restart/reconnect UX still behaves as expected.
-8. `ss` confirms port 4274 is loopback-only.
-
-Do not accept `curl -k`, a Brave certificate exception, or disabling Safe Browsing as evidence of success.
+Do not accept `curl -k`, browser exceptions, disabled Safe Browsing, or a manually installed MCC CA as evidence that public mode passes.
 
 ## Production deployment
 
-After staging sign-off, schedule a normal production change window. Use the production hostname and port:
+After staging sign-off, schedule a normal production change window. Replace the staging FQDN/upstream with the administrator-approved production FQDN and `127.0.0.1:4273`; do not reuse the reserved example. Repeat the complete staging checklist before changing normal bookmarks.
 
-```dotenv
-MCC_HTTPS_HOSTNAME=mcc.local
-MCC_HTTPS_UPSTREAM=127.0.0.1:4273
-```
+Existing sessions are hostname-scoped. Moving from `.local` to a real FQDN creates a different browser origin, so users should expect to sign in once at the new URL. All application links and downloads remain same-origin, and production cookies remain `Secure`.
 
-Confirm `mcc.local` resolves correctly, distribute/verify trust before changing the normal bookmark, install the production `mcc.service` loopback drop-in, validate Caddy, and repeat the complete staging checklist against production. Do not merge, tag, or deploy merely because configuration validation passes.
-
-Existing sessions are host-scoped rather than port-scoped, but the production cookie is `Secure`; users coming from the old HTTP URL may need to log in once at the new HTTPS origin. All normal links and API calls remain same-origin. Keep the HTTP redirect so saved HTTP bookmarks converge on HTTPS.
+Do not merge, tag, or production-deploy solely because Caddy validation or certificate issuance succeeds.
 
 ## Renewal and monitoring
 
-Caddy automatically renews its managed server and intermediate certificates. Clients continue trusting the stable CA root, so leaf renewal requires no Windows action. Package upgrades should use the normal Raspberry Pi patch process; validate the Caddyfile and test staging after a major Caddy upgrade.
+Caddy renews either certificate type automatically. Public mode requires the selected DNS plugin and working scoped credential for every renewal; keep the credential active and monitor provider audit logs. Internal mode renews leaf/intermediate certificates locally while clients trust the stable root.
 
 Recommended monthly checks:
 
 ```bash
 sudo systemctl is-active caddy.service mcc.service
 sudo journalctl -u caddy.service --since '30 days ago' --no-pager
-sudo openssl x509 -in /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt -noout -dates -fingerprint -sha256
+caddy list-modules | grep '^dns.providers.'
 curl --fail --silent --show-error http://127.0.0.1:4273/api/health
 ```
 
-Also run `Test-MccHttpsClient.ps1` from a representative managed Windows/Brave client. Alert well before the root CA expiry; root rotation requires distributing the new root before Caddy begins serving a chain from it.
+Also run `Test-MccHttpsClient.ps1` and a real mobile browser check against the canonical name. Alert on ACME renewal errors, credential expiry, DNS API failures, and certificate expiry. Test with the ACME CA's staging endpoint during repeated issuance experiments to avoid public rate limits; production must return to the approved public CA endpoint.
 
 ## Backup and recovery
 
-Back up these root-owned/service-managed items through the site's protected system backup process:
+Back up through the protected system backup process:
 
-- `/etc/caddy/Caddyfile`
+- `/etc/caddy/Caddyfile` and the selected `/etc/caddy/mcc-tls-*.caddy` fragment
 - `/etc/mcc-https.env`
+- `/etc/mcc-https-dns.env` in public mode, encrypted and access-restricted
 - `/etc/systemd/system/caddy.service.d/mcc-https.conf`
 - the relevant MCC service loopback drop-in
-- `/var/lib/caddy/.local/share/caddy` (contains CA/certificate state and private keys)
+- `/var/lib/caddy/.local/share/caddy` certificate/account state
+- the custom Caddy binary provenance: Caddy version, provider module/package, and pinned provider version/commit
 
-The Caddy data backup contains the CA private key. Encrypt it, restrict it to the smallest administrator group, keep it out of the MCC repository/updater state, and test restoration on an isolated host. The MCC application updater intentionally does not read, write, back up, or roll back Caddy state.
+The MCC updater intentionally does not read, write, back up, or roll back Caddy state or DNS credentials. Restoring an application version therefore preserves TLS configuration. Verify backup permissions and restoration on an isolated host.
 
-For Caddy configuration failure, leave Node on loopback, use SSH/local console, restore the last-known-good config, run `caddy validate`, and restart Caddy. The direct loopback updater health check remains available. An administrator can use an SSH local port forward for diagnosis; do not re-expose 4273/4274 to the LAN as the permanent recovery.
+For a Caddy configuration failure, keep Node loopback-only, use SSH/local console, restore the last-known-good Caddy/environment/TLS fragment, run `sudo validate-mcc-https`, and restart Caddy. Use an SSH local port forward for emergency diagnosis; never recover by binding 4273/4274 to the LAN.
 
-If Caddy data is lost but uncompromised, stop Caddy and restore the protected data backup with ownership `caddy:caddy` before starting it. If no backup exists, Caddy will create a different root; that is a planned CA rotation, not transparent recovery, and clients must verify/install the new root before use.
+If public certificate state is lost, restore protected Caddy state or allow controlled reissuance after checking CA rate limits and DNS credentials. If a DNS credential may be compromised, revoke/rotate it at the provider, update the root-only environment file, review provider audit logs, validate, and restart Caddy.
 
-If the Pi or CA private key may be compromised, stop Caddy, remove the old root from Windows/GPO trust, rebuild or recover the Pi from a known-good base, generate a new CA, and distribute the new fingerprint/root through the original verified process. Never continue trusting a potentially compromised root.
+If the internal CA key may be compromised, remove the old root from all trust stores/GPO/MDM, rebuild or recover from a known-good base, generate a new CA, and redistribute the independently verified root. Never continue trusting a potentially compromised CA.
+
+To roll back public mode to the internal fallback, schedule the DNS/origin change, select `MCC_HTTPS_MODE=internal`, a `.local` hostname, and the internal TLS fragment, then distribute CA trust before users switch. Rollback never includes re-exposing Node ports.
 
 ## Validation and troubleshooting
 
 Repository checks:
 
 ```bash
+npm run test:network-access
 npm run test:https-deployment
+npm run test:mobile-qr
 npm run build
 npm run smoke
 ```
@@ -223,10 +277,13 @@ sudo journalctl -u caddy.service -u mcc.service --since today --no-pager
 
 Common failures:
 
-- **Name mismatch:** browse the exact hostname configured in `MCC_HTTPS_HOSTNAME`; IP-address access does not match a `.local` certificate.
-- **Untrusted issuer:** verify the Pi's current root fingerprint and the Windows Local Machine/GPO root. Do not click through.
-- **502 from Caddy:** confirm the configured loopback port, MCC service status, and direct loopback health.
-- **HTTP does not redirect:** check that Caddy owns both ports 80 and 443 and that no global `auto_https` override was added.
-- **Wrong client IP in auditing/rate limits:** confirm Node is loopback-only and Caddy is the immediate peer; do not add broader Express proxy trust.
+- **Provider module missing:** `caddy list-modules` must contain the `dns.providers.<name>` referenced by the public TLS fragment.
+- **DNS-01 fails:** verify scoped credential variables, authoritative TXT visibility, CAA, outbound access, provider audit logs, and split-DNS resolver selection.
+- **Valid certificate but hostname does not load:** test the internal A/AAAA answer and Wi-Fi/VLAN path on that device. Certificate trust does not supply LAN name resolution.
+- **Name mismatch:** browse exactly `MCC_HTTPS_HOSTNAME`; IP-address access will not match the certificate.
+- **Untrusted issuer in public mode:** inspect the served chain, Caddy issuance logs, client clock, and configured issuer. Do not install the MCC internal root to mask the defect.
+- **502 from Caddy:** check the configured loopback port, MCC service status, and direct loopback health.
+- **HTTP does not redirect:** confirm Caddy owns 80/443 and no `auto_https` override was added.
+- **Wrong client IP in auditing/rate limits:** confirm Node is loopback-only and Caddy is the immediate peer; never broaden Express proxy trust.
 
-Primary operational references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy systemd/local HTTPS](https://caddyserver.com/docs/running), [Caddy reverse proxy defaults](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy), [Chromium locally managed trust on Windows](https://chromium.googlesource.com/chromium/src/+/main/net/data/ssl/chrome_root_store/faq.md), and [Microsoft trusted-root deployment](https://learn.microsoft.com/en-us/troubleshoot/windows-server/certificates-and-public-key-infrastructure-pki/valid-root-ca-certificates-untrusted).
+Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), and [Caddy systemd operation](https://caddyserver.com/docs/running).

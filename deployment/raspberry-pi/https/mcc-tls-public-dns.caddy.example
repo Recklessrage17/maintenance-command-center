@@ -1,0 +1,6 @@
+# Copy to /etc/caddy/mcc-tls-public-dns.caddy, then replace the placeholders
+# with the exact syntax documented by the selected caddy-dns provider module.
+# Keep API secrets in /etc/mcc-https-dns.env and reference them with {env.*}.
+tls {
+	dns DNS_PROVIDER_NAME {env.DNS_PROVIDER_API_TOKEN}
+}

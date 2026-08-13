@@ -2,6 +2,7 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 type NetworkLinks = {
   accessMode?: 'https' | 'development';
+  certificateMode?: 'internal' | 'public';
   canonicalUrl?: string | null;
   localPort?: number | null;
   localhostUrl?: string | null;
@@ -11,6 +12,7 @@ type NetworkLinks = {
 
 const stagingUrl = 'https://mcc-stage.local';
 const productionUrl = 'https://mcc.local';
+const publicUrl = 'https://mcc.plant.company.com';
 const lanUrl = 'http://10.1.2.188:4273';
 const user = {
   id: 71,
@@ -49,8 +51,8 @@ function links(primaryLanUrl:string|null,detectedLanUrls:string[] = primaryLanUr
   return {accessMode:'development',canonicalUrl:null,localPort:4273,localhostUrl:'http://localhost:4273',detectedLanUrls,primaryLanUrl};
 }
 
-function httpsLinks(canonicalUrl:string):NetworkLinks {
-  return {accessMode:'https',canonicalUrl};
+function httpsLinks(canonicalUrl:string,certificateMode:'internal'|'public'='internal'):NetworkLinks {
+  return {accessMode:'https',canonicalUrl,certificateMode};
 }
 
 function mobilePanel(page:Page) {
@@ -137,6 +139,27 @@ test('production selects the production canonical HTTPS hostname', async ({page}
   await expect(mobilePanel(page).locator('.share-url-row code')).toHaveText(productionUrl);
   await qrTrigger(page).click();
   await expect(qrDialog(page).locator('svg[role="img"]')).toHaveAttribute('data-qr-payload',productionUrl);
+});
+
+test('public DNS mode uses one trusted canonical URL for PC copy and mobile QR without custom CA guidance', async ({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  await mockSettings(page,[httpsLinks(publicUrl,'public')]);
+  await page.goto('/settings');
+  const networkCard = page.locator('.share-card').filter({hasText:'Network access'});
+  await expect(page.locator('.network-host-panel .share-url-row code')).toHaveText(publicUrl);
+  await expect(page.locator('.network-lan-panel .share-url-row code')).toHaveText(publicUrl);
+  await expect(mobilePanel(page).locator('.share-url-row code')).toHaveText(publicUrl);
+  await expect(networkCard).toContainText('no custom MCC certificate is required');
+  await expect(networkCard).toContainText('public-CA mode requires no custom certificate installation');
+  await expect(networkCard).not.toContainText('must trust the MCC internal CA');
+  await mobilePanel(page).getByRole('button',{name:`Copy ${publicUrl}`}).click();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(publicUrl);
+  await qrTrigger(page).click();
+  const dialog = qrDialog(page);
+  await expect(dialog.locator('svg[role="img"]')).toHaveAttribute('data-qr-payload',publicUrl);
+  await expect(dialog.locator('.share-url-row code')).toHaveText(publicUrl);
+  await expect(dialog).toContainText('does not require a custom MCC certificate');
+  await expect(dialog).not.toContainText('must trust the MCC CA');
 });
 
 for (const [label,value] of [

@@ -4,6 +4,7 @@ import { withJsonRequestDefaults } from '../../apiRequest';
 
 type NetworkLinks = {
   accessMode?: 'https' | 'development';
+  certificateMode?: 'internal' | 'public';
   canonicalUrl?: string | null;
   localPort?: number | null;
   localhostUrl?: string | null;
@@ -582,12 +583,22 @@ function selectPrimaryLanUrl(links:NetworkLinks|null) {
   return candidates.map(value=>value?.trim() ?? '').find(isUsableLanUrl) ?? '';
 }
 
-function isCanonicalHttpsUrl(value:string|undefined|null) {
+function isCanonicalHttpsUrl(value:string|undefined|null,certificateMode:NetworkLinks['certificateMode']) {
   if (!value?.trim()) return false;
   try {
     const parsed = new URL(value.trim());
+    const hostname = parsed.hostname.toLowerCase();
+    const validDnsName = hostname.length <= 253
+      && hostname.includes('.')
+      && !/^\d+(?:\.\d+){3}$/.test(hostname)
+      && hostname.split('.').every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+    const publicExcluded = ['.local','.localhost','.internal','.home.arpa','.example','.example.com','.example.net','.example.org','.invalid','.test'].some(suffix=>hostname.endsWith(suffix));
+    const validCertificateName = certificateMode === 'public'
+      ? !publicExcluded && /[a-z]/.test(hostname.slice(hostname.lastIndexOf('.')+1))
+      : hostname.endsWith('.local');
     return parsed.protocol === 'https:'
-      && parsed.hostname.toLowerCase().endsWith('.local')
+      && validDnsName
+      && validCertificateName
       && !parsed.port
       && parsed.pathname === '/'
       && !parsed.username
@@ -601,21 +612,23 @@ function isCanonicalHttpsUrl(value:string|undefined|null) {
 
 function selectSharedNetworkUrl(links:NetworkLinks|null) {
   if (links?.accessMode === 'https') {
-    return isCanonicalHttpsUrl(links.canonicalUrl) ? links.canonicalUrl!.trim() : '';
+    return isCanonicalHttpsUrl(links.canonicalUrl,links.certificateMode) ? links.canonicalUrl!.trim() : '';
   }
   return selectPrimaryLanUrl(links);
 }
 
 const qrWrenchBadge = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11.5" fill="#fff" stroke="#d7e7ee"/><path d="M14.7 5.3a4.5 4.5 0 0 0-5.5 5.5l-4.4 4.4a2.3 2.3 0 1 0 3.2 3.2l4.4-4.4a4.5 4.5 0 0 0 5.5-5.5l-2.7 2.7-2.4-.6-.6-2.4 2.5-2.9Z" fill="#07141d"/></svg>')}`;
 
-function MobileLanAccess({url,httpsAccess,onCopied,onQrOpen}:{url:string;httpsAccess:boolean;onCopied:(value:string)=>void;onQrOpen:()=>void}) {
+function MobileLanAccess({url,httpsAccess,internalCaAccess,onCopied,onQrOpen}:{url:string;httpsAccess:boolean;internalCaAccess:boolean;onCopied:(value:string)=>void;onQrOpen:()=>void}) {
   return (
     <section className={`network-link-panel mobile-access-panel${url ? '' : ' is-unavailable'}`} aria-label="Mobile and tablet network access">
       <div className="mobile-access-copy">
         <span>Mobile / Tablet</span>
         <strong>Phone or tablet URL</strong>
         <p>{httpsAccess ? 'Use the canonical HTTPS address while connected to the same Wi-Fi/network.' : 'Use this on phone/tablet when connected to the same Wi-Fi/network. Do not use cellular data.'}</p>
-        {httpsAccess&&<p className="form-help">This device must trust the MCC CA when the site uses the internal-CA deployment.</p>}
+        {internalCaAccess
+          ? <p className="form-help">This device must trust the MCC CA because this deployment uses the internal-CA fallback.</p>
+          : httpsAccess&&<p className="form-help">The publicly trusted certificate requires no custom MCC certificate installation on normal devices.</p>}
         <div className={`mobile-access-control-group${url ? '' : ' is-unavailable'}`}>
           {url
             ? <CopyUrl url={url} onCopied={onCopied} />
@@ -650,7 +663,7 @@ function MobileQrTrigger({url,onOpen}:{url:string;onOpen:()=>void}) {
   );
 }
 
-function MobileQrModal({url,httpsAccess,refreshing,onCopied,onRefresh,onClose}:{url:string;httpsAccess:boolean;refreshing:boolean;onCopied:(value:string)=>void;onRefresh:()=>void;onClose:()=>void}) {
+function MobileQrModal({url,httpsAccess,internalCaAccess,refreshing,onCopied,onRefresh,onClose}:{url:string;httpsAccess:boolean;internalCaAccess:boolean;refreshing:boolean;onCopied:(value:string)=>void;onRefresh:()=>void;onClose:()=>void}) {
   const closeRef = useRef<HTMLButtonElement|null>(null);
   const qrLabel = `QR code to open Maintenance Command Center at ${url}`;
   useEffect(()=>{
@@ -693,7 +706,9 @@ function MobileQrModal({url,httpsAccess,refreshing,onCopied,onRefresh,onClose}:{
         </div>
         <p className="mobile-qr-modal-helper">Scan while connected to the same plant Wi-Fi/network.</p>
         <p className="mobile-qr-modal-warning">Wi-Fi/network access is required. Do not use cellular data.</p>
-        {httpsAccess&&<p className="form-help">The phone or tablet must trust the MCC CA when using the internal-CA deployment.</p>}
+        {internalCaAccess
+          ? <p className="form-help">The phone or tablet must trust the MCC CA because this deployment uses the internal-CA fallback.</p>
+          : httpsAccess&&<p className="form-help">This publicly trusted HTTPS URL does not require a custom MCC certificate on normal phones or tablets.</p>}
         <CopyUrl url={url} onCopied={onCopied} />
         <div className="modal-actions mobile-qr-modal-actions">
           <button className="secondary-button" type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? 'Checking...' : 'Refresh network links'}</button>
@@ -735,6 +750,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [resetMsg,setResetMsg]=useState('');
   const [resetModal,setResetModal]=useState<ResetModalState|null>(null);
   const httpsAccess = links?.accessMode === 'https';
+  const internalCaAccess = httpsAccess && links?.certificateMode !== 'public';
   const detectedLanUrls = httpsAccess ? [] : links?.detectedLanUrls ?? [];
   const sharedNetworkUrl = selectSharedNetworkUrl(links);
   const hostUrl = httpsAccess ? sharedNetworkUrl : links?.localhostUrl?.trim() ?? '';
@@ -1315,11 +1331,13 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
           <section className="network-link-panel network-url-panel network-lan-panel">
             <span>Other PC on same network</span>
             <strong>Other PC URL</strong>
-            <p>{httpsAccess ? 'The Windows PC must trust the MCC internal CA or receive it through Group Policy.' : 'Use this from another PC on the same development network.'}</p>
+            <p>{internalCaAccess
+              ? 'The Windows PC must trust the MCC internal CA or receive it through Group Policy.'
+              : httpsAccess ? 'Use the publicly trusted HTTPS address; no custom MCC certificate is required.' : 'Use this from another PC on the same development network.'}</p>
             {sharedNetworkUrl ? <CopyUrl url={sharedNetworkUrl} onCopied={value=>setMsg(`Copied ${value}`)} /> : <p className="form-help">{httpsAccess ? 'The canonical HTTPS hostname is unavailable. Check MCC_HTTPS_HOSTNAME on the server.' : 'No development LAN URL is currently available.'}</p>}
           </section>
 
-          <MobileLanAccess url={sharedNetworkUrl} httpsAccess={httpsAccess} onCopied={value=>setMsg(`Copied ${value}`)} onQrOpen={()=>setMobileQrOpen(true)} />
+          <MobileLanAccess url={sharedNetworkUrl} httpsAccess={httpsAccess} internalCaAccess={internalCaAccess} onCopied={value=>setMsg(`Copied ${value}`)} onQrOpen={()=>setMobileQrOpen(true)} />
         </div>
 
         {!httpsAccess&&links&&detectedLanUrls.length>1&&(
@@ -1339,8 +1357,9 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             <li>MCC Website must be running.</li>
             <li>Other devices must be on same network/Wi-Fi.</li>
             {httpsAccess&&<li>LAN browser access is served by HTTPS on standard ports 80/443; Node ports are not exposed.</li>}
-            {httpsAccess&&<li>Windows PCs must trust the MCC internal CA or receive it through GPO.</li>}
-            {httpsAccess&&<li>Phones and tablets must trust the MCC CA on that device when using the internal-CA deployment.</li>}
+            {internalCaAccess&&<li>Windows PCs must trust the MCC internal CA or receive it through GPO.</li>}
+            {internalCaAccess&&<li>Phones and tablets must trust the MCC CA on that device when using the internal-CA fallback.</li>}
+            {httpsAccess&&!internalCaAccess&&<li>The public-CA mode requires no custom certificate installation on normal Windows, iPhone/iPad, Android, or tablet clients.</li>}
           </ul>
         </section>
 
@@ -1351,6 +1370,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
         <MobileQrModal
           url={sharedNetworkUrl}
           httpsAccess={httpsAccess}
+          internalCaAccess={internalCaAccess}
           refreshing={loading}
           onCopied={value=>setMsg(`Copied ${value}`)}
           onRefresh={loadLinks}
