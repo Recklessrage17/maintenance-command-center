@@ -108,10 +108,10 @@ while IFS= read -r line <&"${publisher_output_fd}"; do
     [[ "${resolved}" == "true" ]] \
       || fail "publisher reported established, but ${hostname} did not resolve exactly to ${address}"
     if [[ "${ready}" != "true" ]]; then
-      /usr/bin/systemd-notify --ready --status="Published ${hostname} -> ${address} without a reverse PTR"
+      /usr/bin/systemd-notify --pid=parent --ready --status="Published ${hostname} -> ${address} without a reverse PTR"
       ready=true
     else
-      /usr/bin/systemd-notify --status="Republished ${hostname} -> ${address} after Avahi reconnect"
+      /usr/bin/systemd-notify --pid=parent --status="Republished ${hostname} -> ${address} after Avahi reconnect"
     fi
   elif [[ "${line}" == "Established under name '"* ]]; then
     collision "publisher established an unexpected alias instead of ${hostname}: ${line}"

@@ -6,7 +6,9 @@ After=network-online.target avahi-daemon.service
 
 [Service]
 Type=notify
-NotifyAccess=main
+# systemd-notify is a child of the main Bash wrapper. Allow notifications only
+# from this service's cgroup; the wrapper explicitly attributes them to its PID.
+NotifyAccess=all
 ExecStart=/usr/local/sbin/publish-mcc-mdns
 Restart=on-failure
 RestartPreventExitStatus=78

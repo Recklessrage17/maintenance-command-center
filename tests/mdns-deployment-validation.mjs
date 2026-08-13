@@ -40,7 +40,11 @@ assert.match(publisher, /external hostname collision:/, 'Publisher must reject a
 assert.match(publisher, /Name collision, picking new name/, 'Publisher must detect Avahi automatic collision renaming.');
 assert.match(publisher, /refusing Avahi's automatically renamed alias/, 'A suffixed alias must be fatal.');
 assert.match(publisher, /Established under name '\$\{hostname\}'/, 'Publisher readiness must require the exact configured name.');
-assert.match(publisher, /systemd-notify --ready/, 'The service must not become ready before exact-name resolution succeeds.');
+assert.match(publisher, /systemd-notify --pid=parent --ready/, 'The helper must explicitly attribute readiness to its main wrapper parent.');
+assert.ok(
+  publisher.indexOf('if check_exact_resolution; then') < publisher.indexOf('systemd-notify --pid=parent --ready'),
+  'READY=1 must be sent only after exact-name resolution succeeds.',
+);
 assert.match(publisher, /MCC_MDNS_ADDRESS contains an invalid IPv4 octet/);
 assert.match(publisher, /MCC_MDNS_INTERFACE contains unsupported characters/);
 assert.match(publisher, /ip link show dev "\$\{interface\}"/);
@@ -48,11 +52,44 @@ assert.match(publisher, /ip link show dev "\$\{interface\}"/);
 assert.match(publisherService, /Requires=avahi-daemon\.service/);
 assert.match(publisherService, /After=network-online\.target avahi-daemon\.service/);
 assert.match(publisherService, /Type=notify/);
+assert.match(publisherService, /NotifyAccess=all/, 'The systemd-notify child must be authorized to send readiness from the service cgroup.');
+assert.doesNotMatch(publisherService, /NotifyAccess=main/, 'NotifyAccess=main rejects the capability-restricted systemd-notify child.');
 assert.match(publisherService, /ExecStart=\/usr\/local\/sbin\/publish-mcc-mdns/);
 assert.match(publisherService, /Restart=on-failure/);
 assert.match(publisherService, /RestartPreventExitStatus=78/, 'A real exact-name collision must stop instead of looping on suffixed aliases.');
 assert.match(publisherService, /WantedBy=multi-user\.target/);
 assert.match(publisherService, /User=root/);
+assert.match(publisherService, /^CapabilityBoundingSet=$/m, 'Publisher must not gain CAP_SYS_ADMIN merely to impersonate the main PID.');
+
+// Model the capability-restricted Bookworm path: systemd-notify cannot forge
+// the Bash parent's SCM_CREDENTIALS, so PID 1 sees the short-lived helper as
+// sender. NotifyAccess=all is the narrowest supported mode that accepts a
+// service-cgroup child; --pid=parent keeps MAINPID attributed to the wrapper.
+const notifyAccess = publisherService.match(/^NotifyAccess=(\w+)$/m)?.[1];
+const timeoutStartMs = Number(publisherService.match(/^TimeoutStartSec=(\d+)s$/m)?.[1]) * 1000;
+const wrapperMainPid = 100;
+const notifyHelperPid = 102;
+const publisherPid = 101;
+const serviceCgroupPids = new Set([wrapperMainPid, publisherPid, notifyHelperPid]);
+const notificationAccepted = access => access === 'all' && serviceCgroupPids.has(notifyHelperPid);
+const simulateEstablishedAlias = access => {
+  let state = 'activating';
+  const establishedAtMs = 1000;
+  const exactResolutionSucceeded = true;
+  const parentPidWasExplicit = /systemd-notify --pid=parent --ready/.test(publisher);
+  if (exactResolutionSucceeded && parentPidWasExplicit && notificationAccepted(access)) state = 'active';
+  return { state, elapsedMs: state === 'active' ? establishedAtMs : timeoutStartMs };
+};
+assert.deepEqual(
+  simulateEstablishedAlias(notifyAccess),
+  { state: 'active', elapsedMs: 1000 },
+  'An exactly resolved established alias must transition the unit to active before TimeoutStartSec.',
+);
+assert.deepEqual(
+  simulateEstablishedAlias('main'),
+  { state: 'activating', elapsedMs: timeoutStartMs },
+  'Regression guard: the former NotifyAccess=main path must reproduce activation timeout in the model.',
+);
 
 assert.match(httpsMigrator, /MCC_HTTPS_MODE:-/, 'Migration must tolerate an older file with no mode.');
 assert.match(httpsMigrator, /mode="internal"/, 'A .local older environment must migrate to internal mode.');
