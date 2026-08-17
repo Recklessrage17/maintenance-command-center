@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { createInflateRaw, crc32 } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { ZipArchive, type ArchiverError } from 'archiver';
 import ExcelJS from 'exceljs';
-import JSZip from 'jszip';
 
 export const PORTABLE_PACKAGE_VERSION = 1;
 export const PORTABLE_SCHEMA_VERSION = 1;
@@ -13,6 +14,10 @@ export const PORTABLE_ZIP_MIME = 'application/zip';
 export const DEFAULT_MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 export const DEFAULT_MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024;
 export const DEFAULT_MAX_ARCHIVE_ENTRIES = 50_000;
+export const DEFAULT_RECOVERY_QUOTA_BYTES = 8 * 1024 * 1024 * 1024;
+export const DEFAULT_RECOVERY_MAX_PACKAGES = 3;
+const MAX_CENTRAL_DIRECTORY_BYTES = 32 * 1024 * 1024;
+const RECOVERY_IMPORT_HEADROOM_BYTES = 64 * 1024 * 1024;
 const EXCEL_CELL_LIMIT = 32_000;
 const PORTABLE_ROOT_PATTERN = /^MCC_Master_Backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d+)?$/;
 const PORTABLE_ARCHIVE_PATTERN = /^MCC_Master_Backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d+)?\.zip$/;
@@ -66,9 +71,13 @@ export type ImportedPortablePackage = {
 
 type CentralDirectoryEntry = {
   name: string;
+  flags: number;
+  compressionMethod: number;
+  crc32: number;
   compressedSize: number;
   uncompressedSize: number;
   externalAttributes: number;
+  localHeaderOffset: number;
   directory: boolean;
 };
 
@@ -77,6 +86,27 @@ type ArchiveInspection = {
   rootName: string;
   compressedSizeBytes: number;
   expandedSizeBytes: number;
+  centralDirectoryOffset: number;
+};
+
+export type RecoveryStoragePolicy = {
+  quotaBytes: number;
+  maxPackages: number;
+};
+
+export type RecoveryStorageStatus = RecoveryStoragePolicy & {
+  usedBytes: number;
+  remainingBytes: number;
+  packageCount: number;
+  atCapacity: boolean;
+};
+
+type WorkbookSheet = {
+  table: string;
+  name: string;
+  query?: string;
+  derivedColumns?: Array<{ name: string; value: (row: Record<string, unknown>) => unknown }>;
+  hyperlinkColumns?: string[];
 };
 
 export function normalizeArchiveLimits(input: { maxArchiveBytes?: number; maxExpandedBytes?: number; maxEntries?: number } = {}) {
@@ -176,15 +206,85 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
       (database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>).map(row => row.name),
     );
     const historyTables = [...existing].filter(name => /history|audit/i.test(name)).sort();
-    const exports = [
-      { filename: 'MCC_Inventory.xlsx', tables: ['inventory_parts', 'inventory_locations'] },
-      { filename: 'MCC_Vendors.xlsx', tables: ['inventory_vendors'] },
-      { filename: 'MCC_Machine_List.xlsx', tables: ['machine_assets', 'machine_library', 'machines', 'machine_pms'] },
-      { filename: 'MCC_Equipment_List.xlsx', tables: ['equipment_assets', 'equipment_library', 'equipment', 'equipment_pms'] },
-      { filename: 'MCC_History.xlsx', tables: historyTables.length ? historyTables : ['history_logs'] },
+    const exports: Array<{ filename: string; sheets: WorkbookSheet[] }> = [
+      { filename: 'MCC_Inventory.xlsx', sheets: [
+        { table: 'inventory_parts', name: 'Inventory Parts', hyperlinkColumns: ['part_info_url'] },
+        { table: 'inventory_locations', name: 'Inventory Locations' },
+      ] },
+      { filename: 'MCC_Vendors.xlsx', sheets: [
+        { table: 'inventory_vendors', name: 'Vendors' },
+        { table: 'vendor_contacts', name: 'Vendor Contacts' },
+      ] },
+      { filename: 'MCC_Machine_List.xlsx', sheets: [
+        { table: 'machine_assets', name: 'Machine Assets' },
+        { table: 'machines', name: 'Machines' },
+        { table: 'machine_library', name: 'Machine Library' },
+        { table: 'pm_tasks', name: 'Machine PM', query: "SELECT * FROM pm_tasks WHERE asset_library='machine' ORDER BY rowid" },
+        { table: 'machine_pms', name: 'Machine PM Legacy' },
+        {
+          table: 'machine_document_folders',
+          name: 'Document Folders',
+          query: 'SELECT f.*,a.asset_number AS asset_number FROM machine_document_folders f LEFT JOIN machine_assets a ON a.id=f.asset_id ORDER BY f.rowid',
+          derivedColumns: [{ name: 'asset_number', value: row => row.asset_number }],
+        },
+        {
+          table: 'machine_documents',
+          name: 'Documents',
+          query: 'SELECT d.*,a.asset_number AS asset_number,f.name AS folder_name FROM machine_documents d LEFT JOIN machine_assets a ON a.id=d.asset_id LEFT JOIN machine_document_folders f ON f.id=d.folder_id ORDER BY d.rowid',
+          derivedColumns: [
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'folder_name', value: row => row.folder_name },
+            { name: 'portable_relative_path', value: machineDocumentPortablePath },
+          ],
+        },
+        {
+          table: 'machine_asset_notes',
+          name: 'Asset Notes',
+          query: 'SELECT n.*,a.asset_number AS asset_number FROM machine_asset_notes n LEFT JOIN machine_assets a ON a.id=n.asset_id ORDER BY n.rowid',
+          derivedColumns: [
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'portable_pdf_relative_path', value: row => portableStoredReference(row.pdf_stored_reference) },
+          ],
+        },
+        {
+          table: 'machine_asset_note_attachments',
+          name: 'Note Attachments',
+          query: 'SELECT x.*,n.asset_id AS asset_id,a.asset_number AS asset_number FROM machine_asset_note_attachments x LEFT JOIN machine_asset_notes n ON n.id=x.note_id LEFT JOIN machine_assets a ON a.id=n.asset_id ORDER BY x.rowid',
+          derivedColumns: [
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
+        {
+          table: 'machine_inspection_records',
+          name: 'Inspection Records',
+          query: 'SELECT r.*,a.asset_number AS asset_number FROM machine_inspection_records r LEFT JOIN machine_assets a ON a.id=r.asset_id ORDER BY r.rowid',
+          derivedColumns: [
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
+        {
+          table: 'machine_component_images',
+          name: 'Component Images',
+          query: 'SELECT i.*,a.asset_number AS asset_number FROM machine_component_images i LEFT JOIN machine_assets a ON a.id=i.asset_id ORDER BY i.rowid',
+          derivedColumns: [
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
+      ] },
+      { filename: 'MCC_Equipment_List.xlsx', sheets: [
+        { table: 'equipment_assets', name: 'Equipment Assets' },
+        { table: 'equipment_library', name: 'Equipment Library' },
+        { table: 'equipment', name: 'Equipment' },
+        { table: 'equipment_pms', name: 'Equipment PM' },
+      ] },
+      { filename: 'MCC_History.xlsx', sheets: (historyTables.length ? historyTables : ['history_logs']).map(table => ({ table, name: table })) },
     ];
     for (const item of exports) {
-      await writeDatabaseWorkbook(database, path.join(excelRoot, item.filename), item.tables.filter(table => existing.has(table)));
+      await writeDatabaseWorkbook(database, path.join(excelRoot, item.filename), item.sheets.filter(sheet => existing.has(sheet.table)));
     }
     return exports.map(item => `excel/${item.filename}`);
   } finally {
@@ -192,7 +292,7 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
   }
 }
 
-async function writeDatabaseWorkbook(database: DatabaseSync, outputPath: string, tables: string[]) {
+async function writeDatabaseWorkbook(database: DatabaseSync, outputPath: string, sheets: WorkbookSheet[]) {
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: outputPath, useStyles: true, useSharedStrings: true });
   const usedSheetNames = new Set<string>();
   const overflow = workbook.addWorksheet('Oversized Values');
@@ -206,32 +306,37 @@ async function writeDatabaseWorkbook(database: DatabaseSync, outputPath: string,
   ];
   styleStreamingHeader(overflow);
   let overflowSequence = 0;
-  if (!tables.length) {
+  if (!sheets.length) {
     const sheet = workbook.addWorksheet('No records');
     sheet.columns = [{ header: 'Status', key: 'status', width: 70 }];
     styleStreamingHeader(sheet);
     sheet.addRow({ status: 'No applicable records were present in this database snapshot.' }).commit();
     sheet.commit();
   }
-  for (const table of tables) {
-    const columns = (database.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all() as Array<{ name: string }>).map(row => row.name);
+  for (const definition of sheets) {
+    const persistentColumns = (database.prepare(`PRAGMA table_info(${quoteIdentifier(definition.table)})`).all() as Array<{ name: string }>).map(row => row.name);
+    const columns = [...persistentColumns, ...(definition.derivedColumns ?? []).map(column => column.name).filter(name => !persistentColumns.includes(name))];
     if (!columns.length) continue;
-    const sheetName = uniqueSheetName(table, usedSheetNames);
+    const sheetName = uniqueSheetName(definition.name, usedSheetNames);
     const sheet = workbook.addWorksheet(sheetName, { views: [{ state: 'frozen', ySplit: 1 }] });
     sheet.columns = columns.map(column => ({ header: column, key: column, width: Math.min(42, Math.max(12, column.length + 3)) }));
     styleStreamingHeader(sheet);
     let sourceRow = 1;
-    const statement = database.prepare(`SELECT * FROM ${quoteIdentifier(table)} ORDER BY rowid`);
+    const statement = database.prepare(definition.query ?? `SELECT * FROM ${quoteIdentifier(definition.table)} ORDER BY rowid`);
+    const hyperlinkColumns = new Set(definition.hyperlinkColumns ?? []);
     for (const row of statement.iterate() as Iterable<Record<string, unknown>>) {
       sourceRow += 1;
       const output: Record<string, unknown> = {};
       for (const column of columns) {
-        const value = excelValue(row[column]);
+        const derived = definition.derivedColumns?.find(item => item.name === column);
+        const value = excelValue(derived ? derived.value(row) : row[column]);
         if (typeof value === 'string' && value.length > EXCEL_CELL_LIMIT) {
           const reference = `OV-${++overflowSequence}`;
           output[column] = `[Full value in Oversized Values: ${reference}]`;
           const parts = splitText(value, EXCEL_CELL_LIMIT);
           parts.forEach((part, index) => overflow.addRow({ reference, sheet: sheetName, sourceRow, column, part: `${index + 1}/${parts.length}`, value: part }).commit());
+        } else if (typeof value === 'string' && hyperlinkColumns.has(column) && safeHttpUrl(value)) {
+          output[column] = { text: value, hyperlink: value };
         } else {
           output[column] = value;
         }
@@ -243,6 +348,28 @@ async function writeDatabaseWorkbook(database: DatabaseSync, outputPath: string,
   }
   overflow.commit();
   await workbook.commit();
+}
+
+function portableStoredReference(value: unknown) {
+  const relative = String(value ?? '').replace(/\\/g, '/');
+  return relative.startsWith('uploads/') && safeRelativePath(relative) ? `files/${relative}` : '';
+}
+
+function machineDocumentPortablePath(row: Record<string, unknown>) {
+  const assetId = Number(row.asset_id);
+  const storedFilename = String(row.stored_filename ?? '');
+  if (!Number.isInteger(assetId) || assetId <= 0 || storedFilename !== path.basename(storedFilename) || !storedFilename) return '';
+  return `files/uploads/machine-library/asset-${assetId}/documents/${storedFilename}`;
+}
+
+function safeHttpUrl(value: string) {
+  if (!value || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function quoteIdentifier(value: string) {
@@ -368,11 +495,12 @@ export function inspectPortableArchive(archivePath: string, limitsInput: { maxAr
   const stat = fs.statSync(archivePath);
   if (!stat.isFile()) throw new Error('Portable archive is not a regular file.');
   if (!stat.size || stat.size > limits.maxArchiveBytes) throw new Error(`Portable archive exceeds the ${formatBytes(limits.maxArchiveBytes)} compressed-size limit.`);
-  const buffer = fs.readFileSync(archivePath);
-  const entries = parseCentralDirectory(buffer, limits.maxEntries);
+  const parsed = parseCentralDirectory(archivePath, stat.size, limits.maxEntries);
+  const entries = parsed.entries;
   let expandedSizeBytes = 0;
   const names = new Set<string>();
   const roots = new Set<string>();
+  const localOffsets = new Set<number>();
   for (const entry of entries) {
     validateArchiveEntryName(entry.name);
     const comparisonName = entry.name.replace(/\/$/, '').toLowerCase();
@@ -386,6 +514,10 @@ export function inspectPortableArchive(archivePath: string, limitsInput: { maxAr
     const unixType = unixMode & 0o170000;
     if (unixType === 0o120000) throw new Error(`Portable archive contains a symbolic link: ${entry.name}`);
     if (unixType && unixType !== 0o100000 && unixType !== 0o040000) throw new Error(`Portable archive contains an unsupported link or device entry: ${entry.name}`);
+    if (entry.compressionMethod !== 0 && entry.compressionMethod !== 8) throw new Error(`Portable archive uses an unsupported compression method: ${entry.name}`);
+    if (entry.directory && (entry.compressedSize !== 0 || entry.uncompressedSize !== 0)) throw new Error(`Portable archive directory entry has invalid size metadata: ${entry.name}`);
+    if (entry.localHeaderOffset >= parsed.centralDirectoryOffset || localOffsets.has(entry.localHeaderOffset)) throw new Error('Portable archive local file metadata is corrupt.');
+    localOffsets.add(entry.localHeaderOffset);
     expandedSizeBytes += entry.uncompressedSize;
     if (expandedSizeBytes > limits.maxExpandedBytes) throw new Error(`Portable archive exceeds the ${formatBytes(limits.maxExpandedBytes)} expanded-size limit.`);
     if (entry.compressedSize > 0 && entry.uncompressedSize / entry.compressedSize > 250 && entry.uncompressedSize > 10 * 1024 * 1024) {
@@ -397,40 +529,78 @@ export function inspectPortableArchive(archivePath: string, limitsInput: { maxAr
   for (const required of [`${rootName}/manifest.json`, `${rootName}/RECOVERY_README.txt`, `${rootName}/database/mcc.sqlite`, `${rootName}/recovery/restore-manifest.json`]) {
     if (!names.has(required.toLowerCase())) throw new Error(`Portable archive is missing required entry: ${required.slice(rootName.length + 1)}`);
   }
-  return { entries, rootName, compressedSizeBytes: stat.size, expandedSizeBytes };
+  return { entries, rootName, compressedSizeBytes: stat.size, expandedSizeBytes, centralDirectoryOffset: parsed.centralDirectoryOffset };
 }
 
-function parseCentralDirectory(buffer: Buffer, maxEntries: number) {
-  const eocdSignature = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
-  const minimum = Math.max(0, buffer.length - 65_557);
-  const eocdOffset = buffer.lastIndexOf(eocdSignature);
-  if (eocdOffset < minimum || eocdOffset + 22 > buffer.length) throw new Error('Portable archive is corrupt or missing its central directory.');
-  const entryCount = buffer.readUInt16LE(eocdOffset + 10);
-  const centralSize = buffer.readUInt32LE(eocdOffset + 12);
-  const centralOffset = buffer.readUInt32LE(eocdOffset + 16);
-  if (entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) throw new Error('ZIP64 portable archives are not supported by this recovery version.');
-  if (!entryCount || entryCount > maxEntries) throw new Error(`Portable archive entry count is invalid or exceeds ${maxEntries}.`);
-  if (centralOffset + centralSize > eocdOffset || centralOffset < 0) throw new Error('Portable archive central directory is corrupt.');
-  const entries: CentralDirectoryEntry[] = [];
-  let offset = centralOffset;
-  for (let index = 0; index < entryCount; index += 1) {
-    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('Portable archive central directory entry is corrupt.');
-    const flags = buffer.readUInt16LE(offset + 8);
-    if (flags & 0x1) throw new Error('Encrypted portable archives are not supported.');
-    const compressedSize = buffer.readUInt32LE(offset + 20);
-    const uncompressedSize = buffer.readUInt32LE(offset + 24);
-    const nameLength = buffer.readUInt16LE(offset + 28);
-    const extraLength = buffer.readUInt16LE(offset + 30);
-    const commentLength = buffer.readUInt16LE(offset + 32);
-    const externalAttributes = buffer.readUInt32LE(offset + 38);
-    const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
-    if (!nameLength || nextOffset > buffer.length) throw new Error('Portable archive contains an invalid central directory name.');
-    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString((flags & 0x800) ? 'utf8' : 'latin1');
-    entries.push({ name, compressedSize, uncompressedSize, externalAttributes, directory: name.endsWith('/') });
-    offset = nextOffset;
+function parseCentralDirectory(archivePath: string, archiveSize: number, maxEntries: number) {
+  const descriptor = fs.openSync(archivePath, 'r');
+  try {
+    const tailSize = Math.min(archiveSize, 65_557);
+    const tailOffset = archiveSize - tailSize;
+    const tail = readExactly(descriptor, tailSize, tailOffset);
+    let relativeEocdOffset = -1;
+    for (let offset = tail.length - 22; offset >= 0; offset -= 1) {
+      if (tail.readUInt32LE(offset) !== 0x06054b50) continue;
+      const commentLength = tail.readUInt16LE(offset + 20);
+      if (offset + 22 + commentLength === tail.length) {
+        relativeEocdOffset = offset;
+        break;
+      }
+    }
+    if (relativeEocdOffset < 0) throw new Error('Portable archive is corrupt or missing its central directory.');
+    const eocdOffset = tailOffset + relativeEocdOffset;
+    const diskNumber = tail.readUInt16LE(relativeEocdOffset + 4);
+    const centralDisk = tail.readUInt16LE(relativeEocdOffset + 6);
+    const entriesOnDisk = tail.readUInt16LE(relativeEocdOffset + 8);
+    const entryCount = tail.readUInt16LE(relativeEocdOffset + 10);
+    const centralSize = tail.readUInt32LE(relativeEocdOffset + 12);
+    const centralOffset = tail.readUInt32LE(relativeEocdOffset + 16);
+    if (diskNumber !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) throw new Error('Multi-disk portable archives are not supported.');
+    if (entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) throw new Error('ZIP64 portable archives are not supported by this recovery version.');
+    if (!entryCount || entryCount > maxEntries) throw new Error(`Portable archive entry count is invalid or exceeds ${maxEntries}.`);
+    if (!centralSize || centralSize > MAX_CENTRAL_DIRECTORY_BYTES) throw new Error(`Portable archive central directory exceeds the ${formatBytes(MAX_CENTRAL_DIRECTORY_BYTES)} bounded-memory limit.`);
+    if (centralOffset + centralSize > eocdOffset) throw new Error('Portable archive central directory is corrupt.');
+    const buffer = readExactly(descriptor, centralSize, centralOffset);
+    const entries: CentralDirectoryEntry[] = [];
+    let offset = 0;
+    for (let index = 0; index < entryCount; index += 1) {
+      if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('Portable archive central directory entry is corrupt.');
+      const flags = buffer.readUInt16LE(offset + 8);
+      if (flags & 0x1) throw new Error('Encrypted portable archives are not supported.');
+      const compressionMethod = buffer.readUInt16LE(offset + 10);
+      const expectedCrc32 = buffer.readUInt32LE(offset + 16);
+      const compressedSize = buffer.readUInt32LE(offset + 20);
+      const uncompressedSize = buffer.readUInt32LE(offset + 24);
+      const nameLength = buffer.readUInt16LE(offset + 28);
+      const extraLength = buffer.readUInt16LE(offset + 30);
+      const commentLength = buffer.readUInt16LE(offset + 32);
+      const diskStart = buffer.readUInt16LE(offset + 34);
+      const externalAttributes = buffer.readUInt32LE(offset + 38);
+      const localHeaderOffset = buffer.readUInt32LE(offset + 42);
+      const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
+      if (!nameLength || nextOffset > buffer.length) throw new Error('Portable archive contains an invalid central directory name.');
+      if (diskStart !== 0) throw new Error('Multi-disk portable archives are not supported.');
+      if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localHeaderOffset === 0xffffffff) throw new Error('ZIP64 portable archives are not supported by this recovery version.');
+      const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString((flags & 0x800) ? 'utf8' : 'latin1');
+      entries.push({ name, flags, compressionMethod, crc32: expectedCrc32, compressedSize, uncompressedSize, externalAttributes, localHeaderOffset, directory: name.endsWith('/') });
+      offset = nextOffset;
+    }
+    if (offset !== centralSize) throw new Error('Portable archive central directory length does not match its metadata.');
+    return { entries, centralDirectoryOffset: centralOffset };
+  } finally {
+    fs.closeSync(descriptor);
   }
-  if (offset !== centralOffset + centralSize) throw new Error('Portable archive central directory length does not match its metadata.');
-  return entries;
+}
+
+function readExactly(descriptor: number, length: number, position: number) {
+  const buffer = Buffer.allocUnsafe(length);
+  let offset = 0;
+  while (offset < length) {
+    const read = fs.readSync(descriptor, buffer, offset, length - offset, position + offset);
+    if (!read) throw new Error('Portable archive ended before its metadata was complete.');
+    offset += read;
+  }
+  return buffer;
 }
 
 function validateArchiveEntryName(name: string) {
@@ -454,9 +624,9 @@ export async function extractAndImportPortableArchive(input: {
   recoveryRoot: string;
   currentAppVersion: string;
   limits?: { maxArchiveBytes?: number; maxExpandedBytes?: number; maxEntries?: number };
+  storagePolicy?: Partial<RecoveryStoragePolicy>;
 }) {
   const inspection = inspectPortableArchive(input.archivePath, input.limits);
-  ensureAvailableSpace(input.recoveryRoot, inspection.compressedSizeBytes + inspection.expandedSizeBytes + 64 * 1024 * 1024);
   const stagingRoot = path.join(input.recoveryRoot, '.staging');
   const importedRoot = path.join(input.recoveryRoot, 'imported');
   const archivesRoot = path.join(input.recoveryRoot, 'archives');
@@ -476,19 +646,16 @@ export async function extractAndImportPortableArchive(input: {
       }
       throw new Error('A different imported recovery package already uses this backup name.');
     }
-    const archiveBuffer = fs.readFileSync(input.archivePath);
-    const zip = await JSZip.loadAsync(archiveBuffer, { checkCRC32: true, createFolders: true });
+    assertRecoveryStorageCapacity(input.recoveryRoot, inspection.compressedSizeBytes + inspection.expandedSizeBytes, input.storagePolicy);
+    ensureAvailableSpace(input.recoveryRoot, inspection.compressedSizeBytes + inspection.expandedSizeBytes + RECOVERY_IMPORT_HEADROOM_BYTES);
     for (const entry of inspection.entries) {
       const target = resolveInside(stagingPath, entry.name.replace(/\/$/, ''));
       if (entry.directory) {
         fs.mkdirSync(target, { recursive: true });
         continue;
       }
-      const zipEntry = zip.file(entry.name);
-      if (!zipEntry) throw new Error(`Portable archive entry could not be read: ${entry.name}`);
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      await pipeline(zipEntry.nodeStream(), fs.createWriteStream(target, { flags: 'wx', mode: 0o600 }));
-      if (fs.statSync(target).size !== entry.uncompressedSize) throw new Error(`Portable archive entry size does not match its metadata: ${entry.name}`);
+      await extractArchiveEntry(input.archivePath, entry, inspection.centralDirectoryOffset, target);
     }
     const stagedPackagePath = path.join(stagingPath, inspection.rootName);
     const validation = validatePortablePackage(stagedPackagePath, input.currentAppVersion);
@@ -506,6 +673,72 @@ export async function extractAndImportPortableArchive(input: {
     return imported;
   } finally {
     if (isPathInside(stagingRoot, stagingPath) && fs.existsSync(stagingPath)) fs.rmSync(stagingPath, { recursive: true, force: true });
+  }
+}
+
+async function extractArchiveEntry(archivePath: string, entry: CentralDirectoryEntry, centralDirectoryOffset: number, targetPath: string) {
+  const descriptor = fs.openSync(archivePath, 'r');
+  let dataOffset = 0;
+  try {
+    const localHeader = readExactly(descriptor, 30, entry.localHeaderOffset);
+    if (localHeader.readUInt32LE(0) !== 0x04034b50) throw new Error(`Portable archive local header is corrupt: ${entry.name}`);
+    const localFlags = localHeader.readUInt16LE(6);
+    const localMethod = localHeader.readUInt16LE(8);
+    const localCrc32 = localHeader.readUInt32LE(14);
+    const localCompressedSize = localHeader.readUInt32LE(18);
+    const localUncompressedSize = localHeader.readUInt32LE(22);
+    const nameLength = localHeader.readUInt16LE(26);
+    const extraLength = localHeader.readUInt16LE(28);
+    if (!nameLength || (localFlags & 0x1) || localMethod !== entry.compressionMethod || (localFlags & 0x800) !== (entry.flags & 0x800)) {
+      throw new Error(`Portable archive local metadata does not match its central directory: ${entry.name}`);
+    }
+    const nameBuffer = readExactly(descriptor, nameLength, entry.localHeaderOffset + 30);
+    const localName = nameBuffer.toString((localFlags & 0x800) ? 'utf8' : 'latin1');
+    if (localName !== entry.name) throw new Error(`Portable archive local path does not match its central directory: ${entry.name}`);
+    if (!(localFlags & 0x8) && (localCrc32 !== entry.crc32 || localCompressedSize !== entry.compressedSize || localUncompressedSize !== entry.uncompressedSize)) {
+      throw new Error(`Portable archive local size or checksum metadata does not match: ${entry.name}`);
+    }
+    dataOffset = entry.localHeaderOffset + 30 + nameLength + extraLength;
+    if (dataOffset < 0 || dataOffset + entry.compressedSize > centralDirectoryOffset) throw new Error(`Portable archive entry data is out of bounds: ${entry.name}`);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  if (entry.compressedSize === 0) {
+    if (entry.uncompressedSize !== 0 || entry.crc32 !== 0) throw new Error(`Portable archive entry integrity check failed: ${entry.name}`);
+    fs.writeFileSync(targetPath, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
+    return;
+  }
+  const source = fs.createReadStream(archivePath, { start: dataOffset, end: dataOffset + entry.compressedSize - 1 });
+  const integrity = new ZipEntryIntegrity(entry);
+  const output = fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 });
+  try {
+    if (entry.compressionMethod === 8) await pipeline(source, createInflateRaw(), integrity, output);
+    else await pipeline(source, integrity, output);
+  } catch (error) {
+    if (error instanceof Error && /^Portable archive entry /.test(error.message)) throw error;
+    throw new Error(`Portable archive entry extraction or integrity check failed: ${entry.name}`, { cause: error });
+  }
+}
+
+class ZipEntryIntegrity extends Transform {
+  private byteCount = 0;
+  private checksum = 0;
+
+  constructor(private readonly entry: CentralDirectoryEntry) {
+    super();
+  }
+
+  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null, data?: Buffer) => void) {
+    this.byteCount += chunk.length;
+    if (this.byteCount > this.entry.uncompressedSize) return callback(new Error(`Portable archive entry exceeds its declared expanded size: ${this.entry.name}`));
+    this.checksum = crc32(chunk, this.checksum);
+    callback(null, chunk);
+  }
+
+  override _flush(callback: (error?: Error | null) => void) {
+    if (this.byteCount !== this.entry.uncompressedSize) return callback(new Error(`Portable archive entry size does not match its metadata: ${this.entry.name}`));
+    if ((this.checksum >>> 0) !== this.entry.crc32) return callback(new Error(`Portable archive entry CRC integrity check failed: ${this.entry.name}`));
+    callback();
   }
 }
 
@@ -574,6 +807,7 @@ export function validatePortablePackage(packagePath: string, currentAppVersion: 
   const databasePath = databasePathInPackage(root, manifest);
   if (sha256FileSync(databasePath) !== manifest.checksumSha256) throw new Error('Portable package database checksum does not match the manifest.');
   validateSqliteDatabase(databasePath);
+  validateMachineLibraryPackageIntegrity(databasePath, root);
   const recoveryManifest = JSON.parse(fs.readFileSync(path.join(root, 'recovery', 'restore-manifest.json'), 'utf8')) as Record<string, unknown>;
   if (recoveryManifest.packageVersion !== PORTABLE_PACKAGE_VERSION || recoveryManifest.sourcePathsAreRelative !== true) throw new Error('Portable package restore manifest is incompatible.');
   return {
@@ -584,6 +818,95 @@ export function validatePortablePackage(packagePath: string, currentAppVersion: 
     checkedFileCount: Object.keys(checksums).length,
     expandedSizeBytes: actualFiles.reduce((total, file) => total + file.sizeBytes, 0),
   };
+}
+
+export function validateMachineLibraryPackageIntegrity(databasePath: string, packagePath: string) {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const tables = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name));
+    if (!tables.has('machine_assets')) return;
+    const assetIds = new Set((database.prepare('SELECT id FROM machine_assets').all() as Array<{ id: number }>).map(row => Number(row.id)));
+    const folderRelationships = new Set<string>();
+    if (tables.has('machine_document_folders')) {
+      for (const row of database.prepare('SELECT id,asset_id FROM machine_document_folders').all() as Array<{ id: number; asset_id: number }>) {
+        assertMachineAssetRelationship(assetIds, row.asset_id, `document folder ${row.id}`);
+        folderRelationships.add(`${Number(row.id)}:${Number(row.asset_id)}`);
+      }
+    }
+    if (tables.has('machine_documents')) {
+      for (const row of database.prepare('SELECT id,asset_id,folder_id,stored_filename,size_bytes FROM machine_documents').all() as Array<Record<string, unknown>>) {
+        const id = Number(row.id);
+        const assetId = Number(row.asset_id);
+        assertMachineAssetRelationship(assetIds, assetId, `document ${id}`);
+        if (!folderRelationships.has(`${Number(row.folder_id)}:${assetId}`)) throw new Error(`Portable package Machine Library document ${id} has an invalid folder relationship.`);
+        const storedFilename = String(row.stored_filename ?? '');
+        if (!storedFilename || storedFilename !== path.basename(storedFilename) || storedFilename.includes('\\')) throw new Error(`Portable package Machine Library document ${id} has an unsafe stored filename.`);
+        assertMachinePayloadFile(packagePath, `files/uploads/machine-library/asset-${assetId}/documents/${storedFilename}`, row.size_bytes, `document ${id}`);
+      }
+    }
+    const noteAssets = new Map<number, number>();
+    if (tables.has('machine_asset_notes')) {
+      for (const row of database.prepare('SELECT id,asset_id,pdf_stored_reference FROM machine_asset_notes').all() as Array<Record<string, unknown>>) {
+        const id = Number(row.id);
+        const assetId = Number(row.asset_id);
+        assertMachineAssetRelationship(assetIds, assetId, `asset note ${id}`);
+        noteAssets.set(id, assetId);
+        const pdfReference = String(row.pdf_stored_reference ?? '');
+        if (pdfReference) assertMachineStoredReference(packagePath, pdfReference, 'uploads/machine-asset-notes/', undefined, `asset note PDF ${id}`);
+      }
+    }
+    if (tables.has('machine_asset_note_attachments')) {
+      for (const row of database.prepare('SELECT id,note_id,file_size,stored_file_reference FROM machine_asset_note_attachments').all() as Array<Record<string, unknown>>) {
+        const id = Number(row.id);
+        if (!noteAssets.has(Number(row.note_id))) throw new Error(`Portable package Machine Library note attachment ${id} has an invalid note relationship.`);
+        assertMachineStoredReference(packagePath, row.stored_file_reference, 'uploads/machine-asset-notes/', row.file_size, `note attachment ${id}`);
+      }
+    }
+    validateMachineReferencedTable(database, tables, assetIds, packagePath, {
+      table: 'machine_inspection_records', prefix: 'uploads/machine-inspection-records/', label: 'inspection record', sizeColumn: 'file_size',
+    });
+    validateMachineReferencedTable(database, tables, assetIds, packagePath, {
+      table: 'machine_component_images', prefix: 'uploads/machine-component-images/', label: 'component image', sizeColumn: 'file_size',
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function validateMachineReferencedTable(
+  database: DatabaseSync,
+  tables: Set<string>,
+  assetIds: Set<number>,
+  packagePath: string,
+  input: { table: string; prefix: string; label: string; sizeColumn: string },
+) {
+  if (!tables.has(input.table)) return;
+  const statement = database.prepare(`SELECT id,asset_id,stored_file_reference,${quoteIdentifier(input.sizeColumn)} AS expected_size FROM ${quoteIdentifier(input.table)}`);
+  for (const row of statement.all() as Array<Record<string, unknown>>) {
+    const id = Number(row.id);
+    assertMachineAssetRelationship(assetIds, row.asset_id, `${input.label} ${id}`);
+    assertMachineStoredReference(packagePath, row.stored_file_reference, input.prefix, row.expected_size, `${input.label} ${id}`);
+  }
+}
+
+function assertMachineAssetRelationship(assetIds: Set<number>, value: unknown, label: string) {
+  const assetId = Number(value);
+  if (!Number.isInteger(assetId) || !assetIds.has(assetId)) throw new Error(`Portable package Machine Library ${label} has an invalid machine relationship.`);
+}
+
+function assertMachineStoredReference(packagePath: string, value: unknown, prefix: string, expectedSize: unknown, label: string) {
+  const reference = String(value ?? '');
+  if (!reference.startsWith(prefix) || !safeRelativePath(reference)) throw new Error(`Portable package Machine Library ${label} has an unsafe stored file reference.`);
+  assertMachinePayloadFile(packagePath, `files/${reference}`, expectedSize, label);
+}
+
+function assertMachinePayloadFile(packagePath: string, relative: string, expectedSize: unknown, label: string) {
+  const candidate = resolveInside(packagePath, relative);
+  if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) throw new Error(`Portable package is missing Machine Library ${label} physical file.`);
+  if (expectedSize !== undefined && expectedSize !== null) {
+    const size = Number(expectedSize);
+    if (!Number.isSafeInteger(size) || size < 0 || fs.statSync(candidate).size !== size) throw new Error(`Portable package Machine Library ${label} physical file size does not match its database metadata.`);
+  }
 }
 
 export function validateSqliteDatabase(databasePath: string) {
@@ -645,6 +968,65 @@ export function listImportedPortablePackages(recoveryRoot: string, currentAppVer
     }
   }
   return results.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function normalizeRecoveryStoragePolicy(input: Partial<RecoveryStoragePolicy> = {}): RecoveryStoragePolicy {
+  return {
+    quotaBytes: positiveLimit(input.quotaBytes, DEFAULT_RECOVERY_QUOTA_BYTES),
+    maxPackages: positiveLimit(input.maxPackages, DEFAULT_RECOVERY_MAX_PACKAGES),
+  };
+}
+
+export function recoveryStorageStatus(recoveryRoot: string, input: Partial<RecoveryStoragePolicy> = {}): RecoveryStorageStatus {
+  const policy = normalizeRecoveryStoragePolicy(input);
+  const importedRoot = path.join(recoveryRoot, 'imported');
+  const archivesRoot = path.join(recoveryRoot, 'archives');
+  const packageNames = new Set<string>();
+  if (fs.existsSync(importedRoot)) {
+    for (const entry of fs.readdirSync(importedRoot, { withFileTypes: true })) if (entry.isDirectory() && PORTABLE_ROOT_PATTERN.test(entry.name)) packageNames.add(entry.name);
+  }
+  if (fs.existsSync(archivesRoot)) {
+    for (const entry of fs.readdirSync(archivesRoot, { withFileTypes: true })) {
+      if (entry.isFile() && PORTABLE_ARCHIVE_PATTERN.test(entry.name)) packageNames.add(entry.name.slice(0, -4));
+    }
+  }
+  const usedBytes = directorySizeBytes(importedRoot) + directorySizeBytes(archivesRoot);
+  return {
+    ...policy,
+    usedBytes,
+    remainingBytes: Math.max(0, policy.quotaBytes - usedBytes),
+    packageCount: packageNames.size,
+    atCapacity: packageNames.size >= policy.maxPackages || usedBytes >= policy.quotaBytes,
+  };
+}
+
+export function assertRecoveryStorageCapacity(recoveryRoot: string, requiredBytes: number, input: Partial<RecoveryStoragePolicy> = {}) {
+  const status = recoveryStorageStatus(recoveryRoot, input);
+  if (status.packageCount >= status.maxPackages) {
+    throw new Error(`Recovery storage retention limit reached (${status.packageCount} of ${status.maxPackages} packages). Offload an older recovery package before importing another; MCC never silently deletes recovery packages.`);
+  }
+  const projected = status.usedBytes + Math.max(0, requiredBytes) + 1024 * 1024;
+  if (projected > status.quotaBytes) {
+    throw new Error(`Recovery storage quota would be exceeded (${formatBytes(status.usedBytes)} used; ${formatBytes(status.quotaBytes)} quota). Offload an older recovery package before importing another.`);
+  }
+  return status;
+}
+
+function directorySizeBytes(root: string) {
+  if (!fs.existsSync(root)) return 0;
+  let total = 0;
+  function visit(current: string) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const candidate = path.join(current, entry.name);
+      const stat = fs.lstatSync(candidate);
+      if (stat.isSymbolicLink()) throw new Error('Recovery storage contains an unsupported symbolic link or junction.');
+      if (entry.isDirectory()) visit(candidate);
+      else if (entry.isFile()) total += stat.size;
+      else throw new Error('Recovery storage contains an unsupported filesystem entry.');
+    }
+  }
+  visit(root);
+  return total;
 }
 
 export function importedPackagePath(recoveryRoot: string, id: unknown) {

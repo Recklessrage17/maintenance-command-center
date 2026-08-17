@@ -111,6 +111,14 @@ type ExternalBackupSettings = {
   lastCopyBackupId: string | null;
   lastCopyFilename: string | null;
 };
+type RecoveryStorageStatus = {
+  usedBytes: number;
+  remainingBytes: number;
+  quotaBytes: number;
+  packageCount: number;
+  maxPackages: number;
+  atCapacity: boolean;
+};
 type BackupGroupStatus = {
   category: BackupCategory;
   categoryLabel: string;
@@ -139,6 +147,7 @@ type BackupStatus = {
   portableBackups: BackupSummary[];
   importedRecoveryBackups: ImportedRecoveryBackup[];
   recoveryLocation: string;
+  recoveryStorage: RecoveryStorageStatus | null;
   externalBackup: ExternalBackupSettings | null;
   latestBackup: BackupSummary | null;
   lastAutoBackup: BackupSummary | null;
@@ -563,6 +572,7 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
   const counts = asRecord(data.backupCountsByType);
   const permissions = asRecord(data.permissions);
   const lastResult = asRecord(data.lastBackupResult);
+  const recoveryStorage = asRecord(data.recoveryStorage);
   const backupCountsByType: Record<BackupType, number> = {
     ...emptyBackupCounts,
     daily_auto: Number(counts.daily_auto ?? 0),
@@ -580,6 +590,14 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
     portableBackups: Array.isArray(data.portableBackups) ? data.portableBackups.map(normalizeBackupSummary).filter((item): item is BackupSummary=>Boolean(item)) : [],
     importedRecoveryBackups: Array.isArray(data.importedRecoveryBackups) ? data.importedRecoveryBackups.map(normalizeImportedRecoveryBackup).filter((item): item is ImportedRecoveryBackup=>Boolean(item)) : [],
     recoveryLocation: String(data.recoveryLocation ?? ''),
+    recoveryStorage: data.recoveryStorage ? {
+      usedBytes: Number(recoveryStorage.usedBytes ?? 0),
+      remainingBytes: Number(recoveryStorage.remainingBytes ?? 0),
+      quotaBytes: Number(recoveryStorage.quotaBytes ?? 0),
+      packageCount: Number(recoveryStorage.packageCount ?? 0),
+      maxPackages: Number(recoveryStorage.maxPackages ?? 0),
+      atCapacity: Boolean(recoveryStorage.atCapacity),
+    } : null,
     externalBackup: normalizeExternalBackupSettings(data.externalBackup),
     latestBackup: normalizeBackupSummary(data.latestBackup),
     lastAutoBackup: normalizeBackupSummary(data.lastAutoBackup),
@@ -1690,19 +1708,20 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
                   <strong>Pull Master Backup into MCC</strong>
                   <p>MCC treats ZIP files as untrusted, validates them, and atomically promotes only a verified local copy under:</p>
                   <code className="backup-path-code">{backupStatus?.recoveryLocation||'Configured MCC recovery storage'}</code>
-                  <label className={`secondary-button compact-button backup-file-button${portableLoading?' disabled':''}`}>
-                    {portableLoading?'Import in progress...':'Choose MCC Master Backup ZIP'}
-                    <input type="file" accept=".zip,application/zip" disabled={portableLoading} onChange={event=>{const file=event.target.files?.[0];event.target.value='';importPortableBackup(file);}} />
+                  <label className={`secondary-button compact-button backup-file-button${portableLoading||backupStatus?.recoveryStorage?.atCapacity?' disabled':''}`}>
+                    {portableLoading?'Import in progress...':backupStatus?.recoveryStorage?.atCapacity?'Recovery storage limit reached':'Choose MCC Master Backup ZIP'}
+                    <input type="file" accept=".zip,application/zip" disabled={portableLoading||backupStatus?.recoveryStorage?.atCapacity} onChange={event=>{const file=event.target.files?.[0];event.target.value='';importPortableBackup(file);}} />
                   </label>
                   {portableUploadProgress!==null&&<div className="backup-byte-progress" aria-label={`Portable backup upload ${portableUploadProgress}%`}><i style={{width:`${portableUploadProgress}%`}} /></div>}
                   <small>Live MCC data is untouched during upload, copy, extraction, and validation.</small>
+                  {backupStatus?.recoveryStorage&&<small>{formatBytes(backupStatus.recoveryStorage.usedBytes)} of {formatBytes(backupStatus.recoveryStorage.quotaBytes)} used · {backupStatus.recoveryStorage.packageCount} of {backupStatus.recoveryStorage.maxPackages} packages. MCC never auto-deletes recovery packages.</small>}
                 </section>
               </div>
 
               <section className="backup-imported-list">
                 <div className="backup-protection-heading">
                   <div><span>Verified local recovery archive</span><strong>{backupStatus?.importedRecoveryBackups.length??0} imported backup{(backupStatus?.importedRecoveryBackups.length??0)===1?'':'s'}</strong></div>
-                  <span className="backup-area-badge protected">Local copy</span>
+                  <span className={`backup-area-badge ${backupStatus?.recoveryStorage?.atCapacity?'pending':'protected'}`}>{backupStatus?.recoveryStorage?.atCapacity?'Limit reached':'Local copy'}</span>
                 </div>
                 {(backupStatus?.importedRecoveryBackups??[]).map(backup=>(
                   <div className="backup-portable-row" key={backup.id}>

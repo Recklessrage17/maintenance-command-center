@@ -53,6 +53,10 @@ The manifest records package/schema version, MCC version, UTC creation time, bac
 
 Excel files are generated from the snapshot database, not changing live tables. Every persisted column from the applicable tables is exported. History/audit tables use deterministic sheets. Values exceeding Excel's cell limit are referenced from an `Oversized Values` sheet and split into complete numbered parts rather than silently truncated. PM history is copied through the current formula-free workflow; obsolete Helper formula columns are not regenerated.
 
+`MCC_Vendors.xlsx` contains both `Vendors` (`inventory_vendors`) and `Vendor Contacts` (`vendor_contacts`), including primary and every additional/secondary contact. `MCC_Inventory.xlsx` preserves the exact `part_info_url` value; syntactically valid `http://` and `https://` values are clickable Excel hyperlinks, while blank, malformed, or non-HTTP(S) values remain blank/plain text.
+
+`MCC_Machine_List.xlsx` includes current and legacy machine/PM tables when present plus `Document Folders`, `Documents`, `Asset Notes`, `Note Attachments`, `Inspection Records`, and `Component Images`. All persisted IDs and fields remain present. The file sheets add machine asset numbers, folder/note relationships, and safe package-relative physical paths where they can be derived. They never turn an old absolute runtime path into a recovery dependency. SQLite and the files under `files/uploads/` remain the authoritative full-fidelity restore sources.
+
 ## Browser download
 
 Manager and higher can use **Download Portable Backup** in Settings. The response is streamed from a fixed MCC backup directory with `application/zip`, a safe attachment filename, `Content-Length`, `private, no-store`, and `nosniff`. The API resolves a backup ID inside the allowlisted Master Backup directory and never accepts a filesystem path.
@@ -78,6 +82,8 @@ Recommended production ownership and permissions are the MCC service account wit
 
 The compressed upload limit defaults to 512 MB and can be set, up to 2048 MB, with `MCC_PORTABLE_BACKUP_MAX_MB`. The importer also enforces entry-count, expanded-size, and suspicious compression-ratio limits.
 
+ZIP inspection and extraction are bounded for Raspberry Pi use. The inspector reads only the final ZIP metadata window (at most 65,557 bytes) and a central directory capped at 32 MB. It never reads the complete archive into a JavaScript buffer. Extraction processes one entry at a time through range-limited file streams, backpressure-aware inflate, expanded-byte accounting, and CRC-32 verification. Package SHA-256, per-file manifest checksums, SQLite integrity, and Machine Library database-to-file relationship validation run after extraction.
+
 ## Optional external backup destination
 
 An Admin/Owner Admin can configure a mounted USB disk or server-side share in Settings, for example:
@@ -101,12 +107,14 @@ The recovery/import card is visible to Manager and higher. Final destructive res
 1. Select an `MCC_Master_Backup_*.zip` in Settings.
 2. The browser uploads it to an MCC-owned incoming area; upload progress is based on transferred bytes.
 3. MCC treats the ZIP as untrusted and validates its central directory before extraction.
-4. MCC checks compressed/expanded limits, entry count, compression ratio, root/package structure, duplicates, traversal, absolute/drive-letter paths, links, required payloads, manifest versions, every checksum, SQLite integrity, and database compatibility.
-5. Extraction occurs in a unique staging directory using create-new files only.
+4. MCC checks compressed/expanded limits, entry count, compression ratio, root/package structure, duplicates, traversal, absolute/drive-letter paths, links/devices, required payloads, manifest versions, every checksum, SQLite integrity, and database compatibility.
+5. Bounded extraction occurs in a unique staging directory using create-new files only; every file is streamed and checked against its declared size and ZIP CRC.
 6. MCC verifies the extracted local package, copies and checksums the archive into persistent recovery storage, then atomically promotes the extracted package.
 7. Only after success does MCC show: **Backup safely copied to this MCC drive. External backup drive may now be disconnected.**
 
-Failed imports remove their MCC-owned staging artifacts, never touch live state, and can be retried. Imported archives/packages are intentionally retained independently of normal local-backup retention so a routine retention pass cannot silently remove the disaster-recovery copy. Administrators should monitor `MCC_RECOVERY_DIR` capacity and retain/offload imported packages according to the site's written data-retention policy.
+Failed imports remove their MCC-owned staging artifacts, never touch live state, and can be retried. Imported archives/packages are retained independently of normal local-backup retention. MCC never automatically deletes an imported recovery package, so it cannot silently delete the last valid recovery copy or a package being restored.
+
+Recovery storage is bounded instead: imports stop before committed storage exceeds `MCC_RECOVERY_QUOTA_MB` (default 8192 MB) or `MCC_RECOVERY_MAX_PACKAGES` (default 3). Settings shows current bytes/package usage and disables new imports at the limit. An operator must first verify and offload an older package, then deliberately remove that package from MCC-owned recovery storage according to the site's retention procedure. Re-importing the exact already-retained package remains idempotent. Free-space checks still reserve temporary room for the incoming archive, streamed extraction, verified archive copy, and staging headroom.
 
 ## Bare-drive / new-SSD recovery
 
@@ -127,7 +135,7 @@ The restore runs from the verified local imported copy, not directly from remova
 
 ## Restore safety and rollback
 
-Before replacement, MCC verifies the complete package and SQLite `PRAGMA quick_check`. The live database is closed only after validation and the `pre_restore` package succeeds. Database/WAL/SHM and complete portable payload folders are restored from allowlisted mappings. PM workbook and work-order storage use their current environment-derived paths.
+Before replacement, MCC verifies the complete package and SQLite `PRAGMA quick_check`. Machine Library validation additionally proves that documents, generated note PDFs, note attachments, inspection files, and component images referenced by SQLite exist in the package, have their recorded sizes, and retain valid machine/folder/note relationships. The live database is closed only after validation and the `pre_restore` package succeeds. Database/WAL/SHM and complete portable payload folders are restored from allowlisted mappings. PM workbook and work-order storage use their current environment-derived paths.
 
 If restore fails after replacement begins, MCC reopens the `pre_restore` snapshot, restores its runtime payloads, recreates required storage directories, and leaves the source backup unchanged. The failure is audited and the verified local imported package remains available for retry.
 
@@ -150,7 +158,7 @@ Create and download a new portable backup after verification so the recovered in
 
 ## Retention
 
-Normal tier retention remains type-specific. When MCC retention removes a local Master Backup folder, it removes that package's adjacent portable ZIP/checksum sidecar as the same recovery unit. Retention never deletes configured external copies or imported recovery archives. Plan external/imported retention and free-space monitoring separately.
+Normal tier retention remains type-specific. When MCC retention removes a local Master Backup folder, it removes that package's adjacent portable ZIP/checksum sidecar as the same recovery unit. Retention never deletes configured external copies or imported recovery archives. Imported recovery storage uses the explicit quota/package-count stop policy described above; there is no silent age-based deletion.
 
 ## Troubleshooting
 
@@ -158,6 +166,7 @@ Normal tier retention remains type-specific. When MCC retention removes a local 
 - **External test rejected:** use an absolute mounted destination outside MCC code/runtime/recovery trees; confirm the service account owns or can write it.
 - **External copy failed:** reconnect/remount the exact configured disk/share, confirm free space and filename conflicts, retest, then create a new Master Backup. MCC does not silently fall back.
 - **Import rejected:** do not manually extract/repack the ZIP. Use an intact archive from MCC and check package version, size limit, free space, and checksums.
+- **Recovery limit reached:** verify that another off-device copy exists, offload an older imported package if needed, and remove it deliberately according to site policy. MCC will not choose or delete a recovery copy automatically.
 - **Newer/incompatible package:** install the supported matching/newer MCC application release before importing.
 - **Restore denied:** Manager can import, but the existing Master Restore permission remains Admin/Owner Admin.
 - **Login changed after restore:** sessions and users come from the restored database. Refresh and sign in with a restored account.

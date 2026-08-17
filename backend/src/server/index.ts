@@ -49,6 +49,8 @@ import {
 } from './systemUpdate.js';
 import {
   DEFAULT_MAX_ARCHIVE_BYTES,
+  DEFAULT_RECOVERY_MAX_PACKAGES,
+  DEFAULT_RECOVERY_QUOTA_BYTES,
   PORTABLE_PACKAGE_VERSION,
   PORTABLE_SCHEMA_VERSION,
   PORTABLE_ZIP_MIME,
@@ -61,6 +63,7 @@ import {
   packageFileChecksums,
   packagePayloadSize,
   portablePackageRoot,
+  recoveryStorageStatus,
   sha256File as sha256PortableFile,
   sha256FileSync,
   validateExternalDestination,
@@ -151,6 +154,16 @@ const configuredPortableUploadMaxMb = Number(process.env.MCC_PORTABLE_BACKUP_MAX
 const portableUploadMaxBytes = Number.isFinite(configuredPortableUploadMaxMb) && configuredPortableUploadMaxMb > 0 && configuredPortableUploadMaxMb <= 2048
   ? Math.floor(configuredPortableUploadMaxMb * 1024 * 1024)
   : DEFAULT_MAX_ARCHIVE_BYTES;
+const configuredRecoveryQuotaMb = Number(process.env.MCC_RECOVERY_QUOTA_MB ?? DEFAULT_RECOVERY_QUOTA_BYTES / 1024 / 1024);
+const recoveryQuotaBytes = Number.isFinite(configuredRecoveryQuotaMb) && configuredRecoveryQuotaMb > 0 && configuredRecoveryQuotaMb <= 1024 * 1024
+  ? Math.floor(configuredRecoveryQuotaMb * 1024 * 1024)
+  : DEFAULT_RECOVERY_QUOTA_BYTES;
+const configuredRecoveryMaxPackages = Number(process.env.MCC_RECOVERY_MAX_PACKAGES ?? DEFAULT_RECOVERY_MAX_PACKAGES);
+const recoveryMaxPackages = Number.isInteger(configuredRecoveryMaxPackages) && configuredRecoveryMaxPackages > 0 && configuredRecoveryMaxPackages <= 100
+  ? configuredRecoveryMaxPackages
+  : DEFAULT_RECOVERY_MAX_PACKAGES;
+const recoveryStoragePolicy = { quotaBytes: recoveryQuotaBytes, maxPackages: recoveryMaxPackages };
+const activePortableRestores = new Set<string>();
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
 const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
@@ -3403,6 +3416,7 @@ function masterBackupStatus(actor?: User) {
     portableBackups,
     importedRecoveryBackups,
     recoveryLocation: actor && canUsePortableRecovery(actor) ? recoveryDir : '',
+    recoveryStorage: actor && canUsePortableRecovery(actor) ? recoveryStorageStatus(recoveryDir, recoveryStoragePolicy) : null,
     externalBackup: actor && canUsePortableRecovery(actor) ? currentExternalBackupSettings() : null,
     latestBackup,
     lastAutoBackup: backups.find(backup=>backup.type === 'daily_auto' || backup.type === 'auto') ?? null,
@@ -10561,7 +10575,7 @@ app.post('/api/backup/restore', requireAuth, async(req:AuthRequest,res)=>{
 app.get('/api/backup/portable', requireAuth, (req:AuthRequest,res)=>{
   if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   const backups = listBackupsByCategory('master').filter(backup=>backup.portableReady);
-  res.json({ok:true,backups,recoveryLocation:recoveryDir,importedBackups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
+  res.json({ok:true,backups,recoveryLocation:recoveryDir,recoveryStorage:recoveryStorageStatus(recoveryDir,recoveryStoragePolicy),importedBackups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
 });
 app.get('/api/backup/portable/:backupId/download', requireAuth, async(req:AuthRequest,res)=>{
   if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
@@ -10657,6 +10671,7 @@ app.post('/api/backup/recovery/import', requireAuth, requirePortableRecovery, re
       recoveryRoot: recoveryDir,
       currentAppVersion: applicationVersion ?? '0.0.0',
       limits: { maxArchiveBytes: portableUploadMaxBytes },
+      storagePolicy: recoveryStoragePolicy,
     });
     audit(req,'portable backup imported','backup',imported.id,{filename:imported.archiveFilename,sizeBytes:imported.archiveSizeBytes,checkedFileCount:imported.checkedFileCount});
     res.status(imported.alreadyImported ? 200 : 201).json({ok:true,backup:imported,message:'Backup safely copied to this MCC drive. External backup drive may now be disconnected.'});
@@ -10670,20 +10685,28 @@ app.post('/api/backup/recovery/import', requireAuth, requirePortableRecovery, re
 });
 app.get('/api/backup/recovery', requireAuth, (req:AuthRequest,res)=>{
   if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
-  res.json({ok:true,recoveryLocation:recoveryDir,backups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
+  res.json({ok:true,recoveryLocation:recoveryDir,recoveryStorage:recoveryStorageStatus(recoveryDir,recoveryStoragePolicy),backups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
 });
 app.post('/api/backup/recovery/restore', requireAuth, async(req:AuthRequest,res)=>{
   if (!canRestoreBackupCategory(req.user!, 'master')) return res.status(403).json({ok:false,error:'Permission denied.'});
+  let activeBackupId = '';
+  let activeRestoreRegistered = false;
   try {
     const body = isRecord(req.body) ? req.body : {};
+    activeBackupId = String(body.backupId ?? '').trim();
+    if (activePortableRestores.has(activeBackupId)) throw new Error('This recovery package is already being restored.');
     const packagePath = importedPackagePath(recoveryDir, body.backupId);
     if (!fs.existsSync(packagePath)) throw new Error('Imported recovery package not found.');
+    activePortableRestores.add(activeBackupId);
+    activeRestoreRegistered = true;
     const result = await restoreBackup({ category:'master', backupId:body.backupId, confirmation:body.confirmation, actor:req.user!, importedPackagePath:packagePath });
     res.json({ok:true,...result,message:'Verified portable backup restored. Refresh MCC and log in again if needed.'});
   } catch (error) {
     const message = safeErrorMessage(error, [], 'Portable backup restore failed.');
     try { audit(req,'portable backup restore failed','backup',isRecord(req.body)?String(req.body.backupId??''):'',{error:message}); } catch {}
     res.status(/confirm|not found|missing|checksum|invalid|unsupported|incompatible|integrity/i.test(message)?400:500).json({ok:false,error:message});
+  } finally {
+    if (activeRestoreRegistered) activePortableRestores.delete(activeBackupId);
   }
 });
 app.get('/api/settings/branding', requireAuth, (_req,res)=>{
