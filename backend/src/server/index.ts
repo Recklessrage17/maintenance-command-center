@@ -48,6 +48,29 @@ import {
   type UpdateIdentity,
 } from './systemUpdate.js';
 import {
+  DEFAULT_MAX_ARCHIVE_BYTES,
+  PORTABLE_PACKAGE_VERSION,
+  PORTABLE_SCHEMA_VERSION,
+  PORTABLE_ZIP_MIME,
+  copyArchiveToExternal,
+  createPortableArchive,
+  databasePathInPackage,
+  extractAndImportPortableArchive,
+  importedPackagePath,
+  listImportedPortablePackages,
+  packageFileChecksums,
+  packagePayloadSize,
+  portablePackageRoot,
+  sha256File as sha256PortableFile,
+  sha256FileSync,
+  validateExternalDestination,
+  validatePortablePackage,
+  validateSqliteDatabase,
+  writeExcelInsuranceExports,
+  writeRecoveryFiles,
+  type PortablePackageManifest,
+} from './portableBackup.js';
+import {
   inheritedPermissions,
   isPermissionKey,
   permissionByKey,
@@ -116,6 +139,18 @@ const frontendDistPath = path.resolve(__dirname, '../../../frontend/dist');
 const dataDir = path.resolve(process.env.MCC_DATA_DIR || path.resolve(__dirname, '../../data'));
 const backupsDir = path.resolve(process.env.MCC_BACKUPS_DIR || path.resolve(__dirname, '../../backups'));
 const uploadsDir = path.resolve(process.env.MCC_UPLOADS_DIR || path.resolve(__dirname, '../../uploads'));
+const dataDirRelativeToRepo = path.relative(repoRootPath, dataDir);
+const dataDirIsInsideRepo = dataDirRelativeToRepo === '' || (dataDirRelativeToRepo !== '..' && !dataDirRelativeToRepo.startsWith(`..${path.sep}`) && !path.isAbsolute(dataDirRelativeToRepo));
+const defaultRecoveryDir = dataDirIsInsideRepo
+  ? path.join(os.homedir(), '.mcc', 'recovery')
+  : path.join(dataDir, 'recovery');
+const recoveryDir = path.resolve(process.env.MCC_RECOVERY_DIR || defaultRecoveryDir);
+const portableBackupDir = path.join(backupsDir, 'portable');
+const portableIncomingDir = path.join(recoveryDir, 'incoming');
+const configuredPortableUploadMaxMb = Number(process.env.MCC_PORTABLE_BACKUP_MAX_MB ?? DEFAULT_MAX_ARCHIVE_BYTES / 1024 / 1024);
+const portableUploadMaxBytes = Number.isFinite(configuredPortableUploadMaxMb) && configuredPortableUploadMaxMb > 0 && configuredPortableUploadMaxMb <= 2048
+  ? Math.floor(configuredPortableUploadMaxMb * 1024 * 1024)
+  : DEFAULT_MAX_ARCHIVE_BYTES;
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
 const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
@@ -147,6 +182,7 @@ fs.mkdirSync(equipmentAssetNotesDir, { recursive: true });
 fs.mkdirSync(equipmentDocumentLibraryDir, { recursive: true });
 fs.mkdirSync(pmExcelSourceDir, { recursive: true });
 fs.mkdirSync(pmExcelBackupDir, { recursive: true });
+fs.mkdirSync(portableIncomingDir, { recursive: true });
 const pmWorkOrderStorage=createPmWorkOrderStorage(pmWorkOrderDir,pmWorkOrderMaxBytes);
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
 const pmExcelUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 20 * 1024 * 1024 } });
@@ -156,6 +192,22 @@ const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), li
 const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
 const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
 const machineDocumentUpload = multer({ storage: multer.memoryStorage(), limits: { files: 20, fileSize: 50 * 1024 * 1024 } });
+const portableBackupUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, portableIncomingDir),
+    filename: (_req, _file, callback) => callback(null, `portable-${crypto.randomUUID()}.zip`),
+  }),
+  limits: { files: 1, fileSize: portableUploadMaxBytes },
+});
+function receivePortableBackup(req: Request, res: Response, next: NextFunction) {
+  portableBackupUpload.single('file')(req, res, error=>{
+    if (!error) return next();
+    const message = error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE'
+      ? `Portable backup archive must be ${Math.floor(portableUploadMaxBytes / 1024 / 1024)} MB or smaller.`
+      : 'Portable backup upload was rejected.';
+    res.status(400).json({ok:false,error:message});
+  });
+}
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
@@ -2452,7 +2504,7 @@ type BackupManifest = {
   createdAt: string;
   createdBy: { id: number; fullName: string; email: string; role: Role } | null;
   appVersion: string;
-  databaseFile: 'mcc.sqlite';
+  databaseFile: string;
   databaseSizeBytes: number;
   includedPaths: string[];
   includedFolders: string[];
@@ -2461,6 +2513,11 @@ type BackupManifest = {
   workOrderAttachments?: { attachmentCount: number; fileCount: number; sizeBytes: number };
   checksumSha256: string;
   fileChecksums?: Record<string,string>;
+  packageVersion?: number;
+  schemaVersion?: number;
+  portableArchive?: { filename: string; packageRoot: string };
+  excelExports?: string[];
+  payloadSizeBytes?: number;
   notes: string;
 };
 type BackupSummary = {
@@ -2482,6 +2539,9 @@ type BackupSummary = {
   notes: string;
   restorable: boolean;
   folderLabel: string;
+  portableArchiveFilename?: string;
+  portableArchiveSizeBytes?: number;
+  portableReady?: boolean;
 };
 type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
 type ProtectedBackupArea = {
@@ -2571,6 +2631,32 @@ let nextMasterBackupAt: string | null = null;
 let lastBackupResult: BackupOperationResult = { ok: true, message: 'No tiered backup has run yet.' };
 let backupInProgress = false;
 
+type ExternalBackupSettings = {
+  destination: string;
+  enabled: boolean;
+  lastTestAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string;
+  lastCopyAt: string | null;
+  lastCopyOk: boolean | null;
+  lastCopyMessage: string;
+  lastCopyBackupId: string | null;
+  lastCopyFilename: string | null;
+};
+
+const defaultExternalBackupSettings: ExternalBackupSettings = {
+  destination: '',
+  enabled: false,
+  lastTestAt: null,
+  lastTestOk: null,
+  lastTestMessage: 'External backup location has not been tested.',
+  lastCopyAt: null,
+  lastCopyOk: null,
+  lastCopyMessage: 'No external portable backup copy has run yet.',
+  lastCopyBackupId: null,
+  lastCopyFilename: null,
+};
+
 function backupCategoryLabel(category: BackupCategory) {
   return category === 'legacy' ? legacyBackupDetail.label : backupCategoryDetails[category].label;
 }
@@ -2588,6 +2674,7 @@ function backupPrefix(category: BackupCategory) {
 }
 function ensureBackupDirs() {
   fs.mkdirSync(backupsDir, { recursive: true });
+  fs.mkdirSync(portableBackupDir, { recursive: true });
   for (const category of creatableBackupCategories) fs.mkdirSync(backupDirectory(category), { recursive: true });
 }
 function ensureBackupCategoryDir(category: CreatableBackupCategory) {
@@ -2597,7 +2684,7 @@ function sqliteLiteral(value: string) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 function sha256File(filePath: string) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  return sha256FileSync(filePath);
 }
 function backupFileChecksums(rootPath: string) {
   const checksums: Record<string,string> = {};
@@ -2613,6 +2700,46 @@ function backupFileChecksums(rootPath: string) {
 }
 function safeFolderStamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
+}
+function currentExternalBackupSettings(): ExternalBackupSettings {
+  const saved = appSettingJson<ExternalBackupSettings>('master_backup_external');
+  return {
+    destination: String(saved.destination ?? '').trim(),
+    enabled: saved.enabled === true && Boolean(String(saved.destination ?? '').trim()),
+    lastTestAt: saved.lastTestAt ? String(saved.lastTestAt) : null,
+    lastTestOk: typeof saved.lastTestOk === 'boolean' ? saved.lastTestOk : null,
+    lastTestMessage: String(saved.lastTestMessage ?? defaultExternalBackupSettings.lastTestMessage),
+    lastCopyAt: saved.lastCopyAt ? String(saved.lastCopyAt) : null,
+    lastCopyOk: typeof saved.lastCopyOk === 'boolean' ? saved.lastCopyOk : null,
+    lastCopyMessage: String(saved.lastCopyMessage ?? defaultExternalBackupSettings.lastCopyMessage),
+    lastCopyBackupId: saved.lastCopyBackupId ? String(saved.lastCopyBackupId) : null,
+    lastCopyFilename: saved.lastCopyFilename ? String(saved.lastCopyFilename) : null,
+  };
+}
+function saveExternalBackupSettings(value: ExternalBackupSettings, actor?: User | null) {
+  setAppSettingJson('master_backup_external', value as unknown as Record<string, unknown>, actor);
+}
+function externalBackupForbiddenRoots() {
+  return [repoRootPath, dataDir, backupsDir, uploadsDir, pmExcelDir, pmWorkOrderDir, recoveryDir];
+}
+function testExternalBackupDestination(destination: string, requiredBytes = 0) {
+  return validateExternalDestination({ destination, forbiddenRoots: externalBackupForbiddenRoots(), requiredBytes, create: true });
+}
+function uniquePortableIdentity(createdAt: string) {
+  const base = portablePackageRoot(createdAt);
+  for (let suffix = 1; suffix < 10_000; suffix += 1) {
+    const packageRoot = suffix === 1 ? base : `${base}_${suffix}`;
+    const filename = `${packageRoot}.zip`;
+    if (!fs.existsSync(path.join(portableBackupDir, filename))) return { packageRoot, filename };
+  }
+  throw new Error('A unique portable backup filename could not be allocated.');
+}
+function portableArchivePathFromManifest(manifest: BackupManifest | null) {
+  const filename = String(manifest?.portableArchive?.filename ?? '');
+  if (!/^MCC_Master_Backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d+)?\.zip$/.test(filename) || filename !== path.basename(filename)) return null;
+  const resolved = path.resolve(portableBackupDir, filename);
+  if (path.dirname(resolved) !== path.resolve(portableBackupDir)) return null;
+  return resolved;
 }
 function folderSizeBytes(folderPath: string): number {
   if (!fs.existsSync(folderPath)) return 0;
@@ -2784,7 +2911,8 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
   const manifest = readBackupManifest(folderPath);
   const category = fallbackCategory === 'legacy' ? 'legacy' : manifestBackupCategory(manifest?.backupCategory, fallbackCategory);
   const type = backupTypeFromValue(manifest?.backupType, backupTypeFromFolderName(name) ?? (category === 'legacy' ? 'legacy' : 'manual'));
-  const dbFile = path.join(folderPath, 'mcc.sqlite');
+  const dbFile = databasePathInPackage(folderPath, manifest);
+  const portableArchivePath = portableArchivePathFromManifest(manifest);
   const stat = fs.statSync(folderPath);
   return {
     id: name,
@@ -2805,6 +2933,9 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     notes: manifest?.notes ?? '',
     restorable: fs.existsSync(dbFile),
     folderLabel: backupFolderLabel(category),
+    portableArchiveFilename: portableArchivePath ? path.basename(portableArchivePath) : undefined,
+    portableArchiveSizeBytes: portableArchivePath && fs.existsSync(portableArchivePath) ? fs.statSync(portableArchivePath).size : undefined,
+    portableReady: Boolean(portableArchivePath && fs.existsSync(portableArchivePath) && fs.statSync(portableArchivePath).isFile()),
   };
 }
 function listBackupDirectory(category: BackupCategory) {
@@ -2833,7 +2964,13 @@ function removeBackupFolder(category: CreatableBackupCategory, folderPath: strin
   const resolved = path.resolve(folderPath);
   const root = path.resolve(backupDirectory(category));
   if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Unsafe backup retention target.');
+  const manifest = readBackupManifest(resolved);
+  const archivePath = portableArchivePathFromManifest(manifest);
   fs.rmSync(resolved, { recursive: true, force: true });
+  if (archivePath && fs.existsSync(archivePath)) {
+    fs.rmSync(archivePath, { force: true });
+    if (fs.existsSync(`${archivePath}.sha256`)) fs.rmSync(`${archivePath}.sha256`, { force: true });
+  }
 }
 function applyBackupRetention(category: CreatableBackupCategory) {
   const backups = listBackupsByCategory(category);
@@ -2850,23 +2987,29 @@ function defaultManualBackupType(category: CreatableBackupCategory): BackupType 
   if (category === 'weekly') return 'weekly_manual';
   return 'master_manual';
 }
-function createBackup(input: { category: CreatableBackupCategory; type?: BackupType; actor?: User | null; notes?: string }) {
+async function createBackup(input: { category: CreatableBackupCategory; type?: BackupType; actor?: User | null; notes?: string }) {
   if (backupInProgress) throw new Error('Another backup is already running.');
   backupInProgress = true;
   const category = input.category;
   const type = input.type ?? defaultManualBackupType(category);
+  let targetDir = '';
   try {
     refreshMachineDocumentRecoveryMetadata();
     facilityInfoService?.refreshRecoveryMetadata();
     ensureBackupCategoryDir(category);
     const createdAt = now();
     const folderName = `${backupPrefix(category)}${safeFolderStamp()}_${type}`;
-    const targetDir = path.join(backupDirectory(category), folderName);
+    targetDir = path.join(backupDirectory(category), folderName);
     fs.mkdirSync(targetDir, { recursive: false });
-    const backupDbPath = path.join(targetDir, 'mcc.sqlite');
+    const portable = category === 'master';
+    const portableIdentity = portable ? uniquePortableIdentity(createdAt) : null;
+    const databaseRelativePath = portable ? 'database/mcc.sqlite' : 'mcc.sqlite';
+    const backupDbPath = path.join(targetDir, ...databaseRelativePath.split('/'));
+    fs.mkdirSync(path.dirname(backupDbPath), { recursive: true });
     db.exec('PRAGMA wal_checkpoint(FULL);');
     db.exec(`VACUUM INTO ${sqliteLiteral(backupDbPath)}`);
-    const includedPaths = ['mcc.sqlite'];
+    validateSqliteDatabase(backupDbPath);
+    const includedPaths = [databaseRelativePath];
     const includedFolders: string[] = [];
     const fileTargetRoot = path.join(targetDir, 'files');
     for (const includedFolder of masterBackupFolderCandidates) {
@@ -2875,9 +3018,28 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
         ? (source:string)=>path.basename(source)!=='.staging'
         : undefined;
       if (copyDirectoryIfPresent(sourcePath, path.join(fileTargetRoot, includedFolder), filter)) {
-        includedPaths.push(`${includedFolder}/`);
-        includedFolders.push(`${includedFolder}/`);
+        includedPaths.push(`files/${includedFolder}/`);
+        includedFolders.push(`files/${includedFolder}/`);
       }
+    }
+    let excelExports: string[] = [];
+    if (portable && portableIdentity) {
+      excelExports = await writeExcelInsuranceExports(backupDbPath, path.join(targetDir, 'excel'));
+      if (fs.existsSync(pmExcelLatestPath) && fs.statSync(pmExcelLatestPath).isFile()) {
+        const pmTarget = path.join(targetDir, 'excel', 'PM', 'PM_report_latest.xlsx');
+        fs.mkdirSync(path.dirname(pmTarget), { recursive: true });
+        fs.copyFileSync(pmExcelLatestPath, pmTarget);
+        excelExports.push('excel/PM/PM_report_latest.xlsx');
+      }
+      writeRecoveryFiles({
+        packagePath: targetDir,
+        createdAt,
+        appVersion: applicationVersion ?? '0.0.0',
+        backupType: type,
+        packageRoot: portableIdentity.packageRoot,
+      });
+      includedPaths.push(...excelExports, 'RECOVERY_README.txt', 'recovery/restore-manifest.json');
+      includedFolders.push('excel/', 'recovery/');
     }
     const databaseSizeBytes = fs.statSync(backupDbPath).size;
     const manifest: BackupManifest = {
@@ -2886,8 +3048,8 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
       backupType: type,
       createdAt,
       createdBy: actorForManifest(input.actor),
-      appVersion: applicationVersion ?? 'unavailable',
-      databaseFile: 'mcc.sqlite',
+      appVersion: applicationVersion ?? '0.0.0',
+      databaseFile: databaseRelativePath,
       databaseSizeBytes,
       includedPaths,
       includedFolders,
@@ -2895,15 +3057,62 @@ function createBackup(input: { category: CreatableBackupCategory; type?: BackupT
       documentLibrary: machineDocumentLibraryBackupStats(),
       workOrderAttachments: pmWorkOrderBackupStats(),
       checksumSha256: sha256File(backupDbPath),
-      fileChecksums: backupFileChecksums(targetDir),
+      ...(portable ? {
+        packageVersion: PORTABLE_PACKAGE_VERSION,
+        schemaVersion: PORTABLE_SCHEMA_VERSION,
+        portableArchive: { filename: portableIdentity!.filename, packageRoot: portableIdentity!.packageRoot },
+        excelExports,
+      } : {}),
+      fileChecksums: {},
       notes: input.notes ?? '',
     };
+    manifest.fileChecksums = portable ? packageFileChecksums(targetDir) : backupFileChecksums(targetDir);
+    if (portable) manifest.payloadSizeBytes = packagePayloadSize(targetDir);
     fs.writeFileSync(path.join(targetDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    let portableWarning = '';
+    let archiveResult: Awaited<ReturnType<typeof createPortableArchive>> | null = null;
+    if (portable && portableIdentity) {
+      validatePortablePackage(targetDir, applicationVersion ?? '0.0.0');
+      try {
+        archiveResult = await createPortableArchive(targetDir, path.join(portableBackupDir, portableIdentity.filename), portableIdentity.packageRoot);
+        fs.writeFileSync(`${archiveResult.archivePath}.sha256`, `${archiveResult.sha256}  ${archiveResult.filename}\n`, { encoding: 'utf8', mode: 0o600 });
+      } catch (error) {
+        portableWarning = ` Portable archive failed: ${safeErrorMessage(error, [], 'archive creation failed')}`;
+      }
+      const external = currentExternalBackupSettings();
+      if (archiveResult && external.enabled && external.destination) {
+        const copyAt = now();
+        try {
+          const tested = testExternalBackupDestination(external.destination, archiveResult.sizeBytes + 16 * 1024 * 1024);
+          const copied = await copyArchiveToExternal({ archivePath: archiveResult.archivePath, destination: tested.destination, expectedSha256: archiveResult.sha256 });
+          saveExternalBackupSettings({
+            ...external,
+            lastCopyAt: copyAt,
+            lastCopyOk: true,
+            lastCopyMessage: `Verified external copy completed: ${copied.filename}`,
+            lastCopyBackupId: folderName,
+            lastCopyFilename: copied.filename,
+          });
+        } catch (error) {
+          const message = safeErrorMessage(error, [], 'External backup copy failed.');
+          saveExternalBackupSettings({
+            ...external,
+            lastCopyAt: copyAt,
+            lastCopyOk: false,
+            lastCopyMessage: message,
+            lastCopyBackupId: folderName,
+            lastCopyFilename: archiveResult.filename,
+          });
+          portableWarning += ` External copy failed: ${message}`;
+        }
+      }
+    }
     applyBackupRetention(category);
     const summary = summaryFromBackupFolder(targetDir, category);
-    lastBackupResult = { ok: true, category, type, backupId: folderName, createdAt, message: `${backupTypeLabel(type)} backup created.` };
+    lastBackupResult = { ok: true, category, type, backupId: folderName, createdAt, message: `${backupTypeLabel(type)} backup created.${portableWarning}`.trim() };
     return summary!;
   } catch (error) {
+    if (targetDir && fs.existsSync(targetDir) && !fs.existsSync(path.join(targetDir, 'manifest.json'))) removeDirectoryIfPresent(targetDir);
     lastBackupResult = { ok: false, category, type, createdAt: now(), message: safeBackupClientError(error, 'Backup failed.') };
     throw error;
   } finally {
@@ -2917,7 +3126,7 @@ function legacyMasterTypeToTiered(type: LegacyMasterBackupType): { category: Cre
   if (type === 'pre_restore') return { category: 'master', type: 'pre_restore' };
   return { category: 'master', type: 'startup' };
 }
-function createMasterBackup(input: { type: LegacyMasterBackupType; actor?: User | null; notes?: string }) {
+async function createMasterBackup(input: { type: LegacyMasterBackupType; actor?: User | null; notes?: string }) {
   const tiered = legacyMasterTypeToTiered(input.type);
   return createBackup({ category: tiered.category, type: tiered.type, actor: input.actor, notes: input.notes });
 }
@@ -2925,10 +3134,10 @@ function scheduleAutoBackup(reason: string, actor?: User | null) {
   autoBackupReason = reason;
   if (actor) autoBackupActor = actor;
   if (autoBackupTimer) clearTimeout(autoBackupTimer);
-  autoBackupTimer = setTimeout(()=>{
+  autoBackupTimer = setTimeout(async()=>{
     autoBackupTimer = undefined;
     try {
-      createBackup({ category: 'daily', type: 'daily_auto', actor: autoBackupActor, notes: autoBackupReason || 'Automatic backup after MCC data changes.' });
+      await createBackup({ category: 'daily', type: 'daily_auto', actor: autoBackupActor, notes: autoBackupReason || 'Automatic backup after MCC data changes.' });
     } catch (error) {
       console.log(`MCC daily auto backup failed: ${safeErrorMessage(error)}`);
     } finally {
@@ -2943,16 +3152,25 @@ function verifyBackup(category: BackupCategory, id: unknown) {
   if (!fs.existsSync(folderPath)) throw new Error('Backup not found.');
   const summary = summaryFromBackupFolder(folderPath, category);
   if (!summary?.restorable) throw new Error('Backup database file is missing.');
-  const dbFile = path.join(folderPath, 'mcc.sqlite');
   const manifest = readBackupManifest(folderPath);
+  const dbFile = databasePathInPackage(folderPath, manifest);
   const checksumSha256 = sha256File(dbFile);
   const checksumMatches = !manifest?.checksumSha256 || manifest.checksumSha256 === checksumSha256;
   const missingOrChangedFiles=Object.entries(manifest?.fileChecksums??{}).filter(([relativePath,expected])=>{
     const candidate=path.resolve(folderPath,...relativePath.split('/'));
     return !candidate.startsWith(`${path.resolve(folderPath)}${path.sep}`)||!fs.existsSync(candidate)||!fs.statSync(candidate).isFile()||sha256File(candidate)!==expected;
   }).map(([relativePath])=>relativePath);
-  const ok=checksumMatches&&!missingOrChangedFiles.length;
-  const message=!checksumMatches?'Backup database checksum does not match the manifest.':missingOrChangedFiles.length?`Backup file verification failed for ${missingOrChangedFiles.length} file${missingOrChangedFiles.length===1?'':'s'}.`:'Backup verified.';
+  let validationError = '';
+  if (checksumMatches && !missingOrChangedFiles.length) {
+    try {
+      if (manifest?.packageVersion === PORTABLE_PACKAGE_VERSION) validatePortablePackage(folderPath, applicationVersion ?? '0.0.0');
+      else validateSqliteDatabase(dbFile);
+    } catch (error) {
+      validationError = safeErrorMessage(error, [], 'Backup validation failed.');
+    }
+  }
+  const ok=checksumMatches&&!missingOrChangedFiles.length&&!validationError;
+  const message=!checksumMatches?'Backup database checksum does not match the manifest.':missingOrChangedFiles.length?`Backup file verification failed for ${missingOrChangedFiles.length} file${missingOrChangedFiles.length===1?'':'s'}.`:validationError||'Backup verified.';
   return { ok, backup: summary, checksumSha256, missingOrChangedFiles, message };
 }
 function verifyMasterBackup(id: unknown) {
@@ -2969,6 +3187,8 @@ function appDataFolderPath(folderName: string) {
 }
 function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, _options: { removeMissing: boolean }) {
   const restoredFolders: string[] = [];
+  const restoreManifest = readBackupManifest(backupFolderPath);
+  const completePortablePackage = restoreManifest?.packageVersion === PORTABLE_PACKAGE_VERSION && restoreManifest.workOrderAttachments !== undefined;
   const backupFilesRoot = path.join(backupFolderPath, 'files');
   for (const folderName of masterBackupFolderCandidates) {
     const sourcePath = path.join(backupFilesRoot, folderName);
@@ -2977,7 +3197,17 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, _options:
       removeDirectoryIfPresent(targetPath);
       fs.cpSync(sourcePath, targetPath, { recursive: true });
       restoredFolders.push(folderName);
+    } else if (_options.removeMissing && completePortablePackage) {
+      removeDirectoryIfPresent(targetPath);
     }
+  }
+  const pmWorkbookSource = path.join(backupFolderPath, 'excel', 'PM', 'PM_report_latest.xlsx');
+  if (fs.existsSync(pmWorkbookSource) && fs.statSync(pmWorkbookSource).isFile()) {
+    fs.mkdirSync(pmExcelDir, { recursive: true });
+    fs.copyFileSync(pmWorkbookSource, pmExcelLatestPath);
+    restoredFolders.push('pm-excel');
+  } else if (_options.removeMissing && completePortablePackage && fs.existsSync(pmExcelLatestPath)) {
+    fs.rmSync(pmExcelLatestPath, { force: true });
   }
   fs.mkdirSync(brandingUploadsDir, { recursive: true });
   fs.mkdirSync(machineComponentImagesDir, { recursive: true });
@@ -2988,15 +3218,45 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, _options:
   facilityInfoService?.ensureSchema();
   return restoredFolders;
 }
-function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown }) {
+async function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown; importedPackagePath?: string }) {
   if (String(input.confirmation ?? '').trim() !== 'RESTORE MCC') throw new Error('Type RESTORE MCC to confirm restore.');
-  const verification = verifyBackup(input.category, input.backupId);
-  if (!verification.ok) throw new Error(verification.message);
-  const backupFolderPath = backupPathFromId(input.category, input.backupId);
-  const backupDbPath = path.join(backupFolderPath, 'mcc.sqlite');
-  const preRestoreBackup = createBackup({ category: 'master', type: 'pre_restore', actor: input.actor, notes: `Before restoring ${verification.backup.name}` });
+  let verification: ReturnType<typeof verifyBackup>;
+  let backupFolderPath: string;
+  if (input.importedPackagePath) {
+    const portable = validatePortablePackage(input.importedPackagePath, applicationVersion ?? '0.0.0');
+    const manifest = portable.manifest;
+    const type = backupTypeFromValue(manifest.backupType, 'master_manual');
+    const summary: BackupSummary = {
+      id: path.basename(input.importedPackagePath),
+      name: path.basename(input.importedPackagePath),
+      category: 'master',
+      categoryLabel: backupCategoryLabel('master'),
+      type,
+      typeLabel: backupTypeLabel(type),
+      createdAt: manifest.createdAt,
+      sizeBytes: portable.expandedSizeBytes,
+      databaseSizeBytes: manifest.databaseSizeBytes,
+      includedPaths: manifest.includedPaths,
+      includedFolders: manifest.includedFolders,
+      recordCounts: manifest.recordCounts,
+      checksumSha256: manifest.checksumSha256,
+      notes: String(manifest.notes ?? ''),
+      restorable: true,
+      folderLabel: 'MCC recovery archive',
+      portableArchiveFilename: manifest.portableArchive.filename,
+      portableReady: true,
+    };
+    verification = { ok: true, backup: summary, checksumSha256: manifest.checksumSha256, missingOrChangedFiles: [], message: 'Imported portable backup verified.' };
+    backupFolderPath = input.importedPackagePath;
+  } else {
+    verification = verifyBackup(input.category, input.backupId);
+    if (!verification.ok) throw new Error(verification.message);
+    backupFolderPath = backupPathFromId(input.category, input.backupId);
+  }
+  const backupDbPath = databasePathInPackage(backupFolderPath, readBackupManifest(backupFolderPath));
+  const preRestoreBackup = await createBackup({ category: 'master', type: 'pre_restore', actor: input.actor, notes: `Before restoring ${verification.backup.name}` });
   const preRestoreFolderPath = backupPathFromId('master', preRestoreBackup.id);
-  const preRestoreDbPath = path.join(preRestoreFolderPath, 'mcc.sqlite');
+  const preRestoreDbPath = databasePathInPackage(preRestoreFolderPath, readBackupManifest(preRestoreFolderPath));
   let restoredFolders: string[] = [];
   try {
     db.close();
@@ -3043,7 +3303,7 @@ function restoreBackup(input: { category: BackupCategory; backupId: unknown; act
     throw error;
   }
 }
-function restoreMasterBackup(input: { backupId: unknown; actor: User; confirmation: unknown }) {
+async function restoreMasterBackup(input: { backupId: unknown; actor: User; confirmation: unknown }) {
   return restoreBackup({ category: 'master', backupId: input.backupId, actor: input.actor, confirmation: input.confirmation });
 }
 function backupGroupHealth(category: BackupCategory, backups: BackupSummary[]): BackupHealth {
@@ -3106,6 +3366,8 @@ function backupPermissionStatus(actor: User) {
     canViewMaster,
     canCreateMaster,
     canRestoreMaster,
+    canUsePortableRecovery: canUsePortableRecovery(actor),
+    canConfigureExternalBackup: canConfigureExternalBackups(actor),
     canViewBackups: canViewDaily || canViewWeekly || canViewMaster,
     canCreateBackup: canCreateMaster,
     canRestoreBackup: canRestoreMaster,
@@ -3123,11 +3385,25 @@ function masterBackupStatus(actor?: User) {
   const daily = actor ? backupGroupStatus('daily', actor) : hiddenBackupGroup('daily');
   const weekly = actor ? backupGroupStatus('weekly', actor) : hiddenBackupGroup('weekly');
   const master = actor ? backupGroupStatus('master', actor) : hiddenBackupGroup('master');
+  const portableBackups = actor && canUsePortableRecovery(actor)
+    ? listBackupsByCategory('master').filter(backup=>backup.portableReady).slice(0, 20)
+    : [];
+  const importedRecoveryBackups = actor && canUsePortableRecovery(actor)
+    ? listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0').map(item=>({
+        id:item.id,name:item.name,createdAt:item.createdAt,appVersion:item.appVersion,backupType:item.backupType,
+        archiveFilename:item.archiveFilename,archiveSizeBytes:item.archiveSizeBytes,importedAt:item.importedAt,
+        checkedFileCount:item.checkedFileCount,safeToDisconnect:item.safeToDisconnect,
+      }))
+    : [];
   return {
     ok: true,
     daily,
     weekly,
     master,
+    portableBackups,
+    importedRecoveryBackups,
+    recoveryLocation: actor && canUsePortableRecovery(actor) ? recoveryDir : '',
+    externalBackup: actor && canUsePortableRecovery(actor) ? currentExternalBackupSettings() : null,
     latestBackup,
     lastAutoBackup: backups.find(backup=>backup.type === 'daily_auto' || backup.type === 'auto') ?? null,
     lastManualBackup: backups.find(backup=>backup.type === 'daily_manual' || backup.type === 'weekly_manual' || backup.type === 'master_manual' || backup.type === 'manual') ?? null,
@@ -3198,34 +3474,34 @@ function currentMonthlyScheduleTime(from = new Date()) {
 function currentMonthStart(from = new Date()) {
   return new Date(from.getFullYear(), from.getMonth(), 1, 0, 0, 0, 0);
 }
-function createMissedWeeklyBackupIfNeeded() {
+async function createMissedWeeklyBackupIfNeeded() {
   const windowStart = currentWeeklyWindowStart();
   if (hasSuccessfulBackupSince('weekly', windowStart)) return;
   try {
-    createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Missed Friday 1:00 PM weekly full backup created on startup.' });
+    await createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Missed Friday 1:00 PM weekly full backup created on startup.' });
   } catch (error) {
     console.log(`MCC missed weekly backup failed: ${safeErrorMessage(error)}`);
   }
 }
-function createMissedMasterBackupIfNeeded() {
+async function createMissedMasterBackupIfNeeded() {
   const currentTime = new Date();
   if (currentTime < currentMonthlyScheduleTime(currentTime)) return;
   if (hasSuccessfulBackupSince('master', currentMonthStart(currentTime), { includeLegacy: true })) return;
   try {
-    createBackup({ category: 'master', type: 'master_scheduled', notes: 'Missed monthly master backup created on startup.' });
+    await createBackup({ category: 'master', type: 'master_scheduled', notes: 'Missed monthly master backup created on startup.' });
   } catch (error) {
     console.log(`MCC missed monthly master backup failed: ${safeErrorMessage(error)}`);
   }
 }
 function armWeeklyBackupTimer(target: Date) {
   const delay = Math.max(1000, Math.min(target.getTime() - Date.now(), maxBackupScheduleDelayMs));
-  weeklyBackupTimer = setTimeout(()=>{
+  weeklyBackupTimer = setTimeout(async()=>{
     if (Date.now() < target.getTime() - 1000) {
       armWeeklyBackupTimer(target);
       return;
     }
     try {
-      createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Scheduled Friday 1:00 PM weekly full backup.' });
+      await createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Scheduled Friday 1:00 PM weekly full backup.' });
     } catch (error) {
       console.log(`MCC weekly backup failed: ${safeErrorMessage(error)}`);
     } finally {
@@ -3242,14 +3518,14 @@ function scheduleWeeklyBackupTimer() {
 }
 function armMasterBackupTimer(target: Date) {
   const delay = Math.max(1000, Math.min(target.getTime() - Date.now(), maxBackupScheduleDelayMs));
-  masterBackupTimer = setTimeout(()=>{
+  masterBackupTimer = setTimeout(async()=>{
     if (Date.now() < target.getTime() - 1000) {
       armMasterBackupTimer(target);
       return;
     }
     try {
       if (!hasSuccessfulBackupSince('master', currentMonthStart(), { includeLegacy: true })) {
-        createBackup({ category: 'master', type: 'master_scheduled', notes: 'Scheduled monthly master full backup.' });
+        await createBackup({ category: 'master', type: 'master_scheduled', notes: 'Scheduled monthly master full backup.' });
       }
     } catch (error) {
       console.log(`MCC monthly master backup failed: ${safeErrorMessage(error)}`);
@@ -3265,11 +3541,11 @@ function scheduleMasterBackupTimer() {
   nextMasterBackupAt = target.toISOString();
   armMasterBackupTimer(target);
 }
-function startBackupSchedulers() {
+async function startBackupSchedulers() {
   ensureBackupDirs();
   if (quarantineLiveDatabaseIfUnhealthy()) return;
-  createMissedWeeklyBackupIfNeeded();
-  createMissedMasterBackupIfNeeded();
+  await createMissedWeeklyBackupIfNeeded();
+  await createMissedMasterBackupIfNeeded();
   scheduleWeeklyBackupTimer();
   scheduleMasterBackupTimer();
 }
@@ -6335,9 +6611,9 @@ function historySectionForReset(request: ResetRequest): HistorySection {
   if (!selected) throw new Error('History reset section is invalid.');
   return selected;
 }
-function performReset(req: AuthRequest, request: ResetRequest) {
+async function performReset(req: AuthRequest, request: ResetRequest) {
   const actor = req.user!;
-  const preResetBackup = createMasterBackup({ type: 'manual', actor, notes: `Pre-reset backup before ${request.section}: ${request.reasonNote}` });
+  const preResetBackup = await createMasterBackup({ type: 'manual', actor, notes: `Pre-reset backup before ${request.section}: ${request.reasonNote}` });
   const verified = verifyMasterBackup(preResetBackup.id);
   if (!verified.ok) throw new Error('Pre-reset backup could not be verified.');
   const deletedCounts: Record<string, number> = {};
@@ -7579,6 +7855,12 @@ async function buildVerifiedPmPackage(workbook:Buffer,requestId:string){
   for(const attachment of all<Pick<PmWorkOrderAttachmentRow,'stored_relative_path'>>('SELECT stored_relative_path FROM pm_work_order_attachments ORDER BY id'))if(!verified.file(attachment.stored_relative_path))throw new Error(`Generated PM package is missing work-order attachment ${attachment.stored_relative_path}.`);
   pmDownloadLog(requestId,'package_generation_end',{packageBytes:buffer.length,workOrderFiles:includedFiles.length});return buffer;
 }
+function canUsePortableRecovery(actor: User) {
+  return isOwnerAdmin(actor) || roleRank(actor.role) >= roleRank('Manager');
+}
+function canConfigureExternalBackups(actor: User) {
+  return isOwnerAdmin(actor) || actor.role === 'Admin';
+}
 function validateMachineDocumentStorageIntegrity() {
   const missing:string[]=[];
   for (const row of all<Pick<MachineDocumentRow,'id'|'asset_id'|'stored_filename'|'size_bytes'>>('SELECT id,asset_id,stored_filename,size_bytes FROM machine_documents')) {
@@ -8479,6 +8761,7 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); req.sessionId=sid; if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; next(); }
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
+function requirePortableRecovery(req: AuthRequest, res: Response, next: NextFunction) { return req.user && canUsePortableRecovery(req.user) ? next() : res.status(403).json({ok:false,error:'Permission denied.'}); }
 function requireSystemVersionAccess(req: AuthRequest, res: Response, next: NextFunction) { return req.user && canViewSystemVersion(req.user) ? next() : res.status(403).json({ok:false,error:'Admin access required.'}); }
 function permissionAliasAllowed(user:User,permission:string) {
   if(isPermissionKey(permission)) return hasPermission(user,permission);
@@ -10235,13 +10518,13 @@ app.get('/api/backup/list', requireAuth, (req:AuthRequest,res)=>{
     res.status(/category/i.test(safeErrorMessage(error)) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup list failed.')});
   }
 });
-app.post('/api/backup/create', requireAuth, (req:AuthRequest,res)=>{
+app.post('/api/backup/create', requireAuth, async(req:AuthRequest,res)=>{
   try {
     const body = isRecord(req.body) ? req.body : {};
     const category = backupCategoryFromValue(body.category, 'master');
     if (category === 'legacy') return res.status(400).json({ok:false,error:'Legacy backups are read-only.'});
     if (!canCreateBackupCategory(req.user!, category)) return res.status(403).json({ok:false,error:'Permission denied.'});
-    const backup = createBackup({ category, type: defaultManualBackupType(category), actor: req.user!, notes: `${backupCategoryLabel(category)} created from MCC Settings.` });
+    const backup = await createBackup({ category, type: defaultManualBackupType(category), actor: req.user!, notes: `${backupCategoryLabel(category)} created from MCC Settings.` });
     try { audit(req,`${category} backup created`,'backup',backup.id,{backupCategory:backup.category,backupType:backup.type}); } catch (auditError) { console.log(`MCC manual backup audit failed: ${safeErrorMessage(auditError, [], 'Audit failed.')}`); }
     res.status(201).json({ok:true,backup,status:masterBackupStatus(req.user!),message:`${backupCategoryLabel(category)} created successfully.`});
   } catch (error) {
@@ -10262,17 +10545,145 @@ app.post('/api/backup/verify', requireAuth, (req:AuthRequest,res)=>{
     res.status(/not found|missing/i.test(message) ? 404 : /category/i.test(message) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup verification failed.')});
   }
 });
-app.post('/api/backup/restore', requireAuth, (req:AuthRequest,res)=>{
+app.post('/api/backup/restore', requireAuth, async(req:AuthRequest,res)=>{
   try {
     const body = isRecord(req.body) ? req.body : {};
     const category = resolveBackupCategoryForRequest(body.category, body.backupId);
     if (!canRestoreBackupCategory(req.user!, category)) return res.status(403).json({error:'Permission denied.'});
-    const result = restoreBackup({ category, backupId: body.backupId, confirmation: body.confirmation, actor: req.user! });
+    const result = await restoreBackup({ category, backupId: body.backupId, confirmation: body.confirmation, actor: req.user! });
     res.json({ok:true,...result,message:'Backup restored. Refresh MCC and log in again if needed.'});
   } catch (error) {
     const message = safeErrorMessage(error, [], 'Restore failed.');
     try { audit(req,'master restore failed','backup',isRecord(req.body) ? String(req.body.backupId ?? '') : '',{error:message}); } catch {}
     res.status(/confirm|not found|missing|checksum|category/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.get('/api/backup/portable', requireAuth, (req:AuthRequest,res)=>{
+  if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
+  const backups = listBackupsByCategory('master').filter(backup=>backup.portableReady);
+  res.json({ok:true,backups,recoveryLocation:recoveryDir,importedBackups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
+});
+app.get('/api/backup/portable/:backupId/download', requireAuth, async(req:AuthRequest,res)=>{
+  if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
+  try {
+    const folderPath = backupPathFromId('master', req.params.backupId);
+    const verification = verifyBackup('master', req.params.backupId);
+    if (!verification.ok) throw new Error(verification.message);
+    const manifest = readBackupManifest(folderPath);
+    const archivePath = portableArchivePathFromManifest(manifest);
+    if (!archivePath || !fs.existsSync(archivePath)) throw new Error('Portable archive is missing. Create a new verified Master Backup.');
+    const checksumPath = `${archivePath}.sha256`;
+    const expected = fs.existsSync(checksumPath) ? fs.readFileSync(checksumPath, 'utf8').trim().split(/\s+/)[0] : '';
+    if (!/^[a-f0-9]{64}$/i.test(expected) || await sha256PortableFile(archivePath) !== expected) throw new Error('Portable archive checksum verification failed.');
+    const stat = fs.statSync(archivePath);
+    res.setHeader('Content-Type', PORTABLE_ZIP_MIME);
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(archivePath)}"`);
+    res.setHeader('Content-Length', String(stat.size));
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    const stream = fs.createReadStream(archivePath);
+    stream.once('error', error=>{
+      console.log(`MCC portable backup download failed: ${safeErrorMessage(error)}`);
+      if (!res.headersSent) res.status(500).json({ok:false,error:'Portable backup download failed.'});
+      else res.destroy(error);
+    });
+    stream.pipe(res);
+    try { audit(req,'portable backup downloaded','backup',verification.backup.id,{filename:path.basename(archivePath),sizeBytes:stat.size}); } catch {}
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'Portable backup download failed.');
+    if (!res.headersSent) res.status(/missing|not found/i.test(message) ? 404 : /checksum|verify/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  }
+});
+app.get('/api/backup/external', requireAuth, (req:AuthRequest,res)=>{
+  if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
+  res.json({ok:true,settings:currentExternalBackupSettings(),canConfigure:canConfigureExternalBackups(req.user!)});
+});
+app.post('/api/backup/external/test', requireAuth, (req:AuthRequest,res)=>{
+  if (!canConfigureExternalBackups(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
+  const previous = currentExternalBackupSettings();
+  const destination = String(isRecord(req.body) ? req.body.destination ?? previous.destination : previous.destination).trim();
+  const testedAt = now();
+  try {
+    const result = testExternalBackupDestination(destination);
+    const next = { ...previous, destination: result.destination, lastTestAt: testedAt, lastTestOk: true, lastTestMessage: `Writable with ${Math.floor(result.freeBytes / 1024 / 1024)} MB free.` };
+    saveExternalBackupSettings(next, req.user!);
+    audit(req,'external backup location tested','backup','external',{destination:result.destination,freeBytes:result.freeBytes,ok:true});
+    res.json({ok:true,settings:next,freeBytes:result.freeBytes,message:'External backup location is writable and ready.'});
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'External backup location test failed.');
+    const next = { ...previous, lastTestAt: testedAt, lastTestOk: false, lastTestMessage: message };
+    saveExternalBackupSettings(next, req.user!);
+    try { audit(req,'external backup location test failed','backup','external',{ok:false,error:message}); } catch {}
+    res.status(400).json({ok:false,error:message,settings:next});
+  }
+});
+app.put('/api/backup/external', requireAuth, (req:AuthRequest,res)=>{
+  if (!canConfigureExternalBackups(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
+  try {
+    const body = isRecord(req.body) ? req.body : {};
+    const destination = String(body.destination ?? '').trim();
+    const enabled = body.enabled === true;
+    const previous = currentExternalBackupSettings();
+    if (!destination) {
+      if (enabled) throw new Error('Test and provide an external backup destination before enabling automatic copies.');
+      const next = { ...defaultExternalBackupSettings };
+      saveExternalBackupSettings(next, req.user!);
+      audit(req,'external backup location disabled','backup','external',{});
+      return res.json({ok:true,settings:next,message:'External backup copying is disabled.'});
+    }
+    const result = testExternalBackupDestination(destination);
+    const next: ExternalBackupSettings = {
+      ...previous,
+      destination: result.destination,
+      enabled,
+      lastTestAt: now(),
+      lastTestOk: true,
+      lastTestMessage: `Writable with ${Math.floor(result.freeBytes / 1024 / 1024)} MB free.`,
+    };
+    saveExternalBackupSettings(next, req.user!);
+    audit(req,'external backup location configured','backup','external',{destination:result.destination,enabled});
+    res.json({ok:true,settings:next,message:enabled?'Verified external backup copying is enabled.':'External destination saved but automatic copying is disabled.'});
+  } catch (error) {
+    res.status(400).json({ok:false,error:safeErrorMessage(error, [], 'External backup configuration failed.')});
+  }
+});
+app.post('/api/backup/recovery/import', requireAuth, requirePortableRecovery, receivePortableBackup, async(req:AuthRequest,res)=>{
+  const uploadedPath = req.file?.path ? path.resolve(req.file.path) : '';
+  try {
+    if (!req.file || !uploadedPath) throw new Error('Choose an MCC_Master_Backup_*.zip file.');
+    if (!/\.zip$/i.test(req.file.originalname)) throw new Error('Portable Master Backup import requires a .zip archive.');
+    const imported = await extractAndImportPortableArchive({
+      archivePath: uploadedPath,
+      recoveryRoot: recoveryDir,
+      currentAppVersion: applicationVersion ?? '0.0.0',
+      limits: { maxArchiveBytes: portableUploadMaxBytes },
+    });
+    audit(req,'portable backup imported','backup',imported.id,{filename:imported.archiveFilename,sizeBytes:imported.archiveSizeBytes,checkedFileCount:imported.checkedFileCount});
+    res.status(imported.alreadyImported ? 200 : 201).json({ok:true,backup:imported,message:'Backup safely copied to this MCC drive. External backup drive may now be disconnected.'});
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'Portable backup import failed.');
+    try { audit(req,'portable backup import failed','backup',req.file?.originalname ?? '',{error:message}); } catch {}
+    res.status(/choose|requires|unsafe|path|missing|invalid|unsupported|checksum|corrupt|integrity|incompatible|space|size|duplicate|symbolic|link|archive|package|database/i.test(message) ? 400 : 500).json({ok:false,error:message});
+  } finally {
+    if (uploadedPath && path.dirname(uploadedPath) === path.resolve(portableIncomingDir) && fs.existsSync(uploadedPath)) fs.rmSync(uploadedPath, { force: true });
+  }
+});
+app.get('/api/backup/recovery', requireAuth, (req:AuthRequest,res)=>{
+  if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
+  res.json({ok:true,recoveryLocation:recoveryDir,backups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
+});
+app.post('/api/backup/recovery/restore', requireAuth, async(req:AuthRequest,res)=>{
+  if (!canRestoreBackupCategory(req.user!, 'master')) return res.status(403).json({ok:false,error:'Permission denied.'});
+  try {
+    const body = isRecord(req.body) ? req.body : {};
+    const packagePath = importedPackagePath(recoveryDir, body.backupId);
+    if (!fs.existsSync(packagePath)) throw new Error('Imported recovery package not found.');
+    const result = await restoreBackup({ category:'master', backupId:body.backupId, confirmation:body.confirmation, actor:req.user!, importedPackagePath:packagePath });
+    res.json({ok:true,...result,message:'Verified portable backup restored. Refresh MCC and log in again if needed.'});
+  } catch (error) {
+    const message = safeErrorMessage(error, [], 'Portable backup restore failed.');
+    try { audit(req,'portable backup restore failed','backup',isRecord(req.body)?String(req.body.backupId??''):'',{error:message}); } catch {}
+    res.status(/confirm|not found|missing|checksum|invalid|unsupported|incompatible|integrity/i.test(message)?400:500).json({ok:false,error:message});
   }
 });
 app.get('/api/settings/branding', requireAuth, (_req,res)=>{
@@ -10346,12 +10757,12 @@ app.get('/api/admin/reset/status', requireAuth, requireOwnerAdmin, (_req,res)=>{
     res.status(500).json({ok:false,error:safeErrorMessage(error, [], 'Reset status failed.')});
   }
 });
-app.post('/api/admin/reset/section', requireAuth, requireOwnerAdmin, (req:AuthRequest,res)=>{
+app.post('/api/admin/reset/section', requireAuth, requireOwnerAdmin, async(req:AuthRequest,res)=>{
   let section = '';
   try {
     const request = validateResetRequest(req.body);
     section = request.section;
-    res.json(performReset(req, request));
+    res.json(await performReset(req, request));
   } catch (error) {
     const message = safeErrorMessage(error, [], 'Reset failed. No data was removed.');
     try { audit(req,'reset failed','admin_reset',section,{error:message}); } catch {}
@@ -11490,11 +11901,15 @@ try {
 } catch {
   console.log('MCC update audit reconciliation needs attention.');
 }
+try {
+  await startBackupSchedulers();
+} catch (error) {
+  console.log(`MCC backup scheduler startup failed: ${safeErrorMessage(error)}`);
+}
 const httpServer=app.listen(port,bindHost,()=>{
   console.log(`${appName} running on ${bindHost}:${port}`);
   console.log(`SESSION_SECRET configured: ${sessionSecretConfigured ? 'yes' : 'no'}`);
   console.log(`SMTP configured: ${smtpConfigured ? 'yes' : 'no'}`);
-  startBackupSchedulers();
 });
 if(systemUpdateConfiguration.windowsShutdownPath){
   const shutdownPath=systemUpdateConfiguration.windowsShutdownPath;

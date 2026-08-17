@@ -83,6 +83,33 @@ type BackupSummary = {
   notes: string;
   restorable: boolean;
   folderLabel: string;
+  portableArchiveFilename?: string;
+  portableArchiveSizeBytes?: number;
+  portableReady?: boolean;
+};
+type ImportedRecoveryBackup = {
+  id: string;
+  name: string;
+  createdAt: string;
+  appVersion: string;
+  backupType: string;
+  archiveFilename: string;
+  archiveSizeBytes: number;
+  importedAt: string;
+  checkedFileCount: number;
+  safeToDisconnect: boolean;
+};
+type ExternalBackupSettings = {
+  destination: string;
+  enabled: boolean;
+  lastTestAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string;
+  lastCopyAt: string | null;
+  lastCopyOk: boolean | null;
+  lastCopyMessage: string;
+  lastCopyBackupId: string | null;
+  lastCopyFilename: string | null;
 };
 type BackupGroupStatus = {
   category: BackupCategory;
@@ -109,6 +136,10 @@ type BackupStatus = {
   daily: BackupGroupStatus;
   weekly: BackupGroupStatus;
   master: BackupGroupStatus;
+  portableBackups: BackupSummary[];
+  importedRecoveryBackups: ImportedRecoveryBackup[];
+  recoveryLocation: string;
+  externalBackup: ExternalBackupSettings | null;
   latestBackup: BackupSummary | null;
   lastAutoBackup: BackupSummary | null;
   lastManualBackup: BackupSummary | null;
@@ -136,6 +167,8 @@ type BackupStatus = {
     canViewMaster: boolean;
     canCreateMaster: boolean;
     canRestoreMaster: boolean;
+    canUsePortableRecovery: boolean;
+    canConfigureExternalBackup: boolean;
     canViewBackups: boolean;
     canCreateBackup: boolean;
     canRestoreBackup: boolean;
@@ -245,6 +278,8 @@ const emptyBackupPermissions = {
   canViewMaster: false,
   canCreateMaster: false,
   canRestoreMaster: false,
+  canUsePortableRecovery: false,
+  canConfigureExternalBackup: false,
   canViewBackups: false,
   canCreateBackup: false,
   canRestoreBackup: false,
@@ -428,6 +463,43 @@ function normalizeBackupSummary(value: unknown): BackupSummary | null {
     notes: String(data.notes ?? ''),
     restorable: Boolean(data.restorable ?? false),
     folderLabel: String(data.folderLabel ?? ''),
+    portableArchiveFilename: data.portableArchiveFilename ? String(data.portableArchiveFilename) : undefined,
+    portableArchiveSizeBytes: data.portableArchiveSizeBytes === undefined ? undefined : Number(data.portableArchiveSizeBytes),
+    portableReady: Boolean(data.portableReady),
+  };
+}
+
+function normalizeImportedRecoveryBackup(value: unknown): ImportedRecoveryBackup | null {
+  const data = asRecord(value);
+  if (!data.id || !data.createdAt) return null;
+  return {
+    id: String(data.id),
+    name: String(data.name ?? data.id),
+    createdAt: String(data.createdAt),
+    appVersion: String(data.appVersion ?? ''),
+    backupType: String(data.backupType ?? ''),
+    archiveFilename: String(data.archiveFilename ?? ''),
+    archiveSizeBytes: Number(data.archiveSizeBytes ?? 0),
+    importedAt: String(data.importedAt ?? ''),
+    checkedFileCount: Number(data.checkedFileCount ?? 0),
+    safeToDisconnect: data.safeToDisconnect === true,
+  };
+}
+
+function normalizeExternalBackupSettings(value: unknown): ExternalBackupSettings | null {
+  const data = asRecord(value);
+  if (!Object.keys(data).length) return null;
+  return {
+    destination: String(data.destination ?? ''),
+    enabled: data.enabled === true,
+    lastTestAt: data.lastTestAt ? String(data.lastTestAt) : null,
+    lastTestOk: typeof data.lastTestOk === 'boolean' ? data.lastTestOk : null,
+    lastTestMessage: String(data.lastTestMessage ?? ''),
+    lastCopyAt: data.lastCopyAt ? String(data.lastCopyAt) : null,
+    lastCopyOk: typeof data.lastCopyOk === 'boolean' ? data.lastCopyOk : null,
+    lastCopyMessage: String(data.lastCopyMessage ?? ''),
+    lastCopyBackupId: data.lastCopyBackupId ? String(data.lastCopyBackupId) : null,
+    lastCopyFilename: data.lastCopyFilename ? String(data.lastCopyFilename) : null,
   };
 }
 
@@ -505,6 +577,10 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
     daily: normalizeBackupGroup(data.daily, 'daily'),
     weekly: normalizeBackupGroup(data.weekly, 'weekly'),
     master: normalizeBackupGroup(data.master, 'master'),
+    portableBackups: Array.isArray(data.portableBackups) ? data.portableBackups.map(normalizeBackupSummary).filter((item): item is BackupSummary=>Boolean(item)) : [],
+    importedRecoveryBackups: Array.isArray(data.importedRecoveryBackups) ? data.importedRecoveryBackups.map(normalizeImportedRecoveryBackup).filter((item): item is ImportedRecoveryBackup=>Boolean(item)) : [],
+    recoveryLocation: String(data.recoveryLocation ?? ''),
+    externalBackup: normalizeExternalBackupSettings(data.externalBackup),
     latestBackup: normalizeBackupSummary(data.latestBackup),
     lastAutoBackup: normalizeBackupSummary(data.lastAutoBackup),
     lastManualBackup: normalizeBackupSummary(data.lastManualBackup),
@@ -537,6 +613,8 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
       canViewMaster: Boolean(permissions.canViewMaster),
       canCreateMaster: Boolean(permissions.canCreateMaster),
       canRestoreMaster: Boolean(permissions.canRestoreMaster),
+      canUsePortableRecovery: Boolean(permissions.canUsePortableRecovery),
+      canConfigureExternalBackup: Boolean(permissions.canConfigureExternalBackup),
       canViewBackups: Boolean(permissions.canViewBackups),
       canCreateBackup: Boolean(permissions.canCreateBackup),
       canRestoreBackup: Boolean(permissions.canRestoreBackup),
@@ -737,12 +815,18 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
   const [visibleBackupList,setVisibleBackupList]=useState<Exclude<BackupCategory, 'legacy'>|null>(null);
   const [restoreTarget,setRestoreTarget]=useState<BackupSummary|null>(null);
+  const [recoveryRestoreTarget,setRecoveryRestoreTarget]=useState<ImportedRecoveryBackup|null>(null);
   const [restoreConfirmation,setRestoreConfirmation]=useState('');
   const [msg,setMsg]=useState('');
   const [loading,setLoading]=useState(false);
   const [backupLoading,setBackupLoading]=useState(false);
   const [manualBackupProgress,setManualBackupProgress]=useState<ManualBackupProgress>({state:'idle',activeStep:0,message:''});
   const [lastManualBackupResult,setLastManualBackupResult]=useState<{ok:boolean;message:string;createdAt:string}|null>(null);
+  const [portableLoading,setPortableLoading]=useState(false);
+  const [portableMessage,setPortableMessage]=useState('');
+  const [portableUploadProgress,setPortableUploadProgress]=useState<number|null>(null);
+  const [externalDestination,setExternalDestination]=useState('');
+  const [externalEnabled,setExternalEnabled]=useState(false);
   const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
   const [brandingMsg,setBrandingMsg]=useState('');
   const [brandingLoading,setBrandingLoading]=useState(false);
@@ -916,7 +1000,13 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   function loadBackupStatus(options: { quiet?: boolean } = {}) {
     if (!options.quiet) setBackupLoading(true);
     return api('/api/backup/status')
-      .then(data=>{ setBackupStatus(normalizeBackupStatus(data)); setMsg(''); })
+      .then(data=>{
+        const status=normalizeBackupStatus(data);
+        setBackupStatus(status);
+        setExternalDestination(status.externalBackup?.destination ?? '');
+        setExternalEnabled(status.externalBackup?.enabled ?? false);
+        setMsg('');
+      })
       .catch(e=>setMsg(e.message))
       .finally(()=>{ if (!options.quiet) setBackupLoading(false); });
   }
@@ -994,6 +1084,85 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
       })
       .catch(e=>setMsg(e.message))
       .finally(()=>setBackupLoading(false));
+  }
+
+  function importPortableBackup(file: File | undefined) {
+    if (!file) return;
+    setPortableLoading(true);
+    setPortableMessage('Uploading portable backup to MCC recovery staging...');
+    setPortableUploadProgress(0);
+    const form = new FormData();
+    form.append('file',file,file.name);
+    const request = new XMLHttpRequest();
+    request.open('POST','/api/backup/recovery/import');
+    request.withCredentials=true;
+    request.upload.onprogress=event=>{
+      if(event.lengthComputable)setPortableUploadProgress(Math.min(100,Math.round((event.loaded/event.total)*100)));
+    };
+    request.onload=()=>{
+      let data:Record<string,unknown>={};
+      try{data=JSON.parse(request.responseText) as Record<string,unknown>;}catch{}
+      if(request.status>=200&&request.status<300){
+        setPortableMessage(String(data.message??'Backup safely copied to this MCC drive. External backup drive may now be disconnected.'));
+        void loadBackupStatus({quiet:true});
+      }else{
+        setPortableMessage(String(data.error??'Portable backup import failed. Current MCC data was not changed.'));
+      }
+      setPortableLoading(false);
+      setPortableUploadProgress(null);
+    };
+    request.onerror=()=>{
+      setPortableMessage('Portable backup upload failed. Current MCC data was not changed.');
+      setPortableLoading(false);
+      setPortableUploadProgress(null);
+    };
+    request.send(form);
+  }
+
+  async function testExternalLocation() {
+    setPortableLoading(true);
+    setPortableMessage('Testing existence, write access, and free space...');
+    try {
+      const data=await api('/api/backup/external/test',{method:'POST',body:JSON.stringify({destination:externalDestination})});
+      setPortableMessage(String(data.message??'External backup location is ready.'));
+      await loadBackupStatus({quiet:true});
+    } catch(error) {
+      setPortableMessage((error as Error).message);
+      await loadBackupStatus({quiet:true}).catch(()=>undefined);
+    } finally {
+      setPortableLoading(false);
+    }
+  }
+
+  async function saveExternalLocation() {
+    setPortableLoading(true);
+    setPortableMessage('Saving verified external backup configuration...');
+    try {
+      const data=await api('/api/backup/external',{method:'PUT',body:JSON.stringify({destination:externalDestination,enabled:externalEnabled})});
+      setPortableMessage(String(data.message??'External backup configuration saved.'));
+      await loadBackupStatus({quiet:true});
+    } catch(error) {
+      setPortableMessage((error as Error).message);
+    } finally {
+      setPortableLoading(false);
+    }
+  }
+
+  async function restoreImportedBackup() {
+    if(!recoveryRestoreTarget)return;
+    setPortableLoading(true);
+    setPortableMessage('Revalidating local recovery copy and creating pre-restore backup...');
+    try {
+      const data=await api('/api/backup/recovery/restore',{method:'POST',body:JSON.stringify({backupId:recoveryRestoreTarget.id,confirmation:restoreConfirmation})});
+      setPortableMessage(String(data.message??'Verified portable backup restored. Refresh MCC and log in again if needed.'));
+      setRecoveryRestoreTarget(null);
+      setRestoreConfirmation('');
+      await loadBackupStatus({quiet:true});
+    } catch(error) {
+      setPortableMessage((error as Error).message);
+    } finally {
+      setPortableLoading(false);
+    }
   }
 
   function openResetModal(target: ResetConfig) {
@@ -1487,6 +1656,95 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             })}
           </div>
 
+          {backupPermissions.canUsePortableRecovery&&(
+            <section className="backup-portable-panel" aria-label="Portable Master Backup and Recovery">
+              <div className="backup-portable-heading">
+                <div>
+                  <span>Portable Master Backup / Recovery</span>
+                  <strong>Off-device disaster recovery</strong>
+                  <p>Download one verified ZIP, or import a ZIP into MCC-owned local recovery storage before restoring.</p>
+                </div>
+                <span className="backup-health-badge healthy">Manager+</span>
+              </div>
+
+              <div className="backup-portable-grid">
+                <section className="backup-portable-card">
+                  <span>Portable download</span>
+                  <strong>{backupStatus?.portableBackups[0]?.portableArchiveFilename??'No portable Master Backup yet'}</strong>
+                  <p>The browser/OS chooses the Save As or download destination. Downloading never changes the verified server backup.</p>
+                  <div className="backup-action-row">
+                    {backupStatus?.portableBackups[0]
+                      ? <a className="primary-button compact-button" href={`/api/backup/portable/${encodeURIComponent(backupStatus.portableBackups[0].id)}/download`}>Download Portable Backup</a>
+                      : <button className="primary-button compact-button" type="button" disabled>Download Portable Backup</button>}
+                  </div>
+                  {(backupStatus?.portableBackups??[]).slice(1,5).map(backup=>(
+                    <div className="backup-portable-row" key={backup.id}>
+                      <div><strong>{backup.portableArchiveFilename}</strong><small>{formatDateTime(backup.createdAt)} · {formatBytes(backup.portableArchiveSizeBytes??0)}</small></div>
+                      <a className="secondary-button compact-button" href={`/api/backup/portable/${encodeURIComponent(backup.id)}/download`}>Download</a>
+                    </div>
+                  ))}
+                </section>
+
+                <section className="backup-portable-card">
+                  <span>Import portable backup</span>
+                  <strong>Pull Master Backup into MCC</strong>
+                  <p>MCC treats ZIP files as untrusted, validates them, and atomically promotes only a verified local copy under:</p>
+                  <code className="backup-path-code">{backupStatus?.recoveryLocation||'Configured MCC recovery storage'}</code>
+                  <label className={`secondary-button compact-button backup-file-button${portableLoading?' disabled':''}`}>
+                    {portableLoading?'Import in progress...':'Choose MCC Master Backup ZIP'}
+                    <input type="file" accept=".zip,application/zip" disabled={portableLoading} onChange={event=>{const file=event.target.files?.[0];event.target.value='';importPortableBackup(file);}} />
+                  </label>
+                  {portableUploadProgress!==null&&<div className="backup-byte-progress" aria-label={`Portable backup upload ${portableUploadProgress}%`}><i style={{width:`${portableUploadProgress}%`}} /></div>}
+                  <small>Live MCC data is untouched during upload, copy, extraction, and validation.</small>
+                </section>
+              </div>
+
+              <section className="backup-imported-list">
+                <div className="backup-protection-heading">
+                  <div><span>Verified local recovery archive</span><strong>{backupStatus?.importedRecoveryBackups.length??0} imported backup{(backupStatus?.importedRecoveryBackups.length??0)===1?'':'s'}</strong></div>
+                  <span className="backup-area-badge protected">Local copy</span>
+                </div>
+                {(backupStatus?.importedRecoveryBackups??[]).map(backup=>(
+                  <div className="backup-portable-row" key={backup.id}>
+                    <div>
+                      <strong>{backup.name}</strong>
+                      <small>MCC {backup.appVersion} · {formatDateTime(backup.createdAt)} · {backup.checkedFileCount} verified files</small>
+                      {backup.safeToDisconnect&&<em>Backup safely copied to this MCC drive. External backup drive may now be disconnected.</em>}
+                    </div>
+                    {backupPermissions.canRestoreMaster
+                      ? <button className="danger-button compact-button" type="button" disabled={portableLoading} onClick={()=>{setRecoveryRestoreTarget(backup);setRestoreConfirmation('');}}>Restore Verified Backup</button>
+                      : <small>Admin confirmation required to restore</small>}
+                  </div>
+                ))}
+                {!backupStatus?.importedRecoveryBackups.length&&<p className="form-help">No portable backup has been imported into this MCC drive yet.</p>}
+              </section>
+
+              <section className="backup-external-card">
+                <div className="backup-protection-heading">
+                  <div><span>Optional external destination</span><strong>{backupStatus?.externalBackup?.enabled?'Automatic verified copy enabled':'Local Master Backup remains primary'}</strong></div>
+                  <span className={`backup-area-badge ${backupStatus?.externalBackup?.lastCopyOk===false?'pending':'protected'}`}>{backupStatus?.externalBackup?.lastCopyOk===false?'Copy failed':backupStatus?.externalBackup?.enabled?'Enabled':'Optional'}</span>
+                </div>
+                <p>After a local Master Backup and portable archive validate, MCC can atomically copy the same ZIP to a mounted USB disk or network share.</p>
+                {backupPermissions.canConfigureExternalBackup?(
+                  <div className="backup-external-controls">
+                    <label className="form-field"><span>Server-side external backup destination</span><input value={externalDestination} onChange={event=>setExternalDestination(event.target.value)} placeholder="/media/usb/MCC_Backups" disabled={portableLoading} /></label>
+                    <label className="backup-toggle"><input type="checkbox" checked={externalEnabled} onChange={event=>setExternalEnabled(event.target.checked)} disabled={portableLoading||!externalDestination.trim()} /><span>Copy completed Master Backups automatically</span></label>
+                    <div className="backup-action-row">
+                      <button className="secondary-button compact-button" type="button" onClick={()=>void testExternalLocation()} disabled={portableLoading||!externalDestination.trim()}>Test Backup Location</button>
+                      <button className="primary-button compact-button" type="button" onClick={()=>void saveExternalLocation()} disabled={portableLoading}>Save Backup Location</button>
+                    </div>
+                  </div>
+                ):<code className="backup-path-code">{backupStatus?.externalBackup?.destination||'No external destination configured'}</code>}
+                <div className="backup-external-status">
+                  <p><strong>Location test</strong><span>{backupStatus?.externalBackup?.lastTestMessage||'Not tested'}</span></p>
+                  <p><strong>Last external copy</strong><span>{backupStatus?.externalBackup?.lastCopyMessage||'No copy has run'} {backupStatus?.externalBackup?.lastCopyAt?`(${formatDateTime(backupStatus.externalBackup.lastCopyAt)})`:''}</span></p>
+                </div>
+              </section>
+
+              {portableMessage&&<p className="form-message" role="status">{portableMessage}</p>}
+            </section>
+          )}
+
           <section className="backup-protection-panel">
             <div className="backup-protection-heading">
               <div>
@@ -1540,6 +1798,33 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
             <div className="modal-actions">
               <button className="danger-button" type="button" onClick={restoreBackup} disabled={backupLoading || restoreConfirmation !== 'RESTORE MCC'}>{backupLoading ? 'Restoring...' : 'Restore Backup'}</button>
               <button className="secondary-button" type="button" onClick={()=>setRestoreTarget(null)} disabled={backupLoading}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {recoveryRestoreTarget&&(
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="mcc-card inventory-modal restore-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Restore verified local recovery copy</p>
+                <h3>{recoveryRestoreTarget.name}</h3>
+              </div>
+              <button className="link-button compact-button" type="button" onClick={()=>setRecoveryRestoreTarget(null)} disabled={portableLoading}>Close</button>
+            </div>
+            <section className="restore-warning-panel">
+              <strong>MCC {recoveryRestoreTarget.appVersion} from {formatDateTime(recoveryRestoreTarget.createdAt)}</strong>
+              <p>MCC will revalidate the local imported copy, create the normal pre-restore safety backup, then replace database and packaged runtime payloads.</p>
+              <p>The external/source ZIP is not used or modified during restore.</p>
+            </section>
+            <label className="form-field">
+              <span>Type RESTORE MCC to continue</span>
+              <input value={restoreConfirmation} onChange={event=>setRestoreConfirmation(event.target.value)} placeholder="RESTORE MCC" disabled={portableLoading} />
+            </label>
+            <div className="modal-actions">
+              <button className="danger-button" type="button" onClick={()=>void restoreImportedBackup()} disabled={portableLoading||restoreConfirmation!=='RESTORE MCC'}>{portableLoading?'Restoring...':'Restore Verified Backup'}</button>
+              <button className="secondary-button" type="button" onClick={()=>setRecoveryRestoreTarget(null)} disabled={portableLoading}>Cancel</button>
             </div>
           </section>
         </div>
