@@ -4,6 +4,14 @@ set -Eeuo pipefail
 readonly CONFIG_FILE="/etc/mcc-https.env"
 readonly CADDYFILE="/etc/caddy/Caddyfile"
 readonly DNS_ENV_FILE="/etc/mcc-https-dns.env"
+check_public_ready=false
+
+if [[ "${1:-}" == "--check-public-ready" && "$#" -eq 1 ]]; then
+  check_public_ready=true
+elif [[ "$#" -ne 0 ]]; then
+  echo "Usage: validate-mcc-https [--check-public-ready]" >&2
+  exit 64
+fi
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run this validator as root." >&2
@@ -88,12 +96,13 @@ else
     echo "Public certificate mode must disable internal-CA root onboarding." >&2
     exit 65
   fi
-  case "${MCC_HTTPS_HOSTNAME}" in
-    *.local|*.localhost|*.internal|*.home.arpa|*.example|*.example.com|*.example.net|*.example.org|*.invalid|*.test)
+  public_excluded_domains=(alt arpa example example.com example.net example.org internal invalid local localhost onion test)
+  for excluded_domain in "${public_excluded_domains[@]}"; do
+    if [[ "${MCC_HTTPS_HOSTNAME}" == "${excluded_domain}" || "${MCC_HTTPS_HOSTNAME}" == *."${excluded_domain}" ]]; then
       echo "Public mode requires a real public DNS hostname, not a reserved or internal name." >&2
       exit 65
-      ;;
-  esac
+    fi
+  done
   public_tld="${MCC_HTTPS_HOSTNAME##*.}"
   if [[ ! "${public_tld}" =~ [a-z] ]]; then
     echo "Public mode requires a real public DNS hostname with a non-numeric top-level label." >&2
@@ -126,6 +135,21 @@ else
   # shellcheck source=/dev/null
   source "${DNS_ENV_FILE}"
   set +a
+  mapfile -t dns_environment_references < <(
+    grep -oE '\{env\.[A-Za-z_][A-Za-z0-9_]*\}' "${MCC_HTTPS_TLS_CONFIG}" \
+      | sed -E 's/^\{env\.([A-Za-z_][A-Za-z0-9_]*)\}$/\1/' \
+      | sort -u
+  )
+  for environment_name in "${dns_environment_references[@]}"; do
+    if ! grep -Eq "^[[:space:]]*${environment_name}=" "${DNS_ENV_FILE}"; then
+      echo "Public mode TLS config references ${environment_name}, but ${DNS_ENV_FILE} does not assign it." >&2
+      exit 78
+    fi
+    if [[ -z "${!environment_name:-}" ]]; then
+      echo "Public mode TLS credential ${environment_name} must not be empty." >&2
+      exit 78
+    fi
+  done
 fi
 
 /usr/sbin/runuser -u caddy -- /usr/bin/env \
@@ -137,5 +161,124 @@ fi
   MCC_ONBOARDING_IP="${MCC_ONBOARDING_IP:-}" \
   MCC_HTTPS_UPSTREAM="${MCC_HTTPS_UPSTREAM}" \
   /usr/bin/caddy validate --config "${CADDYFILE}" --adapter caddyfile
+
+if [[ "${check_public_ready}" == "true" ]]; then
+  if [[ "${MCC_HTTPS_MODE}" != "public" ]]; then
+    echo "--check-public-ready requires MCC_HTTPS_MODE=public." >&2
+    exit 65
+  fi
+  for required_command in curl getent ip openssl ss systemctl; do
+    command -v "${required_command}" >/dev/null || {
+      echo "Public readiness validation requires ${required_command}." >&2
+      exit 69
+    }
+  done
+  systemctl is-active --quiet caddy.service || {
+    echo "caddy.service is not active." >&2
+    exit 69
+  }
+
+  listeners="$(ss -ltnpH)"
+  for caddy_port in 80 443; do
+    port_listeners="$(awk -v port=":${caddy_port}" '$4 ~ port "$" {print}' <<< "${listeners}")"
+    if [[ -z "${port_listeners}" ]]; then
+      echo "Caddy is not listening on TCP ${caddy_port}." >&2
+      exit 69
+    fi
+    while IFS= read -r listener; do
+      if [[ "${listener}" != *'("caddy"'* ]]; then
+        echo "TCP ${caddy_port} is not owned exclusively by Caddy: ${listener}" >&2
+        exit 69
+      fi
+    done <<< "${port_listeners}"
+  done
+
+  node_port="${MCC_HTTPS_UPSTREAM##*:}"
+  for protected_node_port in 4273 4274; do
+    node_listeners="$(awk -v port=":${protected_node_port}" '$4 ~ port "$" {print $4}' <<< "${listeners}")"
+    if [[ "${protected_node_port}" == "${node_port}" && -z "${node_listeners}" ]]; then
+      echo "Node is not listening on ${MCC_HTTPS_UPSTREAM}." >&2
+      exit 69
+    fi
+    [[ -z "${node_listeners}" ]] && continue
+    while IFS= read -r listener; do
+      if [[ "${listener}" != "127.0.0.1:${protected_node_port}" ]]; then
+        echo "Node port ${protected_node_port} is exposed by ${listener}." >&2
+        exit 69
+      fi
+    done <<< "${node_listeners}"
+  done
+
+  mapfile -t resolved_addresses < <(getent ahostsv4 "${MCC_HTTPS_HOSTNAME}" | awk '{print $1}' | sort -u)
+  if (( ${#resolved_addresses[@]} == 0 )); then
+    echo "Split DNS did not return an IPv4 address for ${MCC_HTTPS_HOSTNAME}." >&2
+    exit 69
+  fi
+  for resolved_address in "${resolved_addresses[@]}"; do
+    if ! ip -4 route get "${resolved_address}" | grep -Eq '^local[[:space:]]'; then
+      echo "Split DNS resolved ${MCC_HTTPS_HOSTNAME} to ${resolved_address}, which is not assigned to this Pi." >&2
+      exit 69
+    fi
+  done
+  mapfile -t resolved_ipv6_addresses < <(
+    getent ahostsv6 "${MCC_HTTPS_HOSTNAME}" \
+      | awk '$1 ~ /:/ && tolower($1) !~ /^::ffff:/ {print $1}' \
+      | sort -u
+  )
+  for resolved_address in "${resolved_ipv6_addresses[@]}"; do
+    if ! ip -6 route get "${resolved_address}" | grep -Eq '^local[[:space:]]'; then
+      echo "Split DNS resolved ${MCC_HTTPS_HOSTNAME} to ${resolved_address}, which is not assigned to this Pi." >&2
+      exit 69
+    fi
+  done
+
+  upstream_health="$(curl --noproxy '*' --fail --silent --show-error --max-time 10 \
+    "http://${MCC_HTTPS_UPSTREAM}/api/health")" || {
+      echo "Loopback Node health failed at ${MCC_HTTPS_UPSTREAM}." >&2
+      exit 69
+    }
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<< "${upstream_health}" || {
+    echo "Loopback Node health did not report ok=true." >&2
+    exit 69
+  }
+
+  redirect_result="$(curl --noproxy '*' --silent --show-error --max-time 10 \
+    --output /dev/null --write-out '%{http_code} %{redirect_url}' \
+    "http://${MCC_HTTPS_HOSTNAME}/")" || {
+      echo "Canonical HTTP redirect check failed." >&2
+      exit 69
+    }
+  read -r redirect_status redirect_url <<< "${redirect_result}"
+  if [[ ! "${redirect_status}" =~ ^30(1|2|7|8)$ || "${redirect_url}" != "https://${MCC_HTTPS_HOSTNAME}/" ]]; then
+    echo "HTTP must redirect directly to https://${MCC_HTTPS_HOSTNAME}/; received ${redirect_status} ${redirect_url}." >&2
+    exit 69
+  fi
+
+  public_health="$(curl --noproxy '*' --fail --silent --show-error --max-time 15 \
+    "https://${MCC_HTTPS_HOSTNAME}/api/health")" || {
+      echo "Publicly trusted HTTPS health failed for ${MCC_HTTPS_HOSTNAME}; do not bypass certificate validation." >&2
+      exit 69
+    }
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<< "${public_health}" || {
+    echo "Public HTTPS health did not report ok=true." >&2
+    exit 69
+  }
+
+  leaf_certificate="$(openssl s_client -connect "${MCC_HTTPS_HOSTNAME}:443" \
+    -servername "${MCC_HTTPS_HOSTNAME}" </dev/null 2>/dev/null | openssl x509 -outform PEM)" || {
+      echo "Could not read the certificate served for ${MCC_HTTPS_HOSTNAME}." >&2
+      exit 69
+    }
+  openssl x509 -noout -checkhost "${MCC_HTTPS_HOSTNAME}" <<< "${leaf_certificate}" >/dev/null || {
+    echo "The served certificate does not cover ${MCC_HTTPS_HOSTNAME}." >&2
+    exit 69
+  }
+  openssl x509 -noout -checkend 604800 <<< "${leaf_certificate}" >/dev/null || {
+    echo "The served certificate expires within seven days." >&2
+    exit 69
+  }
+  certificate_expiry="$(openssl x509 -noout -enddate <<< "${leaf_certificate}" | cut -d= -f2-)"
+  echo "MCC public HTTPS readiness passed for ${MCC_HTTPS_HOSTNAME}; certificate expires ${certificate_expiry}."
+fi
 
 echo "MCC HTTPS ${MCC_HTTPS_MODE} configuration is valid for ${MCC_HTTPS_HOSTNAME} -> ${MCC_HTTPS_UPSTREAM}."

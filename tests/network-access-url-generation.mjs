@@ -19,7 +19,24 @@ assert.equal(canonicalHttpsUrl(''), null, 'A blank hostname must preserve develo
 for (const invalid of ['http://mcc.local', 'mcc.local:4273', '127.0.0.1', 'mcc.local/path', 'mcc..company.com', '-mcc.company.com', 'mcc.company.com.']) {
   assert.throws(() => canonicalHttpsUrl(invalid), /valid DNS hostname/, `Rejected unsafe canonical hostname: ${invalid}`);
 }
-for (const reserved of ['mcc.local', 'mcc.localhost', 'mcc.internal', 'mcc.home.arpa', 'mcc.example', 'mcc.example.com', 'mcc.example.net', 'mcc.example.org', 'mcc.invalid', 'mcc.test']) {
+for (const reserved of [
+  'mcc.alt',
+  'mcc.arpa',
+  'home.arpa',
+  'mcc.internal',
+  'mcc.local',
+  'mcc.localhost',
+  'mcc.onion',
+  'mcc.example',
+  'example.com',
+  'mcc.example.com',
+  'example.net',
+  'mcc.example.net',
+  'example.org',
+  'mcc.example.org',
+  'mcc.invalid',
+  'mcc.test',
+]) {
   assert.throws(() => canonicalHttpsUrl(reserved, 'public'), /real public DNS hostname/, `Rejected non-public hostname in public mode: ${reserved}`);
 }
 assert.throws(() => canonicalHttpsUrl('mcc.company.com', 'internal'), /requires a \.local/, 'Internal mode must not be mislabeled as public DNS.');

@@ -138,7 +138,12 @@ sudo validate-mcc-https
 sudo systemctl restart caddy.service
 sudo systemctl enable caddy.service
 sudo systemctl status caddy.service --no-pager
+sudo validate-mcc-https --check-public-ready
 ```
+
+Run the first `validate-mcc-https` before restarting Caddy; it performs offline configuration, provider-module, credential-reference, ownership, and loopback-upstream checks. Run `--check-public-ready` only after Caddy has obtained the real certificate and split DNS is active. The readiness gate requires Caddy to own TCP 80/443, any production or staging Node listener to use only its defined loopback port, every A or AAAA answer for the canonical FQDN to be assigned to this Pi, direct loopback and canonical HTTPS health to return `ok=true`, HTTP to redirect to the exact canonical HTTPS URL, the normal OS trust store to accept the certificate, the leaf certificate to cover the hostname, and at least seven days of certificate validity. It never uses an insecure TLS bypass.
+
+The readiness gate cannot prove fresh-client behavior, authoritative DNS permissions, credential least privilege, CAA approval, or future renewal by itself. Complete the staging client matrix and inspect Caddy/provider logs before production approval.
 
 DNS-01 needs no inbound Internet connection to ports 80/443. The public CA queries authoritative DNS for the TXT challenge while Caddy makes outbound requests. Restrict the Pi firewall and upstream router so MCC 80/443 remain reachable only from approved LANs. Confirm no public A/AAAA/NAT/port-forward exposes MCC.
 
@@ -347,6 +352,16 @@ Export only `root.crt`, verify its SHA-256 fingerprint through a separate authen
 
 Use a staging-only FQDN and port 4274. For public mode, do not request a certificate until the staging DNS name, provider module, scoped credential, internal A/AAAA behavior, CAA policy, and outbound access are approved. Apply the loopback drop-in to the actual staging service and verify:
 
+```bash
+# /etc/mcc-https.env must select the approved staging FQDN and loopback upstream:
+# MCC_HTTPS_MODE=public
+# MCC_HTTPS_HOSTNAME=<staging-fqdn>
+# MCC_HTTPS_UPSTREAM=127.0.0.1:4274
+sudo validate-mcc-https
+sudo systemctl restart <staging-mcc-service>.service caddy.service
+sudo validate-mcc-https --check-public-ready
+```
+
 1. `sudo validate-mcc-https` passes and Caddy logs show successful issuance/renewal state.
 2. Direct `curl http://127.0.0.1:4274/api/health` and trusted `https://<staging-fqdn>/api/health` return `ok=true`.
 3. HTTP redirects to the exact canonical HTTPS hostname.
@@ -363,6 +378,16 @@ Do not accept `curl -k`, browser exceptions, disabled Safe Browsing, or a manual
 
 After staging sign-off, schedule a normal production change window. Replace the staging FQDN/upstream with the administrator-approved production FQDN and `127.0.0.1:4273`; do not reuse the reserved example. Repeat the complete staging checklist before changing normal bookmarks.
 
+```bash
+# /etc/mcc-https.env must select the approved production FQDN and loopback upstream:
+# MCC_HTTPS_MODE=public
+# MCC_HTTPS_HOSTNAME=<production-fqdn>
+# MCC_HTTPS_UPSTREAM=127.0.0.1:4273
+sudo validate-mcc-https
+sudo systemctl restart mcc.service caddy.service
+sudo validate-mcc-https --check-public-ready
+```
+
 Existing sessions are hostname-scoped. Moving from `.local` to a real FQDN creates a different browser origin, so users should expect to sign in once at the new URL. All application links and downloads remain same-origin, and production cookies remain `Secure`.
 
 Do not merge, tag, or production-deploy solely because Caddy validation or certificate issuance succeeds.
@@ -378,6 +403,7 @@ sudo systemctl is-active caddy.service mcc.service
 sudo journalctl -u caddy.service --since '30 days ago' --no-pager
 caddy list-modules | grep '^dns.providers.'
 curl --fail --silent --show-error http://127.0.0.1:4273/api/health
+sudo validate-mcc-https --check-public-ready
 ```
 
 Also run `Test-MccHttpsClient.ps1` and a real mobile browser check against the canonical name. Alert on ACME renewal errors, credential expiry, DNS API failures, and certificate expiry. Test with the ACME CA's staging endpoint during repeated issuance experiments to avoid public rate limits; production must return to the approved public CA endpoint.
@@ -458,6 +484,7 @@ Pi checks:
 
 ```bash
 sudo validate-mcc-https
+sudo validate-mcc-https --check-public-ready  # public mode after issuance only
 sudo systemctl status caddy.service mcc.service --no-pager
 sudo journalctl -u caddy.service -u mcc.service --since today --no-pager
 ```
@@ -473,4 +500,4 @@ Common failures:
 - **HTTP does not redirect:** confirm Caddy owns 80/443 and no `auto_https` override was added.
 - **Wrong client IP in auditing/rate limits:** confirm Node is loopback-only and Caddy is the immediate peer; never broaden Express proxy trust.
 
-Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), [Caddy systemd operation](https://caddyserver.com/docs/running), [Raspberry Pi mDNS guidance](https://www.raspberrypi.com/documentation/computers/remote-access.html#resolve-raspberrypilocal-with-mdns), [Debian Bookworm Avahi publisher source](https://sources.debian.org/src/avahi/0.8-10%2Bdeb12u1/avahi-utils/avahi-publish.c/), [Apple manual root trust](https://support.apple.com/102390), and [Google/Pixel certificate management](https://support.google.com/pixelphone/answer/2844832).
+Primary references: [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https), [Caddy TLS DNS challenge](https://caddyserver.com/docs/caddyfile/directives/tls), [Caddy custom builds](https://caddyserver.com/docs/build), [Caddy systemd operation](https://caddyserver.com/docs/running), [IANA special-use domain names](https://www.iana.org/assignments/special-use-domain-names/special-use-domain-names.xhtml), [Raspberry Pi mDNS guidance](https://www.raspberrypi.com/documentation/computers/remote-access.html#resolve-raspberrypilocal-with-mdns), [Debian Bookworm Avahi publisher source](https://sources.debian.org/src/avahi/0.8-10%2Bdeb12u1/avahi-utils/avahi-publish.c/), [Apple manual root trust](https://support.apple.com/102390), and [Google/Pixel certificate management](https://support.google.com/pixelphone/answer/2844832).

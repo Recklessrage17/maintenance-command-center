@@ -77,13 +77,32 @@ assert.match(clientCheck, /301, 302, 307, 308/, 'Client verification must requir
 assert.match(piValidator, /MCC_HTTPS_MODE.*internal.*public/, 'Pi validator must allow only the two supported certificate modes.');
 assert.match(piValidator, /Internal mode requires a \.local/, 'Pi validator must preserve the .local internal-CA fallback.');
 assert.match(piValidator, /Public mode requires a real public DNS hostname/, 'Pi validator must require a non-reserved public hostname.');
+for (const reservedDomain of ['alt', 'arpa', 'example.com', 'example.net', 'example.org', 'internal', 'local', 'localhost', 'onion', 'test']) {
+  assert.match(piValidator, new RegExp(`public_excluded_domains=.*\\b${reservedDomain.replace('.', '\\.') }\\b`), `Pi validator must reject ${reservedDomain} and its subdomains in public mode.`);
+}
 assert.match(piValidator, /dns\.providers\.\$\{dns_provider\}/, 'Pi validator must verify the selected provider plugin is installed.');
 assert.match(piValidator, /root:root:600/, 'Pi validator must require root-only DNS credentials.');
+assert.match(piValidator, /DNS_ENV_FILE[\s\S]*does not assign it/, 'Every provider credential reference must come from the root-only DNS environment file.');
+assert.match(piValidator, /TLS credential[\s\S]*must not be empty/, 'Provider credential values must not be empty.');
 assert.match(piValidator, /MCC_HTTPS_ONBOARDING_CONFIG.*mcc-onboarding-\(disabled\|http\)/, 'Only reviewed onboarding fragments may be selected.');
 assert.match(piValidator, /Public certificate mode must disable internal-CA root onboarding/, 'Public mode must not serve internal-CA onboarding material.');
 assert.match(piValidator, /127\\\.0\\\.0\\\.1:\(4273\|4274\)/, 'Pi validator must reject non-loopback or unexpected upstreams.');
 assert.match(piValidator, /root:root:644/, 'Pi validator must reject writable or incorrectly owned deployment configuration.');
 assert.match(piValidator, /caddy validate/, 'Pi validator must invoke Caddy configuration validation.');
+assert.match(piValidator, /--check-public-ready/, 'Pi validator must expose an explicit post-issuance public readiness gate.');
+assert.match(piValidator, /getent ahostsv4/, 'Public readiness must exercise split-DNS resolution.');
+assert.match(piValidator, /getent ahostsv6/, 'Public readiness must validate an AAAA answer when one is present.');
+assert.match(piValidator, /\^::ffff:/, 'IPv4-mapped resolver output must not be mistaken for a real AAAA answer.');
+assert.match(piValidator, /not assigned to this Pi/, 'Public readiness must reject DNS answers that do not point to the Pi.');
+assert.match(piValidator, /ss -ltnpH/, 'Public readiness must inspect live listener ownership.');
+assert.match(piValidator, /not owned exclusively by Caddy/, 'Public readiness must require Caddy on LAN-facing HTTP\/HTTPS ports.');
+assert.match(piValidator, /for protected_node_port in 4273 4274/, 'Public readiness must keep both production and staging Node ports loopback-only when present.');
+assert.match(piValidator, /http:\/\/\$\{MCC_HTTPS_UPSTREAM\}\/api\/health/, 'Public readiness must verify the loopback Node health route.');
+assert.match(piValidator, /https:\/\/\$\{MCC_HTTPS_HOSTNAME\}\/api\/health/, 'Public readiness must verify canonical HTTPS health.');
+assert.match(piValidator, /--noproxy '\*'/, 'Public readiness must connect directly instead of using an outbound proxy.');
+assert.doesNotMatch(piValidator, /curl[^\n]*(?:-k|--insecure)/, 'Public readiness must never bypass certificate validation.');
+assert.match(piValidator, /openssl x509 -noout -checkhost/, 'Public readiness must verify the leaf certificate hostname.');
+assert.match(piValidator, /openssl x509 -noout -checkend 604800/, 'Public readiness must reject a certificate expiring within seven days.');
 
 for (const heading of ['Administrator inputs required before public issuance', 'Public-CA DNS-01 deployment', 'Internal-CA .local fallback', 'Certificate trust', 'Renewal and monitoring', 'Backup and recovery', 'Staging deployment', 'Production deployment']) {
   assert.ok(documentation.includes(`## ${heading}`), `HTTPS runbook is missing the ${heading} section.`);

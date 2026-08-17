@@ -1,7 +1,26 @@
 export type HttpsCertificateMode = 'internal' | 'public';
 
 const dnsLabel = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
-const publicCertificateExcludedSuffixes = ['.local', '.localhost', '.internal', '.home.arpa', '.example', '.example.com', '.example.net', '.example.org', '.invalid', '.test'];
+// IANA special-use names apply to both the listed name and its subdomains.
+// `internal` is also reserved here for MCC's explicitly private deployment mode.
+const publicCertificateExcludedDomains = [
+  'alt',
+  'arpa',
+  'example',
+  'example.com',
+  'example.net',
+  'example.org',
+  'internal',
+  'invalid',
+  'local',
+  'localhost',
+  'onion',
+  'test',
+];
+
+function isExcludedPublicCertificateHostname(hostname: string) {
+  return publicCertificateExcludedDomains.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
+}
 
 function normalizedHostname(configuredHostname: string | undefined) {
   const hostname = configuredHostname?.trim();
@@ -25,7 +44,7 @@ export function canonicalHttpsAccess(configuredHostname: string | undefined, con
     throw new Error('MCC_HTTPS_MODE=internal requires a .local MCC_HTTPS_HOSTNAME.');
   }
   if (certificateMode === 'public') {
-    if (publicCertificateExcludedSuffixes.some(suffix => hostname.endsWith(suffix))) {
+    if (isExcludedPublicCertificateHostname(hostname)) {
       throw new Error('MCC_HTTPS_MODE=public requires a real public DNS hostname, not a reserved or internal name.');
     }
     const topLevelLabel = hostname.slice(hostname.lastIndexOf('.') + 1);
