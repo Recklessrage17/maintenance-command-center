@@ -213,6 +213,43 @@ test('closes open Machine and Equipment accordions on outside interaction and Es
   await expect(equipment301).toHaveAttribute('aria-expanded','false');
 });
 
+test('centers and highlights smoothly rotating PM chevrons in both libraries',async({page})=>{
+  await mockDashboard(page);
+  await page.goto('/');
+
+  for(const [sectionClass,assetName] of [['machine','Press 51 \\(Toyo\\)'],['equipment','EQ-301 \\(Atlas Copco\\)']] as const){
+    const section=page.locator(`.dashboard-pm-section--${sectionClass}`);
+    const toggle=section.getByRole('button',{name:new RegExp(assetName)});
+    const chevron=toggle.locator('.dashboard-pm-chevron');
+    const icon=chevron.locator('svg');
+    const closedStyle=await chevron.evaluate(element=>{
+      const style=getComputedStyle(element);
+      const identityBox=element.parentElement!.querySelector('.dashboard-pm-asset-identity')!.getBoundingClientRect();
+      const chevronBox=element.getBoundingClientRect();
+      return {
+        centerOffset:Math.abs((chevronBox.top+chevronBox.height/2)-(identityBox.top+identityBox.height/2)),
+        background:style.backgroundColor,
+        boxShadow:style.boxShadow,
+        transitionProperties:style.transitionProperty,
+      };
+    });
+    expect(closedStyle.centerOffset).toBeLessThanOrEqual(1);
+    expect(closedStyle.transitionProperties).toContain('box-shadow');
+    await expect(icon).toHaveCSS('transition-property','transform');
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded','true');
+    await expect(icon).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');
+    const openStyle=await chevron.evaluate(element=>({background:getComputedStyle(element).backgroundColor,boxShadow:getComputedStyle(element).boxShadow}));
+    expect(openStyle.background).not.toBe(closedStyle.background);
+    expect(openStyle.boxShadow).not.toBe(closedStyle.boxShadow);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded','false');
+    await expect(icon).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');
+  }
+});
+
 test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   const dynamicAlerts=[alert(1,'Past Due')];

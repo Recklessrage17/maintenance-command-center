@@ -101,8 +101,9 @@
 .dashboard-pm-count-pill strong { display: inline; margin: 0; color: inherit; font-size: .72rem; line-height: 1; }
 .dashboard-pm-count-pill.status-due-now { color: #ffd4bd; border-color: rgba(255,138,76,.7); background: rgba(114,48,20,.47); }
 .dashboard-pm-count-pill.status-past-due { color: #ffc2cc; border-color: rgba(255,73,104,.72); background: rgba(104,24,45,.46); }
-.dashboard-pm-chevron { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid color-mix(in srgb,var(--dashboard-asset-accent) 38%,var(--mcc-border-default)); border-radius: 50%; color: color-mix(in srgb,var(--dashboard-asset-accent) 70%,white); background: color-mix(in srgb,var(--dashboard-asset-accent) 8%,var(--mcc-surface-control)); }
-.dashboard-pm-chevron svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; transition: transform 180ms ease; }
+.dashboard-pm-chevron { width: 26px; height: 26px; display: grid; place-items: center; align-self: center; justify-self: center; border: 1px solid color-mix(in srgb,var(--dashboard-asset-accent) 38%,var(--mcc-border-default)); border-radius: 50%; color: color-mix(in srgb,var(--dashboard-asset-accent) 70%,white); background-color: rgba(18,32,44,.92); background-image: linear-gradient(135deg,color-mix(in srgb,var(--dashboard-asset-accent) 10%,transparent),transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); line-height: 0; transition: border-color 200ms ease,background-color 200ms ease,color 200ms ease,box-shadow 200ms ease; }
+.dashboard-pm-chevron svg { width: 17px; height: 17px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); transform-origin: 50% 50%; transition: transform 220ms cubic-bezier(.4,0,.2,1); }
+.dashboard-pm-asset-group.is-open .dashboard-pm-chevron { border-color: color-mix(in srgb,var(--dashboard-asset-accent) 72%,white); color: color-mix(in srgb,var(--dashboard-asset-accent) 82%,white); background-color: rgba(24,47,62,.96); background-image: linear-gradient(135deg,color-mix(in srgb,var(--dashboard-asset-accent) 20%,transparent),transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.12),0 0 10px color-mix(in srgb,var(--dashboard-asset-accent) 24%,transparent); }
 .dashboard-pm-asset-group.is-open .dashboard-pm-chevron svg { transform: rotate(180deg); }
 
 .dashboard-pm-accordion-body { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 190ms ease,opacity 140ms ease,visibility 0s linear 190ms; }
@@ -150,6 +151,7 @@
   .dashboard-metric-pill.mcc-pill-card,
   .dashboard-pm-asset-group,
   .dashboard-pm-accordion-body,
+  .dashboard-pm-chevron,
   .dashboard-pm-chevron svg,
   .dashboard-pm-task-row { transition: none; }
 }
