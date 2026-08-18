@@ -1,27 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { MccPillCard, MccStatusPill } from '../../components/MccPills';
-import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 import { PmCompleteWorkflowModal } from '../preventive-maintenance/PmWorkflowModals';
 import { PmFormModal, PmHistoryModal, type AssetIdentity, type AssetLibraryScope, type PmTask } from '../machine-library/PreventiveMaintenanceTracking';
 import { PM_UPDATED_EVENT } from '../machine-library/pmEvents';
+import { DashboardRequisitionSummary, type DashboardRequisitionView } from './DashboardRequisitionSummary';
+import { dueInformation, intervalSummary, PmAttentionSection } from './DashboardPmAttention';
+import { sortedAttentionAlerts, type PmAlert } from './dashboardPm';
 
 type RequisitionSummary = { requestedCount:number;orderedCount:number;receivedCount:number;canceledCount:number;activeCount:number };
-export type DashboardRequisitionView = 'active'|'requested'|'ordered';
-type DashboardMetric = { view:DashboardRequisitionView;label:string;value:number;note:string;accentColor:string;variant:'info'|'warning'|'brand' };
-type PmStatus = 'Due Soon'|'Due Now'|'Past Due';
-type PmAlert = {
-  id:number;assetId:number;assetNumber:string;assetName:string;brand:string;model:string;serialNumber:string;
-  assetLibrary?:'machine'|'equipment';
-  title:string;instructions:string;notes:string;intervalType:string;intervalLabel:string;intervalValue:number;
-  status:PmStatus;relativeMessage:string;countdown:string;scheduleStatus:'active'|'hold'|'inactive';
-  lastCompletedDate:string|null;lastCompletedMeter:number|null;currentMeter:number|null;nextDueDate:string|null;nextDueMeter:number|null;
-  historyCount:number;createdAt:string;updatedAt:string;
-};
+export type { DashboardRequisitionView } from './DashboardRequisitionSummary';
 
 const emptyRequisitionSummary:RequisitionSummary={requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0};
-const attentionStatuses=new Set<PmStatus>(['Due Soon','Due Now','Past Due']);
-const meterIntervals=new Set(['hourly','cycles']);
 
 function formatDate(value:string|null) {
   if(!value)return 'Not set';
@@ -29,33 +18,11 @@ function formatDate(value:string|null) {
   return Number.isNaN(date.getTime())?value:date.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
 }
 function formatNumber(value:number|null){return value===null?'Not set':value.toLocaleString();}
-function intervalSummary(alert:PmAlert) {
-  const fixed:Record<string,string>={bi_weekly:'Every 2 weeks',quarterly:'Every 3 months',bi_annual:'Every 6 months',annual:'Every 12 months'};
-  if(fixed[alert.intervalType])return fixed[alert.intervalType];
-  const units:Record<string,[string,string]>={hourly:['hour','hours'],cycles:['cycle','cycles'],days:['day','days'],weekly:['week','weeks'],monthly:['month','months']};
-  const unit=units[alert.intervalType]??['interval','intervals'];
-  return `Every ${alert.intervalValue.toLocaleString()} ${Math.abs(alert.intervalValue)===1?unit[0]:unit[1]}`;
-}
-function dueInformation(alert:PmAlert) {
-  if(alert.nextDueDate)return `Due ${formatDate(alert.nextDueDate)}`;
-  if(alert.nextDueMeter!==null)return `Due at ${formatNumber(alert.nextDueMeter)} ${alert.intervalType==='hourly'?'hours':'cycles'}`;
-  return 'Next due information unavailable';
-}
 function lastCompletedInformation(alert:PmAlert) {
   const values=[];
   if(alert.lastCompletedDate)values.push(formatDate(alert.lastCompletedDate));
   if(alert.lastCompletedMeter!==null)values.push(`${formatNumber(alert.lastCompletedMeter)} ${alert.intervalType==='hourly'?'hours':'cycles'}`);
   return values.join(' · ')||'No completion recorded';
-}
-function pmSortDistance(alert:PmAlert) {
-  if(meterIntervals.has(alert.intervalType)&&alert.nextDueMeter!==null&&alert.currentMeter!==null)return alert.nextDueMeter-alert.currentMeter;
-  if(alert.nextDueDate){const today=new Date().toISOString().slice(0,10);return Date.parse(`${alert.nextDueDate}T12:00:00Z`)-Date.parse(`${today}T12:00:00Z`);}
-  return Number.MAX_SAFE_INTEGER;
-}
-function sortedAttentionAlerts(alerts:PmAlert[]) {
-  const rank:Record<PmStatus,number>={'Past Due':0,'Due Now':1,'Due Soon':2};
-  return alerts.filter(alert=>attentionStatuses.has(alert.status)&&alert.scheduleStatus==='active')
-    .sort((left,right)=>rank[left.status]-rank[right.status]||pmSortDistance(left)-pmSortDistance(right)||left.assetNumber.localeCompare(right.assetNumber,undefined,{numeric:true}));
 }
 function workOrderFilename(alert:PmAlert) {
   const token=(value:string)=>value.replace(/[^A-Za-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
@@ -110,47 +77,21 @@ export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermi
     return()=>{window.removeEventListener(PM_UPDATED_EVENT,refresh);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refreshWhenVisible);};
   },[loadPmAlerts]);
 
-  const dashboardMetrics=useMemo<DashboardMetric[]>(()=>[
-    {view:'active',label:'Active Requisitions',value:requisitionSummary.activeCount,note:'Requested + ordered',accentColor:'#36e5d0',variant:'info'},
-    {view:'requested',label:'Requested',value:requisitionSummary.requestedCount,note:'Waiting for order action',accentColor:'#f6be3f',variant:'warning'},
-    {view:'ordered',label:'Ordered',value:requisitionSummary.orderedCount,note:'Ordered, not yet received',accentColor:'#7d8cff',variant:'brand'},
-  ],[requisitionSummary]);
   function openRequisitions(view:DashboardRequisitionView) {
     if(requisitionNavigationPending.current)return;
     requisitionNavigationPending.current=true;
     onOpenRequisitions(view);
   }
-  const counts=useMemo(()=>({dueSoon:pmAlerts.filter(alert=>alert.status==='Due Soon').length,dueNow:pmAlerts.filter(alert=>alert.status==='Due Now').length,pastDue:pmAlerts.filter(alert=>alert.status==='Past Due').length}),[pmAlerts]);
-
   return <div className="page-stack dashboard-page">
-    <div className="dashboard-metric-grid" aria-label="Requisition summary">{dashboardMetrics.map(metric=><DashboardMetricPill key={metric.view} metric={metric} onActivate={()=>openRequisitions(metric.view)}/>)}</div>
+    <DashboardRequisitionSummary activeCount={requisitionSummary.activeCount} requestedCount={requisitionSummary.requestedCount} orderedCount={requisitionSummary.orderedCount} onOpen={openRequisitions}/>
     <section className="mcc-card dashboard-pm-panel glass-panel glass-panel--highlight" aria-labelledby="dashboard-pm-title">
-      <div className="dashboard-pm-heading"><div><p className="eyebrow">Maintenance attention</p><h2 id="dashboard-pm-title">Preventive Maintenance Due</h2></div>{pmAlerts.length>0&&<MccSummaryTokenGroup className="dashboard-pm-counts"><MccSummaryToken tone="warning">{counts.dueSoon} Due Soon</MccSummaryToken><MccSummaryToken tone="urgent">{counts.dueNow} Due Now</MccSummaryToken><MccSummaryToken tone="danger">{counts.pastDue} Past Due</MccSummaryToken></MccSummaryTokenGroup>}</div>
+      <div className="dashboard-pm-heading"><div><p className="eyebrow">Preventive maintenance</p><h2 id="dashboard-pm-title">Maintenance Attention</h2><p>Urgent schedules grouped by asset and library.</p></div></div>
       {pmLoading&&<p className="dashboard-pm-state">Loading preventive maintenance…</p>}
       {!pmLoading&&pmError&&<div className="dashboard-pm-state error"><span>{pmError}</span><button className="secondary-button compact-button" type="button" onClick={()=>void loadPmAlerts()}>Retry</button></div>}
-      {!pmLoading&&!pmError&&!pmAlerts.length&&<p className="dashboard-pm-state success">No preventive maintenance is currently due.</p>}
-      {!pmLoading&&!pmError&&pmAlerts.length>0&&<div className="dashboard-pm-grid">{pmAlerts.map(alert=><PmAlertCard key={alert.id} alert={alert} onOpen={()=>setSelectedPm(alert)}/>)}</div>}
+      {!pmLoading&&!pmError&&<div className="dashboard-pm-sections"><PmAttentionSection library="machine" title="Machine PM Attention" description="Machine Library preventive maintenance requiring action." alerts={pmAlerts} onOpenTask={setSelectedPm}/><PmAttentionSection library="equipment" title="Equipment PM Attention" description="Equipment Library preventive maintenance requiring action." alerts={pmAlerts} onOpenTask={setSelectedPm}/></div>}
     </section>
     {selectedPm&&<PmDetailModal alert={selectedPm} performedBy={userFullName} canEdit={effectivePermissions.includes(`${selectedPm.assetLibrary==='equipment'?'equipment':'machine'}.pm_manage`)} onClose={()=>setSelectedPm(null)} onChanged={async()=>{setSelectedPm(null);await loadPmAlerts();}}/>}
   </div>;
-}
-
-function DashboardMetricPill({metric,onActivate}:{metric:DashboardMetric;onActivate:()=>void}) {
-  return <MccPillCard className={`dashboard-metric-pill dashboard-metric-pill--${metric.view}`} variant={metric.variant} accentColor={metric.accentColor} onActivate={onActivate} ariaLabel={`${metric.label}: ${metric.value}. Open ${metric.label.toLowerCase()} view`}>
-    <span className="dashboard-metric-label">{metric.label}</span>
-    <span className="dashboard-metric-value-row"><strong>{metric.value.toLocaleString()}</strong><span className="dashboard-metric-arrow" aria-hidden="true">&rarr;</span></span>
-    <span className="dashboard-metric-note">{metric.note}</span>
-  </MccPillCard>;
-}
-
-function PmAlertCard({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
-  const tone=alert.status==='Due Soon'?'warning':'danger';
-  const accent=alert.status==='Due Soon'?'#F6BE3F':alert.status==='Due Now'?'#FF8A4C':'#FF4968';
-  return <MccPillCard className={`dashboard-pm-alert status-${alert.status.toLowerCase().replace(/\s+/g,'-')}`} variant={tone} accentColor={accent} onActivate={onOpen} ariaLabel={`Open ${alert.title} preventive maintenance details for ${alert.assetNumber}`}>
-    <div className="dashboard-pm-top"><div className="dashboard-pm-asset"><strong>{alert.assetNumber}</strong><span>{alert.brand||'Brand unknown'}</span></div><MccStatusPill variant={tone} className="dashboard-pm-status">{alert.status}</MccStatusPill></div>
-    <div className="dashboard-pm-task"><strong>{alert.title}</strong><span className={`dashboard-pm-interval${alert.intervalType==='hourly'?' dashboard-pm-interval--hourly':''}`}>{intervalSummary(alert)}</span></div>
-    <div className="dashboard-pm-due"><span>{dueInformation(alert)}</span><i aria-hidden="true">·</i><strong>{alert.relativeMessage||alert.countdown}</strong><span className="dashboard-pm-open" aria-hidden="true" title="Open details">&rarr;</span></div>
-  </MccPillCard>;
 }
 
 function dashboardTask(alert:PmAlert):PmTask{return {...alert,intervalType:alert.intervalType as PmTask['intervalType'],status:alert.status,scheduleStatus:alert.scheduleStatus};}

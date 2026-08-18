@@ -8197,12 +8197,14 @@ function dashboardPmSortDistance(row:PmTaskRow) {
   return Number.MAX_SAFE_INTEGER;
 }
 function dashboardPmAlerts() {
-  type DashboardPmRow=PmTaskRow&{asset_number:string;asset_name:string;brand:string;model:string;serial_number:string};
+  type DashboardPmRow=PmTaskRow&{asset_number:string;asset_name:string;brand:string;model:string;serial_number:string;accent_color:string;category:string};
   const statusRank:Record<string,number>={Overdue:0,'Due Now':1,'Due Soon':2};
-  const machineRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number
+  const machineRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(bs.color_hex,def.color_hex,?) AS accent_color,'' AS category
     FROM pm_tasks p JOIN machine_assets a ON a.id=p.asset_id
-    WHERE p.asset_library='machine' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`);
-  const equipmentRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number
+    LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand)
+    LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default'
+    WHERE p.asset_library='machine' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`,[machineDefaultBrandColors.Default]);
+  const equipmentRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,'' AS accent_color,a.category
     FROM pm_tasks p JOIN equipment_assets a ON a.id=p.asset_id
     WHERE p.asset_library='equipment' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`);
   return [...machineRows,...equipmentRows].map(row=>({row,state:pmTaskStatus(row)}))
@@ -8221,6 +8223,8 @@ function dashboardPmAlerts() {
       model:row.model,
       serialNumber:row.serial_number,
       assetLibrary:row.asset_library,
+      assetAccentColor:row.asset_library==='machine'?safeHexColor(row.accent_color,machineDefaultBrandColors.Default):'',
+      assetCategory:row.category,
     }));
 }
 function pmWorkOrderAttachment(historyId:number) {return one<PmWorkOrderAttachmentRow>('SELECT * FROM pm_work_order_attachments WHERE pm_history_id=?',[historyId]);}
