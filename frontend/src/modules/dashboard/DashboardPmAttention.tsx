@@ -77,7 +77,11 @@ export function PmAttentionSection({library,title,description,alerts,onOpenTask}
     const openAccordion=()=>sectionRef.current?.querySelector<HTMLElement>('.dashboard-pm-asset-group.is-open')??null;
     const handlePointerDown=(event:PointerEvent)=>{
       const accordion=openAccordion();
-      if(accordion&&event.target instanceof Node&&!accordion.contains(event.target))setOpenGroup(null);
+      if(!accordion||!(event.target instanceof Node)||accordion.contains(event.target))return;
+      const targetElement=event.target instanceof Element?event.target:event.target.parentElement;
+      const targetToggle=targetElement?.closest('.dashboard-pm-asset-toggle');
+      if(targetToggle&&sectionRef.current?.contains(targetToggle))return;
+      setOpenGroup(null);
     };
     const handleKeyDown=(event:KeyboardEvent)=>{
       if(event.key!=='Escape')return;

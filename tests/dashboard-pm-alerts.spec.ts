@@ -185,6 +185,34 @@ test('shows the compact empty state when no preventive maintenance needs attenti
   await expect(page.locator('.dashboard-pm-asset-group')).toHaveCount(0);
 });
 
+test('switches Machine and Equipment accordions above or below in one interaction',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
+  const alerts=[...fixtureAlerts,alert(3021,'Due Now',{assetLibrary:'equipment',assetId:302,assetNumber:'EQ-302',assetName:'Backup Air Compressor',brand:'Atlas Copco',assetCategory:'Air Compressor',title:'Oil Inspection',nextDueDate:'2026-07-17'})];
+  await mockDashboard(page,alerts);
+  await page.goto('/');
+
+  for(const library of ['machine','equipment'] as const){
+    const toggles=page.locator(`.dashboard-pm-section--${library} .dashboard-pm-asset-toggle`);
+    await expect(toggles).toHaveCount(2);
+    const upper=toggles.nth(0);
+    const lower=toggles.nth(1);
+
+    await activate(upper,mobile);
+    await expect(upper).toHaveAttribute('aria-expanded','true');
+    await lower.locator('.dashboard-pm-asset-identity strong').dispatchEvent('pointerdown',{pointerType:mobile?'touch':'mouse',isPrimary:true});
+    await expect(upper).toHaveAttribute('aria-expanded','true');
+    await lower.dispatchEvent('click');
+    await expect(lower).toHaveAttribute('aria-expanded','true');
+    await expect(upper).toHaveAttribute('aria-expanded','false');
+
+    await activate(upper,mobile);
+    await expect(upper).toHaveAttribute('aria-expanded','true');
+    await expect(lower).toHaveAttribute('aria-expanded','false');
+    await activate(upper,mobile);
+    await expect(upper).toHaveAttribute('aria-expanded','false');
+  }
+});
+
 test('closes Machine and Equipment accordions outside or on Escape, but not on inside pointer events',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   await mockDashboard(page);
