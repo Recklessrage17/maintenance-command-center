@@ -10852,12 +10852,16 @@ app.post('/api/backup/recovery/restore', requireAuth, async(req:AuthRequest,res)
   try {
     const body = isRecord(req.body) ? req.body : {};
     activeBackupId = String(body.backupId ?? '').trim();
+    const activeRestoreId = activePortableRestores.values().next().value;
+    if (activeRestoreId) {
+      if (activeRestoreId === activeBackupId) throw new Error('This recovery package is already being restored.');
+      throw new Error('Another MCC recovery restore is already in progress.');
+    }
     if (String(body.confirmation ?? '').trim() !== 'RESTORE MCC') throw new Error('Type RESTORE MCC to confirm restore.');
-    if (activePortableRestores.has(activeBackupId)) throw new Error('This recovery package is already being restored.');
-    const packagePath = importedPackagePath(recoveryDir, body.backupId);
-    if (!fs.existsSync(packagePath)) throw new Error('Imported recovery package not found.');
     activePortableRestores.add(activeBackupId);
     activeRestoreRegistered = true;
+    const packagePath = importedPackagePath(recoveryDir, body.backupId);
+    if (!fs.existsSync(packagePath)) throw new Error('Imported recovery package not found.');
     beginPortableRestoreStatus(activeBackupId, req.sessionId!);
     await yieldForRestoreStatusPolling();
     const result = await restoreBackup({
@@ -10873,7 +10877,7 @@ app.post('/api/backup/recovery/restore', requireAuth, async(req:AuthRequest,res)
     const message = safePortableRestoreClientError(error, 'Portable backup restore failed.');
     if (activeRestoreRegistered) failPortableRestoreStatus(activeBackupId, message);
     try { audit(req,'portable backup restore failed','backup',isRecord(req.body)?String(req.body.backupId??''):'',{error:message}); } catch {}
-    const statusCode = /already being restored/i.test(message)
+    const statusCode = /already being restored|recovery restore is already in progress/i.test(message)
       ? 409
       : /confirm|not found|missing|checksum|invalid|unsupported|incompatible|integrity/i.test(message)
         ? 400
