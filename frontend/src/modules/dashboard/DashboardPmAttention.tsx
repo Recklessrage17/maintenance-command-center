@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { MccStatusPill } from '../../components/MccPills';
 import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 import { groupPmAlerts, pmStatusCounts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus } from './dashboardPm';
@@ -70,8 +70,31 @@ export function PmAttentionSection({library,title,description,alerts,onOpenTask}
   const groups=useMemo(()=>groupPmAlerts(alerts,library),[alerts,library]);
   const sectionAlerts=useMemo(()=>groups.flatMap(group=>group.alerts),[groups]);
   const [openGroup,setOpenGroup]=useState<string|null>(null);
+  const sectionRef=useRef<HTMLElement>(null);
   useEffect(()=>{if(openGroup&&!groups.some(group=>group.key===openGroup))setOpenGroup(null);},[groups,openGroup]);
-  return <section className={`dashboard-pm-section dashboard-pm-section--${library}`} aria-labelledby={`dashboard-${library}-pm-title`}>
+  useEffect(()=>{
+    if(!openGroup)return;
+    const openAccordion=()=>sectionRef.current?.querySelector<HTMLElement>('.dashboard-pm-asset-group.is-open')??null;
+    const handlePointerDown=(event:PointerEvent)=>{
+      const accordion=openAccordion();
+      if(accordion&&event.target instanceof Node&&!accordion.contains(event.target))setOpenGroup(null);
+    };
+    const handleKeyDown=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape')return;
+      const accordion=openAccordion();
+      if(!accordion||!accordion.contains(document.activeElement))return;
+      event.preventDefault();
+      setOpenGroup(null);
+      accordion.querySelector<HTMLElement>('.dashboard-pm-asset-toggle')?.focus();
+    };
+    document.addEventListener('pointerdown',handlePointerDown);
+    document.addEventListener('keydown',handleKeyDown);
+    return ()=>{
+      document.removeEventListener('pointerdown',handlePointerDown);
+      document.removeEventListener('keydown',handleKeyDown);
+    };
+  },[openGroup]);
+  return <section ref={sectionRef} className={`dashboard-pm-section dashboard-pm-section--${library}`} aria-labelledby={`dashboard-${library}-pm-title`}>
     <header className="dashboard-pm-section-heading">
       <div><p className="dashboard-pm-library-label">{library==='machine'?'Machine Library':'Equipment Library'}</p><h3 id={`dashboard-${library}-pm-title`}>{title}</h3><p>{description}</p></div>
       {sectionAlerts.length>0&&<PmStatusSummary alerts={sectionAlerts} className="dashboard-pm-section-counts"/>}

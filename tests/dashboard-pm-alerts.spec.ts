@@ -185,6 +185,34 @@ test('shows the compact empty state when no preventive maintenance needs attenti
   await expect(page.locator('.dashboard-pm-asset-group')).toHaveCount(0);
 });
 
+test('closes open Machine and Equipment accordions on outside interaction and Escape only',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
+  await mockDashboard(page);
+  await page.goto('/');
+  const machineSection=page.locator('.dashboard-pm-section--machine');
+  const equipmentSection=page.locator('.dashboard-pm-section--equipment');
+  const press51=machineSection.getByRole('button',{name:/Press 51 \(Toyo\)/});
+  const equipment301=equipmentSection.getByRole('button',{name:/EQ-301 \(Atlas Copco\)/});
+
+  await activate(press51,mobile);
+  await activate(machineSection.locator('.dashboard-pm-status-section h4').first(),mobile);
+  await expect(press51).toHaveAttribute('aria-expanded','true');
+  await activate(machineSection.getByRole('heading',{name:'Machine PM Attention'}),mobile);
+  await expect(press51).toHaveAttribute('aria-expanded','false');
+
+  await press51.focus();
+  await press51.press('Enter');
+  await press51.press('Escape');
+  await expect(press51).toHaveAttribute('aria-expanded','false');
+  await expect(press51).toBeFocused();
+
+  await activate(equipment301,mobile);
+  await activate(equipmentSection.locator('.dashboard-pm-status-section h4').first(),mobile);
+  await expect(equipment301).toHaveAttribute('aria-expanded','true');
+  await activate(equipmentSection.getByRole('heading',{name:'Equipment PM Attention'}),mobile);
+  await expect(equipment301).toHaveAttribute('aria-expanded','false');
+});
+
 test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   const dynamicAlerts=[alert(1,'Past Due')];
@@ -203,13 +231,17 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
     await expect(groups).toHaveCount(count);
     const layout=await page.evaluate(()=>{
       const panel=document.querySelector<HTMLElement>('.dashboard-pm-panel')!;
+      const section=document.querySelector<HTMLElement>('.dashboard-pm-section--machine')!;
       const list=document.querySelector<HTMLElement>('.dashboard-pm-section--machine .dashboard-pm-asset-list')!;
       const groups=[...document.querySelectorAll<HTMLElement>('.dashboard-pm-section--machine .dashboard-pm-asset-group')];
       const tokens=[...document.querySelectorAll<HTMLElement>('.dashboard-pm-section--machine .dashboard-pm-section-counts .mcc-summary-token')];
       return {
         panelWidth:panel.getBoundingClientRect().width,
+        sectionLeft:section.getBoundingClientRect().left,
+        sectionRight:section.getBoundingClientRect().right,
         listWidth:list.getBoundingClientRect().width,
         listLeft:list.getBoundingClientRect().left,
+        listRight:list.getBoundingClientRect().right,
         documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
         groups:groups.map(group=>({left:group.getBoundingClientRect().left,width:group.getBoundingClientRect().width,scrollWidth:group.scrollWidth,clientWidth:group.clientWidth})),
         tokenWidths:tokens.map(token=>token.getBoundingClientRect().width),
@@ -221,6 +253,7 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
     expect(layout.tokenWidths.every(width=>width<150)).toBeTruthy();
     expect(layout.groups.every(group=>group.width>=layout.listWidth-2)).toBeTruthy();
     expect(layout.listWidth).toBeLessThanOrEqual(layout.panelWidth);
+    expect(Math.abs((layout.listLeft-layout.sectionLeft)-(layout.sectionRight-layout.listRight))).toBeLessThanOrEqual(2);
   }
 
   const firstGroup=page.locator('.dashboard-pm-section--machine .dashboard-pm-asset-group').first();
