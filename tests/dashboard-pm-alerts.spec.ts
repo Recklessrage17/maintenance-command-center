@@ -282,6 +282,36 @@ test('centers and highlights smoothly rotating PM chevrons in both libraries',as
   }
 });
 
+test('renders sharp readable expanded PM task details in both libraries',async({page})=>{
+  await mockDashboard(page);
+  await page.goto('/');
+
+  for(const [sectionClass,assetName,detailColor] of [['machine','Press 51 \\(Toyo\\)','rgb(168, 242, 205)'],['equipment','EQ-301 \\(Atlas Copco\\)','rgb(197, 220, 231)']] as const){
+    const section=page.locator(`.dashboard-pm-section--${sectionClass}`);
+    await section.getByRole('button',{name:new RegExp(assetName)}).click();
+    const row=section.locator('.dashboard-pm-task-row').first();
+    const title=row.locator('.dashboard-pm-task-main strong');
+    const detail=row.locator('.dashboard-pm-task-main span');
+    const due=row.locator('.dashboard-pm-task-due strong');
+    const styles=await row.evaluate(element=>{
+      const rowStyle=getComputedStyle(element);
+      const titleStyle=getComputedStyle(element.querySelector('.dashboard-pm-task-main strong')!);
+      const detailStyle=getComputedStyle(element.querySelector('.dashboard-pm-task-main span')!);
+      const dueStyle=getComputedStyle(element.querySelector('.dashboard-pm-task-due strong')!);
+      return {
+        rowBackground:rowStyle.backgroundColor,
+        title:{fontSize:Number.parseFloat(titleStyle.fontSize),fontWeight:Number(titleStyle.fontWeight),opacity:titleStyle.opacity,filter:titleStyle.filter,textShadow:titleStyle.textShadow},
+        detail:{fontSize:Number.parseFloat(detailStyle.fontSize),fontWeight:Number(detailStyle.fontWeight),color:detailStyle.color,opacity:detailStyle.opacity,filter:detailStyle.filter,textShadow:detailStyle.textShadow},
+        due:{fontSize:Number.parseFloat(dueStyle.fontSize),fontWeight:Number(dueStyle.fontWeight),opacity:dueStyle.opacity,filter:dueStyle.filter,textShadow:dueStyle.textShadow},
+      };
+    });
+    expect(styles.rowBackground).toBe('rgba(3, 14, 27, 0.92)');
+    expect(styles.title).toMatchObject({fontSize:14.72,fontWeight:950,opacity:'1',filter:'none',textShadow:'none'});
+    expect(styles.detail).toMatchObject({fontSize:12,fontWeight:800,color:detailColor,opacity:'1',filter:'none',textShadow:'none'});
+    expect(styles.due).toMatchObject({fontSize:12.48,fontWeight:900,opacity:'1',filter:'none',textShadow:'none'});
+  }
+});
+
 test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   const dynamicAlerts=[alert(1,'Past Due')];
