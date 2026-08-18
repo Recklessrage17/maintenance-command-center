@@ -185,7 +185,7 @@ test('shows the compact empty state when no preventive maintenance needs attenti
   await expect(page.locator('.dashboard-pm-asset-group')).toHaveCount(0);
 });
 
-test('closes open Machine and Equipment accordions on outside interaction and Escape only',async({page},testInfo)=>{
+test('closes Machine and Equipment accordions outside or on Escape, but not on inside pointer events',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   await mockDashboard(page);
   await page.goto('/');
@@ -193,10 +193,15 @@ test('closes open Machine and Equipment accordions on outside interaction and Es
   const equipmentSection=page.locator('.dashboard-pm-section--equipment');
   const press51=machineSection.getByRole('button',{name:/Press 51 \(Toyo\)/});
   const equipment301=equipmentSection.getByRole('button',{name:/EQ-301 \(Atlas Copco\)/});
+  const verifyInsidePointerKeepsOpen=async(toggle:Locator,heading:Locator)=>{
+    await expect(toggle).toHaveAttribute('aria-expanded','true');
+    await expect(heading).toBeVisible();
+    await heading.dispatchEvent('pointerdown',{pointerType:mobile?'touch':'mouse',isPrimary:true});
+    await expect(toggle).toHaveAttribute('aria-expanded','true');
+  };
 
   await activate(press51,mobile);
-  await activate(machineSection.locator('.dashboard-pm-status-section h4').first(),mobile);
-  await expect(press51).toHaveAttribute('aria-expanded','true');
+  await verifyInsidePointerKeepsOpen(press51,machineSection.locator('.dashboard-pm-status-section h4').first());
   await activate(machineSection.getByRole('heading',{name:'Machine PM Attention'}),mobile);
   await expect(press51).toHaveAttribute('aria-expanded','false');
 
@@ -207,8 +212,7 @@ test('closes open Machine and Equipment accordions on outside interaction and Es
   await expect(press51).toBeFocused();
 
   await activate(equipment301,mobile);
-  await activate(equipmentSection.locator('.dashboard-pm-status-section h4').first(),mobile);
-  await expect(equipment301).toHaveAttribute('aria-expanded','true');
+  await verifyInsidePointerKeepsOpen(equipment301,equipmentSection.locator('.dashboard-pm-status-section h4').first());
   await activate(equipmentSection.getByRole('heading',{name:'Equipment PM Attention'}),mobile);
   await expect(equipment301).toHaveAttribute('aria-expanded','false');
 });
