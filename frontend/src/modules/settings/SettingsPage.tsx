@@ -99,6 +99,18 @@ type ImportedRecoveryBackup = {
   checkedFileCount: number;
   safeToDisconnect: boolean;
 };
+type PortableRestoreStatus = {
+  active: boolean;
+  backupId: string;
+  state: 'running' | 'success' | 'error';
+  phase: string;
+  progressPercent: number;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
 type ExternalBackupSettings = {
   destination: string;
   enabled: boolean;
@@ -834,6 +846,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [visibleBackupList,setVisibleBackupList]=useState<Exclude<BackupCategory, 'legacy'>|null>(null);
   const [restoreTarget,setRestoreTarget]=useState<BackupSummary|null>(null);
   const [recoveryRestoreTarget,setRecoveryRestoreTarget]=useState<ImportedRecoveryBackup|null>(null);
+  const [portableRestoreStatus,setPortableRestoreStatus]=useState<PortableRestoreStatus|null>(null);
+  const portableRestoreInFlight=useRef(false);
   const [restoreConfirmation,setRestoreConfirmation]=useState('');
   const [msg,setMsg]=useState('');
   const [loading,setLoading]=useState(false);
@@ -861,6 +875,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   },[sharedNetworkUrl]);
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
+  const portableRestoreActive=Boolean(portableRestoreStatus?.state==='running'||(recoveryRestoreTarget&&portableLoading&&!portableRestoreStatus));
+  const portableRestorePercent=Math.max(0,Math.min(100,Math.round(portableRestoreStatus?.progressPercent??0)));
   const resetConfigs = useMemo<ResetConfig[]>(()=>[
     {
       section: 'inventory',
@@ -1166,19 +1182,98 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     }
   }
 
+  function closeImportedRestore() {
+    if(portableRestoreActive)return;
+    setRecoveryRestoreTarget(null);
+    setRestoreConfirmation('');
+    setPortableRestoreStatus(null);
+  }
+
   async function restoreImportedBackup() {
-    if(!recoveryRestoreTarget)return;
+    if(!recoveryRestoreTarget||portableRestoreInFlight.current)return;
+    const target=recoveryRestoreTarget;
+    const statusUrl=`/api/backup/recovery/restore/status?backupId=${encodeURIComponent(target.id)}`;
+    const startedAt=new Date().toISOString();
+    portableRestoreInFlight.current=true;
     setPortableLoading(true);
-    setPortableMessage('Revalidating local recovery copy and creating pre-restore backup...');
+    setPortableMessage('');
+    setPortableRestoreStatus({
+      active:true,
+      backupId:target.id,
+      state:'running',
+      phase:'starting',
+      progressPercent:5,
+      message:'Starting restore...',
+      startedAt,
+      updatedAt:startedAt,
+      completedAt:null,
+      error:null,
+    });
+    let keepPolling=true;
+    const pollingPromise=(async()=>{
+      while(keepPolling){
+        await new Promise<void>(resolve=>window.setTimeout(resolve,650));
+        if(!keepPolling)return;
+        try{
+          const data=await api(statusUrl);
+          if(!keepPolling)return;
+          const status=data.status as PortableRestoreStatus|undefined;
+          if(status?.backupId===target.id)setPortableRestoreStatus(status);
+          if(status&&!status.active)return;
+        }catch{
+          // The restore POST remains authoritative; transient status polling failures are safe to retry.
+        }
+      }
+    })();
     try {
-      const data=await api('/api/backup/recovery/restore',{method:'POST',body:JSON.stringify({backupId:recoveryRestoreTarget.id,confirmation:restoreConfirmation})});
-      setPortableMessage(String(data.message??'Verified portable backup restored. Refresh MCC and log in again if needed.'));
-      setRecoveryRestoreTarget(null);
-      setRestoreConfirmation('');
-      await loadBackupStatus({quiet:true});
+      const data=await api('/api/backup/recovery/restore',{method:'POST',body:JSON.stringify({backupId:target.id,confirmation:restoreConfirmation})});
+      const completedAt=new Date().toISOString();
+      const status=data.restoreStatus as PortableRestoreStatus|undefined;
+      setPortableRestoreStatus(status?.backupId===target.id?status:{
+        active:false,
+        backupId:target.id,
+        state:'success',
+        phase:'complete',
+        progressPercent:100,
+        message:'Restore complete.',
+        startedAt,
+        updatedAt:completedAt,
+        completedAt,
+        error:null,
+      });
+      setPortableMessage(String(data.message??'MCC restored successfully. Refresh MCC and log in again if needed.'));
+      await loadBackupStatus({quiet:true}).catch(()=>undefined);
     } catch(error) {
-      setPortableMessage((error as Error).message);
+      const message=(error as Error).message||'Portable backup restore failed.';
+      let receivedFailureStatus=false;
+      try{
+        const data=await api(statusUrl);
+        const status=data.status as PortableRestoreStatus|undefined;
+        if(status?.backupId===target.id){
+          receivedFailureStatus=true;
+          setPortableRestoreStatus(status);
+        }
+      }catch{}
+      if(!receivedFailureStatus){
+        const completedAt=new Date().toISOString();
+        setPortableRestoreStatus(current=>({
+          active:false,
+          backupId:target.id,
+          state:'error',
+          phase:current?.phase??'starting',
+          progressPercent:current?.progressPercent??5,
+          message,
+          startedAt:current?.startedAt??startedAt,
+          updatedAt:completedAt,
+          completedAt,
+          error:message,
+        }));
+      }
+      setPortableMessage(message);
     } finally {
+      keepPolling=false;
+      await pollingPromise;
+      portableRestoreInFlight.current=false;
       setPortableLoading(false);
     }
   }
@@ -1731,7 +1826,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
                       {backup.safeToDisconnect&&<em>Backup safely copied to this MCC drive. External backup drive may now be disconnected.</em>}
                     </div>
                     {backupPermissions.canRestoreMaster
-                      ? <button className="danger-button compact-button" type="button" disabled={portableLoading} onClick={()=>{setRecoveryRestoreTarget(backup);setRestoreConfirmation('');}}>Restore Verified Backup</button>
+                      ? <button className="danger-button compact-button" type="button" disabled={portableLoading} onClick={()=>{setRecoveryRestoreTarget(backup);setRestoreConfirmation('');setPortableRestoreStatus(null);}}>Restore Verified Backup</button>
                       : <small>Admin confirmation required to restore</small>}
                   </div>
                 ))}
@@ -1823,27 +1918,47 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
       )}
 
       {recoveryRestoreTarget&&(
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="portable-restore-title">
           <section className="mcc-card inventory-modal restore-modal">
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Restore verified local recovery copy</p>
-                <h3>{recoveryRestoreTarget.name}</h3>
+                <h3 id="portable-restore-title">{recoveryRestoreTarget.name}</h3>
               </div>
-              <button className="link-button compact-button" type="button" onClick={()=>setRecoveryRestoreTarget(null)} disabled={portableLoading}>Close</button>
+              <button className="link-button compact-button" type="button" onClick={closeImportedRestore} disabled={portableRestoreActive}>Close</button>
             </div>
             <section className="restore-warning-panel">
               <strong>MCC {recoveryRestoreTarget.appVersion} from {formatDateTime(recoveryRestoreTarget.createdAt)}</strong>
               <p>MCC will revalidate the local imported copy, create the normal pre-restore safety backup, then replace database and packaged runtime payloads.</p>
               <p>The external/source ZIP is not used or modified during restore.</p>
             </section>
+            {portableRestoreStatus&&(
+              <section className={`restore-progress-panel ${portableRestoreStatus.state}`}>
+                <div className="restore-progress-heading">
+                  <span>{portableRestoreStatus.state==='success'?'Restore Complete ✓':portableRestoreStatus.state==='error'?`Restore stopped at ${portableRestorePercent}%`:'Restoring verified backup'}</span>
+                  <strong>{portableRestorePercent}%</strong>
+                </div>
+                <div
+                  className="restore-progress-track"
+                  role="progressbar"
+                  aria-label="Verified backup restore progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={portableRestorePercent}
+                  aria-valuetext={`${portableRestorePercent}% — ${portableRestoreStatus.message}`}
+                >
+                  <span style={{width:`${portableRestorePercent}%`}} />
+                </div>
+                <p role="status" aria-live="polite">{portableRestoreStatus.state==='success'?'MCC restored successfully. Refresh MCC and log in again if needed.':portableRestoreStatus.message}</p>
+              </section>
+            )}
             <label className="form-field">
               <span>Type RESTORE MCC to continue</span>
-              <input value={restoreConfirmation} onChange={event=>setRestoreConfirmation(event.target.value)} placeholder="RESTORE MCC" disabled={portableLoading} />
+              <input value={restoreConfirmation} onChange={event=>setRestoreConfirmation(event.target.value)} placeholder="RESTORE MCC" disabled={portableRestoreActive||portableRestoreStatus?.state==='success'} />
             </label>
             <div className="modal-actions">
-              <button className="danger-button" type="button" onClick={()=>void restoreImportedBackup()} disabled={portableLoading||restoreConfirmation!=='RESTORE MCC'}>{portableLoading?'Restoring...':'Restore Verified Backup'}</button>
-              <button className="secondary-button" type="button" onClick={()=>setRecoveryRestoreTarget(null)} disabled={portableLoading}>Cancel</button>
+              <button className="danger-button" type="button" onClick={()=>void restoreImportedBackup()} disabled={portableRestoreActive||portableRestoreStatus?.state==='success'||restoreConfirmation!=='RESTORE MCC'}>{portableRestoreActive?'Restoring...':portableRestoreStatus?.state==='error'?'Retry Restore':'Restore Verified Backup'}</button>
+              <button className="secondary-button" type="button" onClick={closeImportedRestore} disabled={portableRestoreActive}>{portableRestoreStatus?.state==='success'?'Close':'Cancel'}</button>
             </div>
           </section>
         </div>

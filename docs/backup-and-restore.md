@@ -128,14 +128,15 @@ Recovery storage is bounded instead: imports stop before committed storage excee
 8. An Admin/Owner Admin selects **Restore Verified Backup**, types `RESTORE MCC`, and continues.
 9. MCC revalidates the persistent local copy before touching live state.
 10. MCC creates and verifies the normal portable `pre_restore` safety backup.
-11. MCC restores the database and packaged runtime payloads into the current configured locations. It does not restore old absolute paths.
-12. Refresh/restart as prompted and log in using users restored from the backup database.
+11. The restore modal reports compact phase-weighted progress from actual backend recovery events while MCC restores the database and packaged runtime payloads into the current configured locations. It does not restore old absolute paths.
+12. `100%` is reported only after database/file/storage validation and recovery metadata work complete successfully.
+13. Refresh/restart as prompted and log in using users restored from the backup database.
 
 The restore runs from the verified local imported copy, not directly from removable media. A reboot or source-drive removal therefore does not create an ongoing dependency on the old mount.
 
 ## Restore safety and rollback
 
-Before replacement, MCC verifies the complete package and SQLite `PRAGMA quick_check`. Machine Library validation additionally proves that documents, generated note PDFs, note attachments, inspection files, and component images referenced by SQLite exist in the package, have their recorded sizes, and retain valid machine/folder/note relationships. The live database is closed only after validation and the `pre_restore` package succeeds. Database/WAL/SHM and complete portable payload folders are restored from allowlisted mappings. PM workbook and work-order storage use their current environment-derived paths.
+Before replacement, MCC verifies the complete package and SQLite `PRAGMA quick_check`. Machine Library validation additionally proves that documents, generated note PDFs, note attachments, inspection files, and component images referenced by SQLite exist in the package, have their recorded sizes, and retain valid machine/folder/note relationships. The live database is closed only after validation and the verified `pre_restore` safety backup succeeds. Database/WAL/SHM and complete portable payload folders are restored from allowlisted mappings. PM workbook and work-order storage use their current environment-derived paths.
 
 If restore fails after replacement begins, MCC reopens the `pre_restore` snapshot, restores its runtime payloads, recreates required storage directories, and leaves the source backup unchanged. The failure is audited and the verified local imported package remains available for retry.
 

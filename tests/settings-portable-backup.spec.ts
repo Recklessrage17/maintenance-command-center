@@ -2,6 +2,13 @@ import { expect, type Page, test } from '@playwright/test';
 
 type FixtureRole='admin'|'manager'|'tech3';
 
+type RestoreStatus={active:boolean;backupId:string;state:'running'|'success'|'error';phase:string;progressPercent:number;message:string;startedAt:string;updatedAt:string;completedAt:string|null;error:string|null};
+
+function restoreStatus(overrides:Partial<RestoreStatus>={}):RestoreStatus{
+  const timestamp='2026-08-18T12:00:00.000Z';
+  return{active:true,backupId:'MCC_Master_Backup_2026-08-17_12-00-00',state:'running',phase:'restoring_database',progressPercent:60,message:'Restoring MCC database...',startedAt:timestamp,updatedAt:timestamp,completedAt:null,error:null,...overrides};
+}
+
 function group(category:string,visible:boolean){return{category,categoryLabel:category,visible,latestBackup:null,lastAutoBackup:null,count:0,health:{ok:visible,label:visible?'Healthy':'Hidden',message:visible?'Ready':'Not available for this role.'},folderLabel:visible?category:'',folderPath:visible?category:'',autoBackupPending:false,nextScheduledBackupAt:null};}
 
 async function mockSettings(page:Page,role:FixtureRole){
@@ -28,6 +35,24 @@ test('Manager sees portable import/download but not destructive restore or exter
 
 test('Admin sees external controls and protected portable restore confirmation',async({page})=>{
   await mockSettings(page,'admin');await page.goto('/settings');const panel=page.getByRole('region',{name:'Portable Master Backup and Recovery'});await expect(panel.getByLabel('Server-side external backup destination')).toHaveValue('/media/usb/MCC_Backups');await expect(panel.getByRole('button',{name:'Test Backup Location'})).toBeVisible();await panel.getByRole('button',{name:'Restore Verified Backup'}).click();await expect(page.getByText('Type RESTORE MCC to continue')).toBeVisible();await expect(page.getByRole('button',{name:'Restore Verified Backup'}).last()).toBeDisabled();await page.setViewportSize({width:390,height:844});const widths=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));expect(widths.scroll).toBeLessThanOrEqual(widths.client);
+});
+
+test('Portable restore renders real progress, locks controls, and preserves a clear success state',async({page})=>{
+  await mockSettings(page,'admin');
+  let releaseRestore=()=>{};const restoreGate=new Promise<void>(resolve=>{releaseRestore=resolve;});
+  await page.route('**/api/backup/recovery/restore/status?*',route=>route.fulfill({json:{ok:true,status:restoreStatus()}}));
+  await page.route('**/api/backup/recovery/restore',async route=>{await restoreGate;const status=restoreStatus({active:false,state:'success',phase:'complete',progressPercent:100,message:'Restore complete.',completedAt:'2026-08-18T12:01:00.000Z',error:null});await route.fulfill({json:{ok:true,restoreStatus:status,message:'MCC restored successfully. Refresh MCC and log in again if needed.'}});});
+  await page.goto('/settings');const panel=page.getByRole('region',{name:'Portable Master Backup and Recovery'});await panel.getByRole('button',{name:'Restore Verified Backup'}).click();const dialog=page.getByRole('dialog');const confirmation=dialog.getByPlaceholder('RESTORE MCC');const restoreButton=dialog.getByRole('button',{name:'Restore Verified Backup'});await expect(restoreButton).toBeDisabled();await confirmation.fill('RESTORE MCC');await expect(restoreButton).toBeEnabled();await restoreButton.click();
+  const progress=dialog.getByRole('progressbar',{name:'Verified backup restore progress'});await expect(progress).toBeVisible();await expect(progress).toHaveAttribute('aria-valuemin','0');await expect(progress).toHaveAttribute('aria-valuemax','100');await expect(progress).toHaveAttribute('aria-valuenow','5');await expect(confirmation).toBeDisabled();await expect(dialog.getByRole('button',{name:'Restoring...'})).toBeDisabled();await expect(dialog.getByRole('button',{name:'Cancel'})).toBeDisabled();await expect(dialog.getByRole('button',{name:'Close'})).toBeDisabled();
+  await expect(progress).toHaveAttribute('aria-valuenow','60');await expect(dialog.getByText('Restoring MCC database...')).toBeVisible();const layout=await page.evaluate(()=>{const modal=document.querySelector('.restore-modal')?.getBoundingClientRect();const track=document.querySelector('.restore-progress-track')?.getBoundingClientRect();return{scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,modalLeft:modal?.left??-1,modalRight:modal?.right??Number.MAX_SAFE_INTEGER,trackWidth:track?.width??0};});expect(layout.scroll).toBeLessThanOrEqual(layout.client);expect(layout.modalLeft).toBeGreaterThanOrEqual(0);expect(layout.modalRight).toBeLessThanOrEqual(layout.client+1);expect(layout.trackWidth).toBeGreaterThan(180);
+  releaseRestore();await expect(progress).toHaveAttribute('aria-valuenow','100');await expect(dialog.getByText('Restore Complete ✓')).toBeVisible();await expect(dialog.getByText('MCC restored successfully. Refresh MCC and log in again if needed.')).toBeVisible();await expect(dialog.getByRole('button',{name:'Close'}).first()).toBeEnabled();await expect(confirmation).toBeDisabled();
+});
+
+test('Portable restore failure keeps the last real percentage and safely enables retry',async({page})=>{
+  await mockSettings(page,'admin');const failed=restoreStatus({active:false,state:'error',phase:'restoring_runtime_files',progressPercent:75,message:'Runtime payload validation failed.',completedAt:'2026-08-18T12:00:30.000Z',error:'Runtime payload validation failed.'});
+  await page.route('**/api/backup/recovery/restore/status?*',route=>route.fulfill({json:{ok:true,status:failed}}));
+  await page.route('**/api/backup/recovery/restore',route=>route.fulfill({status:400,json:{ok:false,error:'Runtime payload validation failed.',restoreStatus:failed}}));
+  await page.goto('/settings');await page.getByRole('region',{name:'Portable Master Backup and Recovery'}).getByRole('button',{name:'Restore Verified Backup'}).click();const dialog=page.getByRole('dialog');const confirmation=dialog.getByPlaceholder('RESTORE MCC');await confirmation.fill('RESTORE MCC');await dialog.getByRole('button',{name:'Restore Verified Backup'}).click();const progress=dialog.getByRole('progressbar',{name:'Verified backup restore progress'});await expect(progress).toHaveAttribute('aria-valuenow','75');await expect(dialog.getByText('Restore stopped at 75%')).toBeVisible();await expect(dialog.getByText('Runtime payload validation failed.')).toBeVisible();await expect(confirmation).toBeEnabled();await expect(dialog.getByRole('button',{name:'Retry Restore'})).toBeEnabled();await expect(dialog.getByRole('button',{name:'Cancel'})).toBeEnabled();await expect(dialog.getByRole('button',{name:'Close'})).toBeEnabled();
 });
 
 test('Maintenance Tech 3 cannot see portable recovery controls',async({page})=>{await mockSettings(page,'tech3');await page.goto('/settings');await expect(page.getByRole('region',{name:'Portable Master Backup and Recovery'})).toHaveCount(0);});

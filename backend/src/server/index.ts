@@ -164,6 +164,120 @@ const recoveryMaxPackages = Number.isInteger(configuredRecoveryMaxPackages) && c
   : DEFAULT_RECOVERY_MAX_PACKAGES;
 const recoveryStoragePolicy = { quotaBytes: recoveryQuotaBytes, maxPackages: recoveryMaxPackages };
 const activePortableRestores = new Set<string>();
+type PortableRestorePhase =
+  | 'starting'
+  | 'revalidating_package'
+  | 'creating_pre_restore_backup'
+  | 'preparing_replacement'
+  | 'restoring_database'
+  | 'restoring_runtime_files'
+  | 'validating_restored_data'
+  | 'refreshing_recovery_metadata'
+  | 'rolling_back'
+  | 'complete';
+type PortableRestoreState = 'running' | 'success' | 'error';
+type PortableRestoreProgress = {
+  active: boolean;
+  backupId: string;
+  state: PortableRestoreState;
+  phase: PortableRestorePhase;
+  progressPercent: number;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
+type PortableRestoreProgressUpdate = Pick<PortableRestoreProgress, 'phase' | 'progressPercent' | 'message'>;
+const portableRestoreStatuses = new Map<string, PortableRestoreProgress>();
+const portableRestoreStatusSessionIds = new Map<string, string>();
+const PORTABLE_RESTORE_STATUS_TTL_MS = 30 * 60 * 1000;
+const MAX_COMPLETED_PORTABLE_RESTORE_STATUSES = 12;
+
+function boundedRestoreStatusText(value: unknown, fallback: string) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 240) || fallback;
+}
+function prunePortableRestoreStatuses() {
+  const cutoff = Date.now() - PORTABLE_RESTORE_STATUS_TTL_MS;
+  for (const [backupId, status] of portableRestoreStatuses) {
+    if (!status.active && Date.parse(status.updatedAt) < cutoff) {
+      portableRestoreStatuses.delete(backupId);
+      portableRestoreStatusSessionIds.delete(backupId);
+    }
+  }
+  const completed = [...portableRestoreStatuses.entries()]
+    .filter(([, status])=>!status.active)
+    .sort((left, right)=>Date.parse(left[1].updatedAt) - Date.parse(right[1].updatedAt));
+  for (const [backupId] of completed.slice(0, Math.max(0, completed.length - MAX_COMPLETED_PORTABLE_RESTORE_STATUSES))) {
+    portableRestoreStatuses.delete(backupId);
+    portableRestoreStatusSessionIds.delete(backupId);
+  }
+}
+function beginPortableRestoreStatus(backupId: string, sessionId: string) {
+  const timestamp = now();
+  const status: PortableRestoreProgress = {
+    active: true,
+    backupId,
+    state: 'running',
+    phase: 'starting',
+    progressPercent: 5,
+    message: 'Starting restore...',
+    startedAt: timestamp,
+    updatedAt: timestamp,
+    completedAt: null,
+    error: null,
+  };
+  portableRestoreStatuses.set(backupId, status);
+  portableRestoreStatusSessionIds.set(backupId, sessionId);
+  prunePortableRestoreStatuses();
+  return status;
+}
+function updatePortableRestoreStatus(backupId: string, update: PortableRestoreProgressUpdate) {
+  const current = portableRestoreStatuses.get(backupId);
+  if (!current || current.state !== 'running') return current ?? null;
+  const timestamp = now();
+  const progressPercent = Math.max(current.progressPercent, Math.min(100, Math.round(update.progressPercent)));
+  const succeeded = progressPercent === 100 && update.phase === 'complete';
+  const status: PortableRestoreProgress = {
+    ...current,
+    active: !succeeded,
+    state: succeeded ? 'success' : 'running',
+    phase: update.phase,
+    progressPercent,
+    message: boundedRestoreStatusText(update.message, current.message),
+    updatedAt: timestamp,
+    completedAt: succeeded ? timestamp : null,
+    error: null,
+  };
+  portableRestoreStatuses.set(backupId, status);
+  prunePortableRestoreStatuses();
+  return status;
+}
+function failPortableRestoreStatus(backupId: string, message: string) {
+  const current = portableRestoreStatuses.get(backupId);
+  if (!current || current.state !== 'running') return current ?? null;
+  const timestamp = now();
+  const safeMessage = boundedRestoreStatusText(message, 'Portable backup restore failed.');
+  const status: PortableRestoreProgress = {
+    ...current,
+    active: false,
+    state: 'error',
+    message: safeMessage,
+    updatedAt: timestamp,
+    completedAt: timestamp,
+    error: safeMessage,
+  };
+  portableRestoreStatuses.set(backupId, status);
+  prunePortableRestoreStatuses();
+  return status;
+}
+function portableRestoreStatus(backupId: string) {
+  prunePortableRestoreStatuses();
+  return portableRestoreStatuses.get(backupId) ?? null;
+}
+function yieldForRestoreStatusPolling() {
+  return new Promise<void>(resolve=>setImmediate(resolve));
+}
 const brandingUploadsDir = path.join(uploadsDir, 'branding');
 const machineComponentImagesDir = path.join(uploadsDir, 'machine-component-images');
 const machineInspectionRecordsDir = path.join(uploadsDir, 'machine-inspection-records');
@@ -222,6 +336,11 @@ function receivePortableBackup(req: Request, res: Response, next: NextFunction) 
   });
 }
 app.use(express.json({ limit: '50mb' }));
+app.use('/api', (req,res,next)=>{
+  if (!activePortableRestores.size) return next();
+  if (req.path === '/health' || req.path === '/backup/recovery/restore' || req.path === '/backup/recovery/restore/status') return next();
+  res.status(503).json({ok:false,error:'MCC restore in progress. Try again after recovery completes.'});
+});
 app.use('/uploads/branding', express.static(brandingUploadsDir, {
   fallthrough: false,
   setHeaders(res) {
@@ -1331,6 +1450,9 @@ function safeBackupClientError(error: unknown, fallback = 'Backup failed.') {
   if (/already running/i.test(message)) return 'Another backup is already running.';
   if (/permission denied/i.test(message)) return 'Permission denied.';
   return fallback;
+}
+function safePortableRestoreClientError(error: unknown, fallback = 'Portable backup restore failed.') {
+  return safeErrorMessage(error, [repoRootPath, dataDir, backupsDir, uploadsDir, recoveryDir, pmExcelDir, pmWorkOrderDir], fallback);
 }
 function smtpTransport() {
   if (!smtpConfigured) return undefined;
@@ -3231,8 +3353,16 @@ function restoreWhitelistedFoldersFromBackup(backupFolderPath: string, _options:
   facilityInfoService?.ensureSchema();
   return restoredFolders;
 }
-async function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown; importedPackagePath?: string }) {
+async function restoreBackup(input: { category: BackupCategory; backupId: unknown; actor: User; confirmation: unknown; importedPackagePath?: string; onProgress?: (update: PortableRestoreProgressUpdate) => void }) {
+  let reachedProgress = 5;
+  const reportProgress = async(phase: PortableRestorePhase, progressPercent: number, message: string) => {
+    reachedProgress = Math.max(reachedProgress, progressPercent);
+    if (!input.onProgress) return;
+    input.onProgress({ phase, progressPercent: reachedProgress, message });
+    await yieldForRestoreStatusPolling();
+  };
   if (String(input.confirmation ?? '').trim() !== 'RESTORE MCC') throw new Error('Type RESTORE MCC to confirm restore.');
+  await reportProgress('revalidating_package', 15, 'Revalidating verified recovery package and checksums...');
   let verification: ReturnType<typeof verifyBackup>;
   let backupFolderPath: string;
   if (input.importedPackagePath) {
@@ -3267,11 +3397,14 @@ async function restoreBackup(input: { category: BackupCategory; backupId: unknow
     backupFolderPath = backupPathFromId(input.category, input.backupId);
   }
   const backupDbPath = databasePathInPackage(backupFolderPath, readBackupManifest(backupFolderPath));
+  await reportProgress('creating_pre_restore_backup', 30, 'Creating pre-restore safety backup...');
   const preRestoreBackup = await createBackup({ category: 'master', type: 'pre_restore', actor: input.actor, notes: `Before restoring ${verification.backup.name}` });
   const preRestoreFolderPath = backupPathFromId('master', preRestoreBackup.id);
   const preRestoreDbPath = databasePathInPackage(preRestoreFolderPath, readBackupManifest(preRestoreFolderPath));
   let restoredFolders: string[] = [];
+  await reportProgress('preparing_replacement', 45, 'Preparing runtime and database replacement...');
   try {
+    await reportProgress('restoring_database', 60, 'Restoring MCC database...');
     db.close();
     for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
       if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true });
@@ -3282,16 +3415,21 @@ async function restoreBackup(input: { category: BackupCategory; backupId: unknow
     db.exec('PRAGMA foreign_keys=ON;');
     initDb();
     migrateDb();
+    await reportProgress('restoring_runtime_files', 75, 'Restoring packaged runtime payloads and files...');
     restoredFolders = restoreWhitelistedFoldersFromBackup(backupFolderPath, { removeMissing: true });
+    await reportProgress('validating_restored_data', 88, 'Validating restored database, files, and storage...');
     validatePmWorkOrderStorageIntegrity();
     validateMachineDocumentStorageIntegrity();
+    await reportProgress('refreshing_recovery_metadata', 95, 'Refreshing recovery metadata and completing validation...');
     refreshMachineDocumentRecoveryMetadata();
     facilityInfoService?.validateStorage();
     facilityInfoService?.refreshRecoveryMetadata();
     try { audit({ user: input.actor, ip: '', get: () => '' } as unknown as Request, 'backup restore completed', 'backup', verification.backup.id, { preRestoreBackupId: preRestoreBackup.id, category: input.category, restoredFolders }); } catch {}
     lastBackupResult = { ok: true, category: input.category, type: verification.backup.type, backupId: verification.backup.id, createdAt: now(), message: `Restored ${verification.backup.name}.` };
+    await reportProgress('complete', 100, 'Restore complete.');
     return { restoredBackup: verification.backup, preRestoreBackup, restoredFolders };
   } catch (error) {
+    await reportProgress('rolling_back', reachedProgress, 'Restore failed. Recovering the pre-restore safety backup...');
     try { db.close(); } catch {}
     try {
       for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -8774,6 +8912,19 @@ const replacementFields: Record<MachineReplacementField, { column: keyof Machine
 };
 
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction) { const sid=unsign(cookie(req,'mcc_session')); if (!sid) return res.status(401).json({error:'Login required.'}); const s=one<{user_id:number}>('SELECT user_id FROM sessions WHERE id=? AND expires_at > ?', [sid,now()]); const u=s && findUserById(s.user_id); if (!u) return res.status(401).json({error:'Login required.'}); req.sessionId=sid; if (u.disabled) { clearSession(req,res); return res.status(403).json({error:'Account disabled.'}); } req.user=u; next(); }
+function requirePortableRestoreStatusAccess(req: AuthRequest, res: Response, next: NextFunction) {
+  const sessionId = unsign(cookie(req,'mcc_session'));
+  if (!sessionId) return res.status(401).json({error:'Login required.'});
+  const backupId = String(req.query.backupId ?? '').trim();
+  const status = backupId ? portableRestoreStatus(backupId) : null;
+  const initiatingSessionId = backupId ? portableRestoreStatusSessionIds.get(backupId) : undefined;
+  if (initiatingSessionId === sessionId) {
+    req.sessionId = sessionId;
+    return next();
+  }
+  if (status?.active) return res.status(403).json({ok:false,error:'Permission denied.'});
+  return requireAuth(req,res,()=>req.user && canRestoreBackupCategory(req.user, 'master') ? next() : res.status(403).json({ok:false,error:'Permission denied.'}));
+}
 function requireOwnerAdmin(req: AuthRequest, res: Response, next: NextFunction) { return Boolean(req.user?.is_owner_admin) ? next() : res.status(403).json({ok:false,error:'Owner Admin only.'}); }
 function requirePortableRecovery(req: AuthRequest, res: Response, next: NextFunction) { return req.user && canUsePortableRecovery(req.user) ? next() : res.status(403).json({ok:false,error:'Permission denied.'}); }
 function requireSystemVersionAccess(req: AuthRequest, res: Response, next: NextFunction) { return req.user && canViewSystemVersion(req.user) ? next() : res.status(403).json({ok:false,error:'Admin access required.'}); }
@@ -10687,6 +10838,13 @@ app.get('/api/backup/recovery', requireAuth, (req:AuthRequest,res)=>{
   if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   res.json({ok:true,recoveryLocation:recoveryDir,recoveryStorage:recoveryStorageStatus(recoveryDir,recoveryStoragePolicy),backups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
 });
+app.get('/api/backup/recovery/restore/status', requirePortableRestoreStatusAccess, (req:AuthRequest,res)=>{
+  const backupId = String(req.query.backupId ?? '').trim();
+  if (!backupId) return res.status(400).json({ok:false,error:'Recovery backup ID is required.'});
+  const status = portableRestoreStatus(backupId);
+  if (!status) return res.status(404).json({ok:false,error:'No restore status is available.'});
+  res.json({ok:true,status});
+});
 app.post('/api/backup/recovery/restore', requireAuth, async(req:AuthRequest,res)=>{
   if (!canRestoreBackupCategory(req.user!, 'master')) return res.status(403).json({ok:false,error:'Permission denied.'});
   let activeBackupId = '';
@@ -10694,17 +10852,33 @@ app.post('/api/backup/recovery/restore', requireAuth, async(req:AuthRequest,res)
   try {
     const body = isRecord(req.body) ? req.body : {};
     activeBackupId = String(body.backupId ?? '').trim();
+    if (String(body.confirmation ?? '').trim() !== 'RESTORE MCC') throw new Error('Type RESTORE MCC to confirm restore.');
     if (activePortableRestores.has(activeBackupId)) throw new Error('This recovery package is already being restored.');
     const packagePath = importedPackagePath(recoveryDir, body.backupId);
     if (!fs.existsSync(packagePath)) throw new Error('Imported recovery package not found.');
     activePortableRestores.add(activeBackupId);
     activeRestoreRegistered = true;
-    const result = await restoreBackup({ category:'master', backupId:body.backupId, confirmation:body.confirmation, actor:req.user!, importedPackagePath:packagePath });
-    res.json({ok:true,...result,message:'Verified portable backup restored. Refresh MCC and log in again if needed.'});
+    beginPortableRestoreStatus(activeBackupId, req.sessionId!);
+    await yieldForRestoreStatusPolling();
+    const result = await restoreBackup({
+      category:'master',
+      backupId:body.backupId,
+      confirmation:body.confirmation,
+      actor:req.user!,
+      importedPackagePath:packagePath,
+      onProgress:update=>{ updatePortableRestoreStatus(activeBackupId, update); },
+    });
+    res.json({ok:true,...result,restoreStatus:portableRestoreStatus(activeBackupId),message:'MCC restored successfully. Refresh MCC and log in again if needed.'});
   } catch (error) {
-    const message = safeErrorMessage(error, [], 'Portable backup restore failed.');
+    const message = safePortableRestoreClientError(error, 'Portable backup restore failed.');
+    if (activeRestoreRegistered) failPortableRestoreStatus(activeBackupId, message);
     try { audit(req,'portable backup restore failed','backup',isRecord(req.body)?String(req.body.backupId??''):'',{error:message}); } catch {}
-    res.status(/confirm|not found|missing|checksum|invalid|unsupported|incompatible|integrity/i.test(message)?400:500).json({ok:false,error:message});
+    const statusCode = /already being restored/i.test(message)
+      ? 409
+      : /confirm|not found|missing|checksum|invalid|unsupported|incompatible|integrity/i.test(message)
+        ? 400
+        : 500;
+    res.status(statusCode).json({ok:false,error:message,restoreStatus:activeRestoreRegistered?portableRestoreStatus(activeBackupId):null});
   } finally {
     if (activeRestoreRegistered) activePortableRestores.delete(activeBackupId);
   }

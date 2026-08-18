@@ -893,6 +893,16 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .restore-warning-panel { display: grid; gap: 9px; padding: 13px; border: 1px solid rgba(255, 117, 138, 0.42); border-radius: 12px; background: rgba(95, 30, 42, 0.3); }
 .restore-warning-panel strong { margin: 0; color: #ffe7e7; font-size: 1rem; line-height: 1.25; }
 .restore-warning-panel p { margin: 0; color: #ffd2d2; font-size: .86rem; line-height: 1.45; }
+.restore-progress-panel { min-width: 0; display: grid; gap: 9px; padding: 12px 13px; border: 1px solid rgba(68, 215, 255, .3); border-radius: 12px; background: rgba(4, 18, 34, .62); }
+.restore-progress-panel.success { border-color: rgba(54, 229, 170, .42); background: rgba(18, 97, 71, .24); }
+.restore-progress-panel.error { border-color: rgba(255, 117, 138, .44); background: rgba(111, 52, 60, .3); }
+.restore-progress-heading { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.restore-progress-heading span { min-width: 0; color: #bfeeff; font-size: .7rem; font-weight: 950; letter-spacing: .06em; line-height: 1.3; text-transform: uppercase; }
+.restore-progress-heading strong { flex: 0 0 auto; color: #f3fbff; font-size: .86rem; line-height: 1; }
+.restore-progress-track { height: 9px; overflow: hidden; border-radius: 999px; background: rgba(143, 205, 233, .16); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .26); }
+.restore-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #44d7ff, #36e5aa); transition: width .18s ease; }
+.restore-progress-panel.error .restore-progress-track > span { background: linear-gradient(90deg, #ff9e72, #ff758a); }
+.restore-progress-panel p { margin: 0; overflow-wrap: anywhere; color: #c6dce7; font-size: .8rem; line-height: 1.4; }
 .backup-notes { border-color: rgba(85, 191, 236, 0.2); background: rgba(6, 67, 98, 0.18); }
 .backup-progress-panel, .backup-result-panel { min-width: 0; display: grid; gap: 12px; padding: 14px; border: 1px solid rgba(68, 215, 255, 0.24); border-radius: 12px; background: rgba(4, 18, 34, 0.58); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
 .backup-progress-panel.success, .backup-result-panel.success { border-color: rgba(54, 229, 170, 0.34); background: rgba(18, 97, 71, 0.22); }
