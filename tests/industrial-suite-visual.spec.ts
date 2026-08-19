@@ -513,11 +513,8 @@ test('390px mobile keeps tables local, the document contained, and focus visible
 
   await goTo(page, '/machine-library', 'Machine Library');
   const machineActions = await actionGroupGeometry(page, '.machine-card-summary-actions');
-  expect(machineActions.controls).toHaveLength(2);
+  expect(machineActions.controls).toHaveLength(1);
   expect(machineActions.rowCount, `machine action rows: ${JSON.stringify(machineActions.controls)}`).toBe(1);
-  for (const control of machineActions.controls) {
-    expect(control.width, `${control.text} should share the machine action row`).toBeLessThan(machineActions.containerWidth * 0.8);
-  }
   await expectNoDocumentOverflow(page);
 
   await goTo(page, '/history/inventory', 'History Logs');

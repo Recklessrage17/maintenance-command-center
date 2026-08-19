@@ -177,13 +177,6 @@ function machinePmSummaryVariant(status: MachinePmCardSummary['status']): MccSem
   if (status==='inactive') return 'muted';
   return 'neutral';
 }
-function historyPreviewDateTime(value:string) {
-  const date=new Date(value);
-  return Number.isNaN(date.getTime()) ? value || '-' : new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',year:'2-digit',hour:'numeric',minute:'2-digit'}).format(date);
-}
-function historyPreviewSummary(record:HistoryRecord) {
-  return record.reasonNote || `Recorded by ${record.userName || 'System'}`;
-}
 function machineSummaryStatusClass(status: string) {
   if (status === 'active') return 'status-active';
   if (status === 'down') return 'status-down';
@@ -452,7 +445,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         </section>
         <div className={`machine-card-grid ${assets.length === 1 ? 'single-result' : 'multi-results'}`}>
         {assets.map(asset=>(
-          <MccPillCard className={`machine-asset-card${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
+          <MccPillCard className={`machine-asset-card${asset.pmSummary ? ' has-pm-summary' : ''}${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
             <div className="machine-pill-card-heading">
               <div className="machine-pill-card-title">
                 <span className="machine-asset-number-label">Asset #</span>
@@ -462,17 +455,12 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
               <MccStatusPill variant={machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.status}`}>{machineStatusLabel(asset.status)}</MccStatusPill>
             </div>
             <div className="machine-pill-card-metrics">
-              <MccMetricPill label="Type / Brand" value={<>{asset.machineType || '-'}<small>{asset.brand || 'Unknown brand'}</small></>} variant="brand" />
               <MccMetricPill label="Year / Age" value={<>{asset.machineYear || '-'}<small>{machineYearAge(asset.machineYear)}</small></>} />
               <MccMetricPill label="Barrel Size" value={asset.barrelDiameter || '-'} variant="brand" />
               <MccMetricPill label="Model" value={asset.model || '-'} />
               <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
             </div>
-            <div className="machine-card-summary-actions">
-              <button className="secondary-button compact-button machine-barrel-screw-logs-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Barrel &amp; Screw Logs</button>
-              {asset.pmSummary&&<button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button>}
-            </div>
-            <MachineHistoryPreview records={asset.historyPreview ?? []} onOpen={()=>void loadLogs(asset)} />
+            {asset.pmSummary&&<div className="machine-card-summary-actions"><button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button></div>}
             <span className="asset-row-open-cue" aria-hidden="true">Open <b>›</b></span>
           </MccPillCard>
         ))}
@@ -488,20 +476,6 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
       {logs&&<LogsModal logs={logs} onClose={()=>setLogs(null)} onBackToAsset={()=>{ setForm(assetToForm(logs.asset)); setEditing(logs.asset); setLogs(null); setShowEditor(true); }} />}
     </div>
   );
-}
-
-function MachineHistoryPreview({records,onOpen}:{records:HistoryRecord[];onOpen:()=>void}) {
-  const preview=[...records].sort((left,right)=>{
-    const timeDifference=new Date(right.createdAt).getTime()-new Date(left.createdAt).getTime();
-    return Number.isNaN(timeDifference)||timeDifference===0 ? right.id-left.id : timeDifference;
-  }).slice(0,1);
-  return <button className="machine-history-preview" type="button" onClick={event=>{event.stopPropagation();onOpen();}} aria-label="Open full machine asset history">
-    <span className="machine-history-preview-heading"><strong>History Preview</strong><span>Open full history</span></span>
-    <span className="machine-history-preview-list">
-      {preview.map(record=><span className="machine-history-preview-row" key={record.id}><span className="machine-history-preview-meta"><time dateTime={record.createdAt}>{historyPreviewDateTime(record.createdAt)}</time><strong>{actionLabel(record.action)}</strong></span><small className="machine-history-preview-summary" title={historyPreviewSummary(record)}>{historyPreviewSummary(record)}</small>{record.userName&&<small className="machine-history-preview-user">Recorded by {record.userName}</small>}</span>)}
-      {!preview.length&&<span className="machine-history-preview-empty">No history recorded yet.</span>}
-    </span>
-  </button>;
 }
 
 function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit,onLogs,onRecordLogs,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;canManagePm:boolean;performedBy:string;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onRecordLogs:(asset:MachineAsset)=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {

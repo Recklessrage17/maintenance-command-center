@@ -97,7 +97,6 @@ function EquipmentCard({asset,onOpen}:{asset:EquipmentAsset;onOpen:()=>void}){
     <div className="equipment-card-heading"><div><span className="equipment-card-number-label">Asset #</span><span className="equipment-card-number">{asset.assetNumber}</span><h3>{asset.equipmentName}</h3></div><MccStatusPill variant={statusVariant}>{statusLabel(asset.status)}</MccStatusPill></div>
     <dl className="equipment-card-facts"><div><dt>Type / Category</dt><dd>{display(asset.category)}{asset.equipmentType?<small>{asset.equipmentType}</small>:null}</dd></div><div><dt>Brand / Model</dt><dd>{display(asset.manufacturer)}<small>{display(asset.model)}</small></dd></div><div><dt>Serial #</dt><dd>{display(asset.serialNumber)}</dd></div><div><dt>Year / Age</dt><dd>{display(asset.equipmentYear)} / {equipmentAge(asset.equipmentYear)}</dd></div><div><dt>Location</dt><dd>{display(asset.location)}</dd></div></dl>
     <div className="equipment-card-signals">{asset.pmSummary&&<span className={`equipment-card-pm pm-${asset.pmSummary.status}`}>{asset.pmSummary.label}</span>}<span className="asset-row-open-cue" aria-hidden="true">Open <b>›</b></span></div>
-    <div className="equipment-card-history"><span>Newest history</span>{asset.latestHistory?<><strong>{historyAction(asset.latestHistory.action)}</strong><small>{formatDateTime(asset.latestHistory.createdAt)} · {asset.latestHistory.userName||'System'}</small></>:<small>No history recorded.</small>}</div>
   </MccPillCard>;
 }
 

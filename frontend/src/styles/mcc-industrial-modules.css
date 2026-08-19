@@ -3058,8 +3058,12 @@ body {
 }
 
 .machine-asset-card.mcc-pill-card {
-  grid-template-columns: minmax(155px, .8fr) minmax(500px, 2.8fr) minmax(150px, .7fr) minmax(170px, .8fr) auto;
+  grid-template-columns: minmax(155px, .8fr) minmax(420px, 2.8fr) auto;
   gap: 10px;
+}
+
+.machine-asset-card.mcc-pill-card.has-pm-summary {
+  grid-template-columns: minmax(155px, .8fr) minmax(420px, 2.8fr) minmax(130px, .7fr) auto;
 }
 
 .machine-asset-card.mcc-pill-card:is(:hover, :focus-visible),
@@ -3111,7 +3115,7 @@ body {
 }
 
 .machine-pill-card-metrics {
-  grid-template-columns: 1.25fr .8fr .8fr 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
@@ -3157,34 +3161,6 @@ body {
   font-size: .67rem;
 }
 
-.machine-history-preview {
-  min-height: 0;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: 10px;
-}
-
-.machine-history-preview-heading > span,
-.machine-history-preview-summary,
-.machine-history-preview-user {
-  display: none;
-}
-
-.machine-history-preview-list,
-.machine-history-preview-row,
-.machine-history-preview-empty {
-  min-height: 0;
-}
-
-.machine-history-preview-row {
-  min-height: 31px;
-  padding: 3px 5px;
-}
-
-.machine-history-preview-row small {
-  display: none;
-}
-
 .asset-row-open-cue {
   display: inline-flex;
   align-items: center;
@@ -3202,7 +3178,7 @@ body {
 }
 
 .equipment-asset-card.mcc-pill-card {
-  grid-template-columns: minmax(190px, .85fr) minmax(520px, 2.7fr) minmax(130px, .55fr) minmax(185px, .8fr);
+  grid-template-columns: minmax(190px, .85fr) minmax(520px, 2.9fr) minmax(130px, .55fr);
   gap: 10px;
 }
 
@@ -3253,31 +3229,19 @@ body {
   white-space: nowrap;
 }
 
-.equipment-card-history {
-  min-width: 0;
-  gap: 2px;
-  padding: 6px 8px;
-  border: 1px solid var(--mcc-border-subtle);
-  border-radius: 10px;
-  background: var(--mcc-surface-card-nested);
-}
-
-.equipment-card-history > :where(strong, small) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 1180px) {
-  .machine-asset-card.mcc-pill-card,
+  .machine-asset-card.mcc-pill-card {
+    grid-template-columns: minmax(170px, .8fr) minmax(0, 2.5fr) auto;
+  }
+
+  .machine-asset-card.mcc-pill-card.has-pm-summary {
+    grid-template-columns: minmax(170px, .8fr) minmax(0, 2.5fr) minmax(130px, .7fr) auto;
+  }
+
   .equipment-asset-card.mcc-pill-card {
     grid-template-columns: minmax(170px, .8fr) minmax(0, 2.5fr) auto;
   }
 
-  .machine-history-preview,
-  .equipment-card-history {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (max-width: 760px) {
@@ -3289,6 +3253,7 @@ body {
   }
 
   .machine-asset-card.mcc-pill-card,
+  .machine-asset-card.mcc-pill-card.has-pm-summary,
   .equipment-asset-card.mcc-pill-card {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -3300,17 +3265,10 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .machine-pill-card-metrics > :first-child,
   .equipment-card-facts > :first-child {
     grid-column: 1 / -1;
   }
 
-  .machine-history-preview,
-  .equipment-card-history {
-    grid-column: auto;
-  }
-
-  .machine-card-summary-actions,
   .equipment-card-signals {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3320,7 +3278,6 @@ body {
   .mcc-page-topbar { max-width: calc(100vw - 16px); }
   .machine-pill-card-metrics,
   .equipment-card-facts { grid-template-columns: minmax(0, 1fr); }
-  .machine-pill-card-metrics > :first-child,
   .equipment-card-facts > :first-child { grid-column: auto; }
 }
 

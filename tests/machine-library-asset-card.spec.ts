@@ -164,11 +164,11 @@ test('asset card has no dead zones and keeps child controls independent', async 
     beforePointerEvents: 'none', afterPointerEvents: 'none', invalidNestedButtons: 0, interceptedPoints: 0,
   });
 
-  const historyRows = cards.first().locator('.machine-history-preview-row');
-  await expect(historyRows).toHaveCount(1);
-  await expect(historyRows).toContainText('Newest history summary');
-  await expect(historyRows).toContainText('Recorded by Newest Technician');
-  await expect(historyRows).not.toContainText('Older inspection note');
+  await expect(cards.first()).not.toContainText('Type / Brand');
+  await expect(cards.first()).not.toContainText('Barrel & Screw Logs');
+  await expect(cards.first()).not.toContainText('History Preview');
+  await expect(cards.first().locator('.machine-pill-card-metrics .mcc-metric-pill')).toHaveCount(4);
+  await expect(cards.first().getByRole('button', { name: /PM: 1 Due Soon/ })).toBeVisible();
 
   await activate(cards.first().locator('.machine-asset-number-pill'), mobile);
   await expectSingleDetail(page);
@@ -204,25 +204,24 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expectSingleDetail(page);
   await closeDetail(page, mobile);
 
-  let before = await documentCardClickCount(page);
-  await activate(cards.first().getByRole('button', { name: 'Barrel & Screw Logs' }), mobile);
-  await expect(page.locator('.machine-detail-modal')).toHaveCount(0);
+  await activate(cards.first(), mobile);
+  await expectSingleDetail(page);
+  const detail = page.locator('.machine-detail-modal');
+  await activate(detail.getByRole('button', { name: 'Barrel & Screw Logs' }).first(), mobile);
   await expect(page.locator('.measurement-record-modal')).toBeVisible();
-  expect(await documentCardClickCount(page)).toBe(before);
   await activate(page.locator('.measurement-record-modal').getByRole('button', { name: 'Close' }), mobile);
+  await expect(detail).toBeVisible();
+  await activate(detail.getByRole('button', { name: 'History' }), mobile);
+  await expect(detail).toHaveCount(0);
+  await expect(page.locator('.machine-logs-modal')).toBeVisible();
+  await expect(page.locator('.machine-logs-modal')).toContainText('Newest history summary');
+  await activate(page.locator('.machine-logs-modal').getByRole('button', { name: 'Done' }), mobile);
 
-  before = await documentCardClickCount(page);
+  const before = await documentCardClickCount(page);
   await activate(cards.first().getByRole('button', { name: /PM: 1 Due Soon/ }), mobile);
   expect(await documentCardClickCount(page)).toBe(before);
   await expectSingleDetail(page);
   await closeDetail(page, mobile);
-
-  before = await documentCardClickCount(page);
-  await activate(cards.first().getByRole('button', { name: 'Open full machine asset history' }), mobile);
-  await expect(page.locator('.machine-detail-modal')).toHaveCount(0);
-  await expect(page.locator('.machine-logs-modal')).toBeVisible();
-  expect(await documentCardClickCount(page)).toBe(before);
-  await activate(page.locator('.machine-logs-modal').getByRole('button', { name: 'Done' }), mobile);
 
   await activate(cards.nth(1).locator('.machine-card-brand-name'), mobile);
   await expectSingleDetail(page, 'Press 52');
