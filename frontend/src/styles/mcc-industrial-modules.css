@@ -3454,6 +3454,31 @@ body {
   box-shadow: 0 1px 5px rgba(0,0,0,.78);
 }
 
+.machine-color-axis-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.machine-color-axis {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.machine-color-axis > span {
+  color: var(--mcc-text-muted);
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.machine-color-axis input {
+  width: 100%;
+  accent-color: var(--preview-color);
+}
+
 .equipment-asset-card.mcc-pill-card {
   grid-template-columns: minmax(190px, .85fr) minmax(520px, 2.9fr) minmax(130px, .55fr);
   gap: 10px;
@@ -3563,6 +3588,10 @@ body {
   .machine-color-row-preview {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .machine-color-axis-controls {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

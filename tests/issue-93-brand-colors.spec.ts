@@ -51,8 +51,12 @@ test('brand tint classes preserve Issue 92 rows and the custom picker stays sync
 
   await customRow.getByRole('button',{name:'Choose Custom Co color'}).click();const picker=customRow.locator('.machine-color-picker');await expect(picker).toBeVisible();
   const beforeHue=await hex.inputValue();await customRow.getByLabel('Custom Co hue').fill('180');await expect(hex).not.toHaveValue(beforeHue);await expect(hex).toHaveValue(/^#[0-9A-F]{6}$/);
-  const area=customRow.getByRole('slider',{name:'Custom Co saturation and brightness'});const beforePointer=await hex.inputValue();await area.click({position:{x:40,y:110}});await expect(hex).not.toHaveValue(beforePointer);
-  const beforeKeyboard=await hex.inputValue();await area.focus();await page.keyboard.press('ArrowRight');await expect(hex).not.toHaveValue(beforeKeyboard);
+  const area=customRow.locator('.machine-color-sv-area');await expect(area).toHaveAttribute('aria-hidden','true');await expect(area).not.toHaveAttribute('role');await expect(area).not.toHaveAttribute('tabindex');
+  const beforePointer=await hex.inputValue();await area.click({position:{x:40,y:30}});await expect(hex).not.toHaveValue(beforePointer);
+  const saturation=customRow.getByRole('slider',{name:'Custom Co saturation'});const brightness=customRow.getByRole('slider',{name:'Custom Co brightness'});
+  await expect(saturation).toHaveAttribute('min','0');await expect(saturation).toHaveAttribute('max','100');await expect(brightness).toHaveAttribute('min','0');await expect(brightness).toHaveAttribute('max','100');
+  const beforeSaturation=await hex.inputValue();const saturationValue=Number(await saturation.inputValue());await saturation.focus();await page.keyboard.press('ArrowRight');await expect(saturation).toHaveValue(String(Math.min(100,saturationValue+1)));await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowRight');await expect(hex).not.toHaveValue(beforeSaturation);
+  const beforeBrightness=await hex.inputValue();const brightnessValue=Number(await brightness.inputValue());await brightness.focus();await page.keyboard.press('ArrowDown');await expect(brightness).toHaveValue(String(Math.max(0,brightnessValue-1)));await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowDown');await expect(hex).not.toHaveValue(beforeBrightness);
   page.once('dialog',dialog=>dialog.accept());await save.click();await expect.poll(()=>state.saves.length).toBe(1);expect(state.saves[0]).toEqual({brandName:'Custom Co',colorHex:await hex.inputValue()});
   await expect(page.getByText('Custom Co color updated.')).toBeVisible();
   await page.reload();await openColorEditor(page);await expect(page.locator('.machine-color-row',{hasText:'Custom Co'}).getByLabel('Hex color')).toHaveValue(state.colors['Custom Co']);

@@ -1008,10 +1008,14 @@ function BrandColorPicker({brandName,value,onChange,disabled}:{brandName:string;
     onChange(hsvToHex({...hsv,s:Math.min(1,Math.max(0,(clientX-rect.left)/rect.width)),v:1-Math.min(1,Math.max(0,(clientY-rect.top)/rect.height))}));
   }
   return <div className="machine-color-picker" aria-label={`${brandName} visual color picker`}>
-    <div ref={areaRef} className="machine-color-sv-area" style={{'--picker-hue':`hsl(${hsv.h} 100% 50%)`} as CSSProperties} role="slider" tabIndex={disabled?-1:0} aria-label={`${brandName} saturation and brightness`} aria-valuetext={`Saturation ${Math.round(hsv.s*100)}%, brightness ${Math.round(hsv.v*100)}%`} onPointerDown={event=>{if(disabled)return;event.currentTarget.setPointerCapture(event.pointerId);updateSv(event.clientX,event.clientY);}} onPointerMove={event=>{if(!disabled&&event.currentTarget.hasPointerCapture(event.pointerId))updateSv(event.clientX,event.clientY);}} onKeyDown={event=>{if(disabled)return;const step=event.shiftKey?.1:.02;let next=hsv;if(event.key==='ArrowLeft')next={...hsv,s:Math.max(0,hsv.s-step)};else if(event.key==='ArrowRight')next={...hsv,s:Math.min(1,hsv.s+step)};else if(event.key==='ArrowUp')next={...hsv,v:Math.min(1,hsv.v+step)};else if(event.key==='ArrowDown')next={...hsv,v:Math.max(0,hsv.v-step)};else return;event.preventDefault();onChange(hsvToHex(next));}}>
+    <div ref={areaRef} className="machine-color-sv-area" style={{'--picker-hue':`hsl(${hsv.h} 100% 50%)`} as CSSProperties} aria-hidden="true" onPointerDown={event=>{if(disabled)return;event.currentTarget.setPointerCapture(event.pointerId);updateSv(event.clientX,event.clientY);}} onPointerMove={event=>{if(!disabled&&event.currentTarget.hasPointerCapture(event.pointerId))updateSv(event.clientX,event.clientY);}}>
       <span className="machine-color-picker-indicator" style={{left:`${hsv.s*100}%`,top:`${(1-hsv.v)*100}%`}} />
     </div>
     <label className="machine-color-hue"><span>Hue</span><input type="range" min="0" max="359" value={Math.round(hsv.h)} disabled={disabled} aria-label={`${brandName} hue`} onChange={event=>onChange(hsvToHex({...hsv,h:Number(event.target.value)}))} /></label>
+    <div className="machine-color-axis-controls">
+      <label className="machine-color-axis"><span>Saturation</span><input type="range" min="0" max="100" value={Math.round(hsv.s*100)} disabled={disabled} aria-label={`${brandName} saturation`} onChange={event=>onChange(hsvToHex({...hsv,s:Number(event.target.value)/100}))} /></label>
+      <label className="machine-color-axis"><span>Brightness</span><input type="range" min="0" max="100" value={Math.round(hsv.v*100)} disabled={disabled} aria-label={`${brandName} brightness`} onChange={event=>onChange(hsvToHex({...hsv,v:Number(event.target.value)/100}))} /></label>
+    </div>
   </div>;
 }
 function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string)=>void;onClose:()=>void}) {
