@@ -3020,6 +3020,310 @@ body {
 /* Motion and transparency preferences                                        */
 /* -------------------------------------------------------------------------- */
 
+/* Issue 91: compact shared title shell and scan-first asset rows. */
+.mcc-page-topbar {
+  right: auto;
+  width: max-content;
+  max-width: calc(100vw - 184px);
+  min-height: 52px;
+  padding: var(--mcc-space-3) var(--mcc-space-4);
+}
+
+.mcc-current-page {
+  width: max-content;
+}
+
+.machine-card-grid,
+.equipment-asset-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--mcc-space-3);
+}
+
+.machine-card-grid.single-result {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.machine-card-grid.single-result .machine-asset-card.mcc-pill-card {
+  max-width: none;
+}
+
+.machine-asset-card.mcc-pill-card,
+.equipment-asset-card.mcc-pill-card {
+  min-height: 0;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 16px;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, background-color .15s ease;
+}
+
+.machine-asset-card.mcc-pill-card {
+  grid-template-columns: minmax(155px, .8fr) minmax(500px, 2.8fr) minmax(150px, .7fr) minmax(170px, .8fr) auto;
+  gap: 10px;
+}
+
+.machine-asset-card.mcc-pill-card:is(:hover, :focus-visible),
+.equipment-asset-card.mcc-pill-card:is(:hover, :focus-visible) {
+  border-color: color-mix(in srgb, var(--mcc-pill-accent) 76%, #fff 10%);
+  outline: 2px solid color-mix(in srgb, var(--mcc-pill-accent) 38%, transparent);
+  outline-offset: 2px;
+  box-shadow: var(--mcc-shadow-card), 0 0 24px color-mix(in srgb, var(--mcc-pill-accent) 17%, transparent);
+  transform: translateY(-1px);
+}
+
+.machine-pill-card-heading {
+  min-width: 0;
+  align-items: center;
+}
+
+.machine-pill-card-title {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 7px;
+}
+
+.machine-asset-number-label,
+.equipment-card-number-label {
+  align-self: center;
+  color: var(--mcc-text-muted);
+  font-size: .58rem;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.machine-asset-number-pill {
+  min-height: 27px;
+  padding: 3px 9px;
+  font-size: .86rem;
+}
+
+.machine-pill-card-title .machine-card-brand-name {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-size: .72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-card-status {
+  align-self: start;
+}
+
+.machine-pill-card-metrics {
+  grid-template-columns: 1.25fr .8fr .8fr 1fr 1fr;
+  gap: 5px;
+}
+
+.machine-pill-card-metrics .mcc-metric-pill,
+.equipment-card-facts > div {
+  min-height: 48px;
+  align-content: center;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.machine-pill-card-metrics .mcc-metric-pill > strong,
+.equipment-card-facts dd {
+  overflow: hidden;
+  font-size: .76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-pill-card-metrics small,
+.equipment-card-facts small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--mcc-text-muted);
+  font-size: .64rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-card-summary-actions {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+}
+
+.machine-card-summary-actions .compact-button,
+.machine-pm-summary-pill {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: .67rem;
+}
+
+.machine-history-preview {
+  min-height: 0;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.machine-history-preview-heading > span,
+.machine-history-preview-summary,
+.machine-history-preview-user {
+  display: none;
+}
+
+.machine-history-preview-list,
+.machine-history-preview-row,
+.machine-history-preview-empty {
+  min-height: 0;
+}
+
+.machine-history-preview-row {
+  min-height: 31px;
+  padding: 3px 5px;
+}
+
+.machine-history-preview-row small {
+  display: none;
+}
+
+.asset-row-open-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: color-mix(in srgb, var(--mcc-pill-accent) 72%, #fff 28%);
+  font-size: .66rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.asset-row-open-cue b {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.equipment-asset-card.mcc-pill-card {
+  grid-template-columns: minmax(190px, .85fr) minmax(520px, 2.7fr) minmax(130px, .55fr) minmax(185px, .8fr);
+  gap: 10px;
+}
+
+.equipment-card-heading {
+  align-items: center;
+}
+
+.equipment-card-heading > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 7px;
+}
+
+.equipment-card-number {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--mcc-pill-accent) 80%, #fff 20%);
+  font-size: .85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.equipment-asset-card h3 {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-size: .76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.equipment-card-facts {
+  grid-template-columns: 1.15fr 1fr .85fr .7fr .85fr;
+  gap: 5px;
+}
+
+.equipment-card-signals {
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.equipment-card-pm {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.equipment-card-history {
+  min-width: 0;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--mcc-border-subtle);
+  border-radius: 10px;
+  background: var(--mcc-surface-card-nested);
+}
+
+.equipment-card-history > :where(strong, small) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .machine-asset-card.mcc-pill-card,
+  .equipment-asset-card.mcc-pill-card {
+    grid-template-columns: minmax(170px, .8fr) minmax(0, 2.5fr) auto;
+  }
+
+  .machine-history-preview,
+  .equipment-card-history {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .mcc-page-topbar {
+    right: auto;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    min-height: 44px;
+  }
+
+  .machine-asset-card.mcc-pill-card,
+  .equipment-asset-card.mcc-pill-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px;
+  }
+
+  .machine-pill-card-metrics,
+  .equipment-card-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .machine-pill-card-metrics > :first-child,
+  .equipment-card-facts > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .machine-history-preview,
+  .equipment-card-history {
+    grid-column: auto;
+  }
+
+  .machine-card-summary-actions,
+  .equipment-card-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .mcc-page-topbar { max-width: calc(100vw - 16px); }
+  .machine-pill-card-metrics,
+  .equipment-card-facts { grid-template-columns: minmax(0, 1fr); }
+  .machine-pill-card-metrics > :first-child,
+  .equipment-card-facts > :first-child { grid-column: auto; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mcc-shell :where(
     .mcc-page-enter,

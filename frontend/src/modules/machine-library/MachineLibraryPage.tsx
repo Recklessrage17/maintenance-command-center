@@ -455,22 +455,25 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
           <MccPillCard className={`machine-asset-card${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
             <div className="machine-pill-card-heading">
               <div className="machine-pill-card-title">
+                <span className="machine-asset-number-label">Asset #</span>
                 <span className="machine-asset-number-pill">{asset.assetNumber}</span>
                 <strong className="machine-card-brand-name">{asset.brand || 'Unknown brand'}</strong>
               </div>
               <MccStatusPill variant={machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.status}`}>{machineStatusLabel(asset.status)}</MccStatusPill>
             </div>
             <div className="machine-pill-card-metrics">
+              <MccMetricPill label="Type / Brand" value={<>{asset.machineType || '-'}<small>{asset.brand || 'Unknown brand'}</small></>} variant="brand" />
+              <MccMetricPill label="Year / Age" value={<>{asset.machineYear || '-'}<small>{machineYearAge(asset.machineYear)}</small></>} />
               <MccMetricPill label="Barrel Size" value={asset.barrelDiameter || '-'} variant="brand" />
               <MccMetricPill label="Model" value={asset.model || '-'} />
               <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
             </div>
-            <div className="machine-pill-card-age"><span>Year {asset.machineYear || 'Unknown'}</span><span aria-hidden="true">&bull;</span><strong>Age {machineYearAge(asset.machineYear)}</strong></div>
             <div className="machine-card-summary-actions">
               <button className="secondary-button compact-button machine-barrel-screw-logs-button" type="button" onClick={event=>{ event.stopPropagation(); setRecordLogsAsset(asset); }}>Barrel &amp; Screw Logs</button>
               {asset.pmSummary&&<button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button>}
             </div>
             <MachineHistoryPreview records={asset.historyPreview ?? []} onOpen={()=>void loadLogs(asset)} />
+            <span className="asset-row-open-cue" aria-hidden="true">Open <b>›</b></span>
           </MccPillCard>
         ))}
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}

@@ -1,7 +1,8 @@
-import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Component, lazy, Suspense, type ErrorInfo, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { withJsonRequestDefaults } from './apiRequest';
 import { MccForgotPassword } from './components/auth/MccForgotPassword';
+import { MccAppLoading } from './components/auth/MccAppLoading';
 import { MccLogin } from './components/auth/MccLogin';
 import { MccLayout, type MccSection } from './layout/MccLayout';
 import { historySectionFromPath, historySectionSlug, type HistorySection } from './modules/history/historyRouting';
@@ -36,7 +37,8 @@ function RouteLoadingState(){return <div className="mcc-route-state" role="statu
 class RouteModuleBoundary extends Component<{resetKey:MccSection;children:ReactNode},{failed:boolean}>{state={failed:false};static getDerivedStateFromError(){return{failed:true};}componentDidCatch(error:Error,info:ErrorInfo){console.error('MCC route module failed to load.',error,info);}componentDidUpdate(previous:{resetKey:MccSection}){if(previous.resetKey!==this.props.resetKey&&this.state.failed)this.setState({failed:false});}render(){if(this.state.failed)return <div className="mcc-route-state mcc-route-state--error" role="alert"><div><strong>Workspace could not load</strong><span>The module download was interrupted. Reload MCC to try again.</span></div><button className="primary-button compact-button" type="button" onClick={()=>window.location.reload()}>Reload MCC</button></div>;return this.props.children;}}
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; canViewSystemVersion:boolean; forcePasswordChange:boolean; effectivePermissions?:string[] };
-type AuthMode = 'loading' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
+type AuthMode = 'loading' | 'initializing' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
+type AppInitialization = { progress:number; stage:string; error:string; target:MccSection; resetToDashboard:boolean };
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,withJsonRequestDefaults(options)); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
 type UpdateNoticeState={kind:'available'|'succeeded';version:string;commit:string;storageKey:string};
 function cleanNoticePart(value:unknown){return typeof value==='string'?value.replace(/[^a-zA-Z0-9._-]/g,'').slice(0,80):'';}
@@ -102,9 +104,53 @@ function pathForSection(section: MccSection, historySection?: HistorySection | n
 function App() {
   const initialRoute = useMemo(()=>routeFromPath(window.location.pathname),[]);
   const [mode,setMode]=useState<AuthMode>('loading'); const [user,setUser]=useState<User|null>(null); const [activeSection,setActiveSection]=useState<MccSection>(initialRoute.section); const [historySection,setHistorySection]=useState<HistorySection|null>(initialRoute.historySection);
+  const [initialization,setInitialization]=useState<AppInitialization>({progress:0,stage:'Checking secure local session...',error:'',target:initialRoute.section,resetToDashboard:false});
+  const initializationRunRef=useRef(0);
   useMccPresence(Boolean(user)&&(mode==='app'||mode==='change'));
-  const refresh=()=>api('/api/auth/status').then(d=>{setUser(d.user); setMode(d.setupRequired?'setup':d.user?.forcePasswordChange?'change':d.user?'app':'login');}).catch(()=>setMode('login'));
-  useEffect(()=>{ refresh(); },[]);
+  function nextPaint(){return new Promise<void>(resolve=>window.requestAnimationFrame(()=>resolve()));}
+  async function initializeApplication(nextUser:User,{resetToDashboard,verifySession}:{resetToDashboard:boolean;verifySession:boolean}) {
+    const runId=++initializationRunRef.current;
+    const route=resetToDashboard?{section:'dashboard' as MccSection,historySection:null}:routeFromPath(window.location.pathname);
+    if(resetToDashboard){setActiveSection('dashboard');setHistorySection(null);window.history.replaceState(null,'','/');}
+    setUser(nextUser);
+    setInitialization({progress:0,stage:'Credentials accepted. Establishing secure session...',error:'',target:route.section,resetToDashboard});
+    setMode('initializing');
+    const update=(progress:number,stage:string)=>{if(initializationRunRef.current===runId)setInitialization(current=>({...current,progress,stage,error:''}));};
+    try {
+      await nextPaint();
+      update(12,'Credentials accepted. Establishing secure session...');
+      let readyUser=nextUser;
+      if(verifySession){
+        const status=await api('/api/auth/status');
+        if(!status.user)throw new Error('The secure session could not be verified. Please sign in again.');
+        readyUser=status.user;
+      }
+      if(initializationRunRef.current!==runId)return;
+      setUser(readyUser);
+      update(38,'Secure session verified. Loading operator workspace...');
+      await routeLoaders[route.section]();
+      update(76,`${route.section==='dashboard'?'Dashboard':'Workspace'} module ready. Synchronizing interface...`);
+      if(document.fonts?.ready)await document.fonts.ready;
+      update(92,'Interface ready. Finalizing controls...');
+      await nextPaint();
+      update(100,`${route.section==='dashboard'?'Dashboard':'Workspace'} ready.`);
+      await nextPaint();
+      if(initializationRunRef.current===runId)setMode(readyUser.forcePasswordChange?'change':'app');
+    } catch(value) {
+      if(initializationRunRef.current!==runId)return;
+      const message=(value as Error).message||'MCC could not finish loading. Check the connection and try again.';
+      setInitialization(current=>({...current,error:message,stage:'Initialization interrupted.'}));
+    }
+  }
+  function refresh(resetToDashboard=false) {
+    return api('/api/auth/status').then(d=>{
+      if(d.setupRequired){setUser(null);setMode('setup');return;}
+      if(!d.user){setUser(null);setMode('login');return;}
+      if(d.user.forcePasswordChange){setUser(d.user);if(resetToDashboard){setActiveSection('dashboard');setHistorySection(null);window.history.replaceState(null,'','/');}setMode('change');return;}
+      return initializeApplication(d.user,{resetToDashboard,verifySession:false});
+    }).catch(()=>{setUser(null);setMode('login');});
+  }
+  useEffect(()=>{void refresh();},[]);
   useEffect(()=>{
     function onPopState() {
       const route = routeFromPath(window.location.pathname);
@@ -140,12 +186,13 @@ function App() {
     window.history.pushState(null,'','/settings#system-update');
   }
   const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} userFullName={user?.fullName ?? ''} onBackToDashboard={()=>navigate('dashboard')} onOpenRequisitions={()=>navigate('requisitions')} /> : activeSection === 'vendors' ? <VendorsPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} /> : activeSection === 'machine-library' ? <MachineLibraryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage userFullName={user?.fullName ?? ''} /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'history' ? (permissions.canViewHistory ? <HistoryPage userRole={user?.role ?? ''} selectedSection={historySection} onSectionChange={section=>navigate('history',section)} onBackToLanding={()=>navigate('history')} /> : <div className="page-stack"><div className="page-heading"><p className="eyebrow">Not Authorized</p><h2>History Logs locked</h2><p>History Logs permission is required.</p></div></div>) : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} userFullName={user?.fullName ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage isOwnerAdmin={Boolean(user?.isOwnerAdmin)} canViewSystemVersion={Boolean(user?.canViewSystemVersion)} /> : <DashboardPage onOpenRequisitions={navigateToRequisitions} userFullName={user?.fullName??''} effectivePermissions={user?.effectivePermissions??[]} />;
-  if(mode==='loading') return <AuthCard title="Loading MCC" eyebrow="Secure local access"><p>Checking local session…</p></AuthCard>;
+  if(mode==='loading') return <MccAppLoading progress={0} stage="Checking secure local session..." />;
+  if(mode==='initializing') return <MccAppLoading progress={initialization.progress} stage={initialization.stage} error={initialization.error} onRetry={initialization.error&&user?()=>void initializeApplication(user,{resetToDashboard:initialization.resetToDashboard,verifySession:true}):undefined} />;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
-  if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{setUser(u); setMode(u.forcePasswordChange?'change':'app');}} />;
+  if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{if(u.forcePasswordChange){setUser(u);setActiveSection('dashboard');setHistorySection(null);window.history.replaceState(null,'','/');setMode('change');return;}void initializeApplication(u,{resetToDashboard:true,verifySession:true});}} />;
   if(mode==='forgot') return <MccForgotPassword onBack={()=>setMode('login')} requestReset={async email=>{const data=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});return data.message;}} />;
-  if(mode==='change') return <Change forced={Boolean(user?.forcePasswordChange)} onDone={refresh} />;
-  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} onPrefetchSection={prefetchSection} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} allowedSections={permissions.allowedSections} onUpdatePassword={()=>setMode('change')} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'}); setUser(null); setMode('login');}}><SystemUpdateNotice user={user!} onViewUpdate={navigateToSystemUpdate}/><RouteModuleBoundary resetKey={activeSection}><Suspense fallback={<RouteLoadingState />}>{page}</Suspense></RouteModuleBoundary></MccLayout>;
+  if(mode==='change') return <Change forced={Boolean(user?.forcePasswordChange)} onDone={()=>void refresh(Boolean(user?.forcePasswordChange))} />;
+  return <MccLayout activeSection={activeSection} onSectionChange={section=>navigate(section)} onPrefetchSection={prefetchSection} user={user!} canManageUsers={permissions.canManageUsers} canViewHistory={permissions.canViewHistory} allowedSections={permissions.allowedSections} onUpdatePassword={()=>setMode('change')} onLogout={async()=>{await api('/api/auth/logout',{method:'POST'});initializationRunRef.current+=1;setActiveSection('dashboard');setHistorySection(null);window.history.replaceState(null,'','/');setUser(null);setMode('login');}}><SystemUpdateNotice user={user!} onViewUpdate={navigateToSystemUpdate}/><RouteModuleBoundary resetKey={activeSection}><Suspense fallback={<RouteLoadingState />}>{page}</Suspense></RouteModuleBoundary></MccLayout>;
 }
 function Setup({onDone}:{onDone:()=>void}) { const [fullName,setFullName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirmPassword,setConfirm]=useState(''),[msg,setMsg]=useState(''); async function submit(e:FormEvent){e.preventDefault();setMsg('');try{await api('/api/auth/setup-first-admin',{method:'POST',body:JSON.stringify({fullName,email,password,confirmPassword})});setMsg('First Admin created. Please log in.'); setTimeout(onDone,800);}catch(err){setMsg((err as Error).message)}} return <AuthCard title="First Admin Setup" eyebrow="MCC security foundation"><form onSubmit={submit} className="auth-form"><Field label="Full name" value={fullName} onChange={setFullName}/><Field label="Email" value={email} onChange={setEmail} autoComplete="email"/><Field label="Password" type="password" value={password} onChange={setPassword}/><Field label="Confirm password" type="password" value={confirmPassword} onChange={setConfirm}/><p className="form-help">Minimum 10 characters with uppercase, lowercase, number, and special character.</p><button className="primary-button">Create First Admin</button>{msg&&<p className="form-message">{msg}</p>}</form></AuthCard> }
 function Login({onLogin,onForgot}:{onLogin:(u:User)=>void;onForgot:()=>void}) {
