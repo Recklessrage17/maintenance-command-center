@@ -3598,8 +3598,10 @@ body {
 
 .asset-year-value {
   min-width: 0;
+  width: max-content;
   display: inline-flex;
   align-items: baseline;
+  flex-wrap: nowrap;
   gap: 6px;
   max-width: 100%;
   font-size: inherit;
@@ -3607,18 +3609,35 @@ body {
   white-space: nowrap;
 }
 
-.asset-year-number {
+.mcc-card .asset-year-value {
+  display: inline-flex;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.asset-year-value > span {
+  flex: 0 0 auto;
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.asset-year-value > .asset-year-number {
   overflow: hidden;
   color: var(--mcc-text-primary);
   text-overflow: ellipsis;
 }
 
-.asset-year-separator {
+.asset-year-value > .asset-year-separator {
   color: var(--mcc-text-muted);
   font-weight: 750;
 }
 
-.asset-age-inline {
+.asset-year-value > .asset-age-inline {
   overflow: hidden;
   color: #ff9f43;
   font-size: inherit;

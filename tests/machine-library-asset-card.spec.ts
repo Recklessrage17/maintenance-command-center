@@ -42,7 +42,7 @@ const emptyAssetFields = {
 const assets = [
   {
     ...emptyAssetFields,
-    id: 51, assetNumber: 'Press 51', assetName: 'North Cell Press', brand: 'Toyo', model: 'SI-250-6', serialNumber: '1694010', machineYear: '2012', barrelDiameter: '35mm', location: 'North Cell', department: 'Molding', status: 'active', brandColorHex: '#44D7FF',
+    id: 51, assetNumber: 'Press 51', assetName: 'North Cell Press', brand: 'Toyo', model: 'SI-250-6', serialNumber: '1694010', machineYear: '2000', barrelDiameter: '35mm', location: 'North Cell', department: 'Molding', status: 'active', brandColorHex: '#44D7FF',
     pmSummary: { total: 2, status: 'due-soon', label: 'PM: 1 Due Soon' },
     historyPreview: [historyRecord, olderHistoryRecord, newestHistoryRecord],
   },
@@ -169,9 +169,9 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expect(cards.first()).not.toContainText('History Preview');
   await expect(cards.first().locator('.machine-pill-card-metrics .mcc-metric-pill')).toHaveCount(4);
   const machineYear = cards.first().locator('.mcc-metric-pill', { hasText: 'Year / Age' });
-  await expect(machineYear.locator('.asset-year-number')).toHaveText('2012');
+  await expect(machineYear.locator('.asset-year-number')).toHaveText('2000');
   await expect(machineYear.locator('.asset-year-separator')).toHaveText('/');
-  await expect(machineYear.locator('.asset-age-inline')).toHaveText('14');
+  await expect(machineYear.locator('.asset-age-inline')).toHaveText('26');
   const rowPolish = await cards.first().evaluate(card=>{
     const brand = getComputedStyle(card.querySelector('.machine-card-brand-name')!);
     const yearElement = card.querySelector('.asset-year-number')!;
@@ -207,16 +207,38 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expect(page.locator('.machine-detail-modal .asset-detail-context')).toHaveText('North Cell Press');
   await expect(page.locator('.machine-detail-modal .machine-detail-summary-card')).toHaveCount(4);
   const detailYearAge = page.locator('.machine-detail-modal .machine-detail-summary-pill.year-age');
-  await expect(detailYearAge.locator('.asset-year-number')).toHaveText('2012');
+  await expect(detailYearAge.locator('.asset-year-number')).toHaveText('2000');
   await expect(detailYearAge.locator('.asset-year-separator')).toHaveText('/');
-  await expect(detailYearAge.locator('.asset-age-inline')).toHaveText('14');
+  await expect(detailYearAge.locator('.asset-age-inline')).toHaveText('26');
   const detailPolish = await page.locator('.machine-detail-modal').evaluate(detail=>{
     const identity = detail.querySelector('.asset-detail-identity-strip')!.getBoundingClientRect();
     const chips = [...detail.querySelectorAll('.asset-detail-identity-strip > span')].map(element=>element.getBoundingClientRect());
     const values = [...detail.querySelectorAll('.asset-detail-identity-strip strong')].map(element=>Number.parseFloat(getComputedStyle(element).fontSize));
     const yearAge = detail.querySelector('.machine-detail-summary-pill.year-age')!;
     const yearAgeStyle = getComputedStyle(yearAge);
-    return { identityWidth: identity.width, chipsWidth: chips.reduce((total,box)=>total+box.width,0), modelSerialGap: chips[2].left-chips[1].right, modelSerialTopDelta: Math.abs(chips[2].top-chips[1].top), minValueSize: Math.min(...values), yearAgeBorder: yearAgeStyle.borderTopWidth, yearAgeBackground: yearAgeStyle.backgroundImage, yearAgeSize: Number.parseFloat(yearAgeStyle.fontSize) };
+    const yearAgeRow = yearAge.querySelector('.asset-year-value')!;
+    const yearAgeRowStyle = getComputedStyle(yearAgeRow);
+    const yearAgeParts = [...yearAgeRow.querySelectorAll(':scope > span')];
+    const yearAgePartStyles = yearAgeParts.map(element=>getComputedStyle(element));
+    const yearAgePartBoxes = yearAgeParts.map(element=>element.getBoundingClientRect());
+    return {
+      identityWidth: identity.width,
+      chipsWidth: chips.reduce((total,box)=>total+box.width,0),
+      modelSerialGap: chips[2].left-chips[1].right,
+      modelSerialTopDelta: Math.abs(chips[2].top-chips[1].top),
+      minValueSize: Math.min(...values),
+      yearAgeBorder: yearAgeStyle.borderTopWidth,
+      yearAgeBackground: yearAgeStyle.backgroundImage,
+      yearAgeSize: Number.parseFloat(yearAgeStyle.fontSize),
+      yearAgeFlexDirection: yearAgeRowStyle.flexDirection,
+      yearAgeFlexWrap: yearAgeRowStyle.flexWrap,
+      yearAgeWhiteSpace: yearAgeRowStyle.whiteSpace,
+      yearAgePartSizes: yearAgePartStyles.map(style=>style.fontSize),
+      yearAgePartColors: yearAgePartStyles.map(style=>style.color),
+      yearAgePartLefts: yearAgePartBoxes.map(box=>box.left),
+      yearAgePartRights: yearAgePartBoxes.map(box=>box.right),
+      yearAgePartCenters: yearAgePartBoxes.map(box=>box.top+(box.height/2)),
+    };
   });
   expect(detailPolish.identityWidth-detailPolish.chipsWidth).toBeLessThanOrEqual(17);
   expect(detailPolish.modelSerialGap).toBeGreaterThanOrEqual(0);
@@ -226,6 +248,17 @@ test('asset card has no dead zones and keeps child controls independent', async 
   expect(detailPolish.yearAgeBorder).toBe('0px');
   expect(detailPolish.yearAgeBackground).toBe('none');
   expect(detailPolish.yearAgeSize).toBeGreaterThanOrEqual(15);
+  if (!mobile) {
+    expect(detailPolish.yearAgeFlexDirection).toBe('row');
+    expect(detailPolish.yearAgeFlexWrap).toBe('nowrap');
+    expect(detailPolish.yearAgeWhiteSpace).toBe('nowrap');
+    expect(detailPolish.yearAgePartSizes).toEqual([`${detailPolish.yearAgeSize}px`,`${detailPolish.yearAgeSize}px`,`${detailPolish.yearAgeSize}px`]);
+    expect(detailPolish.yearAgePartColors[0]).not.toBe(detailPolish.yearAgePartColors[1]);
+    expect(detailPolish.yearAgePartColors[2]).toBe('rgb(255, 159, 67)');
+    expect(detailPolish.yearAgePartRights[0]).toBeLessThanOrEqual(detailPolish.yearAgePartLefts[1]);
+    expect(detailPolish.yearAgePartRights[1]).toBeLessThanOrEqual(detailPolish.yearAgePartLefts[2]);
+    expect(Math.max(...detailPolish.yearAgePartCenters)-Math.min(...detailPolish.yearAgePartCenters)).toBeLessThanOrEqual(1);
+  }
   await closeDetail(page, mobile);
 
   await activate(cards.first().locator('.machine-card-brand-name'), mobile);
