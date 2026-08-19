@@ -146,13 +146,21 @@ function ageYears(value: string) {
   return years < 0 ? 'Unknown' : `${years.toFixed(1)} years`;
 }
 function machineYearAge(value: string) {
+  const ageText = machineYearAgeValue(value);
+  if (ageText === 'Unknown') return ageText;
+  const age = Number(ageText);
+  return `${ageText} ${age === 1 ? 'yr' : 'yrs'}`;
+}
+function machineYearAgeValue(value: string) {
   const yearText = value.trim();
   if (!/^\d{4}$/.test(yearText)) return 'Unknown';
   const year = Number(yearText);
   const currentYear = new Date().getFullYear();
   if (!Number.isFinite(year) || year < 1900 || year > currentYear) return 'Unknown';
-  const age = currentYear - year;
-  return `${age} ${age === 1 ? 'yr' : 'yrs'}`;
+  return String(currentYear - year);
+}
+function MachineYearAge({year}:{year:string}) {
+  return <span className="asset-year-value"><span className="asset-year-number">{year.trim() || '-'}</span><span className="asset-year-separator">/</span><span className="asset-age-inline">{machineYearAgeValue(year)}</span></span>;
 }
 function safeCssHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#44D7FF';
@@ -485,7 +493,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
               <MccStatusPill variant={machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.status}`}>{machineStatusLabel(asset.status)}</MccStatusPill>
             </div>
             <div className="machine-pill-card-metrics">
-              <MccMetricPill label="Year / Age" value={<span className="asset-year-value"><span>{asset.machineYear || '-'}</span><span className="asset-age-inline">{machineYearAge(asset.machineYear)}</span></span>} />
+              <MccMetricPill label="Year / Age" value={<MachineYearAge year={asset.machineYear} />} />
               <MccMetricPill label="Barrel Size" value={asset.barrelDiameter || '-'} variant="brand" />
               <MccMetricPill label="Model" value={asset.model || '-'} />
               <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
@@ -719,7 +727,7 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
     <div className="machine-detail-summary-grid" style={{'--asset-detail-accent':safeCssHex(currentAsset.brandColorHex)} as CSSProperties}>
       <SummaryBadge label="Status" value={machineStatusLabel(currentAsset.status)} tone={machineSummaryStatusClass(currentAsset.status)} />
       <SummaryBadge label="Setup" value={unitLabel} tone={machineSummarySetupClass(currentAsset)} />
-      <SummaryBadge label="Year / Age" value={<span className="asset-year-value"><span>{currentAsset.machineYear || '-'}</span><span className="asset-age-inline">{machineYearAge(currentAsset.machineYear)}</span></span>} tone={machineSummaryKnownClass(currentAsset.machineYear,'year-age')} />
+      <SummaryBadge label="Year / Age" value={<MachineYearAge year={currentAsset.machineYear} />} tone={machineSummaryKnownClass(currentAsset.machineYear,'year-age')} />
       <SummaryBadge label="Location" value={detailValue(currentAsset.location)} tone={machineSummaryKnownClass(currentAsset.location,'location')} />
     </div>
     <MachineRecordLogsLaunchPanel asset={currentAsset} onOpen={()=>onRecordLogs(currentAsset)} />

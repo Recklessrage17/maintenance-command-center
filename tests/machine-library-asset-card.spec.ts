@@ -169,17 +169,31 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expect(cards.first()).not.toContainText('History Preview');
   await expect(cards.first().locator('.machine-pill-card-metrics .mcc-metric-pill')).toHaveCount(4);
   const machineYear = cards.first().locator('.mcc-metric-pill', { hasText: 'Year / Age' });
-  await expect(machineYear.locator('.asset-year-value > span').first()).toHaveText('2012');
-  await expect(machineYear.locator('.asset-age-inline')).toHaveText('14 yrs');
+  await expect(machineYear.locator('.asset-year-number')).toHaveText('2012');
+  await expect(machineYear.locator('.asset-year-separator')).toHaveText('/');
+  await expect(machineYear.locator('.asset-age-inline')).toHaveText('14');
   const rowPolish = await cards.first().evaluate(card=>{
     const brand = getComputedStyle(card.querySelector('.machine-card-brand-name')!);
-    const year = getComputedStyle(card.querySelector('.asset-year-value > span')!);
+    const yearElement = card.querySelector('.asset-year-number')!;
+    const separatorElement = card.querySelector('.asset-year-separator')!;
+    const ageElement = card.querySelector('.asset-age-inline')!;
+    const year = getComputedStyle(yearElement);
+    const separator = getComputedStyle(separatorElement);
     const age = getComputedStyle(card.querySelector('.asset-age-inline')!);
-    return { brandSize: Number.parseFloat(brand.fontSize), yearSize: year.fontSize, ageSize: age.fontSize, ageColor: age.color };
+    const metricSizes = [...card.querySelectorAll('.machine-pill-card-metrics .mcc-metric-pill > strong')].map(element=>Number.parseFloat(getComputedStyle(element).fontSize));
+    const yearBox = yearElement.getBoundingClientRect();
+    const separatorBox = separatorElement.getBoundingClientRect();
+    const ageBox = ageElement.getBoundingClientRect();
+    return { brandSize: Number.parseFloat(brand.fontSize), minMetricSize: Math.min(...metricSizes), yearSize: Number.parseFloat(year.fontSize), ageSize: age.fontSize, ageColor: age.color, yearColor: year.color, separatorColor: separator.color, baselineSpread: Math.max(yearBox.bottom,separatorBox.bottom,ageBox.bottom)-Math.min(yearBox.bottom,separatorBox.bottom,ageBox.bottom) };
   });
-  expect(rowPolish.brandSize).toBeGreaterThanOrEqual(13);
-  expect(rowPolish.ageSize).toBe(rowPolish.yearSize);
+  expect(rowPolish.brandSize).toBeGreaterThanOrEqual(15);
+  expect(rowPolish.minMetricSize).toBeGreaterThanOrEqual(15);
+  expect(rowPolish.yearSize).toBeGreaterThanOrEqual(15);
+  expect(rowPolish.ageSize).toBe(`${rowPolish.yearSize}px`);
   expect(rowPolish.ageColor).toBe('rgb(255, 159, 67)');
+  expect(rowPolish.yearColor).not.toBe(rowPolish.ageColor);
+  expect(rowPolish.separatorColor).not.toBe(rowPolish.ageColor);
+  expect(rowPolish.baselineSpread).toBeLessThanOrEqual(1);
   await expect(cards.first().getByRole('button', { name: /PM: 1 Due Soon/ })).toBeVisible();
 
   await activate(cards.first().locator('.machine-asset-number-pill'), mobile);
@@ -192,7 +206,26 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expect(machineIdentity.locator('.asset-detail-data-chip').nth(1)).toContainText('Serial #1694010');
   await expect(page.locator('.machine-detail-modal .asset-detail-context')).toHaveText('North Cell Press');
   await expect(page.locator('.machine-detail-modal .machine-detail-summary-card')).toHaveCount(4);
-  await expect(page.locator('.machine-detail-modal .machine-detail-summary-grid .asset-age-inline')).toHaveText('14 yrs');
+  const detailYearAge = page.locator('.machine-detail-modal .machine-detail-summary-pill.year-age');
+  await expect(detailYearAge.locator('.asset-year-number')).toHaveText('2012');
+  await expect(detailYearAge.locator('.asset-year-separator')).toHaveText('/');
+  await expect(detailYearAge.locator('.asset-age-inline')).toHaveText('14');
+  const detailPolish = await page.locator('.machine-detail-modal').evaluate(detail=>{
+    const identity = detail.querySelector('.asset-detail-identity-strip')!.getBoundingClientRect();
+    const chips = [...detail.querySelectorAll('.asset-detail-identity-strip > span')].map(element=>element.getBoundingClientRect());
+    const values = [...detail.querySelectorAll('.asset-detail-identity-strip strong')].map(element=>Number.parseFloat(getComputedStyle(element).fontSize));
+    const yearAge = detail.querySelector('.machine-detail-summary-pill.year-age')!;
+    const yearAgeStyle = getComputedStyle(yearAge);
+    return { identityWidth: identity.width, chipsWidth: chips.reduce((total,box)=>total+box.width,0), modelSerialGap: chips[2].left-chips[1].right, modelSerialTopDelta: Math.abs(chips[2].top-chips[1].top), minValueSize: Math.min(...values), yearAgeBorder: yearAgeStyle.borderTopWidth, yearAgeBackground: yearAgeStyle.backgroundImage, yearAgeSize: Number.parseFloat(yearAgeStyle.fontSize) };
+  });
+  expect(detailPolish.identityWidth-detailPolish.chipsWidth).toBeLessThanOrEqual(17);
+  expect(detailPolish.modelSerialGap).toBeGreaterThanOrEqual(0);
+  expect(detailPolish.modelSerialGap).toBeLessThanOrEqual(9);
+  expect(detailPolish.modelSerialTopDelta).toBeLessThanOrEqual(1);
+  expect(detailPolish.minValueSize).toBeGreaterThanOrEqual(15);
+  expect(detailPolish.yearAgeBorder).toBe('0px');
+  expect(detailPolish.yearAgeBackground).toBe('none');
+  expect(detailPolish.yearAgeSize).toBeGreaterThanOrEqual(15);
   await closeDetail(page, mobile);
 
   await activate(cards.first().locator('.machine-card-brand-name'), mobile);

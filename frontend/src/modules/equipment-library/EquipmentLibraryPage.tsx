@@ -38,7 +38,9 @@ function assetToDraft(asset:EquipmentAsset):EquipmentDraft{
 }
 function statusLabel(value:string){return value.replace(/[_-]+/g,' ').replace(/\b\w/g,letter=>letter.toUpperCase())||'Not Set';}
 function display(value:unknown){const text=String(value??'').trim();return text||'Not Set';}
-function equipmentAge(year:string){if(!/^\d{4}$/.test(year.trim()))return 'Not Set';const age=new Date().getFullYear()-Number(year);return age>=0&&age<250?`${age} ${age===1?'yr':'yrs'}`:'Not Set';}
+function equipmentAgeValue(year:string){if(!/^\d{4}$/.test(year.trim()))return 'Not Set';const age=new Date().getFullYear()-Number(year);return age>=0&&age<250?String(age):'Not Set';}
+function equipmentAge(year:string){const ageText=equipmentAgeValue(year);if(ageText==='Not Set')return ageText;return `${ageText} ${Number(ageText)===1?'yr':'yrs'}`;}
+function EquipmentYearAge({year}:{year:string}){return <span className="asset-year-value"><span className="asset-year-number">{display(year)}</span><span className="asset-year-separator">/</span><span className="asset-age-inline">{equipmentAgeValue(year)}</span></span>;}
 function categoryAccent(category:string){const palette=['#44D7FF','#38D7B3','#FFD45A','#8C7CFF','#FF7B72','#65C9FF','#F69D50'];let hash=0;for(const character of category)hash=(hash*31+character.charCodeAt(0))>>>0;return palette[hash%palette.length];}
 function historyAction(value:string){return value.replace(/_/g,' ').replace(/\b\w/g,letter=>letter.toUpperCase());}
 function formatDateTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?value:date.toLocaleString();}
@@ -95,7 +97,7 @@ function EquipmentCard({asset,onOpen}:{asset:EquipmentAsset;onOpen:()=>void}){
   const statusVariant=asset.status==='active'?'success':asset.status==='down'?'danger':'muted';
   return <MccPillCard className="equipment-asset-card" accentColor={categoryAccent(asset.category||asset.manufacturer)} variant={statusVariant} onActivate={onOpen} ariaLabel={`Open Equipment ${asset.assetNumber}, ${asset.equipmentName}`}>
     <div className="equipment-card-heading"><div><span className="equipment-card-number-label">Asset #</span><span className="equipment-card-number">{asset.assetNumber}</span><h3>{asset.equipmentName}</h3></div><MccStatusPill variant={statusVariant}>{statusLabel(asset.status)}</MccStatusPill></div>
-    <dl className="equipment-card-facts"><div><dt>Type / Category</dt><dd>{display(asset.category)}{asset.equipmentType?<small>{asset.equipmentType}</small>:null}</dd></div><div><dt>Brand / Model</dt><dd><span className="equipment-card-brand-name">{display(asset.manufacturer)}</span><small>{display(asset.model)}</small></dd></div><div><dt>Serial #</dt><dd>{display(asset.serialNumber)}</dd></div><div><dt>Year / Age</dt><dd><span className="asset-year-value"><span>{display(asset.equipmentYear)}</span><span className="asset-age-inline">{equipmentAge(asset.equipmentYear)}</span></span></dd></div><div><dt>Location</dt><dd>{display(asset.location)}</dd></div></dl>
+    <dl className="equipment-card-facts"><div><dt>Type / Category</dt><dd>{display(asset.category)}{asset.equipmentType?<small>{asset.equipmentType}</small>:null}</dd></div><div><dt>Brand / Model</dt><dd><span className="equipment-card-brand-name">{display(asset.manufacturer)}</span><small>{display(asset.model)}</small></dd></div><div><dt>Serial #</dt><dd>{display(asset.serialNumber)}</dd></div><div><dt>Year / Age</dt><dd><EquipmentYearAge year={asset.equipmentYear}/></dd></div><div><dt>Location</dt><dd>{display(asset.location)}</dd></div></dl>
     <div className="equipment-card-signals">{asset.pmSummary&&<span className={`equipment-card-pm pm-${asset.pmSummary.status}`}>{asset.pmSummary.label}</span>}<span className="asset-row-open-cue" aria-hidden="true">Open <b>›</b></span></div>
   </MccPillCard>;
 }
@@ -118,7 +120,7 @@ function EquipmentDetail({asset,canEdit,canDelete,canManagePm,performedBy,onBack
     <div className="machine-detail-summary-grid equipment-detail-summary-grid" style={{'--asset-detail-accent':categoryAccent(current.category||current.manufacturer)} as CSSProperties}>
       <EquipmentSummaryTile label="Status" value={statusLabel(current.status)} tone={`status-${current.status}`}/>
       <EquipmentSummaryTile label="Category" value={display(current.category)} tone="equipment-category"/>
-      <EquipmentSummaryTile label="Year / Age" value={<span className="asset-year-value"><span>{display(current.equipmentYear)}</span><span className="asset-age-inline">{equipmentAge(current.equipmentYear)}</span></span>} tone="equipment-year-age"/>
+      <EquipmentSummaryTile label="Year / Age" value={<EquipmentYearAge year={current.equipmentYear}/>} tone="equipment-year-age"/>
       <EquipmentSummaryTile label="Location" value={display(current.location)} tone="equipment-location"/>
     </div>
     {error&&<p className="form-message error" role="alert">{error}</p>}
