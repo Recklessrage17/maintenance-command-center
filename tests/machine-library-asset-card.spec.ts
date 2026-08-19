@@ -168,10 +168,31 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expect(cards.first()).not.toContainText('Barrel & Screw Logs');
   await expect(cards.first()).not.toContainText('History Preview');
   await expect(cards.first().locator('.machine-pill-card-metrics .mcc-metric-pill')).toHaveCount(4);
+  const machineYear = cards.first().locator('.mcc-metric-pill', { hasText: 'Year / Age' });
+  await expect(machineYear.locator('.asset-year-value > span').first()).toHaveText('2012');
+  await expect(machineYear.locator('.asset-age-inline')).toHaveText('14 yrs');
+  const rowPolish = await cards.first().evaluate(card=>{
+    const brand = getComputedStyle(card.querySelector('.machine-card-brand-name')!);
+    const year = getComputedStyle(card.querySelector('.asset-year-value > span')!);
+    const age = getComputedStyle(card.querySelector('.asset-age-inline')!);
+    return { brandSize: Number.parseFloat(brand.fontSize), yearSize: year.fontSize, ageSize: age.fontSize, ageColor: age.color };
+  });
+  expect(rowPolish.brandSize).toBeGreaterThanOrEqual(13);
+  expect(rowPolish.ageSize).toBe(rowPolish.yearSize);
+  expect(rowPolish.ageColor).toBe('rgb(255, 159, 67)');
   await expect(cards.first().getByRole('button', { name: /PM: 1 Due Soon/ })).toBeVisible();
 
   await activate(cards.first().locator('.machine-asset-number-pill'), mobile);
   await expectSingleDetail(page);
+  const machineIdentity = page.locator('.machine-detail-modal .asset-detail-identity-strip');
+  await expect(machineIdentity).toHaveCount(1);
+  await expect(machineIdentity.locator('.asset-detail-brand-chip')).toContainText('Toyo');
+  await expect(machineIdentity.locator('.asset-detail-data-chip')).toHaveCount(2);
+  await expect(machineIdentity.locator('.asset-detail-data-chip').first()).toContainText('ModelSI-250-6');
+  await expect(machineIdentity.locator('.asset-detail-data-chip').nth(1)).toContainText('Serial #1694010');
+  await expect(page.locator('.machine-detail-modal .asset-detail-context')).toHaveText('North Cell Press');
+  await expect(page.locator('.machine-detail-modal .machine-detail-summary-card')).toHaveCount(4);
+  await expect(page.locator('.machine-detail-modal .machine-detail-summary-grid .asset-age-inline')).toHaveText('14 yrs');
   await closeDetail(page, mobile);
 
   await activate(cards.first().locator('.machine-card-brand-name'), mobile);
