@@ -3062,6 +3062,36 @@ body {
   gap: 10px;
 }
 
+/* Issue 93: opt-in brand tint tuning. Toyo and Arburg intentionally retain
+   the generic Issue 92 treatment above. */
+.machine-asset-card.mcc-pill-card.machine-brand-tint-engel {
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--mcc-pill-accent) 12%, transparent), transparent 46%),
+    linear-gradient(180deg, rgba(255,255,255,.025), transparent 72%),
+    var(--mcc-surface-card);
+}
+
+.machine-asset-card.mcc-pill-card.machine-brand-tint-husky {
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--mcc-pill-accent) 13%, transparent), transparent 50%),
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 72%),
+    var(--mcc-surface-card);
+}
+
+.machine-asset-card.mcc-pill-card.machine-brand-tint-netstal {
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--mcc-pill-accent) 12%, transparent), transparent 48%),
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 72%),
+    var(--mcc-surface-card);
+}
+
+.machine-asset-card.mcc-pill-card:is(.machine-brand-tint-engel, .machine-brand-tint-husky, .machine-brand-tint-netstal):is(:hover, :focus-visible) {
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--mcc-pill-accent) 16%, transparent), transparent 54%),
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 72%),
+    var(--mcc-surface-card);
+}
+
 .machine-asset-card.mcc-pill-card.has-pm-summary {
   grid-template-columns: minmax(155px, .8fr) minmax(420px, 2.8fr) minmax(130px, .7fr) auto;
 }
@@ -3177,6 +3207,253 @@ body {
   line-height: 1;
 }
 
+/* Brand color editor */
+.machine-color-modal {
+  width: min(760px, 100%);
+}
+
+.machine-color-title-row,
+.machine-color-intro,
+.machine-color-hex,
+.machine-color-picker,
+.machine-color-hue,
+.machine-color-row-preview {
+  min-width: 0;
+}
+
+.machine-color-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.machine-color-intro {
+  margin: -4px 0 0;
+  color: var(--mcc-text-secondary);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+.machine-color-help {
+  position: relative;
+  display: inline-flex;
+}
+
+.machine-color-help > button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--mcc-module-accent) 52%, var(--mcc-border-default));
+  border-radius: 50%;
+  color: var(--mcc-text-primary);
+  background: rgba(var(--mcc-accent-module-machine-library-rgb), .1);
+  font: inherit;
+  font-size: .76rem;
+  font-weight: 950;
+  cursor: help;
+}
+
+.machine-color-help > button:focus-visible {
+  outline: 2px solid var(--mcc-module-accent);
+  outline-offset: 2px;
+}
+
+.machine-color-help > span {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(310px, calc(100vw - 48px));
+  padding: 9px 10px;
+  border: 1px solid var(--mcc-border-default);
+  border-radius: var(--mcc-radius-sm);
+  color: var(--mcc-text-primary);
+  background: rgba(5, 16, 27, .98);
+  box-shadow: var(--mcc-shadow-card);
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
+}
+
+.machine-color-help:is(:hover, :focus-within) > span,
+.machine-color-help > span.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.machine-color-modal .machine-color-row {
+  grid-template-columns: 38px minmax(82px, .34fr) minmax(160px, .8fr) auto;
+  gap: 9px 11px;
+  padding: 11px;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+.machine-color-modal .machine-color-row.is-invalid {
+  border-color: color-mix(in srgb, var(--mcc-status-danger) 58%, var(--mcc-border-default));
+}
+
+.machine-color-swatch {
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid rgba(255,255,255,.58);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(4,18,34,.9), 0 0 16px color-mix(in srgb, var(--preview-color) 30%, transparent);
+  cursor: pointer;
+  transition: box-shadow .16s ease, transform .16s ease, background-color .16s ease;
+}
+
+.machine-color-swatch:is(:hover, :focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--preview-color) 65%, #fff 20%);
+  outline-offset: 3px;
+  transform: scale(1.04);
+}
+
+.machine-color-swatch:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.machine-color-hex {
+  display: grid;
+  gap: 4px;
+}
+
+.machine-color-hex > span,
+.machine-color-hue > span {
+  color: var(--mcc-text-muted);
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.machine-color-hex input {
+  min-height: 36px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 850;
+  letter-spacing: .04em;
+}
+
+.machine-color-hex input[aria-invalid="true"] {
+  border-color: var(--mcc-status-danger);
+}
+
+.machine-color-hex small {
+  color: color-mix(in srgb, var(--mcc-status-danger) 80%, #fff 20%);
+  font-size: .67rem;
+}
+
+.machine-color-row-preview {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--preview-color) 42%, var(--mcc-border-default));
+  border-left: 3px solid var(--preview-color);
+  border-radius: 11px;
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--preview-color) 13%, transparent), transparent 58%),
+    var(--mcc-surface-card);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.machine-color-row-preview span {
+  color: color-mix(in srgb, var(--preview-color) 82%, #fff 18%);
+  font-weight: 950;
+}
+
+.machine-color-row-preview small {
+  color: var(--mcc-text-muted);
+  font-size: .68rem;
+}
+
+.machine-color-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--mcc-border-subtle);
+  border-radius: 12px;
+  background: rgba(2, 10, 18, .62);
+}
+
+.machine-color-sv-area {
+  position: relative;
+  height: 138px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.32);
+  border-radius: 9px;
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, transparent),
+    var(--picker-hue);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.machine-color-sv-area:focus-visible {
+  outline: 2px solid var(--mcc-module-accent);
+  outline-offset: 2px;
+}
+
+.machine-color-picker-indicator {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 5px rgba(0,0,0,.85), inset 0 0 0 1px rgba(0,0,0,.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.machine-color-hue {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.machine-color-hue input {
+  appearance: none;
+  width: 100%;
+  height: 10px;
+  border: 1px solid rgba(255,255,255,.3);
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  cursor: pointer;
+}
+
+.machine-color-hue input::-webkit-slider-thumb {
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--preview-color);
+  box-shadow: 0 1px 5px rgba(0,0,0,.78);
+}
+
+.machine-color-hue input::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--preview-color);
+  box-shadow: 0 1px 5px rgba(0,0,0,.78);
+}
+
 .equipment-asset-card.mcc-pill-card {
   grid-template-columns: minmax(190px, .85fr) minmax(520px, 2.9fr) minmax(130px, .55fr);
   gap: 10px;
@@ -3272,6 +3549,21 @@ body {
   .equipment-card-signals {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .machine-color-modal .machine-color-row {
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+  }
+
+  .machine-color-hex,
+  .machine-color-row-preview,
+  .machine-color-picker {
+    grid-column: 1 / -1;
+  }
+
+  .machine-color-row-preview {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 420px) {
@@ -3282,6 +3574,13 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .machine-color-help > span,
+  .machine-color-modal .machine-color-row,
+  .machine-color-swatch,
+  .machine-color-row-preview {
+    transition: none;
+  }
+
   .mcc-shell :where(
     .mcc-page-enter,
     .mcc-route-loader,

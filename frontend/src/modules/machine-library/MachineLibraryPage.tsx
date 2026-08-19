@@ -157,8 +157,36 @@ function machineYearAge(value: string) {
 function safeCssHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#44D7FF';
 }
+function isValidHexColor(value: string) {
+  return /^#[0-9A-Fa-f]{6}$/.test(value.trim());
+}
+function normalizeHexColor(value: string) {
+  return value.trim().toUpperCase();
+}
 function isEngelBrand(value: string) {
   return value.trim().toLowerCase() === 'engel';
+}
+function machineBrandTintClass(value: string) {
+  const brand = value.trim().toLowerCase();
+  return ['engel','husky','netstal'].includes(brand) ? ` machine-brand-tint-${brand}` : '';
+}
+type HsvColor = { h:number; s:number; v:number };
+function hexToHsv(value: string): HsvColor {
+  const hex = safeCssHex(value).slice(1);
+  const [r,g,b] = [0,2,4].map(offset=>Number.parseInt(hex.slice(offset,offset+2),16)/255);
+  const max=Math.max(r,g,b); const min=Math.min(r,g,b); const delta=max-min;
+  let h=0;
+  if (delta) {
+    if (max===r) h=60*(((g-b)/delta)%6);
+    else if (max===g) h=60*((b-r)/delta+2);
+    else h=60*((r-g)/delta+4);
+  }
+  return {h:(h+360)%360,s:max===0?0:delta/max,v:max};
+}
+function hsvToHex({h,s,v}: HsvColor) {
+  const chroma=v*s; const section=h/60; const x=chroma*(1-Math.abs(section%2-1)); const match=v-chroma;
+  const [r,g,b] = section<1?[chroma,x,0]:section<2?[x,chroma,0]:section<3?[0,chroma,x]:section<4?[0,x,chroma]:section<5?[x,0,chroma]:[chroma,0,x];
+  return `#${[r,g,b].map(channel=>Math.round((channel+match)*255).toString(16).padStart(2,'0')).join('')}`.toUpperCase();
 }
 function machineStatusLabel(status: string) {
   const normalized = status || 'active';
@@ -386,7 +414,9 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     }
   }
   async function saveColor(brandName: string) {
-    const colorHex = colorDrafts[brandName] ?? '';
+    const draft = colorDrafts[brandName] ?? '';
+    if (!isValidHexColor(draft)) { setMessage({kind:'error',text:`${brandName} color must use the #RRGGBB format.`}); return; }
+    const colorHex = normalizeHexColor(draft);
     if (!window.confirm(`Are you sure? This will change the color for all ${brandName} machine assets.`)) return;
     try {
       await api(`/api/machine-library/brand-settings/${encodeURIComponent(brandName)}`,{method:'PUT',body:JSON.stringify({colorHex})});
@@ -445,7 +475,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         </section>
         <div className={`machine-card-grid ${assets.length === 1 ? 'single-result' : 'multi-results'}`}>
         {assets.map(asset=>(
-          <MccPillCard className={`machine-asset-card${asset.pmSummary ? ' has-pm-summary' : ''}${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
+          <MccPillCard className={`machine-asset-card${asset.pmSummary ? ' has-pm-summary' : ''}${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}${machineBrandTintClass(asset.brand)}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
             <div className="machine-pill-card-heading">
               <div className="machine-pill-card-title">
                 <span className="machine-asset-number-label">Asset #</span>
@@ -969,8 +999,36 @@ function UnitDimensionField({label,value,set,disabled}:{label:string;value:strin
     </> : <div className="machine-unit-display"><div><span className="unit-mm">{formatUnitNumber(parsed.mm, 1)}mm</span><span className="unit-in">{formatUnitNumber(parsed.inches, 2)}in</span><span className="unit-ft">{formatUnitNumber(parsed.feet, 2)}ft</span></div>{!disabled&&<button className="machine-unit-edit" type="button" onClick={()=>setIsEditing(true)} aria-label={`Edit ${label}`}>Edit</button>}</div>}
   </div>;
 }
+function BrandColorPicker({brandName,value,onChange,disabled}:{brandName:string;value:string;onChange:(value:string)=>void;disabled:boolean}) {
+  const hsv=hexToHsv(value);
+  const areaRef=useRef<HTMLDivElement|null>(null);
+  function updateSv(clientX:number,clientY:number) {
+    const rect=areaRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    onChange(hsvToHex({...hsv,s:Math.min(1,Math.max(0,(clientX-rect.left)/rect.width)),v:1-Math.min(1,Math.max(0,(clientY-rect.top)/rect.height))}));
+  }
+  return <div className="machine-color-picker" aria-label={`${brandName} visual color picker`}>
+    <div ref={areaRef} className="machine-color-sv-area" style={{'--picker-hue':`hsl(${hsv.h} 100% 50%)`} as CSSProperties} role="slider" tabIndex={disabled?-1:0} aria-label={`${brandName} saturation and brightness`} aria-valuetext={`Saturation ${Math.round(hsv.s*100)}%, brightness ${Math.round(hsv.v*100)}%`} onPointerDown={event=>{if(disabled)return;event.currentTarget.setPointerCapture(event.pointerId);updateSv(event.clientX,event.clientY);}} onPointerMove={event=>{if(!disabled&&event.currentTarget.hasPointerCapture(event.pointerId))updateSv(event.clientX,event.clientY);}} onKeyDown={event=>{if(disabled)return;const step=event.shiftKey?.1:.02;let next=hsv;if(event.key==='ArrowLeft')next={...hsv,s:Math.max(0,hsv.s-step)};else if(event.key==='ArrowRight')next={...hsv,s:Math.min(1,hsv.s+step)};else if(event.key==='ArrowUp')next={...hsv,v:Math.min(1,hsv.v+step)};else if(event.key==='ArrowDown')next={...hsv,v:Math.max(0,hsv.v-step)};else return;event.preventDefault();onChange(hsvToHex(next));}}>
+      <span className="machine-color-picker-indicator" style={{left:`${hsv.s*100}%`,top:`${(1-hsv.v)*100}%`}} />
+    </div>
+    <label className="machine-color-hue"><span>Hue</span><input type="range" min="0" max="359" value={Math.round(hsv.h)} disabled={disabled} aria-label={`${brandName} hue`} onChange={event=>onChange(hsvToHex({...hsv,h:Number(event.target.value)}))} /></label>
+  </div>;
+}
 function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string)=>void;onClose:()=>void}) {
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><h3>Machine Brand Colors</h3></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>{brandSettings.map(setting=><div className="machine-color-row" key={setting.brandName}><span className={`machine-color-swatch ${isEngelBrand(setting.brandName) ? 'machine-color-swatch-engel' : ''}`} style={{background:safeCssHex(colorDrafts[setting.brandName] ?? setting.colorHex)}} /><strong>{setting.brandName}</strong><input value={colorDrafts[setting.brandName] ?? setting.colorHex} disabled={!canEdit} onChange={event=>setColorDrafts(current=>({...current,[setting.brandName]:event.target.value}))} /><button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit}>Save</button></div>)}</section></div>;
+  const [openPicker,setOpenPicker]=useState<string|null>(null);
+  const [helpOpen,setHelpOpen]=useState(false);
+  function setDraft(brandName:string,value:string) { setColorDrafts(current=>({...current,[brandName]:isValidHexColor(value)?normalizeHexColor(value):value})); }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="machine-brand-color-title"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><div className="machine-color-title-row"><h3 id="machine-brand-color-title">Machine Brand Colors</h3><span className="machine-color-help"><button type="button" aria-label="About machine brand colors" aria-expanded={helpOpen} aria-describedby="machine-color-help-text" onClick={()=>setHelpOpen(value=>!value)}>i</button><span id="machine-color-help-text" role="note" className={helpOpen?'is-open':''}>Brand colors control the Machine Library accent and subtle row tint. Keep a saved preset or choose a custom color visually or with a hex code such as #EB5E41, then preview before saving.</span></span></div></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p className="machine-color-intro">Choose a preset visually or enter an exact six-digit hex color. Changes preview here before they are saved.</p>{brandSettings.map(setting=>{
+    const draft=colorDrafts[setting.brandName] ?? setting.colorHex; const valid=isValidHexColor(draft); const preview=valid?normalizeHexColor(draft):setting.colorHex; const pickerOpen=openPicker===setting.brandName;
+    return <div className={`machine-color-row${valid?'':' is-invalid'}`} key={setting.brandName} style={{'--preview-color':safeCssHex(preview)} as CSSProperties}>
+      <button className={`machine-color-swatch ${isEngelBrand(setting.brandName) ? 'machine-color-swatch-engel' : ''}`} type="button" aria-label={`Choose ${setting.brandName} color`} aria-expanded={pickerOpen} disabled={!canEdit} style={{background:safeCssHex(preview)}} onClick={()=>setOpenPicker(current=>current===setting.brandName?null:setting.brandName)} />
+      <strong>{setting.brandName}</strong>
+      <label className="machine-color-hex"><span>Hex color</span><input className="glass-input" value={draft} disabled={!canEdit} maxLength={7} aria-invalid={!valid} aria-describedby={!valid?`machine-color-error-${setting.brandName}`:undefined} onChange={event=>setDraft(setting.brandName,event.target.value)} onBlur={()=>{if(valid)setDraft(setting.brandName,normalizeHexColor(draft));}} />{!valid&&<small id={`machine-color-error-${setting.brandName}`}>Use a six-digit hex value like #EB5E41.</small>}</label>
+      <button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit||!valid}>Save</button>
+      <div className="machine-color-row-preview" aria-label={`${setting.brandName} row tint preview`}><span>{setting.brandName}</span><small>Machine row accent preview</small></div>
+      {pickerOpen&&<BrandColorPicker brandName={setting.brandName} value={preview} disabled={!canEdit} onChange={value=>setDraft(setting.brandName,value)} />}
+    </div>;
+  })}</section></div>;
 }
 function ReplacementModal({replacement,setReplacement,onSubmit}:{replacement:{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string};setReplacement:Dispatch<SetStateAction<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>>;onSubmit:(event:FormEvent)=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-small-modal" onSubmit={onSubmit}><p className="eyebrow">Replacement Update</p><h3>Update New {replacementLabels[replacement.field]} Install Date</h3><DateWithAge label="Install Date *" value={replacement.installDate} set={installDate=>setReplacement(current=>current&&({...current,installDate}))} disabled={false}/><Area label="Reason / Note" value={replacement.reasonNote} set={reasonNote=>setReplacement(current=>current&&({...current,reasonNote}))} disabled={false}/><div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setReplacement(null)}>Cancel</button><button className="primary-button" type="submit">Update {replacementLabels[replacement.field]} Date</button></div></form></div>;

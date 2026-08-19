@@ -24,6 +24,7 @@
     "test:https-deployment": "node tests/https-deployment-validation.mjs",
     "test:mdns-deployment": "node tests/mdns-deployment-validation.mjs",
     "test:asset-card": "playwright test tests/machine-library-asset-card.spec.ts",
+    "test:machine-brand-colors": "npm run build --prefix backend && node tests/machine-brand-colors-api.mjs && playwright test tests/issue-93-brand-colors.spec.ts",
     "test:machine-documents": "playwright test tests/machine-asset-document-library.spec.ts",
     "test:machine-documents-api": "node tests/machine-asset-document-library-api.mjs",
     "test:machine-asset-spec": "playwright test tests/machine-asset-specification.spec.ts",

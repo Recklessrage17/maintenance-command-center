@@ -416,7 +416,7 @@ export function MachineLibraryToolsDropdown({
   }
 
   return <div className="machine-tools-wrap" ref={wrapRef}>
-    <button className={open ? 'secondary-button compact-button machine-tools-toggle active' : 'secondary-button compact-button machine-tools-toggle'} type="button" aria-haspopup="menu" aria-expanded={open} onClick={()=>setOpen(current=>!current)}>
+    <button className={open ? 'secondary-button compact-button machine-tools-toggle active' : 'secondary-button compact-button machine-tools-toggle'} type="button" aria-label="Machine Library tools" aria-haspopup="menu" aria-expanded={open} onClick={()=>setOpen(current=>!current)}>
       <span className="machine-tools-icon" aria-hidden="true">Tools</span>
     </button>
     {open&&<div className="machine-tools-menu" role="menu" aria-label="Machine Library tools">
