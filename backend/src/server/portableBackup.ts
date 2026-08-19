@@ -280,6 +280,30 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
         { table: 'equipment_library', name: 'Equipment Library' },
         { table: 'equipment', name: 'Equipment' },
         { table: 'equipment_pms', name: 'Equipment PM' },
+        {
+          table: 'equipment_asset_notes',
+          name: 'Equipment Asset Notes',
+          query: 'SELECT n.*,a.asset_number AS asset_number,a.equipment_name AS equipment_name,a.category AS category FROM equipment_asset_notes n LEFT JOIN equipment_assets a ON a.id=n.asset_id ORDER BY n.rowid',
+          derivedColumns: [
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'equipment_name', value: row => row.equipment_name },
+            { name: 'category', value: row => row.category },
+            { name: 'portable_pdf_relative_path', value: row => portableStoredReference(row.pdf_stored_reference) },
+          ],
+        },
+        {
+          table: 'equipment_asset_note_attachments',
+          name: 'Equipment Note Attachments',
+          query: 'SELECT x.*,n.asset_id AS asset_id,n.title AS note_title,a.asset_number AS asset_number,a.equipment_name AS equipment_name,a.category AS category FROM equipment_asset_note_attachments x LEFT JOIN equipment_asset_notes n ON n.id=x.note_id LEFT JOIN equipment_assets a ON a.id=n.asset_id ORDER BY x.rowid',
+          derivedColumns: [
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'equipment_name', value: row => row.equipment_name },
+            { name: 'category', value: row => row.category },
+            { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
       ] },
       { filename: 'MCC_History.xlsx', sheets: (historyTables.length ? historyTables : ['history_logs']).map(table => ({ table, name: table })) },
     ];
@@ -808,6 +832,7 @@ export function validatePortablePackage(packagePath: string, currentAppVersion: 
   if (sha256FileSync(databasePath) !== manifest.checksumSha256) throw new Error('Portable package database checksum does not match the manifest.');
   validateSqliteDatabase(databasePath);
   validateMachineLibraryPackageIntegrity(databasePath, root);
+  validateEquipmentLibraryPackageIntegrity(databasePath, root);
   const recoveryManifest = JSON.parse(fs.readFileSync(path.join(root, 'recovery', 'restore-manifest.json'), 'utf8')) as Record<string, unknown>;
   if (recoveryManifest.packageVersion !== PORTABLE_PACKAGE_VERSION || recoveryManifest.sourcePathsAreRelative !== true) throw new Error('Portable package restore manifest is incompatible.');
   return {
@@ -870,6 +895,55 @@ export function validateMachineLibraryPackageIntegrity(databasePath: string, pac
     });
   } finally {
     database.close();
+  }
+}
+
+export function validateEquipmentLibraryPackageIntegrity(databasePath: string, packagePath: string) {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const tables = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name));
+    if (!tables.has('equipment_assets')) return;
+    const assetIds = new Set((database.prepare('SELECT id FROM equipment_assets').all() as Array<{ id: number }>).map(row => Number(row.id)));
+    const noteAssets = new Map<number, number>();
+    if (tables.has('equipment_asset_notes')) {
+      for (const row of database.prepare('SELECT id,asset_id,pdf_stored_reference FROM equipment_asset_notes').all() as Array<Record<string, unknown>>) {
+        const id = Number(row.id);
+        const assetId = Number(row.asset_id);
+        assertEquipmentAssetRelationship(assetIds, assetId, `asset note ${id}`);
+        noteAssets.set(id, assetId);
+        const pdfReference = String(row.pdf_stored_reference ?? '');
+        if (pdfReference) assertEquipmentStoredReference(packagePath, pdfReference, undefined, `asset note PDF ${id}`);
+      }
+    }
+    if (tables.has('equipment_asset_note_attachments')) {
+      for (const row of database.prepare('SELECT id,note_id,file_size,stored_file_reference FROM equipment_asset_note_attachments').all() as Array<Record<string, unknown>>) {
+        const id = Number(row.id);
+        if (!noteAssets.has(Number(row.note_id))) throw new Error(`Portable package Equipment Library note attachment ${id} has an invalid note relationship.`);
+        assertEquipmentStoredReference(packagePath, row.stored_file_reference, row.file_size, `note attachment ${id}`);
+      }
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function assertEquipmentAssetRelationship(assetIds: Set<number>, value: unknown, label: string) {
+  const assetId = Number(value);
+  if (!Number.isInteger(assetId) || !assetIds.has(assetId)) throw new Error(`Portable package Equipment Library ${label} has an invalid equipment relationship.`);
+}
+
+function assertEquipmentStoredReference(packagePath: string, value: unknown, expectedSize: unknown, label: string) {
+  const reference = String(value ?? '');
+  if (!reference.startsWith('uploads/equipment-asset-notes/') || !safeRelativePath(reference)) throw new Error(`Portable package Equipment Library ${label} has an unsafe stored file reference.`);
+  assertEquipmentPayloadFile(packagePath, `files/${reference}`, expectedSize, label);
+}
+
+function assertEquipmentPayloadFile(packagePath: string, relative: string, expectedSize: unknown, label: string) {
+  const candidate = resolveInside(packagePath, relative);
+  if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) throw new Error(`Portable package is missing Equipment Library ${label} physical file.`);
+  if (expectedSize !== undefined && expectedSize !== null) {
+    const size = Number(expectedSize);
+    if (!Number.isSafeInteger(size) || size < 0 || fs.statSync(candidate).size !== size) throw new Error(`Portable package Equipment Library ${label} physical file size does not match its database metadata.`);
   }
 }
 
