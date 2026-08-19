@@ -116,6 +116,12 @@ async function documentCardClickCount(page: Page) {
   return page.evaluate(()=>(window as unknown as { __assetCardDocumentClicks: number }).__assetCardDocumentClicks);
 }
 
+test('Machine asset query opens the requested full detail', async ({ page }) => {
+  await mockMachineLibrary(page);
+  await page.goto('/machine-library?asset=52');
+  await expectSingleDetail(page,'Press 52');
+});
+
 test('asset card has no dead zones and keeps child controls independent', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile-chromium';
   await mockMachineLibrary(page);

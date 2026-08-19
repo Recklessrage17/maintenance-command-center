@@ -321,6 +321,8 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const listScrollPositionRef = useRef(0);
   const openingAssetIdRef = useRef<number|null>(null);
   const detailReturnAssetNumberRef = useRef<string|null>(null);
+  const requestedAssetIdRef = useRef(Number(new URLSearchParams(window.location.search).get('asset'))||null);
+  const requestedAssetOpenedRef = useRef(false);
   const brands = useMemo(()=>[...new Set(assets.map(asset=>asset.brand).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),[assets]);
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
@@ -333,10 +335,15 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     if (brandFilter) params.set('brand', brandFilter);
     if (statusFilter) params.set('status', statusFilter);
     api<{ok:boolean;assets:MachineAsset[];brandSettings:BrandSetting[];permissions:{canEdit:boolean;canDelete:boolean;canManagePm:boolean}}>(`/api/machine-library/assets?${params}`)
-      .then(data=>{ setAssets(data.assets ?? []); setBrandSettings(data.brandSettings ?? []); setPermissions(data.permissions ?? permissions); setColorDrafts(Object.fromEntries((data.brandSettings ?? []).map(setting=>[setting.brandName,setting.colorHex]))); })
+      .then(data=>{ const nextAssets=data.assets ?? []; setAssets(nextAssets); setBrandSettings(data.brandSettings ?? []); setPermissions(data.permissions ?? permissions); setColorDrafts(Object.fromEntries((data.brandSettings ?? []).map(setting=>[setting.brandName,setting.colorHex]))); const requestedAsset=!requestedAssetOpenedRef.current&&requestedAssetIdRef.current?nextAssets.find(asset=>asset.id===requestedAssetIdRef.current):null; if(requestedAsset){ requestedAssetOpenedRef.current=true; openDetail(requestedAsset); } })
       .catch(error=>setMessage({kind:'error',text:(error as Error).message}));
   }
   useEffect(()=>{ loadAssets(); },[search,brandFilter,statusFilter]);
+  useEffect(()=>{
+    if(!detailAsset)return;
+    const frame=window.requestAnimationFrame(()=>document.querySelector<HTMLElement>('.machine-detail-modal')?.focus());
+    return()=>window.cancelAnimationFrame(frame);
+  },[detailAsset?.id]);
 
   function openAdd() { setSetupDraft({setupType:'Standard Injection',hasDoubleShotInjection:false,hasPlungerInjection:false}); setShowSetup(true); }
   function continueAddFromSetup() { setEditing(null); setForm({...blankAssetForm,...setupDraft}); setShowSetup(false); setShowEditor(true); }
@@ -347,9 +354,6 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     detailReturnAssetNumberRef.current=asset.assetNumber;
     listScrollPositionRef.current=window.scrollY;
     setDetailAsset(asset);
-    window.requestAnimationFrame(()=>{
-      document.querySelector<HTMLElement>('.machine-detail-modal')?.focus();
-    });
   }
   function closeDetail(afterClose?:()=>void) {
     const listScrollPosition=listScrollPositionRef.current;

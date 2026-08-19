@@ -1525,6 +1525,12 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-notes-toolbar small { color: #9fbdcc; font-size: .74rem; }
 .asset-note-form { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,.45fr); gap: 12px; padding: 13px; border: 1px solid rgba(54,229,170,.26); border-radius: 12px; background: rgba(7,25,45,.62); }
 .asset-note-body-field,.asset-note-attachment-picker,.asset-note-form > .asset-attachment-grid,.asset-note-form > .modal-actions { grid-column: 1 / -1; }
+.asset-note-warning-toggle{min-width:0;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid rgba(246,190,63,.38);border-radius:11px;background:rgba(100,65,9,.18);cursor:pointer}
+.asset-note-warning-toggle input{flex:0 0 auto;width:18px;height:18px;margin:1px 0 0;accent-color:#f6be3f}
+.asset-note-warning-toggle>span{min-width:0;display:grid;gap:2px}
+.asset-note-warning-toggle strong{color:#ffe09a;font-size:.82rem}
+.asset-note-warning-toggle small{color:#cdbb91;font-size:.7rem;line-height:1.35}
+.asset-note-warning-toggle:focus-within{outline:2px solid rgba(246,190,63,.78);outline-offset:2px}
 .asset-note-body-field textarea { min-height: 138px; resize: vertical; }
 .asset-note-attachment-picker { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px dashed rgba(143,205,233,.25); border-radius: 10px; background: rgba(4,18,34,.38); }
 .asset-note-attachment-picker > div { display: grid; gap: 3px; }
@@ -1537,6 +1543,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-entry h5 { overflow-wrap: anywhere; margin: 0; color: #f3fbff; font-size: 1rem; }
 .asset-note-entry-heading small { color: #94b8c9; font-size: .72rem; }
 .asset-note-date-pill { display: inline-flex; width: fit-content; min-height: 23px; align-items: center; padding: 0 8px; border: 1px solid rgba(68,215,255,.3); border-radius: 999px; color: #c8f5ff; background: rgba(6,67,98,.28); font-size: .67rem; font-weight: 950; }
+.asset-note-warning-badge{display:inline-flex;width:fit-content;min-height:24px;align-items:center;padding:3px 8px;border:1px solid rgba(246,190,63,.65);border-radius:999px;color:#ffe09a;background:rgba(112,70,5,.32);font-size:.66rem;font-weight:950;letter-spacing:.02em}
 .asset-note-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
 .asset-note-body-preview { display: -webkit-box; overflow: hidden; margin: 0; color: #c2d8e3; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .asset-attachment-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(285px,100%),1fr)); gap: 8px; }
@@ -4429,6 +4436,10 @@ tr:hover td {
 .equipment-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0}
 .equipment-detail-grid div{display:grid;gap:4px;min-width:0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--border-color) 70%,transparent);border-radius:11px;background:color-mix(in srgb,var(--panel-bg) 80%,transparent)}
 .equipment-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start}
+.equipment-custom-category-control,.equipment-custom-category-field{padding:9px;border:1px solid rgba(246,157,80,.58);border-radius:12px;background:linear-gradient(145deg,rgba(126,68,14,.24),rgba(53,29,8,.12));box-shadow:inset 0 1px 0 rgba(255,221,173,.08),0 0 14px rgba(246,157,80,.08)}
+.equipment-custom-category-control>span,.equipment-custom-category-field>span{color:#ffc77d;font-weight:950}
+.equipment-edit-grid .equipment-custom-category-control .glass-input,.equipment-edit-grid .equipment-custom-category-field .glass-input{border-color:rgba(246,157,80,.7);background-color:rgba(59,34,12,.5);box-shadow:0 0 0 1px rgba(246,157,80,.08)}
+.equipment-edit-grid .equipment-custom-category-control .glass-input:focus,.equipment-edit-grid .equipment-custom-category-field .glass-input:focus{border-color:#f6ad5d;box-shadow:0 0 0 3px rgba(246,157,80,.18)}
 .equipment-field-wide{grid-column:span 2}
 .equipment-form-modal{max-height:min(90vh,880px);overflow:auto}
 .equipment-history-item{display:grid;gap:6px;padding:11px 13px;border:1px solid color-mix(in srgb,var(--border-color) 70%,transparent);border-radius:11px;background:color-mix(in srgb,var(--panel-bg) 80%,transparent)}

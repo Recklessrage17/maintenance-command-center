@@ -129,7 +129,7 @@ async function addPm(base,cookie,assetId,index) {
     method:'POST',
     cookie,
     headers:{'Idempotency-Key':`asset-spec-pm-${assetId}-${index}`},
-    body:{title:`Preventive maintenance schedule ${index + 1}`,intervalType:index % 2 ? 'monthly' : 'annual',intervalValue:index % 2 ? 3 : 1,lastCompletedDate:'2026-01-15',scheduleStatus:'active',notes:''},
+    body:{title:`Preventive maintenance schedule ${index + 1}`,intervalType:index % 2 ? 'days' : 'annual',intervalValue:index % 2 ? 90 : 1,lastCompletedDate:'2026-01-15',scheduleStatus:'active',notes:''},
   });
   assert.equal(result.response.status,201);
 }

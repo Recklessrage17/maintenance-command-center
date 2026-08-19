@@ -5,7 +5,7 @@ import { PmFormModal, PmHistoryModal, type AssetIdentity, type AssetLibraryScope
 import { PM_UPDATED_EVENT } from '../machine-library/pmEvents';
 import { DashboardRequisitionSummary, type DashboardRequisitionView } from './DashboardRequisitionSummary';
 import { dueInformation, intervalSummary, PmAttentionSection } from './DashboardPmAttention';
-import { sortedAttentionAlerts, type PmAlert } from './dashboardPm';
+import { relativeNoteAge, sortedAttentionAlerts, type PmAlert, type PmAssetGroup, type WarningNote } from './dashboardPm';
 
 type RequisitionSummary = { requestedCount:number;orderedCount:number;receivedCount:number;canceledCount:number;activeCount:number };
 export type { DashboardRequisitionView } from './DashboardRequisitionSummary';
@@ -32,9 +32,11 @@ function workOrderFilename(alert:PmAlert) {
 export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermissions=[]}:{onOpenRequisitions:(view:DashboardRequisitionView)=>void;userFullName?:string;effectivePermissions?:string[]}) {
   const [requisitionSummary,setRequisitionSummary]=useState<RequisitionSummary>(emptyRequisitionSummary);
   const [pmAlerts,setPmAlerts]=useState<PmAlert[]>([]);
+  const [warningNotes,setWarningNotes]=useState<WarningNote[]>([]);
   const [pmLoading,setPmLoading]=useState(true);
   const [pmError,setPmError]=useState('');
   const [selectedPm,setSelectedPm]=useState<PmAlert|null>(null);
+  const [selectedWarningGroup,setSelectedWarningGroup]=useState<PmAssetGroup|null>(null);
   const requestSequence=useRef(0);
   const requisitionNavigationPending=useRef(false);
 
@@ -54,8 +56,8 @@ export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermi
       const response=await fetch('/api/dashboard/preventive-maintenance-due',{credentials:'include'});
       const data=await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(data.error||'Preventive maintenance alerts are unavailable.');
-      if(sequence===requestSequence.current)setPmAlerts(sortedAttentionAlerts(Array.isArray(data.alerts)?data.alerts:[]));
-    }catch(error){if(sequence===requestSequence.current){setPmAlerts([]);setPmError((error as Error).message);}}
+      if(sequence===requestSequence.current){setPmAlerts(sortedAttentionAlerts(Array.isArray(data.alerts)?data.alerts:[]));setWarningNotes(Array.isArray(data.warningNotes)?data.warningNotes:[]);}
+    }catch(error){if(sequence===requestSequence.current){setPmAlerts([]);setWarningNotes([]);setPmError((error as Error).message);}}
     finally{if(sequence===requestSequence.current)setPmLoading(false);}
   },[]);
 
@@ -88,10 +90,38 @@ export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermi
       <div className="dashboard-pm-heading"><div><p className="eyebrow">Preventive maintenance</p><h2 id="dashboard-pm-title">Maintenance Attention</h2><p>Urgent schedules grouped by asset and library.</p></div></div>
       {pmLoading&&<p className="dashboard-pm-state">Loading preventive maintenance…</p>}
       {!pmLoading&&pmError&&<div className="dashboard-pm-state error"><span>{pmError}</span><button className="secondary-button compact-button" type="button" onClick={()=>void loadPmAlerts()}>Retry</button></div>}
-      {!pmLoading&&!pmError&&<div className="dashboard-pm-sections"><PmAttentionSection library="machine" title="Machine PM Attention" description="Machine Library preventive maintenance requiring action." alerts={pmAlerts} onOpenTask={setSelectedPm}/><PmAttentionSection library="equipment" title="Equipment PM Attention" description="Equipment Library preventive maintenance requiring action." alerts={pmAlerts} onOpenTask={setSelectedPm}/></div>}
+      {!pmLoading&&!pmError&&<div className="dashboard-pm-sections"><PmAttentionSection library="machine" title="Machine PM Attention" description="Machine Library preventive maintenance requiring action." alerts={pmAlerts} warningNotes={warningNotes} onOpenTask={setSelectedPm} onOpenWarnings={setSelectedWarningGroup}/><PmAttentionSection library="equipment" title="Equipment PM Attention" description="Equipment Library preventive maintenance requiring action." alerts={pmAlerts} warningNotes={warningNotes} onOpenTask={setSelectedPm} onOpenWarnings={setSelectedWarningGroup}/></div>}
     </section>
     {selectedPm&&<PmDetailModal alert={selectedPm} performedBy={userFullName} canEdit={effectivePermissions.includes(`${selectedPm.assetLibrary==='equipment'?'equipment':'machine'}.pm_manage`)} onClose={()=>setSelectedPm(null)} onChanged={async()=>{setSelectedPm(null);await loadPmAlerts();}}/>}
+    {selectedWarningGroup&&<WarningNoteViewer group={selectedWarningGroup} onClose={()=>setSelectedWarningGroup(null)}/>}
   </div>;
+}
+
+function WarningNoteViewer({group,onClose}:{group:PmAssetGroup;onClose:()=>void}) {
+  const [expandedId,setExpandedId]=useState<number|null>(null);
+  const dialogRef=useRef<HTMLElement>(null);
+  useEffect(()=>{
+    const returnFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    const dialog=dialogRef.current;dialog?.querySelector<HTMLElement>('button')?.focus();
+    const handleKeyDown=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){event.preventDefault();onClose();return;}
+      if(event.key!=='Tab'||!dialog)return;
+      const focusable=[...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item=>item.offsetParent!==null);
+      if(!focusable.length)return;const first=focusable[0];const last=focusable[focusable.length-1];
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    };
+    document.addEventListener('keydown',handleKeyDown);
+    return()=>{document.removeEventListener('keydown',handleKeyDown);returnFocus?.focus();};
+  },[onClose]);
+  const assetLabel=`${group.assetNumber}${group.assetName?` · ${group.assetName}`:''}`;
+  return createPortal(<div className="modal-backdrop glass-modal-backdrop dashboard-tech-note-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section ref={dialogRef} className="mcc-card glass-modal-shell dashboard-tech-note-viewer" role="dialog" aria-modal="true" aria-labelledby={`dashboard-tech-note-title-${group.library}-${group.assetId}`}>
+    <div className="modal-heading"><div><p className="eyebrow">Warning / Needs Attention</p><h2 id={`dashboard-tech-note-title-${group.library}-${group.assetId}`}>Tech Notes for {group.assetNumber}</h2><p>{assetLabel} · {group.brand||'Brand / manufacturer not set'}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
+    <div className="dashboard-tech-note-list">{group.warningNotes.map(note=>{const expanded=expandedId===note.id;const panelId=`dashboard-tech-note-body-${note.assetLibrary}-${note.id}`;return <article className={`dashboard-tech-note-row${expanded?' is-expanded':''}`} key={`${note.assetLibrary}:${note.id}`}>
+      <button className="dashboard-tech-note-toggle" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={()=>setExpandedId(current=>current===note.id?null:note.id)}><span className="dashboard-tech-note-warning-icon" aria-hidden="true">!</span><span className="dashboard-tech-note-copy"><strong>{note.title}</strong><span><time dateTime={note.noteDate}>{formatDate(note.noteDate)}</time> · {relativeNoteAge(note.noteDate,note.createdAt)} · {note.createdBy}</span></span><span className="dashboard-tech-note-expand" aria-hidden="true">{expanded?'−':'+'}</span></button>
+      <div id={panelId} className="dashboard-tech-note-body" hidden={!expanded}><p>{note.body}</p><div className="dashboard-tech-note-actions"><button className="secondary-button compact-button" type="button" onClick={()=>window.open(note.pdfUrl,'_blank','noopener,noreferrer')}>Print / PDF</button><a className="link-button compact-button" href={`/${note.assetLibrary}-library?asset=${note.assetId}`}>Open full asset detail</a></div></div>
+    </article>;})}</div>
+    <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Close</button></div>
+  </section></div>,document.body);
 }
 
 function dashboardTask(alert:PmAlert):PmTask{return {...alert,intervalType:alert.intervalType as PmTask['intervalType'],status:alert.status,scheduleStatus:alert.scheduleStatus};}

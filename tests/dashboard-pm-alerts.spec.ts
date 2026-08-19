@@ -12,6 +12,9 @@ function alert(id:number,status:string,overrides:AlertOverrides={}) {
     ...overrides,
   };
 }
+function warningNote(id:number,overrides:Record<string,unknown>={}) {
+  return {id,assetId:900,assetLibrary:'machine',assetNumber:'Press 900',assetName:'Warning-only Press',brand:'Toyo',model:'W-900',serialNumber:'WARN-900',location:'North Cell',assetAccentColor:'#1E6BFF',assetCategory:'',title:`Warning Note ${id}`,noteDate:'2026-08-18',body:'Fans are going bad and will need to be replaced soon.',warning:true,createdBy:'Dashboard Technician',createdAt:'2026-08-18T14:00:00Z',updatedAt:'2026-08-18T14:00:00Z',pdfFilename:`warning-${id}.pdf`,pdfUrl:`/api/machine-library/asset-notes/${id}/pdf`,pdfDownloadUrl:`/api/machine-library/asset-notes/${id}/pdf?download=true`,...overrides};
+}
 
 const fixtureAlerts=[
   alert(551,'Past Due',{assetId:51,assetNumber:'Press 51',assetName:'North Cell Press',brand:'Toyo',title:'Machine Greasing',intervalType:'hourly',intervalLabel:'Hourly',intervalValue:250,lastCompletedDate:null,lastCompletedMeter:1000,currentMeter:1270,nextDueDate:null,nextDueMeter:1250,relativeMessage:'Past due by 20 hours'}),
@@ -24,11 +27,11 @@ const fixtureAlerts=[
   alert(58,'Due Now',{scheduleStatus:'inactive',title:'Inactive PM must be excluded'}),
 ];
 
-async function mockDashboard(page:Page,alerts=fixtureAlerts) {
-  await page.addInitScript(()=>{(window as unknown as {__printCalls:number}).__printCalls=0;window.print=()=>{(window as unknown as {__printCalls:number}).__printCalls+=1;};});
+async function mockDashboard(page:Page,alerts=fixtureAlerts,warningNotes:Record<string,unknown>[]=[]) {
+  await page.addInitScript(()=>{const state=window as unknown as {__printCalls:number;__openedUrls:string[]};state.__printCalls=0;state.__openedUrls=[];window.print=()=>{state.__printCalls+=1;};window.open=((url?:string|URL)=>{state.__openedUrls.push(String(url??''));return null;}) as typeof window.open;});
   await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Dashboard Tester',email:'dashboard@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false,effectivePermissions:['machine.view','machine.pm_manage','equipment.view','equipment.pm_manage']}}}));
   await page.route('**/api/requisitions/summary',route=>route.fulfill({json:{ok:true,requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0}}));
-  await page.route('**/api/dashboard/preventive-maintenance-due',route=>route.fulfill({json:{ok:true,alerts,summary:{}}}));
+  await page.route('**/api/dashboard/preventive-maintenance-due',route=>route.fulfill({json:{ok:true,alerts,warningNotes,summary:{}}}));
   await page.route(/\/api\/machine-library\/preventive-maintenance\/\d+\/history$/,route=>route.fulfill({json:{ok:true,history:[{id:1,completionDate:'2026-06-17',completedMeter:1000,performedBy:'Dashboard Tester',completionNotes:'Completed',createdAt:'2026-06-17T12:00:00Z'}]}}));
 }
 async function activate(locator:Locator,mobile:boolean){if(mobile)await locator.tap();else await locator.click();}
@@ -183,6 +186,20 @@ test('shows the compact empty state when no preventive maintenance needs attenti
   await expect(page.getByText('No machine PM tasks need attention.')).toBeVisible();
   await expect(page.getByText('No equipment PM tasks need attention.')).toBeVisible();
   await expect(page.locator('.dashboard-pm-asset-group')).toHaveCount(0);
+});
+
+test('surfaces Machine and Equipment warning-only assets with accessible Tech Note viewers and reduced motion',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
+  const warnings=[warningNote(9602,{title:'Older fan inspection',noteDate:'2026-08-05',createdAt:'2026-08-05T12:00:00Z',body:'Earlier inspection warning.'}),warningNote(9601,{title:'Fan replacement warning'}),warningNote(9701,{assetId:901,assetLibrary:'equipment',assetNumber:'EQ-901',assetName:'Resin Dryer',brand:'Matsui',model:'MJ5',serialNumber:'EQWARN-901',location:'Molding Bay',assetAccentColor:'',assetCategory:'Dryer',title:'Dryer airflow warning',noteDate:'2026-08-22',createdAt:'2026-08-19T12:00:00Z',pdfUrl:'/api/equipment-library/asset-notes/9701/pdf',pdfDownloadUrl:'/api/equipment-library/asset-notes/9701/pdf?download=true'})];
+  await page.emulateMedia({reducedMotion:'reduce'});await mockDashboard(page,[],warnings);await page.goto('/');
+  const machine=page.locator('.dashboard-pm-section--machine');const equipment=page.locator('.dashboard-pm-section--equipment');
+  await expect(machine.locator('.dashboard-pm-asset-group')).toHaveCount(1);await expect(equipment.locator('.dashboard-pm-asset-group')).toHaveCount(1);
+  const machinePill=machine.getByRole('button',{name:'Open 2 warning Tech Notes for Press 900'});const equipmentPill=equipment.getByRole('button',{name:'Open 1 warning Tech Note for EQ-901'});
+  await expect(machinePill).toContainText('Tech Note 2');await expect(equipmentPill).toContainText('Tech Note 1');await expect(machinePill).toHaveCSS('animation-name','none');
+  await activate(machinePill,mobile);const dialog=page.getByRole('dialog',{name:/Tech Notes for Press 900/});await expect(dialog).toBeVisible();await expect(dialog.getByText('Fan replacement warning')).toBeVisible();await expect(dialog.getByText(/1 day old/)).toBeVisible();await expect(dialog.getByText(/Dashboard Technician/).first()).toBeVisible();
+  const noteToggle=dialog.getByRole('button',{name:/Fan replacement warning/});await expect(noteToggle).toHaveAttribute('aria-expanded','false');await noteToggle.press('Enter');await expect(noteToggle).toHaveAttribute('aria-expanded','true');await expect(dialog.getByText('Fans are going bad and will need to be replaced soon.')).toBeVisible();await expect(dialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href','/machine-library?asset=900');
+  await activate(dialog.getByRole('button',{name:'Print / PDF'}),mobile);expect(await page.evaluate(()=>(window as unknown as {__openedUrls:string[]}).__openedUrls)).toContain('/api/machine-library/asset-notes/9601/pdf');
+  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(machinePill).toBeFocused();await activate(equipmentPill,mobile);const equipmentDialog=page.getByRole('dialog',{name:/Tech Notes for EQ-901/});await expect(equipmentDialog.getByText('In 3 days')).toBeVisible();await expect(equipmentDialog.locator('time[datetime="2026-08-22"]')).toBeVisible();await page.keyboard.press('Escape');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test('switches Machine and Equipment accordions above or below in one interaction',async({page},testInfo)=>{

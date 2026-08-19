@@ -1,7 +1,7 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { MccStatusPill } from '../../components/MccPills';
 import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
-import { groupPmAlerts, pmStatusCounts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus } from './dashboardPm';
+import { groupPmAlerts, pmStatusCounts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus, type WarningNote } from './dashboardPm';
 
 function statusClass(status:PmStatus){return status.toLowerCase().replace(/\s+/g,'-');}
 function statusTone(status:PmStatus){return status==='Due Soon'?'warning':status==='Due Now'?'urgent':'danger';}
@@ -25,9 +25,9 @@ export function dueInformation(alert:PmAlert) {
   return 'Next due information unavailable';
 }
 
-function PmStatusSummary({alerts,className=''}:{alerts:PmAlert[];className?:string}) {
+function PmStatusSummary({alerts,warningCount=0,className=''}:{alerts:PmAlert[];warningCount?:number;className?:string}) {
   const counts=pmStatusCounts(alerts);
-  return <MccSummaryTokenGroup className={className}>{(['Due Soon','Due Now','Past Due'] as PmStatus[]).map(status=>counts[status]>0&&<MccSummaryToken key={status} tone={statusTone(status)}>{counts[status]} {status}</MccSummaryToken>)}</MccSummaryTokenGroup>;
+  return <MccSummaryTokenGroup className={className}>{(['Due Soon','Due Now','Past Due'] as PmStatus[]).map(status=>counts[status]>0&&<MccSummaryToken key={status} tone={statusTone(status)}>{counts[status]} {status}</MccSummaryToken>)}{warningCount>0&&<MccSummaryToken tone="warning">{warningCount} Tech Note{warningCount===1?'':'s'}</MccSummaryToken>}</MccSummaryTokenGroup>;
 }
 
 function AssetStatusPills({group}:{group:PmAssetGroup}) {
@@ -42,16 +42,17 @@ function PmTaskRow({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   </button>;
 }
 
-function PmAssetAccordion({group,isOpen,onToggle,onOpenTask}:{group:PmAssetGroup;isOpen:boolean;onToggle:()=>void;onOpenTask:(alert:PmAlert)=>void}) {
+function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{group:PmAssetGroup;isOpen:boolean;onToggle:()=>void;onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
   const contentId=`dashboard-pm-group-${group.library}-${group.assetId}`;
   const label=`${group.assetNumber}${group.brand?` (${group.brand})`:''}`;
   const inactiveContentProps=isOpen?{}:{inert:''};
-  return <article className={`dashboard-pm-asset-group${isOpen?' is-open':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
+  return <article className={`dashboard-pm-asset-group${isOpen?' is-open':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
     <button className="dashboard-pm-asset-toggle" type="button" aria-expanded={isOpen} aria-controls={contentId} onClick={onToggle}>
       <span className="dashboard-pm-asset-identity"><strong>{label}</strong>{group.assetName&&<span>{group.assetName}</span>}</span>
       <AssetStatusPills group={group}/>
       <span className="dashboard-pm-chevron" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5.5 7.5 4.5 4.5 4.5-4.5"/></svg></span>
     </button>
+    {group.warningNotes.length>0&&<button className="dashboard-tech-note-pill" type="button" onClick={()=>onOpenWarnings(group)} aria-label={`Open ${group.warningNotes.length} warning Tech ${group.warningNotes.length===1?'Note':'Notes'} for ${group.assetNumber}`}>Tech Note <strong>{group.warningNotes.length}</strong></button>}
     <div id={contentId} className="dashboard-pm-accordion-body" aria-hidden={!isOpen} {...inactiveContentProps}>
       <div className="dashboard-pm-accordion-inner">
         {pmStatusOrder.map(status=>{
@@ -66,9 +67,10 @@ function PmAssetAccordion({group,isOpen,onToggle,onOpenTask}:{group:PmAssetGroup
   </article>;
 }
 
-export function PmAttentionSection({library,title,description,alerts,onOpenTask}:{library:PmLibrary;title:string;description:string;alerts:PmAlert[];onOpenTask:(alert:PmAlert)=>void}) {
-  const groups=useMemo(()=>groupPmAlerts(alerts,library),[alerts,library]);
+export function PmAttentionSection({library,title,description,alerts,warningNotes,onOpenTask,onOpenWarnings}:{library:PmLibrary;title:string;description:string;alerts:PmAlert[];warningNotes:WarningNote[];onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
+  const groups=useMemo(()=>groupPmAlerts(alerts,library,warningNotes),[alerts,library,warningNotes]);
   const sectionAlerts=useMemo(()=>groups.flatMap(group=>group.alerts),[groups]);
+  const sectionWarningCount=useMemo(()=>groups.reduce((count,group)=>count+group.warningNotes.length,0),[groups]);
   const [openGroup,setOpenGroup]=useState<string|null>(null);
   const sectionRef=useRef<HTMLElement>(null);
   useEffect(()=>{if(openGroup&&!groups.some(group=>group.key===openGroup))setOpenGroup(null);},[groups,openGroup]);
@@ -101,8 +103,8 @@ export function PmAttentionSection({library,title,description,alerts,onOpenTask}
   return <section ref={sectionRef} className={`dashboard-pm-section dashboard-pm-section--${library}`} aria-labelledby={`dashboard-${library}-pm-title`}>
     <header className="dashboard-pm-section-heading">
       <div><p className="dashboard-pm-library-label">{library==='machine'?'Machine Library':'Equipment Library'}</p><h3 id={`dashboard-${library}-pm-title`}>{title}</h3><p>{description}</p></div>
-      {sectionAlerts.length>0&&<PmStatusSummary alerts={sectionAlerts} className="dashboard-pm-section-counts"/>}
+      {(sectionAlerts.length>0||sectionWarningCount>0)&&<PmStatusSummary alerts={sectionAlerts} warningCount={sectionWarningCount} className="dashboard-pm-section-counts"/>}
     </header>
-    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, and Past Due tasks will appear here.</span></div>:<div className="dashboard-pm-asset-list">{groups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask}/>)}</div>}
+    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div className="dashboard-pm-asset-list">{groups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>}
   </section>;
 }

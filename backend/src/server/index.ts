@@ -408,12 +408,12 @@ CREATE TABLE IF NOT EXISTS requisition_staging_items (id INTEGER PRIMARY KEY AUT
 CREATE TABLE IF NOT EXISTS machine_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, asset_name TEXT NOT NULL DEFAULT '', brand TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', machine_year TEXT NOT NULL DEFAULT '', machine_type TEXT NOT NULL DEFAULT 'Injection Molding Machine', power_type TEXT NOT NULL DEFAULT '', setup_type TEXT NOT NULL DEFAULT 'Standard Injection', shot_size_oz REAL NOT NULL DEFAULT 0, tonnage REAL NOT NULL DEFAULT 0, barrel_diameter TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', voltage_value TEXT NOT NULL DEFAULT '', voltage_type TEXT NOT NULL DEFAULT '', full_load_amp TEXT NOT NULL DEFAULT '', machine_length TEXT NOT NULL DEFAULT '', machine_width TEXT NOT NULL DEFAULT '', machine_height TEXT NOT NULL DEFAULT '', full_die_height_length TEXT NOT NULL DEFAULT '', screw_type TEXT NOT NULL DEFAULT '', screw_tip_type TEXT NOT NULL DEFAULT '', screw_tip_installed_date TEXT NOT NULL DEFAULT '', screw_installed_date TEXT NOT NULL DEFAULT '', barrel_installed_date TEXT NOT NULL DEFAULT '', barrel_end_cap_installed_date TEXT NOT NULL DEFAULT '', barrel_length TEXT NOT NULL DEFAULT '', screw_length TEXT NOT NULL DEFAULT '', screw_rebuild_repaired INTEGER NOT NULL DEFAULT 0, barrel_rebuild_repaired INTEGER NOT NULL DEFAULT 0, screw_condition_status TEXT NOT NULL DEFAULT 'new', barrel_condition_status TEXT NOT NULL DEFAULT 'new', notes TEXT NOT NULL DEFAULT '', critical_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
-CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, is_warning INTEGER NOT NULL DEFAULT 0, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS machine_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES machine_document_folders(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS equipment_assets (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_number TEXT NOT NULL UNIQUE COLLATE NOCASE, equipment_name TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', equipment_type TEXT NOT NULL DEFAULT '', manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', serial_number TEXT NOT NULL DEFAULT '', equipment_year TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', criticality TEXT NOT NULL DEFAULT '', power_type TEXT NOT NULL DEFAULT '', voltage TEXT NOT NULL DEFAULT '', phase TEXT NOT NULL DEFAULT '', amperage TEXT NOT NULL DEFAULT '', air_requirement TEXT NOT NULL DEFAULT '', water_requirement TEXT NOT NULL DEFAULT '', capacity_rating TEXT NOT NULL DEFAULT '', dimensions TEXT NOT NULL DEFAULT '', weight TEXT NOT NULL DEFAULT '', specification_notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER);
-CREATE TABLE IF NOT EXISTS equipment_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS equipment_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, is_warning INTEGER NOT NULL DEFAULT 0, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS equipment_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS equipment_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS equipment_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES equipment_document_folders(id) ON DELETE RESTRICT);
@@ -646,7 +646,7 @@ CREATE INDEX IF NOT EXISTS idx_requisition_batch_requisitions_req ON requisition
 CREATE TABLE IF NOT EXISTS machine_brand_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, brand_name TEXT NOT NULL UNIQUE COLLATE NOCASE, color_hex TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by_user_id INTEGER);
 CREATE TABLE IF NOT EXISTS machine_component_images (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, component_type TEXT NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER, UNIQUE(asset_id,component_type));
 CREATE TABLE IF NOT EXISTS machine_inspection_records (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, record_date TEXT NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_at TEXT NOT NULL, uploaded_by_user_id INTEGER);
-CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_asset_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, title TEXT NOT NULL, note_date TEXT NOT NULL, body TEXT NOT NULL, is_warning INTEGER NOT NULL DEFAULT 0, pdf_filename TEXT NOT NULL DEFAULT '', pdf_stored_reference TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_asset_note_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER NOT NULL, original_filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, stored_file_reference TEXT NOT NULL, uploaded_by_user_id INTEGER, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machine_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, UNIQUE(asset_id,name), FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS machine_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES machine_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES machine_document_folders(id) ON DELETE RESTRICT);
@@ -682,6 +682,12 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
   run('UPDATE pm_tasks SET hold=0 WHERE hold IS NULL');
 
   const machineAssetColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_assets)').map(column => column.name));
+  const machineAssetNoteColumns = new Set(all<{ name: string }>('PRAGMA table_info(machine_asset_notes)').map(column => column.name));
+  if (!machineAssetNoteColumns.has('is_warning')) run('ALTER TABLE machine_asset_notes ADD COLUMN is_warning INTEGER NOT NULL DEFAULT 0');
+  const equipmentAssetNoteColumns = new Set(all<{ name: string }>('PRAGMA table_info(equipment_asset_notes)').map(column => column.name));
+  if (!equipmentAssetNoteColumns.has('is_warning')) run('ALTER TABLE equipment_asset_notes ADD COLUMN is_warning INTEGER NOT NULL DEFAULT 0');
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_machine_asset_notes_warning ON machine_asset_notes (is_warning,asset_id,note_date DESC,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_equipment_asset_notes_warning ON equipment_asset_notes (is_warning,asset_id,note_date DESC,created_at DESC);`);
   if (!pmTaskColumns.has('asset_library')) run("ALTER TABLE pm_tasks ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
   db.exec('DROP INDEX IF EXISTS idx_pm_tasks_asset; CREATE INDEX idx_pm_tasks_asset ON pm_tasks (asset_library,asset_id,active,updated_at DESC);');
   const pmHistoryColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_history)').map(column => column.name));
@@ -7364,7 +7370,7 @@ type MachineReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_ca
 type MachineComponentImageType = 'screw' | 'screw-tip' | 'barrel' | 'barrel-end-cap' | 'screw-2' | 'screw-2-tip' | 'barrel-2' | 'barrel-2-end-cap' | 'plunger' | 'plunger-barrel' | 'plunger-barrel-end-cap';
 type MachineComponentImageRow = { id:number; asset_id:number; component_type:MachineComponentImageType; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null };
 type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
-type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; created_by_name?:string };
+type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; is_warning:number; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; location?:string; category?:string; asset_library?:AssetLibrary; accent_color?:string; created_by_name?:string };
 type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string };
 type MachineDocumentFolderRow = { id:number; asset_id:number; name:string; description:string; created_at:string; updated_at:string; created_by_user_id:number|null; updated_by_user_id:number|null; document_count?:number; library_updated_at?:string };
 type MachineDocumentRow = { id:number; asset_id:number; folder_id:number; original_filename:string; display_filename:string; stored_filename:string; extension:string; mime_type:string; size_bytes:number; description:string; revision:string; uploaded_at:string; updated_at:string; uploaded_by_user_id:number|null; updated_by_user_id:number|null; uploaded_by_name?:string; folder_name?:string };
@@ -7669,6 +7675,12 @@ function validMachineAssetNoteDate(value: unknown) {
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10)!==clean) throw new Error('Enter a valid note date.');
   return clean;
 }
+function assetNoteWarningValue(value:unknown,fallback=false) {
+  if (value===undefined || value===null || value==='') return fallback;
+  if (typeof value==='boolean') return value;
+  if (typeof value==='number') return value===1;
+  return ['true','1','on','yes'].includes(String(value).trim().toLowerCase());
+}
 function validatedMachineAssetNoteAttachment(file: Express.Multer.File) {
   const extension = path.extname(file.originalname).toLowerCase();
   const mimeType = machineAssetNoteAttachmentTypes.get(extension);
@@ -7690,13 +7702,13 @@ function safeMachineAssetNoteOriginalName(value: string, extension: string) {
 function machineAssetNoteFilePath(storedReference: string) {
   const relative = storedReference.replace(/\\/g,'/');
   if (!relative.startsWith('uploads/machine-asset-notes/')) throw new Error('Asset note file reference is invalid.');
-  const resolved = path.resolve(__dirname,'../../',relative);
   const root = path.resolve(machineAssetNotesDir);
+  const resolved = path.resolve(root,path.basename(relative));
   if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Asset note file reference is invalid.');
   return resolved;
 }
 function machineAssetNoteById(noteId: number) {
-  return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name
+  return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name
     FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
     WHERE n.id=? AND a.deleted=0`,[noteId]);
 }
@@ -7712,7 +7724,7 @@ function publicMachineAssetNote(row: MachineAssetNoteRow) {
   const pdfBaseUrl = `/api/machine-library/asset-notes/${row.id}/pdf`;
   const version = encodeURIComponent(row.updated_at);
   const attachments = machineAssetNoteAttachments(row.id).map(publicMachineAssetNoteAttachment);
-  return { id:row.id,assetId:row.asset_id,title:row.title,noteDate:row.note_date,body:row.body,createdBy:row.created_by_name ?? 'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,
+  return { id:row.id,assetId:row.asset_id,title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),createdBy:row.created_by_name ?? 'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,
     pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`,attachments };
 }
 function receiveMachineAssetNote(req: Request,res:Response,next:NextFunction) {
@@ -7756,9 +7768,10 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const blue = rgb(0.02,0.35,0.65);
-  const blueDark = rgb(0.02,0.16,0.3);
-  const blueSoft = rgb(0.9,0.96,1);
+  const blue = rgb(0.02,0.3,0.52);
+  const blueDark = rgb(0.04,0.12,0.2);
+  const rule = rgb(0.72,0.77,0.81);
+  const amber = rgb(0.68,0.39,0.02);
   const ink = rgb(0.07,0.1,0.14);
   const muted = rgb(0.32,0.4,0.48);
   const width = 612;
@@ -7769,31 +7782,34 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   let y = 0;
   const addPage = () => {
     page = pdf.addPage([width,height]);
-    page.drawRectangle({x:0,y:height-74,width,height:74,color:blueSoft});
-    page.drawRectangle({x:0,y:height-74,width:9,height:74,color:blue});
-    page.drawText('ASSET MAINTENANCE NOTE',{x:margin,y:height-34,size:10,font:bold,color:blue});
-    page.drawText(truncateToFit(safeMachineAssetNotePdfText(note.title),bold,18,width-margin*2),{x:margin,y:height-57,size:18,font:bold,color:blueDark});
-    y=height-102;
+    page.drawText('ASSET / TECHNICIAN NOTE',{x:margin,y:height-35,size:10,font:bold,color:blue});
+    page.drawText(truncateToFit(safeMachineAssetNotePdfText(note.title),bold,19,width-margin*2),{x:margin,y:height-59,size:19,font:bold,color:blueDark});
+    page.drawRectangle({x:margin,y:height-72,width:width-margin*2,height:1,color:rule});
+    y=height-96;
     return page;
   };
   const ensureSpace = (heightNeeded:number) => { if (y-heightNeeded<52) addPage(); };
   page=addPage();
   const assetLabel = `${note.asset_number ?? ''}${note.asset_name ? ` - ${note.asset_name}` : ''}`;
+  const identityLabel=note.asset_library==='equipment'?'Manufacturer / Category':'Brand';
+  const identityValue=note.asset_library==='equipment'?[note.brand,note.category].filter(Boolean).join(' / '):(note.brand||'-');
   const metadata = [
-    ['Asset',assetLabel || '-'],['Brand / Model',[note.brand,note.model].filter(Boolean).join(' / ') || '-'],['Serial Number',note.serial_number || '-'],
-    ['Note Date',note.note_date],['Created By',note.created_by_name || 'Unknown user'],['Created',new Date(note.created_at).toLocaleString('en-US')],
+    ['Asset # / Name',assetLabel || '-'],[identityLabel,identityValue || '-'],['Model',note.model || '-'],['Serial #',note.serial_number || '-'],
+    ['Location',note.location || '-'],['Note Date',note.note_date],['Technician / Author',note.created_by_name || 'Unknown user'],['Created',new Date(note.created_at).toLocaleString('en-US')],
+    ['Warning / Needs Attention',note.is_warning?'YES':'NO'],
   ];
   metadata.forEach(([label,value],index)=>{
     const column=index%2;
     const row=Math.floor(index/2);
     const x=margin+column*262;
     const top=y-row*48;
-    page.drawText(label.toUpperCase(),{x,y:top,size:7,font:bold,color:blue});
-    page.drawText(truncateToFit(safeMachineAssetNotePdfText(value),regular,10,238),{x,y:top-17,size:10,font:regular,color:ink});
+    const warning=label==='Warning / Needs Attention';
+    page.drawText(label.toUpperCase(),{x,y:top,size:7,font:bold,color:warning&&note.is_warning?amber:blue});
+    page.drawText(truncateToFit(safeMachineAssetNotePdfText(value),warning?bold:regular,10,238),{x,y:top-17,size:10,font:warning?bold:regular,color:warning&&note.is_warning?amber:ink});
   });
-  y-=154;
-  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:blueSoft});
-  page.drawText('NOTE DETAILS',{x:margin,y:y-12,size:9,font:bold,color:blue});
+  y-=250;
+  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
+  page.drawText('TECHNICIAN NOTE',{x:margin,y:y-12,size:9,font:bold,color:blue});
   y-=34;
   const bodyLines=notePdfLines(note.body,regular,10.5,width-margin*2);
   for (const line of bodyLines) {
@@ -7803,7 +7819,7 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   }
   y-=12;
   ensureSpace(56);
-  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:blueSoft});
+  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
   page.drawText('ATTACHMENTS',{x:margin,y:y-12,size:9,font:bold,color:blue});
   y-=34;
   const attachmentLines=attachments.length ? attachments.map(item=>`${item.original_filename} (${path.extname(item.original_filename).replace('.','').toUpperCase() || item.mime_type})`) : ['No attachments'];
@@ -7817,7 +7833,7 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   }
   const pages=pdf.getPages();
   pages.forEach((item,index)=>{
-    item.drawRectangle({x:margin,y:35,width:width-margin*2,height:1,color:blueSoft});
+    item.drawRectangle({x:margin,y:35,width:width-margin*2,height:1,color:rule});
     item.drawText(`Generated ${generatedAt.toLocaleString('en-US')}`,{x:margin,y:19,size:7.5,font:regular,color:muted});
     const pageLabel=`Page ${index+1} of ${pages.length}`;
     item.drawText(pageLabel,{x:width-margin-regular.widthOfTextAtSize(pageLabel,7.5),y:19,size:7.5,font:regular,color:muted});
@@ -8196,17 +8212,17 @@ function dashboardPmSortDistance(row:PmTaskRow) {
   }
   return Number.MAX_SAFE_INTEGER;
 }
-function dashboardPmAlerts() {
+function dashboardPmAlerts(libraries:Set<AssetLibrary>=new Set(['machine','equipment'])) {
   type DashboardPmRow=PmTaskRow&{asset_number:string;asset_name:string;brand:string;model:string;serial_number:string;accent_color:string;category:string};
   const statusRank:Record<string,number>={Overdue:0,'Due Now':1,'Due Soon':2};
-  const machineRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(bs.color_hex,def.color_hex,?) AS accent_color,'' AS category
+  const machineRows=libraries.has('machine')?all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(bs.color_hex,def.color_hex,?) AS accent_color,'' AS category
     FROM pm_tasks p JOIN machine_assets a ON a.id=p.asset_id
     LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand)
     LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default'
-    WHERE p.asset_library='machine' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`,[machineDefaultBrandColors.Default]);
-  const equipmentRows=all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,'' AS accent_color,a.category
+    WHERE p.asset_library='machine' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`,[machineDefaultBrandColors.Default]):[];
+  const equipmentRows=libraries.has('equipment')?all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,'' AS accent_color,a.category
     FROM pm_tasks p JOIN equipment_assets a ON a.id=p.asset_id
-    WHERE p.asset_library='equipment' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`);
+    WHERE p.asset_library='equipment' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`):[];
   return [...machineRows,...equipmentRows].map(row=>({row,state:pmTaskStatus(row)}))
     .filter(item=>item.state.status==='Overdue'||item.state.status==='Due Now'||item.state.status==='Due Soon')
     .sort((left,right)=>statusRank[left.state.status]-statusRank[right.state.status]
@@ -8226,6 +8242,22 @@ function dashboardPmAlerts() {
       assetAccentColor:row.asset_library==='machine'?safeHexColor(row.accent_color,machineDefaultBrandColors.Default):'',
       assetCategory:row.category,
     }));
+}
+function dashboardWarningNotes(user:User) {
+  const rows:MachineAssetNoteRow[]=[];
+  if (hasPermission(user,'machine.view')) rows.push(...all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(bs.color_hex,def.color_hex,?) AS accent_color,COALESCE(u.full_name,'Unknown user') AS created_by_name
+    FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id
+    LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default'
+    LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.is_warning=1 AND a.deleted=0`,[machineDefaultBrandColors.Default]));
+  if (hasPermission(user,'equipment.view')) rows.push(...all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,'' AS accent_color,COALESCE(u.full_name,'Unknown user') AS created_by_name
+    FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
+    WHERE n.is_warning=1 AND a.deleted=0`));
+  return rows.sort((left,right)=>right.note_date.localeCompare(left.note_date)||right.created_at.localeCompare(left.created_at)||right.id-left.id).map(row=>{
+    const library=row.asset_library==='equipment'?'equipment':'machine';
+    const pdfBaseUrl=`/api/${library}-library/asset-notes/${row.id}/pdf`;
+    const version=encodeURIComponent(row.updated_at);
+    return {id:row.id,assetId:row.asset_id,assetLibrary:library,assetNumber:row.asset_number??'',assetName:row.asset_name??'',brand:row.brand??'',model:row.model??'',serialNumber:row.serial_number??'',location:row.location??'',assetCategory:row.category??'',assetAccentColor:library==='machine'?safeHexColor(row.accent_color??'',machineDefaultBrandColors.Default):'',title:row.title,noteDate:row.note_date,body:row.body,warning:true,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`};
+  });
 }
 function pmWorkOrderAttachment(historyId:number) {return one<PmWorkOrderAttachmentRow>('SELECT * FROM pm_work_order_attachments WHERE pm_history_id=?',[historyId]);}
 function pmHistoryParticipants(historyId:number){return all<PmHistoryParticipantRow>('SELECT * FROM pm_history_participants WHERE pm_history_id=? ORDER BY participant_order,id',[historyId]);}
@@ -8824,6 +8856,8 @@ const equipmentCriticalities=['','low','medium','high','critical'];
 const equipmentImportHeaders=['Equipment Asset Number','Equipment Name','Category','Equipment Type','Manufacturer / Brand','Model','Serial Number','Year','Location','Department / Area','Status','Criticality','Power Type','Voltage','Phase','Amperage','Air Requirement','Water Requirement','Capacity / Rating','Dimensions','Weight','Specification Notes'] as const;
 type EquipmentAssetInput=ReturnType<typeof validateEquipmentAssetInput>;
 function equipmentText(input:Record<string,unknown>,keys:string[],maxLength=240,fallback=''){return machineText(input,keys,maxLength,fallback);}
+function equipmentOptionalText(input:Record<string,unknown>,keys:string[],maxLength=240){return equipmentText(input,keys,maxLength).trim()||'N/A';}
+function equipmentZeroText(input:Record<string,unknown>,keys:string[],maxLength=240){return equipmentText(input,keys,maxLength).trim()||'0';}
 function normalizeEquipmentCategory(value:string,customValue:string){
   const requested=value.trim().replace(/\s+/g,' ');
   const custom=customValue.trim().replace(/\s+/g,' ');
@@ -8847,16 +8881,16 @@ function validateEquipmentAssetInput(body:unknown){
   const criticality=equipmentCriticalities.includes(requestedCriticality)?requestedCriticality:'';
   return {
     assetNumber,equipmentName,category,
-    equipmentType:equipmentText(input,['equipmentType','equipment_type','type','Equipment Type'],160),
-    manufacturer:equipmentText(input,['manufacturer','brand','manufacturerBrand','Manufacturer / Brand'],160),
-    model:equipmentText(input,['model','Model'],160),serialNumber:equipmentText(input,['serialNumber','serial_number','Serial Number'],160),
-    equipmentYear:equipmentText(input,['equipmentYear','equipment_year','year','Year'],12),location:equipmentText(input,['location','Location'],160),
-    department:equipmentText(input,['department','departmentArea','Department / Area'],160),status,criticality,
-    powerType:equipmentText(input,['powerType','power_type','Power Type'],120),voltage:equipmentText(input,['voltage','Voltage'],80),
-    phase:equipmentText(input,['phase','Phase'],80),amperage:equipmentText(input,['amperage','Amperage'],80),
-    airRequirement:equipmentText(input,['airRequirement','air_requirement','Air Requirement'],240),waterRequirement:equipmentText(input,['waterRequirement','water_requirement','Water Requirement'],240),
-    capacityRating:equipmentText(input,['capacityRating','capacity_rating','Capacity / Rating'],240),dimensions:equipmentText(input,['dimensions','Dimensions'],240),
-    weight:equipmentText(input,['weight','Weight'],120),specificationNotes:equipmentText(input,['specificationNotes','specification_notes','Specification Notes'],12000),
+    equipmentType:equipmentOptionalText(input,['equipmentType','equipment_type','type','Equipment Type'],160),
+    manufacturer:equipmentOptionalText(input,['manufacturer','brand','manufacturerBrand','Manufacturer / Brand'],160),
+    model:equipmentOptionalText(input,['model','Model'],160),serialNumber:equipmentOptionalText(input,['serialNumber','serial_number','Serial Number'],160),
+    equipmentYear:equipmentOptionalText(input,['equipmentYear','equipment_year','year','Year'],12),location:equipmentOptionalText(input,['location','Location'],160),
+    department:equipmentOptionalText(input,['department','departmentArea','Department / Area'],160),status,criticality,
+    powerType:equipmentOptionalText(input,['powerType','power_type','Power Type'],120),voltage:equipmentOptionalText(input,['voltage','Voltage'],80),
+    phase:equipmentOptionalText(input,['phase','Phase'],80),amperage:equipmentOptionalText(input,['amperage','Amperage'],80),
+    airRequirement:equipmentOptionalText(input,['airRequirement','air_requirement','Air Requirement'],240),waterRequirement:equipmentOptionalText(input,['waterRequirement','water_requirement','Water Requirement'],240),
+    capacityRating:equipmentZeroText(input,['capacityRating','capacity_rating','Capacity / Rating'],240),dimensions:equipmentZeroText(input,['dimensions','Dimensions'],240),
+    weight:equipmentZeroText(input,['weight','Weight'],120),specificationNotes:equipmentOptionalText(input,['specificationNotes','specification_notes','Specification Notes'],12000),
   };
 }
 function publicEquipmentAsset(row:EquipmentAssetRow){
@@ -8893,8 +8927,9 @@ async function parseEquipmentImportFile(file:Express.Multer.File|undefined){
   return equipmentImportRowsFromTable(rows);
 }
 function equipmentInputFromImport(values:Record<string,string>,existing?:EquipmentAssetRow){
-  const get=(header:string)=>values[normalizeImportHeader(header)]??'';
-  return validateEquipmentAssetInput({assetNumber:get('Equipment Asset Number'),equipmentName:get('Equipment Name'),category:get('Category'),customCategory:get('Category'),equipmentType:get('Equipment Type'),manufacturer:get('Manufacturer / Brand'),model:get('Model'),serialNumber:get('Serial Number'),equipmentYear:get('Year'),location:get('Location'),department:get('Department / Area'),status:get('Status')||existing?.status||'active',criticality:get('Criticality'),powerType:get('Power Type'),voltage:get('Voltage'),phase:get('Phase'),amperage:get('Amperage'),airRequirement:get('Air Requirement'),waterRequirement:get('Water Requirement'),capacityRating:get('Capacity / Rating'),dimensions:get('Dimensions'),weight:get('Weight'),specificationNotes:get('Specification Notes')});
+  const current=existing?publicEquipmentAsset(existing):{} as ReturnType<typeof publicEquipmentAsset>;
+  const get=(header:string,fallback='')=>{const key=normalizeImportHeader(header);return Object.prototype.hasOwnProperty.call(values,key)?values[key]:fallback;};
+  return validateEquipmentAssetInput({assetNumber:get('Equipment Asset Number',current.assetNumber),equipmentName:get('Equipment Name',current.equipmentName),category:get('Category',current.category),customCategory:get('Category',current.category),equipmentType:get('Equipment Type',current.equipmentType),manufacturer:get('Manufacturer / Brand',current.manufacturer),model:get('Model',current.model),serialNumber:get('Serial Number',current.serialNumber),equipmentYear:get('Year',current.equipmentYear),location:get('Location',current.location),department:get('Department / Area',current.department),status:get('Status',current.status||'active'),criticality:get('Criticality',current.criticality),powerType:get('Power Type',current.powerType),voltage:get('Voltage',current.voltage),phase:get('Phase',current.phase),amperage:get('Amperage',current.amperage),airRequirement:get('Air Requirement',current.airRequirement),waterRequirement:get('Water Requirement',current.waterRequirement),capacityRating:get('Capacity / Rating',current.capacityRating),dimensions:get('Dimensions',current.dimensions),weight:get('Weight',current.weight),specificationNotes:get('Specification Notes',current.specificationNotes)});
 }
 function importEquipmentRows(req:AuthRequest,rows:ReturnType<typeof equipmentImportRowsFromTable>,mode:MachineImportMode){
   const actor=req.user!;const timestamp=now();const summary={ok:true,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:0,errors:[] as string[],changedAssetNumbers:[] as string[]};const seen=new Set<string>();
@@ -9532,14 +9567,18 @@ app.delete('/api/vendors/:id', requireAuth, requirePermission('vendors.delete'),
     res.status(/not found/i.test(message) ? 404 : /used by active|reason|required/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/dashboard/preventive-maintenance-due', requireAuth, requirePermission('machine.view'), (_req,res)=>{
-  const alerts=dashboardPmAlerts();
+app.get('/api/dashboard/preventive-maintenance-due', requireAuth, (req:AuthRequest,res)=>{
+  const libraries=new Set<AssetLibrary>();if(hasPermission(req.user!,'machine.view'))libraries.add('machine');if(hasPermission(req.user!,'equipment.view'))libraries.add('equipment');
+  if(!libraries.size)return res.status(403).json({ok:false,error:'Machine or Equipment view permission is required.'});
+  const alerts=dashboardPmAlerts(libraries);
+  const warningNotes=dashboardWarningNotes(req.user!);
   const summary={
     dueSoon:alerts.filter(alert=>alert.status==='Due Soon').length,
     dueNow:alerts.filter(alert=>alert.status==='Due Now').length,
     pastDue:alerts.filter(alert=>alert.status==='Past Due').length,
+    warningNotes:warningNotes.length,
   };
-  res.json({ok:true,alerts,summary});
+  res.json({ok:true,alerts,warningNotes,summary});
 });
 app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   seedMachineBrandSettings();
@@ -10013,7 +10052,7 @@ app.get('/api/machine-library/documents/recovery-export',requireAuth,requirePerm
 app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.view'), (req:AuthRequest,res)=>{
   const asset=machineAssetById(Number(req.params.id));
   if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
-  const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name
+  const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name
     FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
     WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicMachineAssetNote);
   res.json({ok:true,notes});
@@ -10027,13 +10066,14 @@ app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission
     const title=String(req.body?.title ?? '').replace(/\s+/g,' ').trim().slice(0,180);
     const body=String(req.body?.body ?? '').replace(/\r/g,'').trim().slice(0,30000);
     const noteDate=validMachineAssetNoteDate(req.body?.noteDate);
+    const warning=assetNoteWarningValue(req.body?.warning);
     if (!title) throw new Error('Note Title is required.');
     if (!body) throw new Error('Note Body is required.');
     const files=(req.files ?? []) as Express.Multer.File[];
     const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));
     const timestamp=now();
-    const result=run('INSERT INTO machine_asset_notes (asset_id,title,note_date,body,pdf_filename,pdf_stored_reference,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[
-      asset.id,title,noteDate,body,'','',req.user!.id,req.user!.id,timestamp,timestamp,
+    const result=run('INSERT INTO machine_asset_notes (asset_id,title,note_date,body,is_warning,pdf_filename,pdf_stored_reference,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[
+      asset.id,title,noteDate,body,warning?1:0,'','',req.user!.id,req.user!.id,timestamp,timestamp,
     ]);
     noteId=Number(result.lastInsertRowid);
     for (const {file,detected} of validated) {
@@ -10071,12 +10111,13 @@ app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermissi
     const title=String(req.body?.title ?? '').replace(/\s+/g,' ').trim().slice(0,180);
     const body=String(req.body?.body ?? '').replace(/\r/g,'').trim().slice(0,30000);
     const noteDate=validMachineAssetNoteDate(req.body?.noteDate);
+    const warning=assetNoteWarningValue(req.body?.warning,Boolean(existing.is_warning));
     if (!title) throw new Error('Note Title is required.');
     if (!body) throw new Error('Note Body is required.');
     const files=(req.files ?? []) as Express.Multer.File[];
     const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));
     const timestamp=now();
-    run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[title,noteDate,body,req.user!.id,timestamp,existing.id]);
+    run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,is_warning=?,updated_by_user_id=?,updated_at=? WHERE id=?',[title,noteDate,body,warning?1:0,req.user!.id,timestamp,existing.id]);
     for (const {file,detected} of validated) {
       const storedName=`asset-${existing.asset_id}-note-${existing.id}-attachment-${Date.now()}-${crypto.randomBytes(5).toString('hex')}${detected.extension}`;
       const storedPath=path.join(machineAssetNotesDir,storedName);
@@ -10093,7 +10134,7 @@ app.put('/api/machine-library/asset-notes/:noteId', requireAuth, requirePermissi
   } catch (error) {
     for (const attachmentId of newAttachmentIds) run('DELETE FROM machine_asset_note_attachments WHERE id=?',[attachmentId]);
     for (const filePath of storedFiles) if (fs.existsSync(filePath)) fs.rmSync(filePath,{force:true});
-    if (previous) run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[previous.title,previous.note_date,previous.body,previous.updated_by_user_id,previous.updated_at,previous.id]);
+    if (previous) run('UPDATE machine_asset_notes SET title=?,note_date=?,body=?,is_warning=?,updated_by_user_id=?,updated_at=? WHERE id=?',[previous.title,previous.note_date,previous.body,previous.is_warning,previous.updated_by_user_id,previous.updated_at,previous.id]);
     const message=safeErrorMessage(error,[],'Asset note could not be updated.');
     res.status(/not found/i.test(message)?404:/required|valid|must be|match|50 MB/i.test(message)?400:500).json({ok:false,error:message});
   }
@@ -10515,7 +10556,7 @@ app.post('/api/equipment-library/assets',requireAuth,requirePermission('equipmen
   catch(error){const message=safeErrorMessage(error);res.status(/required|unsafe|160|already/i.test(message)?400:500).json({ok:false,error:message});}
 });
 app.put('/api/equipment-library/assets/:id',requireAuth,requirePermission('equipment.edit'),(req:AuthRequest,res)=>{
-  try{const id=Number(req.params.id);const existing=equipmentAssetById(id);if(!existing)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const input=validateEquipmentAssetInput(req.body);const duplicate=equipmentAssetByNumber(input.assetNumber);if(duplicate&&duplicate.id!==id&&!duplicate.deleted)return res.status(409).json({ok:false,error:'Equipment Asset Number already exists.'});const oldValue=equipmentHistoryValue(existing);updateEquipmentAsset(id,input,req.user!,now());const updated=equipmentAssetById(id)!;recordEquipmentHistory({action:'equipment_edited',actor:req.user!,row:updated,oldValue,newValue:equipmentHistoryValue(updated),reasonNote:textField(isRecord(req.body)?req.body:{},['reasonNote','reason'])});audit(req,'equipment asset update','equipment_asset',id,{assetNumber:input.assetNumber});scheduleAutoBackup('equipment asset update',req.user!);res.json({ok:true,asset:publicEquipmentAsset(updated)});}
+  try{const id=Number(req.params.id);const existing=equipmentAssetById(id);if(!existing)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const patch=isRecord(req.body)?Object.fromEntries(Object.entries(req.body).filter(([,value])=>value!==undefined)):{};const input=validateEquipmentAssetInput({...publicEquipmentAsset(existing),...patch});const duplicate=equipmentAssetByNumber(input.assetNumber);if(duplicate&&duplicate.id!==id&&!duplicate.deleted)return res.status(409).json({ok:false,error:'Equipment Asset Number already exists.'});const oldValue=equipmentHistoryValue(existing);updateEquipmentAsset(id,input,req.user!,now());const updated=equipmentAssetById(id)!;recordEquipmentHistory({action:'equipment_edited',actor:req.user!,row:updated,oldValue,newValue:equipmentHistoryValue(updated),reasonNote:textField(isRecord(req.body)?req.body:{},['reasonNote','reason'])});audit(req,'equipment asset update','equipment_asset',id,{assetNumber:input.assetNumber});scheduleAutoBackup('equipment asset update',req.user!);res.json({ok:true,asset:publicEquipmentAsset(updated)});}
   catch(error){const message=safeErrorMessage(error);res.status(/not found/i.test(message)?404:/required|unsafe|160|already/i.test(message)?400:500).json({ok:false,error:message});}
 });
 for(const action of ['disable','enable'] as const)app.post(`/api/equipment-library/assets/:id/${action}`,requireAuth,requirePermission('equipment.delete'),(req:AuthRequest,res)=>{
@@ -10615,14 +10656,14 @@ registerEquipmentDocumentLibraryRoutes();
 app.get('/api/equipment-library/documents/recovery-export',requireAuth,requirePermission('equipment.import_export'),(req:AuthRequest,res)=>{const recovery=refreshEquipmentDocumentRecoveryMetadata();const date=new Date().toISOString().slice(0,10);streamRecoveryArchive(res,`MCC_Equipment_Document_Recovery_${date}.zip`,archive=>{archive.append(`${JSON.stringify(recovery.index,null,2)}\n`,{name:'equipment-library-index.json'});archive.append('MCC Equipment Asset Document Library - Full Recovery Export\n\nFiles are grouped by visible Equipment Asset Number. asset-info.json retains stable internal IDs and physical filenames for recovery.\n',{name:'README.txt'});for(const manifest of recovery.manifests){const prefix=`Equipment-${safeArchiveSegment(manifest.asset.assetNumber,String(manifest.asset.internalAssetId))} - ${safeArchiveSegment(manifest.asset.equipmentName,'Unnamed Equipment')}`;archive.append(`${JSON.stringify(manifest,null,2)}\n`,{name:`${prefix}/asset-info.json`});for(const document of manifest.documents){const source=equipmentDocumentFilePath(manifest.asset.internalAssetId,String(document.storedFilename));if(fs.existsSync(source))archive.file(source,{name:`${prefix}/${safeArchiveSegment(String(document.folderName),'Unfiled')}/${safeArchiveSegment(String(document.visibleFilename),'document')}`});}}});});
 
 function equipmentAssetNoteFilePath(storedReference:string){const relative=storedReference.replace(/\\/g,'/');if(!relative.startsWith('uploads/equipment-asset-notes/'))throw new Error('Equipment note file reference is invalid.');const resolved=path.resolve(equipmentAssetNotesDir,path.basename(relative));const root=path.resolve(equipmentAssetNotesDir);if(!resolved.startsWith(`${root}${path.sep}`))throw new Error('Equipment note file reference is invalid.');return resolved;}
-function equipmentAssetNoteById(noteId:number){return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.id=? AND a.deleted=0`,[noteId]);}
+function equipmentAssetNoteById(noteId:number){return one<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.id=? AND a.deleted=0`,[noteId]);}
 function equipmentAssetNoteAttachments(noteId:number){return all<MachineAssetNoteAttachmentRow>('SELECT * FROM equipment_asset_note_attachments WHERE note_id=? ORDER BY created_at,id',[noteId]);}
 function publicEquipmentAssetNoteAttachment(row:MachineAssetNoteAttachmentRow){const base=`/api/equipment-library/asset-note-attachments/${row.id}/file`;const version=encodeURIComponent(row.created_at);return {id:row.id,noteId:row.note_id,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),createdAt:row.created_at,contentUrl:`${base}?v=${version}`,downloadUrl:`${base}?download=true&v=${version}`};}
-function publicEquipmentAssetNote(row:MachineAssetNoteRow){const base=`/api/equipment-library/asset-notes/${row.id}/pdf`;const version=encodeURIComponent(row.updated_at);return {id:row.id,assetId:row.asset_id,title:row.title,noteDate:row.note_date,body:row.body,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,pdfFilename:row.pdf_filename,pdfUrl:`${base}?v=${version}`,pdfDownloadUrl:`${base}?download=true&v=${version}`,attachments:equipmentAssetNoteAttachments(row.id).map(publicEquipmentAssetNoteAttachment)};}
+function publicEquipmentAssetNote(row:MachineAssetNoteRow){const base=`/api/equipment-library/asset-notes/${row.id}/pdf`;const version=encodeURIComponent(row.updated_at);return {id:row.id,assetId:row.asset_id,title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,pdfFilename:row.pdf_filename,pdfUrl:`${base}?v=${version}`,pdfDownloadUrl:`${base}?download=true&v=${version}`,attachments:equipmentAssetNoteAttachments(row.id).map(publicEquipmentAssetNoteAttachment)};}
 async function regenerateEquipmentAssetNotePdf(noteId:number){const note=equipmentAssetNoteById(noteId);if(!note)throw new Error('Equipment asset note not found.');const buffer=await buildMachineAssetNotePdf(note,equipmentAssetNoteAttachments(note.id));const filename=`${safeFileToken(note.asset_number??`Equipment_${note.asset_id}`)}_${safeFileToken(note.title)}_Maintenance_Note_${note.note_date}.pdf`;const storedName=`${crypto.randomUUID()}.pdf`;const storedPath=path.join(equipmentAssetNotesDir,storedName);fs.writeFileSync(storedPath,buffer,{flag:'wx'});const previous=note.pdf_stored_reference;run('UPDATE equipment_asset_notes SET pdf_filename=?,pdf_stored_reference=?,updated_at=? WHERE id=?',[filename,`uploads/equipment-asset-notes/${storedName}`,now(),note.id]);if(previous){const previousPath=equipmentAssetNoteFilePath(previous);if(fs.existsSync(previousPath))fs.rmSync(previousPath,{force:true});}}
-app.get('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicEquipmentAssetNote);res.json({ok:true,notes});});
-app.post('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{let noteId=0;const stored:string[]=[];try{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const title=String(req.body?.title??'').replace(/\s+/g,' ').trim().slice(0,180);const body=String(req.body?.body??'').replace(/\r/g,'').trim().slice(0,30000);if(!title||!body)throw new Error('Note Title and Note Body are required.');const noteDate=validMachineAssetNoteDate(req.body?.noteDate);const files=(req.files as Express.Multer.File[]|undefined)??[];const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));const timestamp=now();const result=run('INSERT INTO equipment_asset_notes (asset_id,title,note_date,body,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',[asset.id,title,noteDate,body,req.user!.id,req.user!.id,timestamp,timestamp]);noteId=Number(result.lastInsertRowid);for(const {file,detected} of validated){const storedName=`${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(equipmentAssetNotesDir,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});stored.push(storedPath);run('INSERT INTO equipment_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[noteId,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/equipment-asset-notes/${storedName}`,req.user!.id,timestamp]);}await regenerateEquipmentAssetNotePdf(noteId);recordEquipmentHistory({action:'note_created',actor:req.user!,row:asset,newValue:{noteId,title,noteDate,attachmentCount:files.length}});scheduleAutoBackup('equipment note created',req.user!);res.status(201).json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(noteId)!)});}catch(error){if(noteId){run('DELETE FROM equipment_asset_note_attachments WHERE note_id=?',[noteId]);run('DELETE FROM equipment_asset_notes WHERE id=?',[noteId]);}stored.forEach(filePath=>{if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Equipment note could not be created.')});}});
-app.put('/api/equipment-library/asset-notes/:noteId',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{try{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;const title=String(req.body?.title??'').replace(/\s+/g,' ').trim().slice(0,180);const body=String(req.body?.body??'').replace(/\r/g,'').trim().slice(0,30000);if(!title||!body)throw new Error('Note Title and Note Body are required.');const noteDate=validMachineAssetNoteDate(req.body?.noteDate);const timestamp=now();run('UPDATE equipment_asset_notes SET title=?,note_date=?,body=?,updated_by_user_id=?,updated_at=? WHERE id=?',[title,noteDate,body,req.user!.id,timestamp,note.id]);for(const file of (req.files as Express.Multer.File[]|undefined)??[]){const detected=validatedMachineAssetNoteAttachment(file);const storedName=`${crypto.randomUUID()}${detected.extension}`;fs.writeFileSync(path.join(equipmentAssetNotesDir,storedName),file.buffer,{flag:'wx'});run('INSERT INTO equipment_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[note.id,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/equipment-asset-notes/${storedName}`,req.user!.id,timestamp]);}await regenerateEquipmentAssetNotePdf(note.id);recordEquipmentHistory({action:'note_edited',actor:req.user!,row:asset,oldValue:{noteId:note.id,title:note.title,noteDate:note.note_date},newValue:{noteId:note.id,title,noteDate}});scheduleAutoBackup('equipment note edited',req.user!);res.json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(note.id)!)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Equipment note could not be updated.')});}});
+app.get('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.view'),(req,res)=>{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.asset_id=? AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(publicEquipmentAssetNote);res.json({ok:true,notes});});
+app.post('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{let noteId=0;const stored:string[]=[];try{const asset=equipmentAssetById(Number(req.params.id));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});const title=String(req.body?.title??'').replace(/\s+/g,' ').trim().slice(0,180);const body=String(req.body?.body??'').replace(/\r/g,'').trim().slice(0,30000);if(!title||!body)throw new Error('Note Title and Note Body are required.');const noteDate=validMachineAssetNoteDate(req.body?.noteDate);const warning=assetNoteWarningValue(req.body?.warning);const files=(req.files as Express.Multer.File[]|undefined)??[];const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));const timestamp=now();const result=run('INSERT INTO equipment_asset_notes (asset_id,title,note_date,body,is_warning,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',[asset.id,title,noteDate,body,warning?1:0,req.user!.id,req.user!.id,timestamp,timestamp]);noteId=Number(result.lastInsertRowid);for(const {file,detected} of validated){const storedName=`${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(equipmentAssetNotesDir,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});stored.push(storedPath);run('INSERT INTO equipment_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[noteId,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/equipment-asset-notes/${storedName}`,req.user!.id,timestamp]);}await regenerateEquipmentAssetNotePdf(noteId);recordEquipmentHistory({action:'note_created',actor:req.user!,row:asset,newValue:{noteId,title,noteDate,warning,attachmentCount:files.length}});scheduleAutoBackup('equipment note created',req.user!);res.status(201).json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(noteId)!)});}catch(error){if(noteId){run('DELETE FROM equipment_asset_note_attachments WHERE note_id=?',[noteId]);run('DELETE FROM equipment_asset_notes WHERE id=?',[noteId]);}stored.forEach(filePath=>{if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Equipment note could not be created.')});}});
+app.put('/api/equipment-library/asset-notes/:noteId',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{try{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;const title=String(req.body?.title??'').replace(/\s+/g,' ').trim().slice(0,180);const body=String(req.body?.body??'').replace(/\r/g,'').trim().slice(0,30000);if(!title||!body)throw new Error('Note Title and Note Body are required.');const noteDate=validMachineAssetNoteDate(req.body?.noteDate);const warning=assetNoteWarningValue(req.body?.warning,Boolean(note.is_warning));const timestamp=now();run('UPDATE equipment_asset_notes SET title=?,note_date=?,body=?,is_warning=?,updated_by_user_id=?,updated_at=? WHERE id=?',[title,noteDate,body,warning?1:0,req.user!.id,timestamp,note.id]);for(const file of (req.files as Express.Multer.File[]|undefined)??[]){const detected=validatedMachineAssetNoteAttachment(file);const storedName=`${crypto.randomUUID()}${detected.extension}`;fs.writeFileSync(path.join(equipmentAssetNotesDir,storedName),file.buffer,{flag:'wx'});run('INSERT INTO equipment_asset_note_attachments (note_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,created_at) VALUES (?,?,?,?,?,?,?)',[note.id,safeMachineAssetNoteOriginalName(file.originalname,detected.extension),detected.mimeType,file.size,`uploads/equipment-asset-notes/${storedName}`,req.user!.id,timestamp]);}await regenerateEquipmentAssetNotePdf(note.id);recordEquipmentHistory({action:'note_edited',actor:req.user!,row:asset,oldValue:{noteId:note.id,title:note.title,noteDate:note.note_date,warning:Boolean(note.is_warning)},newValue:{noteId:note.id,title,noteDate,warning}});scheduleAutoBackup('equipment note edited',req.user!);res.json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(note.id)!)});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Equipment note could not be updated.')});}});
 app.delete('/api/equipment-library/asset-notes/:noteId',requireAuth,requirePermission('equipment.write'),(req:AuthRequest,res)=>{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;const attachments=equipmentAssetNoteAttachments(note.id);run('DELETE FROM equipment_asset_note_attachments WHERE note_id=?',[note.id]);run('DELETE FROM equipment_asset_notes WHERE id=?',[note.id]);for(const item of attachments){const filePath=equipmentAssetNoteFilePath(item.stored_file_reference);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});}if(note.pdf_stored_reference){const pdfPath=equipmentAssetNoteFilePath(note.pdf_stored_reference);if(fs.existsSync(pdfPath))fs.rmSync(pdfPath,{force:true});}recordEquipmentHistory({action:'note_deleted',actor:req.user!,row:asset,oldValue:{noteId:note.id,title:note.title}});scheduleAutoBackup('equipment note deleted',req.user!);res.json({ok:true});});
 app.delete('/api/equipment-library/asset-note-attachments/:attachmentId',requireAuth,requirePermission('equipment.write'),async(req:AuthRequest,res)=>{const attachment=one<MachineAssetNoteAttachmentRow>('SELECT * FROM equipment_asset_note_attachments WHERE id=?',[Number(req.params.attachmentId)]);if(!attachment)return res.status(404).json({ok:false,error:'Equipment note attachment not found.'});const note=equipmentAssetNoteById(attachment.note_id);if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const asset=equipmentAssetById(note.asset_id)!;run('DELETE FROM equipment_asset_note_attachments WHERE id=?',[attachment.id]);const filePath=equipmentAssetNoteFilePath(attachment.stored_file_reference);if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});await regenerateEquipmentAssetNotePdf(note.id);recordEquipmentHistory({action:'note_attachment_deleted',actor:req.user!,row:asset,oldValue:{attachmentId:attachment.id,filename:attachment.original_filename}});scheduleAutoBackup('equipment note attachment deleted',req.user!);res.json({ok:true,note:publicEquipmentAssetNote(equipmentAssetNoteById(note.id)!)});});
 app.get('/api/equipment-library/asset-notes/:noteId/pdf',requireAuth,requirePermission('equipment.view'),(req,res)=>{const note=equipmentAssetNoteById(Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Equipment asset note not found.'});const filePath=equipmentAssetNoteFilePath(note.pdf_stored_reference);if(!fs.existsSync(filePath))return res.status(404).json({ok:false,error:'Generated note PDF is missing.'});res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`${String(req.query.download)==='true'?'attachment':'inline'}; filename="${safeMachineAssetNoteOriginalName(note.pdf_filename,'.pdf')}"`);res.sendFile(filePath);});

@@ -8,6 +8,7 @@ export function MccSearchableCombobox({
   disabled = false,
   required = false,
   placeholder = 'Search options',
+  className = '',
 }: {
   label: string;
   value: string;
@@ -16,6 +17,7 @@ export function MccSearchableCombobox({
   disabled?: boolean;
   required?: boolean;
   placeholder?: string;
+  className?: string;
 }) {
   const inputId = useId();
   const listboxId = useId();
@@ -49,7 +51,7 @@ export function MccSearchableCombobox({
   }
 
   return (
-    <div className="form-field mcc-searchable-combobox" ref={rootRef}>
+    <div className={`form-field mcc-searchable-combobox${className ? ` ${className}` : ''}`} ref={rootRef}>
       <span><label htmlFor={inputId}>{label}</label></span>
       <input
         id={inputId}

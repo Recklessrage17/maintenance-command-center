@@ -7,8 +7,8 @@ import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSumma
 
 type AssetIdentity = { id:number; assetNumber:string; assetName:string; brand:string; model:string; serialNumber:string };
 type AssetNoteAttachment = { id:number; noteId:number; filename:string; mimeType:string; fileSize:number; createdAt:string; contentUrl:string; downloadUrl:string };
-type AssetNote = { id:number; assetId:number; title:string; noteDate:string; body:string; createdBy:string; createdAt:string; updatedAt:string; pdfFilename:string; pdfUrl:string; pdfDownloadUrl:string; attachments:AssetNoteAttachment[] };
-type NoteDraft = { title:string; noteDate:string; body:string };
+type AssetNote = { id:number; assetId:number; title:string; noteDate:string; body:string; warning:boolean; createdBy:string; createdAt:string; updatedAt:string; pdfFilename:string; pdfUrl:string; pdfDownloadUrl:string; attachments:AssetNoteAttachment[] };
+type NoteDraft = { title:string; noteDate:string; body:string; warning:boolean };
 type ViewerFile = { filename:string; mimeType:string; contentUrl:string; downloadUrl:string; label:string };
 
 const attachmentAccept='.pdf,.doc,.docx,.jpg,.jpeg,.png,.webp';
@@ -62,7 +62,7 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
   const [error,setError]=useState('');
   const [editing,setEditing]=useState<AssetNote|null>(null);
   const [adding,setAdding]=useState(false);
-  const [draft,setDraft]=useState<NoteDraft>({title:'',noteDate:localIsoDate(new Date()),body:''});
+  const [draft,setDraft]=useState<NoteDraft>({title:'',noteDate:localIsoDate(new Date()),body:'',warning:false});
   const [pendingAttachments,setPendingAttachments]=useState<File[]>([]);
   const [saving,setSaving]=useState(false);
   const [viewer,setViewer]=useState<ViewerFile|null>(null);
@@ -87,14 +87,14 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
     setEditing(null);
     setAdding(true);
     setPendingAttachments([]);
-    setDraft({title:'',noteDate:localIsoDate(new Date()),body:''});
+    setDraft({title:'',noteDate:localIsoDate(new Date()),body:'',warning:false});
     setError('');
   }
   function beginEdit(note:AssetNote) {
     setEditing(note);
     setAdding(false);
     setPendingAttachments([]);
-    setDraft({title:note.title,noteDate:note.noteDate,body:note.body});
+    setDraft({title:note.title,noteDate:note.noteDate,body:note.body,warning:Boolean(note.warning)});
     setError('');
   }
   function cancelForm() {
@@ -123,6 +123,7 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
       formData.append('title',title);
       formData.append('noteDate',draft.noteDate);
       formData.append('body',body);
+      formData.append('warning',String(draft.warning));
       pendingAttachments.forEach(file=>formData.append('attachments',file,file.name));
       const url=editing?`${apiBase}/asset-notes/${editing.id}`:`${apiBase}/assets/${asset.id}/notes`;
       await responseJson(await fetch(url,{method:editing?'PUT':'POST',credentials:'include',body:formData}));
@@ -163,6 +164,7 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
       {(adding||editing)&&<form className="asset-note-form glass-card glass-card--nested" onSubmit={saveNote}>
         <label className="form-field"><span>Note Title *</span><input className="glass-input" value={draft.title} maxLength={180} onChange={event=>setDraft(current=>({...current,title:event.target.value}))} required /></label>
         <MccDateInput label="Note Date *" value={draft.noteDate} onChange={value=>setDraft(current=>({...current,noteDate:value}))} required />
+        <label className="asset-note-warning-toggle"><input type="checkbox" checked={draft.warning} onChange={event=>setDraft(current=>({...current,warning:event.target.checked}))}/><span><strong>Warning / Needs Attention</strong><small>Show this technician note in Dashboard Maintenance Attention.</small></span></label>
         <label className="form-field asset-note-body-field"><span>Note Body *</span><textarea className="glass-input" value={draft.body} maxLength={30000} rows={7} onChange={event=>setDraft(current=>({...current,body:event.target.value}))} required /></label>
         <div className="asset-note-attachment-picker glass-card glass-card--nested"><div><strong>Optional attachments</strong><small>PDF, Word, JPG, JPEG, PNG, or WEBP · up to 50 MB each</small></div><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>fileInputRef.current?.click()}>Add Attachments</button><input ref={fileInputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{addPending(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>
         {pendingAttachments.length>0&&<div className="asset-attachment-grid glass-attachments">{pendingAttachments.map((file,index)=><PendingAttachmentChip key={`${file.name}-${file.size}-${index}`} file={file} onRemove={()=>setPendingAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} />)}</div>}
@@ -171,6 +173,7 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
       {!adding&&!editing&&loading&&<div className="machine-record-newest-empty glass-empty-state">Loading asset notes...</div>}
       {!adding&&!editing&&!loading&&notes.length===0&&<div className="machine-record-newest-empty glass-empty-state"><strong>No notes</strong><span>Add a working maintenance note and optional supporting files.</span></div>}
       {!adding&&!editing&&notes.length>0&&<div className="asset-note-list">{notes.map(note=><section className="asset-note-entry glass-card glass-card--nested" key={note.id}>
+        {note.warning&&<span className="asset-note-warning-badge">Warning / Needs Attention</span>}
         <div className="asset-note-entry-heading"><div><span className="asset-note-date-pill glass-pill glass-pill--cyan">{formatDate(note.noteDate)}</span><h5>{note.title}</h5><small>Created by {note.createdBy} · {formatDateTime(note.createdAt)}{note.updatedAt!==note.createdAt?' · edited':''}</small></div><MccActionGroup className="asset-note-actions"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>setViewer({filename:note.pdfFilename,mimeType:'application/pdf',contentUrl:note.pdfUrl,downloadUrl:note.pdfDownloadUrl,label:`${asset.assetNumber} asset note`})}>Open Note PDF</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>triggerDownload(note.pdfDownloadUrl,note.pdfFilename)}>Download Note PDF</button><MccOverflowMenu ariaLabel={`More actions for ${note.title}`} items={[{label:'Print Note PDF',onSelect:()=>window.open(note.pdfUrl,'_blank','noopener,noreferrer')},...(canEdit?[{label:'Edit Note',onSelect:()=>beginEdit(note)},{label:'Delete Note',onSelect:()=>void deleteNote(note),danger:true}]:[])]} /></MccActionGroup></div>
         <p className="asset-note-body-preview">{note.body}</p>
         {note.attachments.length>0&&<div className="asset-attachment-grid glass-attachments">{note.attachments.map(attachment=><AttachmentChip key={attachment.id} attachment={attachment} canDelete={canEdit} onOpen={()=>openAttachment(attachment)} onDownload={()=>triggerDownload(attachment.downloadUrl,attachment.filename)} onDelete={()=>void deleteAttachment(note,attachment)} />)}</div>}
