@@ -4,15 +4,18 @@ const user={id:1,fullName:'Issue 91 Operator',email:'operator@example.com',role:
 const machine={id:91,assetNumber:'Press 91',assetName:'Issue Press',brand:'Toyo',model:'SI-350',serialNumber:'MCC-091',machineYear:'2019',machineType:'Injection Molding Machine',setupType:'Standard Injection',barrelDiameter:'42 mm',location:'Bay 1',department:'Molding',status:'active',brandColorHex:'#44D7FF',pmSummary:{total:1,status:'current',label:'PM: Current'},historyPreview:[]};
 const equipment={id:92,assetNumber:'EQ-092',equipmentName:'Process Chiller',assetName:'Process Chiller',category:'Chiller',equipmentType:'Air Cooled',manufacturer:'Advantage',brand:'Advantage',model:'MK-7',serialNumber:'EQ-SN-92',equipmentYear:'2021',year:'2021',location:'Utility Room',department:'Facilities',status:'active',criticality:'high',powerType:'Electric',voltage:'480 VAC',phase:'3 phase',amperage:'',airRequirement:'',waterRequirement:'',capacityRating:'',dimensions:'',weight:'',specificationNotes:'',createdAt:'2026-08-01T12:00:00Z',updatedAt:'2026-08-19T12:00:00Z',pmSummary:null,latestHistory:null};
 
-async function mockIssue91(page:Page,{initiallyAuthenticated=false,failVerification=false}={}){
+async function mockIssue91(page:Page,{initiallyAuthenticated=false,failVerification=false,holdInitialAuth=false}={}){
   let authenticated=initiallyAuthenticated;
+  let initialAuthReleased=!holdInitialAuth;
+  let releaseInitialAuthGate:()=>void=()=>{};
+  const initialAuthGate=new Promise<void>(resolve=>{releaseInitialAuthGate=resolve;});
   let holdVerification=false;
   let releaseVerification:undefined|(()=>void);
   let verificationShouldFail=failVerification;
   await page.route('**/api/**',async route=>{
     const request=route.request();const path=new URL(request.url()).pathname;
     if(path==='/api/auth/status'){
-      if(!authenticated)await new Promise(resolve=>setTimeout(resolve,120));
+      if(!authenticated&&!initialAuthReleased)await initialAuthGate;
       if(authenticated&&holdVerification)await new Promise<void>(resolve=>{releaseVerification=resolve;});
       if(authenticated&&verificationShouldFail){verificationShouldFail=false;return route.fulfill({status:503,json:{error:'Initialization service unavailable.'}});}
       return route.fulfill({json:{setupRequired:false,user:authenticated?user:null}});
@@ -28,6 +31,7 @@ async function mockIssue91(page:Page,{initiallyAuthenticated=false,failVerificat
     return route.fulfill({json:{ok:true}});
   });
   return {
+    releaseInitialAuth(){initialAuthReleased=true;releaseInitialAuthGate();},
     releaseVerification(){holdVerification=false;releaseVerification?.();},
     releaseFailedVerification(){holdVerification=false;releaseVerification?.();},
   };
@@ -37,9 +41,10 @@ async function signIn(page:Page){await page.getByLabel('Email address').fill(use
 
 test('login readiness reaches 100%, resets stale routes, and logout cannot restore them',async({page},testInfo)=>{
   test.skip(testInfo.project.name!=='desktop-chromium','Desktop session-flow audit');
-  const control=await mockIssue91(page);
+  const control=await mockIssue91(page,{holdInitialAuth:true});
   await page.goto('/machine-library');
   await expect(page.getByRole('progressbar',{name:'MCC application readiness'})).toHaveAttribute('aria-valuenow','0');
+  control.releaseInitialAuth();
   await expect(page.getByRole('heading',{name:'Enter command center'})).toBeVisible();
   await signIn(page);
   const loader=page.locator('.mcc-app-loading');const progress=page.getByRole('progressbar',{name:'MCC application readiness'});
@@ -62,8 +67,9 @@ test('initialization failure blocks the app and offers an accessible retry',asyn
 
 test('application readiness gate respects reduced-motion preferences',async({page},testInfo)=>{
   test.skip(testInfo.project.name!=='desktop-chromium','Single reduced-motion readiness audit');
-  await page.emulateMedia({reducedMotion:'reduce'});await mockIssue91(page);await page.goto('/');const loader=page.locator('.mcc-app-loading');await expect(loader).toBeVisible();
+  await page.emulateMedia({reducedMotion:'reduce'});const control=await mockIssue91(page,{holdInitialAuth:true});await page.goto('/');const loader=page.locator('.mcc-app-loading');await expect(loader).toBeVisible();await expect(page.getByRole('progressbar',{name:'MCC application readiness'})).toHaveAttribute('aria-valuenow','0');
   const motion=await loader.evaluate(element=>({scan:getComputedStyle(element.querySelector('.mcc-app-loading__scan')!).animationName,transition:getComputedStyle(element.querySelector('.mcc-app-loading__progress-fill')!).transitionDuration}));expect(motion).toEqual({scan:'none',transition:'0s'});
+  control.releaseInitialAuth();await expect(page.getByRole('heading',{name:'Enter command center'})).toBeVisible();
 });
 
 test('asset libraries use compact shared rows and page titles hug their content',async({page},testInfo)=>{
