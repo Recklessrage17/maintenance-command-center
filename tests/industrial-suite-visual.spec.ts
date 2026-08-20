@@ -139,8 +139,12 @@ const historySummary = [
   { section: 'settings', sectionLabel: 'Settings / System', count: 1, latestCreatedAt: '2026-07-16T12:00:00.000Z' },
 ];
 const dashboardAlerts = [
-  { id: 51, assetId: 51, assetNumber: 'Press 51', assetName: 'North Cell Press', brand: 'Toyo', model: 'SI-250-6', serialNumber: '1694010', title: 'Machine Greasing', instructions: 'Follow the approved lubrication procedure.', notes: 'Record findings.', intervalType: 'days', intervalLabel: 'Days', intervalValue: 30, status: 'Past Due', relativeMessage: 'Past due by 2 days', countdown: '', scheduleStatus: 'active', lastCompletedDate: '2026-06-22', lastCompletedMeter: null, currentMeter: null, nextDueDate: '2026-07-22', nextDueMeter: null, historyCount: 1, createdAt: '2026-06-01T12:00:00.000Z', updatedAt: fixedNow },
-  { id: 52, assetId: 52, assetNumber: 'Press 52', assetName: 'South Cell Press', brand: 'Engel', model: 'Victory 330', serialNumber: 'ENG-052', title: 'Safety Interlock Check', instructions: 'Verify guards and interlocks.', notes: '', intervalType: 'days', intervalLabel: 'Days', intervalValue: 30, status: 'Due Soon', relativeMessage: 'Due in 5 days', countdown: '', scheduleStatus: 'active', lastCompletedDate: '2026-06-29', lastCompletedMeter: null, currentMeter: null, nextDueDate: '2026-07-29', nextDueMeter: null, historyCount: 0, createdAt: '2026-06-01T12:00:00.000Z', updatedAt: fixedNow },
+  { id: 51, assetId: 51, assetLibrary: 'machine', assetNumber: 'Press 51', assetName: 'North Cell Press', brand: 'Toyo', model: 'SI-250-6', serialNumber: '1694010', assetAccentColor: '#44D7FF', assetCategory: '', title: 'Machine Greasing', instructions: 'Follow the approved lubrication procedure.', notes: 'Record findings.', intervalType: 'days', intervalLabel: 'Days', intervalValue: 30, status: 'Past Due', relativeMessage: 'Past due by 2 days', countdown: '', scheduleStatus: 'active', lastCompletedDate: '2026-06-22', lastCompletedMeter: null, currentMeter: null, nextDueDate: '2026-07-22', nextDueMeter: null, historyCount: 1, createdAt: '2026-06-01T12:00:00.000Z', updatedAt: fixedNow },
+  { id: 52, assetId: 52, assetLibrary: 'machine', assetNumber: 'Press 52', assetName: 'South Cell Press', brand: 'Engel', model: 'Victory 330', serialNumber: 'ENG-052', assetAccentColor: '#F5A623', assetCategory: '', title: 'Safety Interlock Check', instructions: 'Verify guards and interlocks.', notes: '', intervalType: 'days', intervalLabel: 'Days', intervalValue: 30, status: 'Due Soon', relativeMessage: 'Due in 5 days', countdown: '', scheduleStatus: 'active', lastCompletedDate: '2026-06-29', lastCompletedMeter: null, currentMeter: null, nextDueDate: '2026-07-29', nextDueMeter: null, historyCount: 0, createdAt: '2026-06-01T12:00:00.000Z', updatedAt: fixedNow },
+  { id: 301, assetId: 301, assetLibrary: 'equipment', assetNumber: 'EQ-301', assetName: 'Central Resin Dryer', brand: 'Matsui', model: 'MJ5-i', serialNumber: 'DRY-301', assetAccentColor: '', assetCategory: 'Dryer', title: 'Dryer Filter Inspection', instructions: 'Inspect and clean the desiccant filters.', notes: 'Record pressure differential.', intervalType: 'days', intervalLabel: 'Days', intervalValue: 30, status: 'Due Soon', relativeMessage: 'Due in 4 days', countdown: '', scheduleStatus: 'active', lastCompletedDate: '2026-06-28', lastCompletedMeter: null, currentMeter: null, nextDueDate: '2026-07-28', nextDueMeter: null, historyCount: 0, createdAt: '2026-06-01T12:00:00.000Z', updatedAt: fixedNow },
+];
+const dashboardWarningNotes = [
+  { id: 5101, assetId: 51, assetLibrary: 'machine', assetNumber: 'Press 51', assetName: 'North Cell Press', brand: 'Toyo', model: 'SI-250-6', serialNumber: '1694010', location: 'North Cell', assetAccentColor: '#44D7FF', assetCategory: '', title: 'Cooling fan replacement warning', noteDate: '2026-07-23', body: 'Cooling fans are noisy and should be replaced during the next planned stop.', warning: true, createdBy: 'Alex Rivera', createdAt: '2026-07-23T14:00:00.000Z', updatedAt: '2026-07-23T14:00:00.000Z', pdfFilename: 'press-51-warning.pdf', pdfUrl: '/api/machine-library/asset-notes/5101/pdf', pdfDownloadUrl: '/api/machine-library/asset-notes/5101/pdf?download=true' },
 ];
 const facilityArea = { id: 21, name: 'Production', description: 'Main production floor references.', building: 'Building A', location: 'North Wing', department: 'Molding', status: 'active', createdAt: '2026-07-20T12:00:00.000Z', updatedAt: '2026-07-23T12:00:00.000Z', summary: { folderCount: 2, documentCount: 4, pictureCount: 2, videoCount: 1 } };
 const secondFacilityArea = { ...facilityArea, id: 22, name: 'Warehouse / Shipping', description: 'Dock and warehouse records.', location: 'South Dock', department: 'Logistics', summary: { folderCount: 1, documentCount: 2, pictureCount: 0, videoCount: 0 } };
@@ -165,7 +169,7 @@ async function mockIndustrialSuite(page: Page) {
     if (path === '/api/presence/disconnect') return fulfillJson(route, { ok: true });
     if (path === '/api/presence/team') return fulfillJson(route, roster);
     if (path === '/api/requisitions/summary') return fulfillJson(route, { ok: true, ...requisitionSummary });
-    if (path === '/api/dashboard/preventive-maintenance-due') return fulfillJson(route, { ok: true, alerts: dashboardAlerts, summary: { dueSoon: 1, dueNow: 0, pastDue: 1 } });
+    if (path === '/api/dashboard/preventive-maintenance-due') return fulfillJson(route, { ok: true, alerts: dashboardAlerts, warningNotes: dashboardWarningNotes, summary: { dueSoon: 2, dueNow: 0, pastDue: 1 } });
     if (path === '/api/pm-excel/status') return fulfillJson(route, { ok: true, sync: { status: 'never', attemptedAt: null, synchronizedAt: null, originalFilename: '', errorMessage: '', changedCells: 0, appendedHistory: 0, downloadAvailable: false } });
     if (path === '/api/inventory/native/summary') return fulfillJson(route, { ok: true, totalParts: inventoryParts.length, lowStockCount: 1, requisitionCount: 2, vendorCount: 1, locationCount: 1 });
     if (path === '/api/inventory/native/parts') return fulfillJson(route, { ok: true, parts: inventoryParts });
@@ -184,6 +188,7 @@ async function mockIndustrialSuite(page: Page) {
     if (path === '/api/machine-library/assets') return fulfillJson(route, { ok: true, assets: machines, brandSettings: [], permissions: { canEdit: true, canDelete: true } });
     if (/^\/api\/machine-library\/assets\/\d+\/history$/.test(path)) return fulfillJson(route, { ok: true, asset: machines[0], records: [machineHistory] });
     if (/^\/api\/machine-library\/assets\/\d+\/inspection-records$/.test(path)) return fulfillJson(route, { ok: true, records: [] });
+    if (/^\/api\/(?:machine|equipment)-library\/assets\/\d+\/preventive-maintenance\/meters$/.test(path)) return fulfillJson(route, { ok: true, meters: { hours: null, cycles: null }, history: [] });
     if (/^\/api\/machine-library\/assets\/\d+\/preventive-maintenance$/.test(path)) return fulfillJson(route, { ok: true, tasks: [], summary: { total: 0, current: 0, dueSoon: 0, dueNow: 0, overdue: 0, hold: 0, inactive: 0, incomplete: 0, nextDueDate: null, nextDueMeter: null } });
     if (/^\/api\/machine-library\/assets\/\d+\/notes$/.test(path)) return fulfillJson(route, { ok: true, notes: [] });
     if (/^\/api\/machine-library\/assets\/\d+\/component-images$/.test(path)) return fulfillJson(route, { ok: true, images: [] });
@@ -375,7 +380,23 @@ test('captures deterministic visual evidence for every representative MCC worksp
   test.skip(testInfo.project.name !== 'desktop-chromium', 'The stable route evidence set is captured once at the large desktop baseline.');
   const unhandled = await mockIndustrialSuite(page);
   await goTo(page, '/', 'Dashboard');
-  await expect(page.locator('.dashboard-pm-alert')).toHaveCount(2);
+  const machineAttention = page.locator('.dashboard-pm-section--machine');
+  const equipmentAttention = page.locator('.dashboard-pm-section--equipment');
+  await expect(machineAttention.getByRole('heading', { name: 'Machine PM Attention' })).toBeVisible();
+  await expect(equipmentAttention.getByRole('heading', { name: 'Equipment PM Attention' })).toBeVisible();
+  await expect(machineAttention.locator('.dashboard-pm-asset-group')).toHaveCount(2);
+  await expect(equipmentAttention.locator('.dashboard-pm-asset-group')).toHaveCount(1);
+  const press51Toggle = machineAttention.getByRole('button', { name: /Press 51 \(Toyo\)/ });
+  const press52Toggle = machineAttention.getByRole('button', { name: /Press 52 \(Engel\)/ });
+  const equipment301Toggle = equipmentAttention.getByRole('button', { name: /EQ-301 \(Matsui\)/ });
+  await expect(press51Toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(press52Toggle).toContainText('Due Soon 1');
+  await expect(equipment301Toggle).toContainText('Due Soon 1');
+  const techNote = machineAttention.getByRole('button', { name: 'Open 1 warning Tech Note for Press 51' });
+  await expect(techNote).toContainText('Tech Note 1');
+  await press51Toggle.click();
+  await expect(press51Toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(machineAttention.getByRole('button', { name: 'Open Machine Greasing preventive maintenance details for Press 51' })).toBeVisible();
   await capture(page, 'dashboard.png');
   await captureDashboardLowerBackground(page);
 
@@ -494,6 +515,9 @@ test('390px mobile keeps tables local, the document contained, and focus visible
   test.skip(testInfo.project.name !== 'mobile-chromium', 'This case requires the touch/mobile browser context.');
   const unhandled = await mockIndustrialSuite(page);
   await goTo(page, '/', 'Dashboard');
+  await expect(page.locator('.dashboard-pm-section--machine .dashboard-pm-asset-group')).toHaveCount(2);
+  await expect(page.locator('.dashboard-pm-section--equipment .dashboard-pm-asset-group')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Open 1 warning Tech Note for Press 51' })).toBeVisible();
   await expectNoDocumentOverflow(page);
   await capture(page, 'responsive-mobile-390-dashboard.png');
 
