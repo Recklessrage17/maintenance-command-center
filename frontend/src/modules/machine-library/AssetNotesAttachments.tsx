@@ -118,7 +118,10 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
       {(adding||editing)&&<form className="asset-note-form glass-card glass-card--nested" onSubmit={saveNote}>
         <label className="form-field"><span>Note Title *</span><input className="glass-input" value={draft.title} maxLength={180} onChange={event=>setDraft(current=>({...current,title:event.target.value}))} required /></label>
         <MccDateInput label="Note Date *" value={draft.noteDate} onChange={value=>setDraft(current=>({...current,noteDate:value}))} required />
-        <label className="asset-note-warning-toggle"><input type="checkbox" checked={draft.warning} disabled={Boolean(editing?.warning)} onChange={event=>setDraft(current=>({...current,warning:event.target.checked,workOrder:event.target.checked?current.workOrder:''}))}/><span><strong>Warning / Needs Attention</strong><small>{editing?.warning?'Resolve this issue through its lifecycle action; the warning flag is retained for history.':'Show this technician issue in Dashboard Maintenance Attention.'}</small></span></label>
+        <div className="asset-note-warning-field">
+          <label className="asset-note-warning-toggle"><input type="checkbox" checked={draft.warning} disabled={Boolean(editing?.warning)} aria-describedby={`asset-note-warning-help-${asset.id}`} onChange={event=>setDraft(current=>({...current,warning:event.target.checked,workOrder:event.target.checked?current.workOrder:''}))}/><span className="asset-note-warning-mark" aria-hidden="true">!</span><strong>Needs Attention</strong></label>
+          <small id={`asset-note-warning-help-${asset.id}`}>{editing?.warning?'Resolve this issue through its lifecycle action; the warning flag is retained for history.':'Show this technician issue in Dashboard Maintenance Attention.'}</small>
+        </div>
         {draft.warning&&<label className="form-field asset-note-work-order-field"><span>Work Order <small>(optional)</small></span><input className="glass-input" value={draft.workOrder} maxLength={120} onChange={event=>setDraft(current=>({...current,workOrder:event.target.value}))} placeholder="WO-12345 or existing reference" /></label>}
         <label className="form-field asset-note-body-field"><span>{draft.warning?'Original Issue Body *':'Note Body *'}</span><textarea className="glass-input" value={draft.body} maxLength={30000} rows={7} onChange={event=>setDraft(current=>({...current,body:event.target.value}))} required /></label>
         <AttachmentPicker inputRef={fileInputRef} files={pendingAttachments} onAdd={addPending} onRemove={index=>setPendingAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} />
@@ -134,7 +137,32 @@ export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:A
   </MccCategoryAccordion>;
 }
 
-function NoteCard({note,asset,updating,lifecycleAction,lifecycleReason,saving,updateBody,updateAttachments,updateFileInputRef,onEdit,onDelete,onResolve,onReopen,onBeginUpdate,onCancelUpdate,onUpdateBody,onAddUpdateFiles,onRemoveUpdateFile,onSaveUpdate,onLifecycleReason,onSubmitLifecycle,onCancelLifecycle,onOpenPdf,onOpenAttachment,onDeleteAttachment}:{note:AssetNote;asset:AssetIdentity;updating:boolean;lifecycleAction:LifecycleAction|null;lifecycleReason:string;saving:boolean;updateBody:string;updateAttachments:File[];updateFileInputRef:RefObject<HTMLInputElement>;onEdit:()=>void;onDelete:()=>void;onResolve:()=>void;onReopen:()=>void;onBeginUpdate:()=>void;onCancelUpdate:()=>void;onUpdateBody:(value:string)=>void;onAddUpdateFiles:(files:File[])=>void;onRemoveUpdateFile:(index:number)=>void;onSaveUpdate:(event:FormEvent)=>void;onLifecycleReason:(value:string)=>void;onSubmitLifecycle:(event:FormEvent)=>void;onCancelLifecycle:()=>void;onOpenPdf:()=>void;onOpenAttachment:(attachment:AssetNoteAttachment)=>void;onDeleteAttachment:(attachment:AssetNoteAttachment)=>void}) {
+type NoteCardProps={note:AssetNote;asset:AssetIdentity;updating:boolean;lifecycleAction:LifecycleAction|null;lifecycleReason:string;saving:boolean;updateBody:string;updateAttachments:File[];updateFileInputRef:RefObject<HTMLInputElement>;onEdit:()=>void;onDelete:()=>void;onResolve:()=>void;onReopen:()=>void;onBeginUpdate:()=>void;onCancelUpdate:()=>void;onUpdateBody:(value:string)=>void;onAddUpdateFiles:(files:File[])=>void;onRemoveUpdateFile:(index:number)=>void;onSaveUpdate:(event:FormEvent)=>void;onLifecycleReason:(value:string)=>void;onSubmitLifecycle:(event:FormEvent)=>void;onCancelLifecycle:()=>void;onOpenPdf:()=>void;onOpenAttachment:(attachment:AssetNoteAttachment)=>void;onDeleteAttachment:(attachment:AssetNoteAttachment)=>void};
+
+function NoteCard(props:NoteCardProps) {
+  return noteStatus(props.note)==='active'?<ActiveWarningIssueCard {...props}/>:<ExpandedNoteCard {...props}/>;
+}
+
+function ActiveWarningIssueCard(props:NoteCardProps) {
+  const {note,asset,updating,lifecycleAction}=props;
+  const [expanded,setExpanded]=useState(false);
+  const detailsId=`asset-note-issue-details-${asset.id}-${note.id}`;
+  useEffect(()=>{if(updating||lifecycleAction)setExpanded(true);},[lifecycleAction,updating]);
+  return <section className={`asset-note-active-issue-card${expanded?' is-expanded':''}`}>
+    <button className="asset-note-issue-toggle" type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={()=>setExpanded(current=>!current)}>
+      <span className="asset-note-issue-toggle-main">
+        <span className="asset-note-issue-badges"><span className="asset-note-warning-badge">Warning / Needs Attention</span><span className="asset-note-status-badge is-active">Active Issue</span><span className="asset-note-date-pill glass-pill glass-pill--cyan">{formatDate(note.noteDate)}</span>{note.workOrder&&<span className="asset-note-work-order">Work Order <strong>{note.workOrder}</strong></span>}</span>
+        <strong className="asset-note-issue-title">{note.title}</strong>
+        <span className="asset-note-issue-summary-text">{note.body}</span>
+        <small>Asset {asset.assetNumber}{asset.assetName?` · ${asset.assetName}`:''}</small>
+      </span>
+      <span className="asset-note-issue-chevron" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 9 5 5 5-5" /></svg></span>
+    </button>
+    <div className="asset-note-issue-details" id={detailsId} aria-hidden={!expanded} ref={element=>{if(!element)return;if(expanded)element.removeAttribute('inert');else element.setAttribute('inert','');}}><div className="asset-note-issue-details-inner"><ExpandedNoteCard {...props}/></div></div>
+  </section>;
+}
+
+function ExpandedNoteCard({note,asset,updating,lifecycleAction,lifecycleReason,saving,updateBody,updateAttachments,updateFileInputRef,onEdit,onDelete,onResolve,onReopen,onBeginUpdate,onCancelUpdate,onUpdateBody,onAddUpdateFiles,onRemoveUpdateFile,onSaveUpdate,onLifecycleReason,onSubmitLifecycle,onCancelLifecycle,onOpenPdf,onOpenAttachment,onDeleteAttachment}:NoteCardProps) {
   const permissions=note.permissions??blankPermissions;const status=noteStatus(note);const actions=[...(permissions.canEdit?[{label:'Edit Note',onSelect:onEdit}]:[]),...(permissions.canDelete?[{label:'Delete Note',onSelect:onDelete,danger:true}]:[])];
   return <section className={`asset-note-entry glass-card glass-card--nested${note.warning?' is-warning-issue':''}${status==='resolved'?' is-resolved':''}`}>
     {note.warning&&<div className="asset-note-issue-badges"><span className="asset-note-warning-badge">Warning / Needs Attention</span><span className={`asset-note-status-badge is-${status}`}>{status==='resolved'?'Resolved':'Active Issue'}</span>{note.workOrder&&<span className="asset-note-work-order">Work Order <strong>{note.workOrder}</strong></span>}</div>}
