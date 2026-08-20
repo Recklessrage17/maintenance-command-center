@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MccAccordionHeader, MccCategoryAccordion } from '../../components/MccCategoryAccordion';
 import { MccDateInput, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
@@ -6,208 +6,153 @@ import { MccActionGroup, MccOverflowMenu, MccResourceRow } from '../../component
 import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
 
 type AssetIdentity = { id:number; assetNumber:string; assetName:string; brand:string; model:string; serialNumber:string };
-type AssetNoteAttachment = { id:number; noteId:number; filename:string; mimeType:string; fileSize:number; createdAt:string; contentUrl:string; downloadUrl:string };
-type AssetNote = { id:number; assetId:number; title:string; noteDate:string; body:string; warning:boolean; createdBy:string; createdAt:string; updatedAt:string; pdfFilename:string; pdfUrl:string; pdfDownloadUrl:string; attachments:AssetNoteAttachment[] };
-type NoteDraft = { title:string; noteDate:string; body:string; warning:boolean };
+type AssetNoteAttachment = { id:number; noteId?:number; updateId?:number; filename:string; mimeType:string; fileSize:number; createdAt:string; contentUrl:string; downloadUrl:string };
+type AssetNotePermissions = { canEdit:boolean; canDelete:boolean; canResolve:boolean; canReopen:boolean; canAddUpdate:boolean; canDeleteAttachments:boolean };
+type AssetNoteUpdate = { id:number; noteId:number; body:string; createdBy:string; createdAt:string; attachments:AssetNoteAttachment[] };
+type AssetNoteLifecycleEvent = { id:number; type:string; actor:string; reason:string; createdAt:string };
+type AssetNote = {
+  id:number;assetId:number;assetNumber?:string;assetName?:string;title:string;noteDate:string;body:string;warning:boolean;workOrder?:string;status?:'ordinary'|'active'|'resolved';createdBy:string;createdAt:string;updatedAt:string;
+  resolvedAt?:string|null;resolvedBy?:string;resolutionSummary?:string;reopenedAt?:string|null;reopenedBy?:string;resolvedYear?:string;pdfFilename:string;pdfUrl:string;pdfDownloadUrl:string;attachments:AssetNoteAttachment[];updates?:AssetNoteUpdate[];lifecycle?:AssetNoteLifecycleEvent[];permissions?:AssetNotePermissions;
+};
+type NoteDraft = { title:string; noteDate:string; body:string; warning:boolean; workOrder:string };
 type ViewerFile = { filename:string; mimeType:string; contentUrl:string; downloadUrl:string; label:string };
+type LifecycleAction = { note:AssetNote; type:'resolve'|'reopen'|'delete' };
 
 const attachmentAccept='.pdf,.doc,.docx,.jpg,.jpeg,.png,.webp';
 const maxAttachmentBytes=50*1024*1024;
+const blankPermissions:AssetNotePermissions={canEdit:false,canDelete:false,canResolve:false,canReopen:false,canAddUpdate:false,canDeleteAttachments:false};
 
 async function responseJson<T>(response:Response) {
   const data=await response.json().catch(()=>({})) as T & {error?:string};
   if(!response.ok) throw new Error(data.error || 'Request failed.');
   return data;
 }
-function formatDate(value:string) {
-  const date=new Date(`${value}T12:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
-function formatDateTime(value:string) {
-  const date=new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-function formatFileSize(size:number) {
-  if(!Number.isFinite(size)||size<=0) return '';
-  if(size<1024) return `${size} B`;
-  if(size<1024*1024) return `${(size/1024).toFixed(size<10240?1:0)} KB`;
-  return `${(size/(1024*1024)).toFixed(1)} MB`;
-}
-function fileKind(file:{filename:string;mimeType:string}) {
-  const extension=file.filename.split('.').pop()?.toLowerCase() ?? '';
-  if(file.mimeType==='application/pdf'||extension==='pdf') return 'pdf';
-  if(file.mimeType.startsWith('image/')||['jpg','jpeg','png','webp'].includes(extension)) return 'image';
-  if(['doc','docx'].includes(extension)||/word/.test(file.mimeType)) return 'word';
-  return 'file';
-}
-function fileKindLabel(file:{filename:string;mimeType:string}) {
-  const extension=file.filename.split('.').pop()?.toUpperCase();
-  return extension || (fileKind(file)==='image'?'IMAGE':'FILE');
-}
-function triggerDownload(url:string,filename:string) {
-  const link=document.createElement('a');
-  link.href=url;
-  link.download=filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-function escapePrintHtml(value:string) { return value.replace(/[&<>'"]/g,character=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[character] ?? character); }
+function formatDate(value:string) { const date=new Date(`${value}T12:00:00`);return Number.isNaN(date.getTime())?value:date.toLocaleDateString(); }
+function formatDateTime(value:string) { const date=new Date(value);return Number.isNaN(date.getTime())?value:date.toLocaleString(); }
+function formatFileSize(size:number) { if(!Number.isFinite(size)||size<=0)return'';if(size<1024)return`${size} B`;if(size<1024*1024)return`${(size/1024).toFixed(size<10240?1:0)} KB`;return`${(size/(1024*1024)).toFixed(1)} MB`; }
+function fileKind(file:{filename:string;mimeType:string}) { const extension=file.filename.split('.').pop()?.toLowerCase()??'';if(file.mimeType==='application/pdf'||extension==='pdf')return'pdf';if(file.mimeType.startsWith('image/')||['jpg','jpeg','png','webp'].includes(extension))return'image';if(['doc','docx'].includes(extension)||/word/.test(file.mimeType))return'word';return'file'; }
+function fileKindLabel(file:{filename:string;mimeType:string}) { const extension=file.filename.split('.').pop()?.toUpperCase();return extension||(fileKind(file)==='image'?'IMAGE':'FILE'); }
+function triggerDownload(url:string,filename:string) { const link=document.createElement('a');link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove(); }
+function escapePrintHtml(value:string) { return value.replace(/[&<>'"]/g,character=>({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[character]??character); }
+function noteStatus(note:AssetNote) { return note.warning?(note.status==='resolved'?'resolved':'active'):'ordinary'; }
+function normalizeNote(note:AssetNote):AssetNote { return {...note,workOrder:note.workOrder??'',status:noteStatus(note),attachments:note.attachments??[],updates:note.updates??[],lifecycle:note.lifecycle??[],permissions:note.permissions??blankPermissions}; }
+function lifecycleLabel(type:string) { return type.replace(/^issue_/,'').replace(/_/g,' ').replace(/\b\w/g,letter=>letter.toUpperCase()); }
 
 export function AssetNotesAttachments({asset,canEdit,library='machine'}:{asset:AssetIdentity;canEdit:boolean;library?:'machine'|'equipment'}) {
   const apiBase=`/api/${library}-library`;
   const [expanded,setExpanded]=useState(false);
   const [notes,setNotes]=useState<AssetNote[]>([]);
+  const [canCreate,setCanCreate]=useState(canEdit);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
   const [editing,setEditing]=useState<AssetNote|null>(null);
   const [adding,setAdding]=useState(false);
-  const [draft,setDraft]=useState<NoteDraft>({title:'',noteDate:localIsoDate(new Date()),body:'',warning:false});
+  const [draft,setDraft]=useState<NoteDraft>({title:'',noteDate:localIsoDate(new Date()),body:'',warning:false,workOrder:''});
   const [pendingAttachments,setPendingAttachments]=useState<File[]>([]);
   const [saving,setSaving]=useState(false);
   const [viewer,setViewer]=useState<ViewerFile|null>(null);
-  const fileInputRef=useRef<HTMLInputElement|null>(null);
+  const [search,setSearch]=useState('');
+  const [statusFilter,setStatusFilter]=useState<'all'|'ordinary'|'active'|'resolved'>('all');
+  const [openYears,setOpenYears]=useState<string[]>([]);
+  const [updatingNoteId,setUpdatingNoteId]=useState<number|null>(null);
+  const [updateBody,setUpdateBody]=useState('');
+  const [updateAttachments,setUpdateAttachments]=useState<File[]>([]);
+  const [lifecycleAction,setLifecycleAction]=useState<LifecycleAction|null>(null);
+  const [lifecycleReason,setLifecycleReason]=useState('');
+  const fileInputRef=useRef<HTMLInputElement>(null);
+  const updateFileInputRef=useRef<HTMLInputElement>(null);
 
   async function loadNotes() {
-    setLoading(true);
-    setError('');
-    try {
-      const data=await responseJson<{ok:boolean;notes:AssetNote[]}>(await fetch(`${apiBase}/assets/${asset.id}/notes`,{credentials:'include'}));
-      setNotes(data.notes);
-    } catch(loadError) {
-      setError((loadError as Error).message || 'Asset notes could not be loaded.');
-    } finally { setLoading(false); }
+    setLoading(true);setError('');
+    try { const data=await responseJson<{ok:boolean;notes:AssetNote[];permissions?:{canCreate?:boolean}}>(await fetch(`${apiBase}/assets/${asset.id}/notes`,{credentials:'include'}));setNotes(data.notes.map(normalizeNote));setCanCreate(data.permissions?.canCreate??canEdit); }
+    catch(loadError) { setError((loadError as Error).message||'Asset notes could not be loaded.'); }
+    finally { setLoading(false); }
   }
-  useEffect(()=>{ setExpanded(false); setAdding(false); setEditing(null); setPendingAttachments([]); void loadNotes(); },[asset.id]);
+  useEffect(()=>{setExpanded(false);setAdding(false);setEditing(null);setPendingAttachments([]);setSearch('');setStatusFilter('all');setOpenYears([]);setUpdatingNoteId(null);setLifecycleAction(null);void loadNotes();},[asset.id]);
 
-  const attachmentCount=useMemo(()=>notes.reduce((count,note)=>count+note.attachments.length,0),[notes]);
-  const summary=loading?'Loading notes...':<MccSummaryTokenGroup><MccSummaryToken tone="note">{notes.length} note{notes.length===1?'':'s'}</MccSummaryToken><MccSummaryToken tone="attachment">{attachmentCount} attachment{attachmentCount===1?'':'s'}</MccSummaryToken></MccSummaryTokenGroup>;
+  const attachmentCount=useMemo(()=>notes.reduce((count,note)=>count+note.attachments.length+(note.updates??[]).reduce((total,update)=>total+update.attachments.length,0),0),[notes]);
+  const activeIssueCount=notes.filter(note=>noteStatus(note)==='active').length;
+  const resolvedCount=notes.filter(note=>noteStatus(note)==='resolved').length;
+  const summary=loading?'Loading notes...':<MccSummaryTokenGroup><MccSummaryToken tone="note">{notes.length} note{notes.length===1?'':'s'}</MccSummaryToken>{activeIssueCount>0&&<MccSummaryToken tone="warning">{activeIssueCount} active issue{activeIssueCount===1?'':'s'}</MccSummaryToken>}{resolvedCount>0&&<MccSummaryToken>{resolvedCount} resolved</MccSummaryToken>}<MccSummaryToken tone="attachment">{attachmentCount} attachment{attachmentCount===1?'':'s'}</MccSummaryToken></MccSummaryTokenGroup>;
+  const visibleNotes=useMemo(()=>{const query=search.trim().toLocaleLowerCase();return notes.filter(note=>{const status=noteStatus(note);if(statusFilter!=='all'&&status!==statusFilter)return false;if(!query)return true;const searchable=[asset.assetNumber,asset.assetName,note.title,note.body,note.noteDate,note.createdBy,note.workOrder,note.resolvedAt,note.resolvedBy,note.resolutionSummary,...(note.updates??[]).flatMap(update=>[update.body,update.createdBy,update.createdAt,...update.attachments.map(file=>file.filename)]),...(note.lifecycle??[]).flatMap(event=>[event.type,event.actor,event.reason,event.createdAt])].join('\n').toLocaleLowerCase();return searchable.includes(query);});},[asset.assetName,asset.assetNumber,notes,search,statusFilter]);
+  const workingNotes=visibleNotes.filter(note=>noteStatus(note)!=='resolved');
+  const resolvedByYear=useMemo(()=>{const grouped=new Map<string,AssetNote[]>();for(const note of visibleNotes.filter(item=>noteStatus(item)==='resolved')){const year=note.resolvedYear||note.resolvedAt?.slice(0,4)||'Unknown';grouped.set(year,[...(grouped.get(year)??[]),note]);}return [...grouped.entries()].sort(([left],[right])=>right.localeCompare(left));},[visibleNotes]);
 
-  function beginAdd() {
-    setEditing(null);
-    setAdding(true);
-    setPendingAttachments([]);
-    setDraft({title:'',noteDate:localIsoDate(new Date()),body:'',warning:false});
-    setError('');
-  }
-  function beginEdit(note:AssetNote) {
-    setEditing(note);
-    setAdding(false);
-    setPendingAttachments([]);
-    setDraft({title:note.title,noteDate:note.noteDate,body:note.body,warning:Boolean(note.warning)});
-    setError('');
-  }
-  function cancelForm() {
-    setAdding(false);
-    setEditing(null);
-    setPendingAttachments([]);
-  }
-  function addPending(files:File[]) {
-    setError('');
-    const supported=files.filter(file=>['pdf','image','word'].includes(fileKind({filename:file.name,mimeType:file.type})));
-    const accepted=supported.filter(file=>file.size<=maxAttachmentBytes);
-    if(supported.some(file=>file.size>maxAttachmentBytes)) setError('Each attachment must be 50 MB or smaller.');
-    else if(supported.length!==files.length) setError('Attachments must be PDF, Word, JPG, JPEG, PNG, or WEBP files.');
-    setPendingAttachments(current=>[...current,...accepted].slice(0,10));
-  }
+  function beginAdd() { setEditing(null);setAdding(true);setPendingAttachments([]);setDraft({title:'',noteDate:localIsoDate(new Date()),body:'',warning:false,workOrder:''});setError('');setNotice(''); }
+  function beginEdit(note:AssetNote) { setEditing(note);setAdding(false);setPendingAttachments([]);setDraft({title:note.title,noteDate:note.noteDate,body:note.body,warning:Boolean(note.warning),workOrder:note.workOrder??''});setError('');setNotice(''); }
+  function cancelForm() { setAdding(false);setEditing(null);setPendingAttachments([]); }
+  function acceptedFiles(files:File[]) { const supported=files.filter(file=>['pdf','image','word'].includes(fileKind({filename:file.name,mimeType:file.type})));const accepted=supported.filter(file=>file.size<=maxAttachmentBytes);if(supported.some(file=>file.size>maxAttachmentBytes))setError('Each attachment must be 50 MB or smaller.');else if(supported.length!==files.length)setError('Attachments must be PDF, Word, JPG, JPEG, PNG, or WEBP files.');return accepted; }
+  function addPending(files:File[]) { setError('');setPendingAttachments(current=>[...current,...acceptedFiles(files)].slice(0,10)); }
   async function saveNote(event:FormEvent) {
-    event.preventDefault();
-    const title=draft.title.trim();
-    const body=draft.body.trim();
-    if(!title||!body) { setError('Note Title and Note Body are required.'); return; }
-    if(!isValidMccDateValue(draft.noteDate,true)) { setError('Enter a valid note date.'); return; }
-    setSaving(true);
-    setError('');
-    try {
-      const formData=new FormData();
-      formData.append('title',title);
-      formData.append('noteDate',draft.noteDate);
-      formData.append('body',body);
-      formData.append('warning',String(draft.warning));
-      pendingAttachments.forEach(file=>formData.append('attachments',file,file.name));
-      const url=editing?`${apiBase}/asset-notes/${editing.id}`:`${apiBase}/assets/${asset.id}/notes`;
-      await responseJson(await fetch(url,{method:editing?'PUT':'POST',credentials:'include',body:formData}));
-      cancelForm();
-      await loadNotes();
-    } catch(saveError) {
-      setError((saveError as Error).message || 'Asset note could not be saved.');
-    } finally { setSaving(false); }
+    event.preventDefault();const title=draft.title.trim();const body=draft.body.trim();if(!title||!body){setError('Note Title and Note Body are required.');return;}if(!isValidMccDateValue(draft.noteDate,true)){setError('Enter a valid note date.');return;}setSaving(true);setError('');setNotice('');
+    try { const formData=new FormData();formData.append('title',title);formData.append('noteDate',draft.noteDate);formData.append('body',body);formData.append('warning',String(draft.warning));if(draft.warning)formData.append('workOrder',draft.workOrder.trim());pendingAttachments.forEach(file=>formData.append('attachments',file,file.name));const url=editing?`${apiBase}/asset-notes/${editing.id}`:`${apiBase}/assets/${asset.id}/notes`;await responseJson(await fetch(url,{method:editing?'PUT':'POST',credentials:'include',body:formData}));cancelForm();setNotice(editing?'Note saved.':'Note added.');await loadNotes(); }
+    catch(saveError) { setError((saveError as Error).message||'Asset note could not be saved.'); }
+    finally { setSaving(false); }
   }
-  async function deleteNote(note:AssetNote) {
-    if(!window.confirm(`Delete asset note “${note.title}” and all of its attachments?`)) return;
-    setError('');
-    try {
-      await responseJson(await fetch(`${apiBase}/asset-notes/${note.id}`,{method:'DELETE',credentials:'include'}));
-      if(editing?.id===note.id) cancelForm();
-      await loadNotes();
-    } catch(deleteError) { setError((deleteError as Error).message || 'Asset note could not be deleted.'); }
+  async function deleteOrdinaryNote(note:AssetNote) { if(!window.confirm(`Delete asset note “${note.title}” and all of its attachments?`))return;setError('');try{await responseJson(await fetch(`${apiBase}/asset-notes/${note.id}`,{method:'DELETE',credentials:'include'}));await loadNotes();}catch(deleteError){setError((deleteError as Error).message||'Asset note could not be deleted.');} }
+  function beginLifecycle(note:AssetNote,type:LifecycleAction['type']) { setLifecycleAction({note,type});setLifecycleReason('');setUpdatingNoteId(null);setError('');setNotice(''); }
+  async function submitLifecycle(event:FormEvent) {
+    event.preventDefault();if(!lifecycleAction)return;const reason=lifecycleReason.trim();if(!reason){setError(`${lifecycleAction.type==='resolve'?'Resolution Summary':lifecycleAction.type==='reopen'?'Reopen Reason':'Delete Reason'} is required.`);return;}if(lifecycleAction.type==='delete'&&!window.confirm(`Permanently remove “${lifecycleAction.note.title}” from active records? Its audit evidence and files will be preserved.`))return;setSaving(true);setError('');
+    try { const endpoint=lifecycleAction.type==='delete'?`${apiBase}/asset-notes/${lifecycleAction.note.id}`:`${apiBase}/asset-notes/${lifecycleAction.note.id}/${lifecycleAction.type}`;const body=lifecycleAction.type==='resolve'?{resolutionSummary:reason}:lifecycleAction.type==='reopen'?{reopenReason:reason}:{deleteReason:reason};await responseJson(await fetch(endpoint,{method:lifecycleAction.type==='delete'?'DELETE':'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));setNotice(lifecycleAction.type==='resolve'?'Issue resolved and removed from Dashboard attention.':lifecycleAction.type==='reopen'?'Issue reopened and restored to Dashboard attention.':'Warning issue removed; audit evidence preserved.');setLifecycleAction(null);setLifecycleReason('');await loadNotes(); }
+    catch(actionError){setError((actionError as Error).message||'Warning issue could not be updated.');}
+    finally{setSaving(false);}
   }
-  async function deleteAttachment(note:AssetNote,attachment:AssetNoteAttachment) {
-    if(!window.confirm(`Delete attachment “${attachment.filename}” from ${note.title}?`)) return;
-    setError('');
-    try {
-      await responseJson(await fetch(`${apiBase}/asset-note-attachments/${attachment.id}`,{method:'DELETE',credentials:'include'}));
-      await loadNotes();
-    } catch(deleteError) { setError((deleteError as Error).message || 'Attachment could not be deleted.'); }
+  function beginUpdate(note:AssetNote) { setUpdatingNoteId(note.id);setUpdateBody('');setUpdateAttachments([]);setLifecycleAction(null);setError('');setNotice(''); }
+  async function saveUpdate(event:FormEvent,note:AssetNote) {
+    event.preventDefault();const body=updateBody.trim();if(!body){setError('Update is required.');return;}setSaving(true);setError('');
+    try { const formData=new FormData();formData.append('body',body);updateAttachments.forEach(file=>formData.append('attachments',file,file.name));await responseJson(await fetch(`${apiBase}/asset-notes/${note.id}/updates`,{method:'POST',credentials:'include',body:formData}));setUpdatingNoteId(null);setUpdateBody('');setUpdateAttachments([]);setNotice('Maintenance update added.');await loadNotes(); }
+    catch(updateError){setError((updateError as Error).message||'Maintenance update could not be added.');}
+    finally{setSaving(false);}
   }
-  function openAttachment(attachment:AssetNoteAttachment) {
-    const kind=fileKind(attachment);
-    if(kind==='word') { triggerDownload(attachment.downloadUrl,attachment.filename); return; }
-    setViewer({filename:attachment.filename,mimeType:attachment.mimeType,contentUrl:attachment.contentUrl,downloadUrl:attachment.downloadUrl,label:`${asset.assetNumber} attachment`});
-  }
+  async function deleteAttachment(note:AssetNote,attachment:AssetNoteAttachment) { if(!window.confirm(`Delete attachment “${attachment.filename}” from ${note.title}?`))return;setError('');try{await responseJson(await fetch(`${apiBase}/asset-note-attachments/${attachment.id}`,{method:'DELETE',credentials:'include'}));await loadNotes();}catch(deleteError){setError((deleteError as Error).message||'Attachment could not be deleted.');} }
+  function openAttachment(attachment:AssetNoteAttachment) { const kind=fileKind(attachment);if(kind==='word'){triggerDownload(attachment.downloadUrl,attachment.filename);return;}setViewer({filename:attachment.filename,mimeType:attachment.mimeType,contentUrl:attachment.contentUrl,downloadUrl:attachment.downloadUrl,label:`${asset.assetNumber} attachment`}); }
 
   return <MccCategoryAccordion accent="notes" expanded={expanded} className="asset-notes-card glass-panel glass-panel--nested">
     <MccAccordionHeader title={<>Asset Notes &amp; Attachments</>} summary={summary} expanded={expanded} controls={`asset-notes-panel-${asset.id}`} onToggle={()=>setExpanded(current=>!current)} />
     <div className="machine-detail-accordion-panel asset-notes-panel" id={`asset-notes-panel-${asset.id}`} aria-hidden={!expanded}>
-      <div className="asset-notes-toolbar glass-toolbar"><div><strong>Working asset notes</strong><small>Saved notes automatically create a maintenance-style PDF.</small></div>{canEdit&&<button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={beginAdd}>Add Note</button>}</div>
-      {error&&<p className="form-message error">{error}</p>}
+      <div className="asset-notes-toolbar glass-toolbar"><div><strong>Working asset notes</strong><small>Ordinary notes stay simple. Warning notes become tracked maintenance issues.</small></div>{canCreate&&<button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={beginAdd}>Add Note</button>}</div>
+      {notes.length>0&&<div className="asset-note-search-toolbar glass-toolbar" role="search"><label className="form-field"><span>Search Asset Notes</span><input className="glass-input" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Title, issue, asset, Work Order, technician, date" /></label><label className="form-field"><span>Note status</span><select className="glass-input" value={statusFilter} onChange={event=>setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">All notes and issues</option><option value="ordinary">Ordinary notes</option><option value="active">Active warning issues</option><option value="resolved">Resolved warning history</option></select></label></div>}
+      {error&&<p className="form-message error" role="alert">{error}</p>}{notice&&<p className="form-message" role="status">{notice}</p>}
       {(adding||editing)&&<form className="asset-note-form glass-card glass-card--nested" onSubmit={saveNote}>
         <label className="form-field"><span>Note Title *</span><input className="glass-input" value={draft.title} maxLength={180} onChange={event=>setDraft(current=>({...current,title:event.target.value}))} required /></label>
         <MccDateInput label="Note Date *" value={draft.noteDate} onChange={value=>setDraft(current=>({...current,noteDate:value}))} required />
-        <label className="asset-note-warning-toggle"><input type="checkbox" checked={draft.warning} onChange={event=>setDraft(current=>({...current,warning:event.target.checked}))}/><span><strong>Warning / Needs Attention</strong><small>Show this technician note in Dashboard Maintenance Attention.</small></span></label>
-        <label className="form-field asset-note-body-field"><span>Note Body *</span><textarea className="glass-input" value={draft.body} maxLength={30000} rows={7} onChange={event=>setDraft(current=>({...current,body:event.target.value}))} required /></label>
-        <div className="asset-note-attachment-picker glass-card glass-card--nested"><div><strong>Optional attachments</strong><small>PDF, Word, JPG, JPEG, PNG, or WEBP · up to 50 MB each</small></div><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>fileInputRef.current?.click()}>Add Attachments</button><input ref={fileInputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{addPending(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>
-        {pendingAttachments.length>0&&<div className="asset-attachment-grid glass-attachments">{pendingAttachments.map((file,index)=><PendingAttachmentChip key={`${file.name}-${file.size}-${index}`} file={file} onRemove={()=>setPendingAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} />)}</div>}
+        <label className="asset-note-warning-toggle"><input type="checkbox" checked={draft.warning} disabled={Boolean(editing?.warning)} onChange={event=>setDraft(current=>({...current,warning:event.target.checked,workOrder:event.target.checked?current.workOrder:''}))}/><span><strong>Warning / Needs Attention</strong><small>{editing?.warning?'Resolve this issue through its lifecycle action; the warning flag is retained for history.':'Show this technician issue in Dashboard Maintenance Attention.'}</small></span></label>
+        {draft.warning&&<label className="form-field asset-note-work-order-field"><span>Work Order <small>(optional)</small></span><input className="glass-input" value={draft.workOrder} maxLength={120} onChange={event=>setDraft(current=>({...current,workOrder:event.target.value}))} placeholder="WO-12345 or existing reference" /></label>}
+        <label className="form-field asset-note-body-field"><span>{draft.warning?'Original Issue Body *':'Note Body *'}</span><textarea className="glass-input" value={draft.body} maxLength={30000} rows={7} onChange={event=>setDraft(current=>({...current,body:event.target.value}))} required /></label>
+        <AttachmentPicker inputRef={fileInputRef} files={pendingAttachments} onAdd={addPending} onRemove={index=>setPendingAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} />
         <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={cancelForm} disabled={saving}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={saving}>{saving?'Saving & generating PDF...':'Save Note'}</button></div>
       </form>}
       {!adding&&!editing&&loading&&<div className="machine-record-newest-empty glass-empty-state">Loading asset notes...</div>}
       {!adding&&!editing&&!loading&&notes.length===0&&<div className="machine-record-newest-empty glass-empty-state"><strong>No notes</strong><span>Add a working maintenance note and optional supporting files.</span></div>}
-      {!adding&&!editing&&notes.length>0&&<div className="asset-note-list">{notes.map(note=><section className="asset-note-entry glass-card glass-card--nested" key={note.id}>
-        {note.warning&&<span className="asset-note-warning-badge">Warning / Needs Attention</span>}
-        <div className="asset-note-entry-heading"><div><span className="asset-note-date-pill glass-pill glass-pill--cyan">{formatDate(note.noteDate)}</span><h5>{note.title}</h5><small>Created by {note.createdBy} · {formatDateTime(note.createdAt)}{note.updatedAt!==note.createdAt?' · edited':''}</small></div><MccActionGroup className="asset-note-actions"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>setViewer({filename:note.pdfFilename,mimeType:'application/pdf',contentUrl:note.pdfUrl,downloadUrl:note.pdfDownloadUrl,label:`${asset.assetNumber} asset note`})}>Open Note PDF</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>triggerDownload(note.pdfDownloadUrl,note.pdfFilename)}>Download Note PDF</button><MccOverflowMenu ariaLabel={`More actions for ${note.title}`} items={[{label:'Print Note PDF',onSelect:()=>window.open(note.pdfUrl,'_blank','noopener,noreferrer')},...(canEdit?[{label:'Edit Note',onSelect:()=>beginEdit(note)},{label:'Delete Note',onSelect:()=>void deleteNote(note),danger:true}]:[])]} /></MccActionGroup></div>
-        <p className="asset-note-body-preview">{note.body}</p>
-        {note.attachments.length>0&&<div className="asset-attachment-grid glass-attachments">{note.attachments.map(attachment=><AttachmentChip key={attachment.id} attachment={attachment} canDelete={canEdit} onOpen={()=>openAttachment(attachment)} onDownload={()=>triggerDownload(attachment.downloadUrl,attachment.filename)} onDelete={()=>void deleteAttachment(note,attachment)} />)}</div>}
-      </section>)}</div>}
+      {!adding&&!editing&&!loading&&notes.length>0&&visibleNotes.length===0&&<div className="machine-record-newest-empty glass-empty-state"><strong>No matching notes</strong><span>Adjust the search or status filter.</span></div>}
+      {!adding&&!editing&&workingNotes.length>0&&<div className="asset-note-list">{workingNotes.map(note=><NoteCard key={note.id} note={note} asset={asset} updating={updatingNoteId===note.id} lifecycleAction={lifecycleAction?.note.id===note.id?lifecycleAction:null} lifecycleReason={lifecycleReason} saving={saving} updateBody={updateBody} updateAttachments={updateAttachments} updateFileInputRef={updateFileInputRef} onEdit={()=>beginEdit(note)} onDelete={()=>note.warning?beginLifecycle(note,'delete'):void deleteOrdinaryNote(note)} onResolve={()=>beginLifecycle(note,'resolve')} onReopen={()=>beginLifecycle(note,'reopen')} onBeginUpdate={()=>beginUpdate(note)} onCancelUpdate={()=>setUpdatingNoteId(null)} onUpdateBody={setUpdateBody} onAddUpdateFiles={files=>setUpdateAttachments(current=>[...current,...acceptedFiles(files)].slice(0,10))} onRemoveUpdateFile={index=>setUpdateAttachments(current=>current.filter((_,itemIndex)=>itemIndex!==index))} onSaveUpdate={event=>void saveUpdate(event,note)} onLifecycleReason={setLifecycleReason} onSubmitLifecycle={event=>void submitLifecycle(event)} onCancelLifecycle={()=>setLifecycleAction(null)} onOpenPdf={()=>setViewer({filename:note.pdfFilename,mimeType:'application/pdf',contentUrl:note.pdfUrl,downloadUrl:note.pdfDownloadUrl,label:`${asset.assetNumber} asset note`})} onOpenAttachment={openAttachment} onDeleteAttachment={attachment=>void deleteAttachment(note,attachment)} />)}</div>}
+      {!adding&&!editing&&resolvedByYear.length>0&&<section className="asset-note-resolved-history" aria-labelledby={`resolved-history-${asset.id}`}><div className="asset-note-history-heading"><div><p className="eyebrow">Maintenance Archive</p><h4 id={`resolved-history-${asset.id}`}>Resolved History</h4></div><span>{resolvedByYear.reduce((count,[,items])=>count+items.length,0)} resolved</span></div><div className="asset-note-year-list">{resolvedByYear.map(([year,yearNotes])=>{const open=openYears.includes(year);return <section className="asset-note-year-folder" key={year}><button type="button" className="asset-note-year-toggle" aria-expanded={open} aria-controls={`asset-note-year-${asset.id}-${year}`} onClick={()=>setOpenYears(current=>current.includes(year)?current.filter(item=>item!==year):[...current,year])}><span aria-hidden="true">{open?'−':'+'}</span><strong>{year}</strong><small>{yearNotes.length} resolved issue{yearNotes.length===1?'':'s'}</small></button>{open&&<div className="asset-note-list asset-note-resolved-list" id={`asset-note-year-${asset.id}-${year}`}>{yearNotes.map(note=><NoteCard key={note.id} note={note} asset={asset} updating={false} lifecycleAction={lifecycleAction?.note.id===note.id?lifecycleAction:null} lifecycleReason={lifecycleReason} saving={saving} updateBody="" updateAttachments={[]} updateFileInputRef={updateFileInputRef} onEdit={()=>beginEdit(note)} onDelete={()=>beginLifecycle(note,'delete')} onResolve={()=>beginLifecycle(note,'resolve')} onReopen={()=>beginLifecycle(note,'reopen')} onBeginUpdate={()=>beginUpdate(note)} onCancelUpdate={()=>undefined} onUpdateBody={()=>undefined} onAddUpdateFiles={()=>undefined} onRemoveUpdateFile={()=>undefined} onSaveUpdate={()=>undefined} onLifecycleReason={setLifecycleReason} onSubmitLifecycle={event=>void submitLifecycle(event)} onCancelLifecycle={()=>setLifecycleAction(null)} onOpenPdf={()=>setViewer({filename:note.pdfFilename,mimeType:'application/pdf',contentUrl:note.pdfUrl,downloadUrl:note.pdfDownloadUrl,label:`${asset.assetNumber} resolved issue`})} onOpenAttachment={openAttachment} onDeleteAttachment={attachment=>void deleteAttachment(note,attachment)} />)}</div>}</section>;})}</div></section>}
     </div>
     {viewer&&<AssetFileViewer asset={asset} file={viewer} onClose={()=>setViewer(null)} />}
   </MccCategoryAccordion>;
 }
 
-function PendingAttachmentChip({file,onRemove}:{file:File;onRemove:()=>void}) {
-  const kind=fileKind({filename:file.name,mimeType:file.type});
-  return <div className={`asset-attachment-chip glass-attachment kind-${kind}`}><span className={`asset-file-icon glass-file-icon glass-file-icon--${kind==='word'?'docx':kind}`} aria-hidden="true">{kind==='pdf'?'PDF':kind==='word'?'W':'IMG'}</span><span className="glass-attachment__copy"><strong>{file.name}</strong><small>{fileKindLabel({filename:file.name,mimeType:file.type})}{file.size?` · ${formatFileSize(file.size)}`:''}</small></span><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onRemove}>Remove</button></div>;
+function NoteCard({note,asset,updating,lifecycleAction,lifecycleReason,saving,updateBody,updateAttachments,updateFileInputRef,onEdit,onDelete,onResolve,onReopen,onBeginUpdate,onCancelUpdate,onUpdateBody,onAddUpdateFiles,onRemoveUpdateFile,onSaveUpdate,onLifecycleReason,onSubmitLifecycle,onCancelLifecycle,onOpenPdf,onOpenAttachment,onDeleteAttachment}:{note:AssetNote;asset:AssetIdentity;updating:boolean;lifecycleAction:LifecycleAction|null;lifecycleReason:string;saving:boolean;updateBody:string;updateAttachments:File[];updateFileInputRef:RefObject<HTMLInputElement>;onEdit:()=>void;onDelete:()=>void;onResolve:()=>void;onReopen:()=>void;onBeginUpdate:()=>void;onCancelUpdate:()=>void;onUpdateBody:(value:string)=>void;onAddUpdateFiles:(files:File[])=>void;onRemoveUpdateFile:(index:number)=>void;onSaveUpdate:(event:FormEvent)=>void;onLifecycleReason:(value:string)=>void;onSubmitLifecycle:(event:FormEvent)=>void;onCancelLifecycle:()=>void;onOpenPdf:()=>void;onOpenAttachment:(attachment:AssetNoteAttachment)=>void;onDeleteAttachment:(attachment:AssetNoteAttachment)=>void}) {
+  const permissions=note.permissions??blankPermissions;const status=noteStatus(note);const actions=[...(permissions.canEdit?[{label:'Edit Note',onSelect:onEdit}]:[]),...(permissions.canDelete?[{label:'Delete Note',onSelect:onDelete,danger:true}]:[])];
+  return <section className={`asset-note-entry glass-card glass-card--nested${note.warning?' is-warning-issue':''}${status==='resolved'?' is-resolved':''}`}>
+    {note.warning&&<div className="asset-note-issue-badges"><span className="asset-note-warning-badge">Warning / Needs Attention</span><span className={`asset-note-status-badge is-${status}`}>{status==='resolved'?'Resolved':'Active Issue'}</span>{note.workOrder&&<span className="asset-note-work-order">Work Order <strong>{note.workOrder}</strong></span>}</div>}
+    {status==='resolved'&&<p className="asset-note-resolved-asset"><span>Asset</span><strong>{asset.assetNumber}{asset.assetName?` · ${asset.assetName}`:''}</strong></p>}
+    <div className="asset-note-entry-heading"><div><span className="asset-note-date-pill glass-pill glass-pill--cyan">{formatDate(note.noteDate)}</span><h5>{note.title}</h5><small>Created by {note.createdBy} · {formatDateTime(note.createdAt)}{note.updatedAt!==note.createdAt?' · record updated':''}</small></div><MccActionGroup className="asset-note-actions"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onOpenPdf}>Open Note PDF</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>triggerDownload(note.pdfDownloadUrl,note.pdfFilename)}>Download Note PDF</button>{actions.length>0&&<MccOverflowMenu ariaLabel={`More actions for ${note.title}`} items={[{label:'Print Note PDF',onSelect:()=>window.open(note.pdfUrl,'_blank','noopener,noreferrer')},...actions]} />}</MccActionGroup></div>
+    {note.warning&&<strong className="asset-note-original-label">Original issue</strong>}<p className="asset-note-body-preview">{note.body}</p>
+    {note.attachments.length>0&&<div className="asset-attachment-grid glass-attachments">{note.attachments.map(attachment=><AttachmentChip key={attachment.id} attachment={attachment} canDelete={permissions.canDeleteAttachments} onOpen={()=>onOpenAttachment(attachment)} onDownload={()=>triggerDownload(attachment.downloadUrl,attachment.filename)} onDelete={()=>onDeleteAttachment(attachment)} />)}</div>}
+    {note.warning&&<div className="asset-note-update-section"><div className="asset-note-update-heading"><div><strong>Maintenance updates</strong><small>Append-only work and progress history</small></div>{permissions.canAddUpdate&&!updating&&<button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onBeginUpdate}>+ Add Update</button>}</div>{(note.updates??[]).length===0?<p className="asset-note-update-empty">No maintenance updates recorded.</p>:<ol className="asset-note-update-timeline">{(note.updates??[]).map(update=><li key={update.id}><div><strong>{update.createdBy}</strong><time dateTime={update.createdAt}>{formatDateTime(update.createdAt)}</time></div><p>{update.body}</p>{update.attachments.length>0&&<div className="asset-attachment-grid glass-attachments">{update.attachments.map(attachment=><AttachmentChip key={attachment.id} attachment={attachment} canDelete={false} onOpen={()=>onOpenAttachment(attachment)} onDownload={()=>triggerDownload(attachment.downloadUrl,attachment.filename)} onDelete={()=>undefined} />)}</div>}</li>)}</ol>}
+      {updating&&<form className="asset-note-update-form glass-card glass-card--nested" onSubmit={onSaveUpdate}><label className="form-field"><span>Maintenance work / progress update *</span><textarea autoFocus className="glass-input" rows={5} maxLength={20000} value={updateBody} onChange={event=>onUpdateBody(event.target.value)} placeholder="What was checked, repaired, replaced, or tested?" required /></label><div className="asset-note-update-attachment-row"><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>updateFileInputRef.current?.click()}>Add Update Attachments</button><small>Optional · same safe note attachment types</small><input ref={updateFileInputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{onAddUpdateFiles(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>{updateAttachments.length>0&&<div className="asset-attachment-grid glass-attachments">{updateAttachments.map((file,index)=><PendingAttachmentChip key={`${file.name}-${file.size}-${index}`} file={file} onRemove={()=>onRemoveUpdateFile(index)} />)}</div>}<div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onCancelUpdate} disabled={saving}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={saving}>{saving?'Adding update...':'Add Update'}</button></div></form>}
+    </div>}
+    {status==='resolved'&&<section className="asset-note-resolution-summary"><span>Issue resolved</span><strong>{note.resolvedBy||'Unknown user'} · {note.resolvedAt?formatDateTime(note.resolvedAt):'Date unavailable'}</strong><p>{note.resolutionSummary}</p></section>}
+    {note.warning&&<div className="asset-note-lifecycle-actions">{permissions.canResolve&&<button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onResolve}>Issue is Resolved</button>}{permissions.canReopen&&<button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onReopen}>Reopen Issue</button>}</div>}
+    {lifecycleAction&&<form className={`asset-note-lifecycle-form is-${lifecycleAction.type}`} onSubmit={onSubmitLifecycle}>{lifecycleAction.type==='resolve'&&<label className="asset-note-resolved-confirm"><input type="checkbox" checked readOnly /><span><strong>Issue is Resolved</strong><small>This removes Dashboard attention while preserving the complete record.</small></span></label>}<label className="form-field"><span>{lifecycleAction.type==='resolve'?'Resolution Summary *':lifecycleAction.type==='reopen'?'Reopen Reason *':'Delete Reason *'}</span><textarea className="glass-input" rows={4} maxLength={lifecycleAction.type==='resolve'?4000:2000} value={lifecycleReason} onChange={event=>onLifecycleReason(event.target.value)} required /></label><div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onCancelLifecycle} disabled={saving}>Cancel</button><button className={`glass-button ${lifecycleAction.type==='delete'?'danger-button':'primary-button glass-button--primary'}`} type="submit" disabled={saving}>{saving?'Saving...':lifecycleAction.type==='resolve'?'Confirm Resolution':lifecycleAction.type==='reopen'?'Reopen Issue':'Delete Warning Issue'}</button></div></form>}
+    {note.warning&&(note.lifecycle??[]).length>0&&<details className="asset-note-audit-history"><summary>Lifecycle audit history ({note.lifecycle?.length})</summary><ol>{note.lifecycle?.map(event=><li key={event.id}><strong>{lifecycleLabel(event.type)}</strong><span>{event.actor} · <time dateTime={event.createdAt}>{formatDateTime(event.createdAt)}</time></span>{event.reason&&<p>{event.reason}</p>}</li>)}</ol></details>}
+    <span className="sr-only">Asset {asset.assetNumber} {asset.assetName}</span>
+  </section>;
 }
-function AttachmentChip({attachment,canDelete,onOpen,onDownload,onDelete}:{attachment:AssetNoteAttachment;canDelete:boolean;onOpen:()=>void;onDownload:()=>void;onDelete:()=>void}) {
-  const kind=fileKind(attachment);
-  return <MccResourceRow className={`asset-attachment-chip glass-attachment kind-${kind}`} icon={<span className={`asset-file-icon glass-file-icon glass-file-icon--${kind==='word'?'docx':kind}`} aria-hidden="true">{kind==='pdf'?'PDF':kind==='word'?'W':'IMG'}</span>} title={attachment.filename} titleText={attachment.filename} metadata={<>{fileKindLabel(attachment)}{attachment.fileSize?` · ${formatFileSize(attachment.fileSize)}`:''}</>} onActivate={onOpen} activateLabel={`Open ${attachment.filename}`} actions={<MccActionGroup className="asset-attachment-actions"><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onDownload}>Download</button>{canDelete&&<MccOverflowMenu ariaLabel={`More actions for ${attachment.filename}`} items={[{label:'Delete',onSelect:onDelete,danger:true}]} />}</MccActionGroup>} />;
-}
-function AssetFileViewer({asset,file,onClose}:{asset:AssetIdentity;file:ViewerFile;onClose:()=>void}) {
-  const kind=fileKind(file);
-  const [fit,setFit]=useState(true);
-  useEffect(()=>{function onKeyDown(event:KeyboardEvent){if(event.key==='Escape')onClose();}document.addEventListener('keydown',onKeyDown);return()=>document.removeEventListener('keydown',onKeyDown);},[onClose]);
-  function printFile() {
-    if(kind==='pdf') { window.open(file.contentUrl,'_blank','noopener,noreferrer'); return; }
-    const printWindow=window.open('','_blank','width=1100,height=850');
-    if(!printWindow) return;
-    printWindow.document.write(`<!doctype html><html><head><title>${escapePrintHtml(file.filename)}</title><style>body{padding:28px;font-family:Arial,sans-serif;color:#10233a}header{border-bottom:3px solid #0b69b7;margin-bottom:20px;padding-bottom:12px}h1{font-size:22px;margin:0 0 5px}p{margin:4px 0}.image{display:flex;justify-content:center}.image img{max-width:100%;max-height:72vh;object-fit:contain}@media print{body{padding:10mm}}</style></head><body><header><h1>${escapePrintHtml(asset.assetNumber)}${asset.assetName?` - ${escapePrintHtml(asset.assetName)}`:''}</h1><p>${escapePrintHtml(file.filename)}</p><p>Generated ${escapePrintHtml(new Date().toLocaleString())}</p></header><div class="image"><img id="asset-note-print-image" src="${escapePrintHtml(file.contentUrl)}"></div></body></html>`);
-    printWindow.document.close();
-    const image=printWindow.document.getElementById('asset-note-print-image') as HTMLImageElement|null;
-    const print=()=>{printWindow.focus();printWindow.print();};
-    if(image?.complete)setTimeout(print,100);else image?.addEventListener('load',print,{once:true});
-  }
-  return createPortal(<div className="modal-backdrop inspection-record-viewer-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card inspection-record-viewer glass-modal-shell mcc-full-view-dialog" role="dialog" aria-modal="true" aria-label={`${file.filename} viewer`}>
-    <div className="modal-heading"><div><p className="eyebrow">{file.label}</p><h3>{file.filename}</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div>
-    <div className={`inspection-record-viewer-canvas${fit?' is-fit':' is-zoom'}`}>{kind==='image'?<img src={file.contentUrl} alt={file.filename} />:<object data={file.contentUrl} type="application/pdf" aria-label={file.filename}><p>Use Open Original to view this PDF.</p></object>}</div>
-    <div className="modal-actions inspection-record-viewer-actions glass-modal__actions">{kind==='image'&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>setFit(current=>!current)}>{fit?'Zoom':'Fit Image'}</button>}<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>triggerDownload(file.downloadUrl,file.filename)}>Download</button><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={printFile}>{kind==='image'?'Print / Save as PDF':'Print'}</button>{kind==='pdf'&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>window.open(file.contentUrl,'_blank','noopener,noreferrer')}>Open Original</button>}<button className="link-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div>
-  </section></div>,document.body);
-}
+
+function AttachmentPicker({inputRef,files,onAdd,onRemove}:{inputRef:RefObject<HTMLInputElement>;files:File[];onAdd:(files:File[])=>void;onRemove:(index:number)=>void}) { return <><div className="asset-note-attachment-picker glass-card glass-card--nested"><div><strong>Optional attachments</strong><small>PDF, Word, JPG, JPEG, PNG, or WEBP · up to 50 MB each</small></div><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={()=>inputRef.current?.click()}>Add Attachments</button><input ref={inputRef} hidden multiple type="file" accept={attachmentAccept} onChange={event=>{onAdd(Array.from(event.target.files??[]));event.currentTarget.value='';}} /></div>{files.length>0&&<div className="asset-attachment-grid glass-attachments">{files.map((file,index)=><PendingAttachmentChip key={`${file.name}-${file.size}-${index}`} file={file} onRemove={()=>onRemove(index)} />)}</div>}</>; }
+function PendingAttachmentChip({file,onRemove}:{file:File;onRemove:()=>void}) { const kind=fileKind({filename:file.name,mimeType:file.type});return <div className={`asset-attachment-chip glass-attachment kind-${kind}`}><span className={`asset-file-icon glass-file-icon glass-file-icon--${kind==='word'?'docx':kind}`} aria-hidden="true">{kind==='pdf'?'PDF':kind==='word'?'W':'IMG'}</span><span className="glass-attachment__copy"><strong>{file.name}</strong><small>{fileKindLabel({filename:file.name,mimeType:file.type})}{file.size?` · ${formatFileSize(file.size)}`:''}</small></span><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onRemove}>Remove</button></div>; }
+function AttachmentChip({attachment,canDelete,onOpen,onDownload,onDelete}:{attachment:AssetNoteAttachment;canDelete:boolean;onOpen:()=>void;onDownload:()=>void;onDelete:()=>void}) { const kind=fileKind(attachment);return <MccResourceRow className={`asset-attachment-chip glass-attachment kind-${kind}`} icon={<span className={`asset-file-icon glass-file-icon glass-file-icon--${kind==='word'?'docx':kind}`} aria-hidden="true">{kind==='pdf'?'PDF':kind==='word'?'W':'IMG'}</span>} title={attachment.filename} titleText={attachment.filename} metadata={<>{fileKindLabel(attachment)}{attachment.fileSize?` · ${formatFileSize(attachment.fileSize)}`:''}</>} onActivate={onOpen} activateLabel={`Open ${attachment.filename}`} actions={<MccActionGroup className="asset-attachment-actions"><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onDownload}>Download</button>{canDelete&&<MccOverflowMenu ariaLabel={`More actions for ${attachment.filename}`} items={[{label:'Delete',onSelect:onDelete,danger:true}]} />}</MccActionGroup>} />; }
+function AssetFileViewer({asset,file,onClose}:{asset:AssetIdentity;file:ViewerFile;onClose:()=>void}) { const kind=fileKind(file);const [fit,setFit]=useState(true);useEffect(()=>{function onKeyDown(event:KeyboardEvent){if(event.key==='Escape')onClose();}document.addEventListener('keydown',onKeyDown);return()=>document.removeEventListener('keydown',onKeyDown);},[onClose]);function printFile(){if(kind==='pdf'){window.open(file.contentUrl,'_blank','noopener,noreferrer');return;}const printWindow=window.open('','_blank','width=1100,height=850');if(!printWindow)return;printWindow.document.write(`<!doctype html><html><head><title>${escapePrintHtml(file.filename)}</title><style>body{padding:28px;font-family:Arial,sans-serif;color:#10233a}header{border-bottom:3px solid #0b69b7;margin-bottom:20px;padding-bottom:12px}h1{font-size:22px;margin:0 0 5px}p{margin:4px 0}.image{display:flex;justify-content:center}.image img{max-width:100%;max-height:72vh;object-fit:contain}@media print{body{padding:10mm}}</style></head><body><header><h1>${escapePrintHtml(asset.assetNumber)}${asset.assetName?` - ${escapePrintHtml(asset.assetName)}`:''}</h1><p>${escapePrintHtml(file.filename)}</p><p>Generated ${escapePrintHtml(new Date().toLocaleString())}</p></header><div class="image"><img id="asset-note-print-image" src="${escapePrintHtml(file.contentUrl)}"></div></body></html>`);printWindow.document.close();const image=printWindow.document.getElementById('asset-note-print-image') as HTMLImageElement|null;const print=()=>{printWindow.focus();printWindow.print();};if(image?.complete)setTimeout(print,100);else image?.addEventListener('load',print,{once:true});}return createPortal(<div className="modal-backdrop inspection-record-viewer-backdrop glass-modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="mcc-card inspection-record-viewer glass-modal-shell mcc-full-view-dialog" role="dialog" aria-modal="true" aria-label={`${file.filename} viewer`}><div className="modal-heading"><div><p className="eyebrow">{file.label}</p><h3>{file.filename}</h3></div><button className="link-button compact-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div><div className={`inspection-record-viewer-canvas${fit?' is-fit':' is-zoom'}`}>{kind==='image'?<img src={file.contentUrl} alt={file.filename} />:<object data={file.contentUrl} type="application/pdf" aria-label={file.filename}><p>Use Open Original to view this PDF.</p></object>}</div><div className="modal-actions inspection-record-viewer-actions glass-modal__actions">{kind==='image'&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>setFit(current=>!current)}>{fit?'Zoom':'Fit Image'}</button>}<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>triggerDownload(file.downloadUrl,file.filename)}>Download</button><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={printFile}>{kind==='image'?'Print / Save as PDF':'Print'}</button>{kind==='pdf'&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>window.open(file.contentUrl,'_blank','noopener,noreferrer')}>Open Original</button>}<button className="link-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div></section></div>,document.body); }

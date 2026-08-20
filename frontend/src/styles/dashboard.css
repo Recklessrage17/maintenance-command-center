@@ -162,6 +162,9 @@
 .dashboard-tech-note-toggle .dashboard-tech-note-expand { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid rgba(246,190,63,.32); border-radius: 50%; color: #ffe09a; font-size: 1rem; font-weight: 700; }
 .dashboard-tech-note-body { padding: 0 14px 14px 54px; }
 .dashboard-tech-note-body p { margin: 0; padding-top: 10px; border-top: 1px solid rgba(246,190,63,.18); color: var(--mcc-text-secondary); font-size: .82rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dashboard-tech-note-body .dashboard-tech-note-work-order { display: flex; align-items: center; gap: 7px; padding: 8px 0; border-top: 0; color: #ded4ff; font-size: .7rem; }
+.dashboard-tech-note-work-order span { color: #a995de; font-weight: 850; text-transform: uppercase; letter-spacing: .05em; }
+.dashboard-tech-note-work-order strong { color: #f5f1ff; overflow-wrap: anywhere; }
 .dashboard-tech-note-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 11px; }
 
 @media (max-width: 760px) {

@@ -12,7 +12,7 @@ export type PmAlert = {
 
 export type WarningNote = {
   id:number;assetId:number;assetLibrary:PmLibrary;assetNumber:string;assetName:string;brand:string;model:string;serialNumber:string;location:string;
-  assetAccentColor?:string;assetCategory?:string;title:string;noteDate:string;body:string;warning:true;createdBy:string;createdAt:string;updatedAt:string;
+  assetAccentColor?:string;assetCategory?:string;title:string;noteDate:string;body:string;warning:true;workOrder?:string;status?:'active';createdBy:string;createdAt:string;updatedAt:string;
   pdfFilename:string;pdfUrl:string;pdfDownloadUrl:string;
 };
 

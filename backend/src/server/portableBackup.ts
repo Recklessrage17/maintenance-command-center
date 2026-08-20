@@ -257,6 +257,40 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
           ],
         },
         {
+          table: 'asset_note_updates',
+          name: 'Issue Updates',
+          query: "SELECT u.*,n.asset_id AS asset_id,n.title AS note_title,n.work_order_reference AS work_order_reference,a.asset_number AS asset_number FROM asset_note_updates u LEFT JOIN machine_asset_notes n ON n.id=u.note_id LEFT JOIN machine_assets a ON a.id=n.asset_id WHERE u.asset_library='machine' ORDER BY u.rowid",
+          derivedColumns: [
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'work_order_reference', value: row => row.work_order_reference },
+          ],
+        },
+        {
+          table: 'asset_note_update_attachments',
+          name: 'Update Attachments',
+          query: "SELECT x.*,u.note_id AS note_id,n.asset_id AS asset_id,n.title AS note_title,a.asset_number AS asset_number FROM asset_note_update_attachments x LEFT JOIN asset_note_updates u ON u.id=x.update_id LEFT JOIN machine_asset_notes n ON n.id=u.note_id LEFT JOIN machine_assets a ON a.id=n.asset_id WHERE u.asset_library='machine' ORDER BY x.rowid",
+          derivedColumns: [
+            { name: 'note_id', value: row => row.note_id },
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
+        {
+          table: 'asset_note_lifecycle_events',
+          name: 'Issue Lifecycle',
+          query: "SELECT e.*,n.asset_id AS asset_id,n.title AS note_title,n.work_order_reference AS work_order_reference,a.asset_number AS asset_number FROM asset_note_lifecycle_events e LEFT JOIN machine_asset_notes n ON n.id=e.note_id LEFT JOIN machine_assets a ON a.id=n.asset_id WHERE e.asset_library='machine' ORDER BY e.rowid",
+          derivedColumns: [
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'work_order_reference', value: row => row.work_order_reference },
+          ],
+        },
+        {
           table: 'machine_inspection_records',
           name: 'Inspection Records',
           query: 'SELECT r.*,a.asset_number AS asset_number FROM machine_inspection_records r LEFT JOIN machine_assets a ON a.id=r.asset_id ORDER BY r.rowid',
@@ -302,6 +336,46 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
             { name: 'equipment_name', value: row => row.equipment_name },
             { name: 'category', value: row => row.category },
             { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
+        {
+          table: 'asset_note_updates',
+          name: 'Equipment Issue Updates',
+          query: "SELECT u.*,n.asset_id AS asset_id,n.title AS note_title,n.work_order_reference AS work_order_reference,a.asset_number AS asset_number,a.equipment_name AS equipment_name,a.category AS category FROM asset_note_updates u LEFT JOIN equipment_asset_notes n ON n.id=u.note_id LEFT JOIN equipment_assets a ON a.id=n.asset_id WHERE u.asset_library='equipment' ORDER BY u.rowid",
+          derivedColumns: [
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'equipment_name', value: row => row.equipment_name },
+            { name: 'category', value: row => row.category },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'work_order_reference', value: row => row.work_order_reference },
+          ],
+        },
+        {
+          table: 'asset_note_update_attachments',
+          name: 'Equipment Update Files',
+          query: "SELECT x.*,u.note_id AS note_id,n.asset_id AS asset_id,n.title AS note_title,a.asset_number AS asset_number,a.equipment_name AS equipment_name,a.category AS category FROM asset_note_update_attachments x LEFT JOIN asset_note_updates u ON u.id=x.update_id LEFT JOIN equipment_asset_notes n ON n.id=u.note_id LEFT JOIN equipment_assets a ON a.id=n.asset_id WHERE u.asset_library='equipment' ORDER BY x.rowid",
+          derivedColumns: [
+            { name: 'note_id', value: row => row.note_id },
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'equipment_name', value: row => row.equipment_name },
+            { name: 'category', value: row => row.category },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'portable_relative_path', value: row => portableStoredReference(row.stored_file_reference) },
+          ],
+        },
+        {
+          table: 'asset_note_lifecycle_events',
+          name: 'Equipment Issue Lifecycle',
+          query: "SELECT e.*,n.asset_id AS asset_id,n.title AS note_title,n.work_order_reference AS work_order_reference,a.asset_number AS asset_number,a.equipment_name AS equipment_name,a.category AS category FROM asset_note_lifecycle_events e LEFT JOIN equipment_asset_notes n ON n.id=e.note_id LEFT JOIN equipment_assets a ON a.id=n.asset_id WHERE e.asset_library='equipment' ORDER BY e.rowid",
+          derivedColumns: [
+            { name: 'asset_id', value: row => row.asset_id },
+            { name: 'asset_number', value: row => row.asset_number },
+            { name: 'equipment_name', value: row => row.equipment_name },
+            { name: 'category', value: row => row.category },
+            { name: 'note_title', value: row => row.note_title },
+            { name: 'work_order_reference', value: row => row.work_order_reference },
           ],
         },
       ] },
@@ -851,6 +925,7 @@ export function validateMachineLibraryPackageIntegrity(databasePath: string, pac
     const tables = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name));
     if (!tables.has('machine_assets')) return;
     const assetIds = new Set((database.prepare('SELECT id FROM machine_assets').all() as Array<{ id: number }>).map(row => Number(row.id)));
+    const userIds = new Set(tables.has('users') ? (database.prepare('SELECT id FROM users').all() as Array<{ id: number }>).map(row => Number(row.id)) : []);
     const folderRelationships = new Set<string>();
     if (tables.has('machine_document_folders')) {
       for (const row of database.prepare('SELECT id,asset_id FROM machine_document_folders').all() as Array<{ id: number; asset_id: number }>) {
@@ -870,12 +945,16 @@ export function validateMachineLibraryPackageIntegrity(databasePath: string, pac
       }
     }
     const noteAssets = new Map<number, number>();
+    const noteWarnings = new Map<number, boolean>();
     if (tables.has('machine_asset_notes')) {
-      for (const row of database.prepare('SELECT id,asset_id,pdf_stored_reference FROM machine_asset_notes').all() as Array<Record<string, unknown>>) {
+      for (const row of database.prepare('SELECT * FROM machine_asset_notes').all() as Array<Record<string, unknown>>) {
         const id = Number(row.id);
         const assetId = Number(row.asset_id);
         assertMachineAssetRelationship(assetIds, assetId, `asset note ${id}`);
         noteAssets.set(id, assetId);
+        noteWarnings.set(id, Number(row.is_warning ?? 0) === 1);
+        assertAssetNoteUserRelationship(userIds,row.created_by_user_id,`Machine Library asset note ${id} creator`);
+        validateAssetNoteLifecycleColumns(row,`Machine Library asset note ${id}`,userIds);
         const pdfReference = String(row.pdf_stored_reference ?? '');
         if (pdfReference) assertMachineStoredReference(packagePath, pdfReference, 'uploads/machine-asset-notes/', undefined, `asset note PDF ${id}`);
       }
@@ -887,6 +966,7 @@ export function validateMachineLibraryPackageIntegrity(databasePath: string, pac
         assertMachineStoredReference(packagePath, row.stored_file_reference, 'uploads/machine-asset-notes/', row.file_size, `note attachment ${id}`);
       }
     }
+    validateAssetNoteIssueLifecycleIntegrity(database,tables,packagePath,'machine',noteWarnings,userIds);
     validateMachineReferencedTable(database, tables, assetIds, packagePath, {
       table: 'machine_inspection_records', prefix: 'uploads/machine-inspection-records/', label: 'inspection record', sizeColumn: 'file_size',
     });
@@ -904,13 +984,18 @@ export function validateEquipmentLibraryPackageIntegrity(databasePath: string, p
     const tables = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name));
     if (!tables.has('equipment_assets')) return;
     const assetIds = new Set((database.prepare('SELECT id FROM equipment_assets').all() as Array<{ id: number }>).map(row => Number(row.id)));
+    const userIds = new Set(tables.has('users') ? (database.prepare('SELECT id FROM users').all() as Array<{ id: number }>).map(row => Number(row.id)) : []);
     const noteAssets = new Map<number, number>();
+    const noteWarnings = new Map<number, boolean>();
     if (tables.has('equipment_asset_notes')) {
-      for (const row of database.prepare('SELECT id,asset_id,pdf_stored_reference FROM equipment_asset_notes').all() as Array<Record<string, unknown>>) {
+      for (const row of database.prepare('SELECT * FROM equipment_asset_notes').all() as Array<Record<string, unknown>>) {
         const id = Number(row.id);
         const assetId = Number(row.asset_id);
         assertEquipmentAssetRelationship(assetIds, assetId, `asset note ${id}`);
         noteAssets.set(id, assetId);
+        noteWarnings.set(id, Number(row.is_warning ?? 0) === 1);
+        assertAssetNoteUserRelationship(userIds,row.created_by_user_id,`Equipment Library asset note ${id} creator`);
+        validateAssetNoteLifecycleColumns(row,`Equipment Library asset note ${id}`,userIds);
         const pdfReference = String(row.pdf_stored_reference ?? '');
         if (pdfReference) assertEquipmentStoredReference(packagePath, pdfReference, undefined, `asset note PDF ${id}`);
       }
@@ -922,8 +1007,77 @@ export function validateEquipmentLibraryPackageIntegrity(databasePath: string, p
         assertEquipmentStoredReference(packagePath, row.stored_file_reference, row.file_size, `note attachment ${id}`);
       }
     }
+    validateAssetNoteIssueLifecycleIntegrity(database,tables,packagePath,'equipment',noteWarnings,userIds);
   } finally {
     database.close();
+  }
+}
+
+function assertAssetNoteUserRelationship(userIds:Set<number>,value:unknown,label:string) {
+  if(value===null||value===undefined||value==='')return;
+  const userId=Number(value);
+  if(!Number.isInteger(userId)||!userIds.has(userId))throw new Error(`Portable package ${label} has an invalid user relationship.`);
+}
+
+function validateAssetNoteLifecycleColumns(row:Record<string,unknown>,label:string,userIds:Set<number>) {
+  if(!Object.hasOwn(row,'issue_status'))return;
+  const warning=Number(row.is_warning??0)===1;
+  const status=String(row.issue_status??'');
+  if(!['active','resolved'].includes(status))throw new Error(`Portable package ${label} has an invalid lifecycle status.`);
+  if(!warning&&String(row.work_order_reference??'').trim())throw new Error(`Portable package ${label} has a Work Order on an ordinary note.`);
+  if(status==='resolved'){
+    if(!warning||!String(row.resolved_at??'').trim()||!String(row.resolved_by_name??'').trim()||row.resolved_by_user_id===null||row.resolved_by_user_id===undefined||!String(row.resolution_summary??'').trim())throw new Error(`Portable package ${label} has incomplete resolution metadata.`);
+    assertAssetNoteUserRelationship(userIds,row.resolved_by_user_id,`${label} resolver`);
+  }
+  if(Number(row.deleted??0)===1){
+    if(!warning||!String(row.deleted_at??'').trim()||!String(row.deleted_by_name??'').trim()||row.deleted_by_user_id===null||row.deleted_by_user_id===undefined||!String(row.delete_reason??'').trim())throw new Error(`Portable package ${label} has incomplete delete audit evidence.`);
+    assertAssetNoteUserRelationship(userIds,row.deleted_by_user_id,`${label} deleting user`);
+  }
+  const hasReopenMetadata=Boolean(String(row.reopened_at??'').trim()||String(row.reopened_by_name??'').trim()||row.reopened_by_user_id!==null&&row.reopened_by_user_id!==undefined);
+  if(hasReopenMetadata){
+    if(!String(row.reopened_at??'').trim()||!String(row.reopened_by_name??'').trim()||row.reopened_by_user_id===null||row.reopened_by_user_id===undefined)throw new Error(`Portable package ${label} has incomplete reopen audit evidence.`);
+    assertAssetNoteUserRelationship(userIds,row.reopened_by_user_id,`${label} reopening user`);
+  }
+}
+
+function validateAssetNoteIssueLifecycleIntegrity(database:DatabaseSync,tables:Set<string>,packagePath:string,library:'machine'|'equipment',noteWarnings:Map<number,boolean>,userIds:Set<number>) {
+  const label=library==='machine'?'Machine Library':'Equipment Library';
+  for(const table of ['asset_note_updates','asset_note_lifecycle_events']){
+    if(!tables.has(table))continue;
+    const invalid=database.prepare(`SELECT asset_library FROM ${quoteIdentifier(table)} WHERE asset_library NOT IN ('machine','equipment') LIMIT 1`).get() as Record<string,unknown>|undefined;
+    if(invalid)throw new Error(`Portable package ${label} warning issue data contains an invalid library relationship.`);
+  }
+  const updateIds=new Set<number>();
+  if(tables.has('asset_note_updates')){
+    for(const row of database.prepare('SELECT * FROM asset_note_updates WHERE asset_library=?').all(library) as Array<Record<string,unknown>>){
+      const id=Number(row.id);const noteId=Number(row.note_id);
+      if(!noteWarnings.get(noteId))throw new Error(`Portable package ${label} warning issue update ${id} has an invalid note relationship.`);
+      if(!String(row.body??'').trim()||!String(row.created_by_name??'').trim()||row.created_by_user_id===null||row.created_by_user_id===undefined||!String(row.created_at??'').trim())throw new Error(`Portable package ${label} warning issue update ${id} has incomplete audit metadata.`);
+      assertAssetNoteUserRelationship(userIds,row.created_by_user_id,`${label} warning issue update ${id} creator`);
+      updateIds.add(id);
+    }
+  }
+  if(tables.has('asset_note_update_attachments')){
+    const allUpdateIds=new Set((database.prepare('SELECT id FROM asset_note_updates').all() as Array<{id:number}>).map(row=>Number(row.id)));
+    for(const row of database.prepare('SELECT * FROM asset_note_update_attachments').all() as Array<Record<string,unknown>>){
+      const id=Number(row.id);const updateId=Number(row.update_id);
+      if(!allUpdateIds.has(updateId))throw new Error(`Portable package warning issue update attachment ${id} has an invalid update relationship.`);
+      if(!updateIds.has(updateId))continue;
+      if(!String(row.uploaded_by_name??'').trim()||row.uploaded_by_user_id===null||row.uploaded_by_user_id===undefined)throw new Error(`Portable package ${label} warning issue update attachment ${id} has incomplete uploader metadata.`);
+      assertAssetNoteUserRelationship(userIds,row.uploaded_by_user_id,`${label} warning issue update attachment ${id} uploader`);
+      if(library==='machine')assertMachineStoredReference(packagePath,row.stored_file_reference,'uploads/machine-asset-notes/',row.file_size,`warning issue update attachment ${id}`);
+      else assertEquipmentStoredReference(packagePath,row.stored_file_reference,row.file_size,`warning issue update attachment ${id}`);
+    }
+  }
+  if(tables.has('asset_note_lifecycle_events')){
+    for(const row of database.prepare('SELECT * FROM asset_note_lifecycle_events WHERE asset_library=?').all(library) as Array<Record<string,unknown>>){
+      const id=Number(row.id);const noteId=Number(row.note_id);const type=String(row.event_type??'');
+      if(!noteWarnings.get(noteId))throw new Error(`Portable package ${label} warning issue lifecycle event ${id} has an invalid note relationship.`);
+      if(!type||!String(row.actor_name??'').trim()||row.actor_user_id===null||row.actor_user_id===undefined||!String(row.created_at??'').trim())throw new Error(`Portable package ${label} warning issue lifecycle event ${id} has incomplete audit metadata.`);
+      if(['issue_resolved','issue_reopened','issue_deleted'].includes(type)&&!String(row.reason??'').trim())throw new Error(`Portable package ${label} warning issue lifecycle event ${id} is missing its required reason.`);
+      assertAssetNoteUserRelationship(userIds,row.actor_user_id,`${label} warning issue lifecycle event ${id} actor`);
+      for(const column of ['old_value_json','new_value_json']){try{JSON.parse(String(row[column]??'{}'));}catch{throw new Error(`Portable package ${label} warning issue lifecycle event ${id} has invalid audit JSON.`);}}
+    }
   }
 }
 
