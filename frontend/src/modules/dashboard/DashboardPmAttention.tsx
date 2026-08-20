@@ -27,7 +27,7 @@ export function dueInformation(alert:PmAlert) {
 
 function PmStatusSummary({alerts,warningCount=0,className=''}:{alerts:PmAlert[];warningCount?:number;className?:string}) {
   const counts=pmStatusCounts(alerts);
-  return <MccSummaryTokenGroup className={className}>{(['Due Soon','Due Now','Past Due'] as PmStatus[]).map(status=>counts[status]>0&&<MccSummaryToken key={status} tone={statusTone(status)}>{counts[status]} {status}</MccSummaryToken>)}{warningCount>0&&<MccSummaryToken tone="warning">{warningCount} Tech Note{warningCount===1?'':'s'}</MccSummaryToken>}</MccSummaryTokenGroup>;
+  return <MccSummaryTokenGroup className={className}>{(['Due Soon','Due Now','Past Due'] as PmStatus[]).map(status=>counts[status]>0&&<MccSummaryToken key={status} tone={statusTone(status)}>{counts[status]} {status}</MccSummaryToken>)}{warningCount>0&&<MccSummaryToken className="dashboard-tech-note-summary">{warningCount} Tech Note{warningCount===1?'':'s'}</MccSummaryToken>}</MccSummaryTokenGroup>;
 }
 
 function AssetStatusPills({group}:{group:PmAssetGroup}) {

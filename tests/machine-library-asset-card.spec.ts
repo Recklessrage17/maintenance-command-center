@@ -122,6 +122,18 @@ test('Machine asset query opens the requested full detail', async ({ page }) => 
   await expectSingleDetail(page,'Press 52');
 });
 
+test('Machine warning notes use the shared high-attention label treatment', async ({ page }) => {
+  await mockMachineLibrary(page);
+  await page.route(/\/api\/machine-library\/assets\/51\/notes$/,route=>route.fulfill({json:{ok:true,notes:[{id:951,assetId:51,title:'Guard interlock warning',noteDate:'2026-07-17',body:'Inspect the guard interlock before operation.',warning:true,createdBy:'Automated Test',createdAt:'2026-07-17T12:00:00Z',updatedAt:'2026-07-17T12:00:00Z',pdfFilename:'guard-interlock-warning.pdf',pdfUrl:'/api/machine-library/asset-notes/951/pdf',pdfDownloadUrl:'/api/machine-library/asset-notes/951/pdf?download=true',attachments:[]}]}}));
+  await page.goto('/machine-library?asset=51');
+  await expectSingleDetail(page,'Press 51');
+  await page.getByRole('button',{name:/Asset Notes & Attachments/}).click();
+  const warningBadge=page.locator('.asset-note-warning-badge');
+  await expect(warningBadge).toHaveText('Warning / Needs Attention');
+  await expect(warningBadge).toHaveCSS('color','rgb(255, 212, 189)');
+  await expect(warningBadge).toHaveCSS('border-color','rgba(255, 138, 76, 0.72)');
+});
+
 test('asset card has no dead zones and keeps child controls independent', async ({ page }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile-chromium';
   await mockMachineLibrary(page);

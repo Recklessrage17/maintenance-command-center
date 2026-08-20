@@ -1525,12 +1525,13 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-notes-toolbar small { color: #9fbdcc; font-size: .74rem; }
 .asset-note-form { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,.45fr); gap: 12px; padding: 13px; border: 1px solid rgba(54,229,170,.26); border-radius: 12px; background: rgba(7,25,45,.62); }
 .asset-note-body-field,.asset-note-attachment-picker,.asset-note-form > .asset-attachment-grid,.asset-note-form > .modal-actions { grid-column: 1 / -1; }
-.asset-note-warning-toggle{min-width:0;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid rgba(246,190,63,.38);border-radius:11px;background:rgba(100,65,9,.18);cursor:pointer}
-.asset-note-warning-toggle input{flex:0 0 auto;width:18px;height:18px;margin:1px 0 0;accent-color:#f6be3f}
-.asset-note-warning-toggle>span{min-width:0;display:grid;gap:2px}
-.asset-note-warning-toggle strong{color:#ffe09a;font-size:.82rem}
-.asset-note-warning-toggle small{color:#cdbb91;font-size:.7rem;line-height:1.35}
-.asset-note-warning-toggle:focus-within{outline:2px solid rgba(246,190,63,.78);outline-offset:2px}
+.asset-note-form .asset-note-warning-toggle{min-width:0;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid rgba(255,138,76,.52);border-radius:11px;background:linear-gradient(135deg,rgba(111,40,34,.34),rgba(91,45,19,.24));box-shadow:inset 3px 0 0 rgba(255,138,76,.8);cursor:pointer}
+.asset-note-form .asset-note-warning-toggle input{flex:0 0 auto;width:18px;height:18px;margin:1px 0 0;accent-color:#ff8a4c}
+.asset-note-form .asset-note-warning-toggle>span{min-width:0;display:grid;gap:2px}
+.asset-note-form .asset-note-warning-toggle strong{display:inline-flex;align-items:center;gap:6px;color:#ffd4bd;font-size:.82rem}
+.asset-note-form .asset-note-warning-toggle strong::before{content:"!";width:18px;height:18px;display:inline-grid;place-items:center;border:1px solid rgba(255,138,76,.78);border-radius:50%;color:#fff0e7;background:rgba(139,50,31,.72);font-size:.7rem;font-weight:1000;line-height:1}
+.asset-note-form .asset-note-warning-toggle small{color:#d9ad99;font-size:.7rem;line-height:1.35}
+.asset-note-form .asset-note-warning-toggle:focus-within{outline:2px solid rgba(255,138,76,.82);outline-offset:2px}
 .asset-note-body-field textarea { min-height: 138px; resize: vertical; }
 .asset-note-attachment-picker { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px dashed rgba(143,205,233,.25); border-radius: 10px; background: rgba(4,18,34,.38); }
 .asset-note-attachment-picker > div { display: grid; gap: 3px; }
@@ -1543,7 +1544,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-entry h5 { overflow-wrap: anywhere; margin: 0; color: #f3fbff; font-size: 1rem; }
 .asset-note-entry-heading small { color: #94b8c9; font-size: .72rem; }
 .asset-note-date-pill { display: inline-flex; width: fit-content; min-height: 23px; align-items: center; padding: 0 8px; border: 1px solid rgba(68,215,255,.3); border-radius: 999px; color: #c8f5ff; background: rgba(6,67,98,.28); font-size: .67rem; font-weight: 950; }
-.asset-note-warning-badge{display:inline-flex;width:fit-content;min-height:24px;align-items:center;padding:3px 8px;border:1px solid rgba(246,190,63,.65);border-radius:999px;color:#ffe09a;background:rgba(112,70,5,.32);font-size:.66rem;font-weight:950;letter-spacing:.02em}
+.asset-note-entry .asset-note-warning-badge{display:inline-flex;width:fit-content;min-height:24px;align-items:center;gap:5px;padding:3px 8px;border:1px solid rgba(255,138,76,.72);border-radius:999px;color:#ffd4bd;background:linear-gradient(135deg,rgba(125,43,31,.62),rgba(91,45,19,.5));box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 10px rgba(255,91,68,.06);font-size:.66rem;font-weight:950;letter-spacing:.02em}
+.asset-note-entry .asset-note-warning-badge::before{content:"!";width:15px;height:15px;display:inline-grid;place-items:center;border:1px solid rgba(255,174,126,.72);border-radius:50%;color:#fff;background:rgba(151,48,32,.76);font-size:.61rem;font-weight:1000;line-height:1}
 .asset-note-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
 .asset-note-body-preview { display: -webkit-box; overflow: hidden; margin: 0; color: #c2d8e3; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .asset-attachment-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(285px,100%),1fr)); gap: 8px; }

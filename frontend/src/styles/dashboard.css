@@ -102,12 +102,15 @@
 .dashboard-pm-count-pill strong { display: inline; margin: 0; color: inherit; font-size: .72rem; line-height: 1; }
 .dashboard-pm-count-pill.status-due-now { color: #ffd4bd; border-color: rgba(255,138,76,.7); background: rgba(114,48,20,.47); }
 .dashboard-pm-count-pill.status-past-due { color: #ffc2cc; border-color: rgba(255,73,104,.72); background: rgba(104,24,45,.46); }
+.dashboard-tech-note-summary.mcc-summary-token { color: #e9e1ff; border-color: rgba(167,139,250,.58); background: linear-gradient(135deg,rgba(91,66,157,.58),rgba(65,48,128,.54)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1),0 0 10px rgba(139,92,246,.09); }
 .dashboard-pm-asset-group.has-tech-notes .dashboard-pm-asset-statuses { padding-right: 94px; }
-.dashboard-tech-note-pill { position: absolute; z-index: 2; top: 14px; right: 47px; min-height: 25px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid rgba(246,190,63,.72); border-radius: 999px; color: #ffe39c; background: rgba(93,61,8,.9); box-shadow: 0 0 0 0 rgba(246,190,63,.2); font: inherit; font-size: .65rem; font-weight: 900; white-space: nowrap; cursor: pointer; animation: dashboard-tech-note-pulse 2.8s ease-in-out infinite; }
-.dashboard-tech-note-pill strong { margin: 0; color: #fff0bd; font-size: .73rem; }
-.dashboard-tech-note-pill:hover { border-color: #f6be3f; background: rgba(116,76,8,.95); }
-.dashboard-tech-note-pill:focus-visible { outline: 2px solid #f6be3f; outline-offset: 2px; }
-@keyframes dashboard-tech-note-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(246,190,63,.12); } 50% { box-shadow: 0 0 0 4px rgba(246,190,63,.08),0 0 12px rgba(246,190,63,.12); } }
+.dashboard-tech-note-pill { position: absolute; z-index: 2; top: 14px; right: 47px; min-height: 25px; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid rgba(167,139,250,.74); border-radius: 999px; color: #eee9ff; background: linear-gradient(135deg,rgba(84,60,153,.94),rgba(55,43,112,.96)); box-shadow: 0 0 0 0 rgba(139,92,246,.16); font: inherit; font-size: .65rem; font-weight: 900; white-space: nowrap; cursor: pointer; animation: dashboard-tech-note-pulse 2.2s ease-in-out infinite; }
+.dashboard-tech-note-pill::after { content: ""; position: absolute; inset: -2px; pointer-events: none; background: linear-gradient(110deg,transparent 30%,rgba(255,255,255,.22) 50%,transparent 70%); transform: translateX(-140%); animation: dashboard-tech-note-shine 2.2s ease-in-out infinite; }
+.dashboard-tech-note-pill strong { margin: 0; color: #fff; font-size: .73rem; }
+.dashboard-tech-note-pill:hover { border-color: #c4b5fd; background: linear-gradient(135deg,rgba(101,74,177,.98),rgba(66,50,133,.98)); }
+.dashboard-tech-note-pill:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; }
+@keyframes dashboard-tech-note-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,.12); } 50% { box-shadow: 0 0 0 3px rgba(139,92,246,.08),0 0 12px rgba(139,92,246,.14); } }
+@keyframes dashboard-tech-note-shine { 0%,58% { transform: translateX(-140%); } 78%,100% { transform: translateX(140%); } }
 .dashboard-pm-chevron { width: 26px; height: 26px; display: grid; place-items: center; align-self: center; justify-self: center; border: 1px solid color-mix(in srgb,var(--dashboard-asset-accent) 38%,var(--mcc-border-default)); border-radius: 50%; color: color-mix(in srgb,var(--dashboard-asset-accent) 70%,white); background-color: rgba(18,32,44,.92); background-image: linear-gradient(135deg,color-mix(in srgb,var(--dashboard-asset-accent) 10%,transparent),transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); line-height: 0; transition: border-color 200ms ease,background-color 200ms ease,color 200ms ease,box-shadow 200ms ease; }
 .dashboard-pm-chevron svg { width: 17px; height: 17px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); transform-origin: 50% 50%; transition: transform 220ms cubic-bezier(.4,0,.2,1); }
 .dashboard-pm-asset-group.is-open .dashboard-pm-chevron { border-color: color-mix(in srgb,var(--dashboard-asset-accent) 72%,white); color: color-mix(in srgb,var(--dashboard-asset-accent) 82%,white); background-color: rgba(24,47,62,.96); background-image: linear-gradient(135deg,color-mix(in srgb,var(--dashboard-asset-accent) 20%,transparent),transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.12),0 0 10px color-mix(in srgb,var(--dashboard-asset-accent) 24%,transparent); }
@@ -188,5 +191,6 @@
   .dashboard-pm-chevron,
   .dashboard-pm-chevron svg,
   .dashboard-pm-task-row { transition: none; }
-  .dashboard-tech-note-pill { animation: none; }
+  .dashboard-tech-note-pill,
+  .dashboard-tech-note-pill::after { animation: none; }
 }
