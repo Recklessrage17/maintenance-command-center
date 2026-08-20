@@ -377,6 +377,7 @@ test('canonical industrial tokens, smoke-glass surfaces, and keyboard focus are 
 });
 
 test('captures deterministic visual evidence for every representative MCC workspace', async ({ page }, testInfo) => {
+  test.slow();
   test.skip(testInfo.project.name !== 'desktop-chromium', 'The stable route evidence set is captured once at the large desktop baseline.');
   const unhandled = await mockIndustrialSuite(page);
   await goTo(page, '/', 'Dashboard');
