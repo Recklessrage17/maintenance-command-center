@@ -1599,12 +1599,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-issue-details .asset-note-entry-heading > div:first-child { align-content: center; }
 .asset-note-issue-details .asset-note-entry-heading .asset-note-date-pill,.asset-note-issue-details .asset-note-entry-heading h5 { display: none; }
 .asset-note-entry.is-deep-link-target { position: relative; scroll-margin-block: clamp(76px,12vh,132px); }
-.asset-note-active-issue-card.is-deep-link-target,.asset-note-entry.is-deep-link-target { outline: 2px solid rgba(191,249,255,.92); outline-offset: 3px; box-shadow: 0 0 0 4px rgba(68,215,255,.18),0 0 28px rgba(68,215,255,.4),0 12px 30px rgba(0,0,0,.3); }
-.asset-note-active-issue-card.is-deep-link-target::after,.asset-note-entry.is-deep-link-target::after { position: absolute; z-index: 6; inset: 0; padding: 3px; border-radius: inherit; background: conic-gradient(from 0turn,transparent 0 72%,rgba(255,255,255,.98) 80%,#7dfff1 85%,#44d7ff 91%,transparent 98%); filter: drop-shadow(0 0 5px #bffbff) drop-shadow(0 0 9px #44d7ff); pointer-events: none; content: ""; opacity: 0; transform-origin: center; animation: asset-note-target-tracer 1.85s linear 1 both; -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask-composite: exclude; }
-@keyframes asset-note-target-tracer {
-  0% { opacity: 1; transform: rotate(0turn); }
-  82% { opacity: 1; }
-  100% { opacity: 0; transform: rotate(1turn); }
+.asset-note-active-issue-card.is-deep-link-target,.asset-note-entry.is-deep-link-target { border-color: rgba(125,255,241,.82); outline: 1px solid rgba(191,249,255,.94); outline-offset: 2px; box-shadow: inset 0 0 12px rgba(125,255,241,.12),0 0 0 3px rgba(68,215,255,.12),0 0 18px rgba(68,215,255,.3),0 12px 30px rgba(0,0,0,.28); }
+.asset-note-active-issue-card.is-deep-link-target::after,.asset-note-entry.is-deep-link-target::after { position: absolute; z-index: 6; inset: 1px; border: 1px solid rgba(191,249,255,.82); border-radius: inherit; background: none; box-shadow: inset 0 0 10px rgba(125,255,241,.14),0 0 9px rgba(68,215,255,.24); pointer-events: none; content: ""; opacity: .42; animation: asset-note-target-glow-pulse .72s ease-in-out 2 alternate both; }
+@keyframes asset-note-target-glow-pulse {
+  from { border-color: rgba(191,249,255,.58); box-shadow: inset 0 0 8px rgba(125,255,241,.1),0 0 7px rgba(68,215,255,.18); opacity: .42; }
+  to { border-color: rgba(225,255,253,.96); box-shadow: inset 0 0 15px rgba(125,255,241,.2),0 0 14px rgba(68,215,255,.34); opacity: .9; }
 }
 .asset-note-issue-badges { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .asset-note-status-badge,.asset-note-work-order { display: inline-flex; width: fit-content; min-height: 24px; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid rgba(143,205,233,.26); border-radius: 999px; color: #c8e7f3; background: rgba(9,42,64,.65); font-size: .65rem; font-weight: 900; }
@@ -1659,7 +1658,13 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-history-search { width: min(520px,100%); }
 .asset-note-year-list,.asset-note-year-folder { display: grid; gap: 8px; }
 .asset-note-year-toggle { appearance: none; width: 100%; min-height: 46px; display: grid; grid-template-columns: 28px auto minmax(0,1fr); align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid rgba(143,205,233,.2); border-radius: 9px; color: #eafaff; background: linear-gradient(145deg,rgba(8,42,61,.64),rgba(4,24,38,.7)); cursor: pointer; font: inherit; text-align: left; }
-.asset-note-year-toggle:hover,.asset-note-year-toggle:focus-visible { border-color: rgba(54,229,170,.52); outline: none; box-shadow: 0 0 0 3px rgba(54,229,170,.1); }
+.asset-note-year-toggle:hover { border-color: rgba(54,229,170,.52); }
+.asset-note-year-toggle:focus-visible { border-color: rgba(125,255,241,.82); outline: 1px solid rgba(191,249,255,.9); outline-offset: 2px; box-shadow: inset 0 0 9px rgba(125,255,241,.1),0 0 0 3px rgba(68,215,255,.1),0 0 12px rgba(68,215,255,.22); }
+.asset-note-year-toggle[aria-expanded="true"] { border-color: rgba(125,255,241,.68); box-shadow: inset 0 0 9px rgba(125,255,241,.08),0 0 12px rgba(68,215,255,.18); animation: asset-note-folder-glow-pulse .72s ease-in-out 2 alternate both; }
+@keyframes asset-note-folder-glow-pulse {
+  from { border-color: rgba(125,255,241,.5); box-shadow: inset 0 0 7px rgba(125,255,241,.06),0 0 8px rgba(68,215,255,.12); }
+  to { border-color: rgba(191,249,255,.88); box-shadow: inset 0 0 12px rgba(125,255,241,.13),0 0 16px rgba(68,215,255,.27); }
+}
 .asset-note-year-toggle strong { color: #f3fffb; font-size: .88rem; }
 .asset-note-year-toggle small { justify-self: end; color: #91afbf; font-size: .68rem; }
 .asset-note-resolved-list { padding-left: 10px; border-left: 2px solid rgba(54,229,170,.22); }
@@ -1681,8 +1686,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 }
 @media (prefers-reduced-motion: reduce) {
   .asset-note-active-issue-card,.asset-note-issue-chevron svg,.asset-note-issue-details { transition: none; }
-  .asset-note-active-issue-card.is-deep-link-target,.asset-note-entry.is-deep-link-target { outline: 3px solid #efffff; outline-offset: 3px; box-shadow: 0 0 0 6px rgba(0,25,34,.96),0 0 0 9px #44d7ff,0 10px 24px rgba(0,0,0,.28); }
-  .asset-note-active-issue-card.is-deep-link-target::after,.asset-note-entry.is-deep-link-target::after { animation: none; opacity: 0; }
+  .asset-note-active-issue-card.is-deep-link-target,.asset-note-entry.is-deep-link-target { border-color: #7dfff1; outline: 2px solid #bff9ff; outline-offset: 2px; box-shadow: inset 0 0 12px rgba(125,255,241,.14),0 0 0 3px rgba(68,215,255,.14),0 0 16px rgba(68,215,255,.28),0 10px 24px rgba(0,0,0,.28); }
+  .asset-note-active-issue-card.is-deep-link-target::after,.asset-note-entry.is-deep-link-target::after { animation: none; opacity: .62; }
+  .asset-note-year-toggle[aria-expanded="true"] { animation: none; border-color: rgba(125,255,241,.72); box-shadow: inset 0 0 9px rgba(125,255,241,.08),0 0 12px rgba(68,215,255,.18); }
 }
 .maintenance-photo-review-backdrop { z-index: 210; }
 .maintenance-photo-review { width: min(760px,100%); max-height: var(--mcc-modal-available-height); display: grid; gap: 12px; overflow: auto; }
