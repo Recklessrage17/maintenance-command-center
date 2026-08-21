@@ -134,8 +134,7 @@ test('Machine warning notes use the shared high-attention label treatment', asyn
   await expect(warningBadge).toHaveCSS('border-color','rgba(255, 138, 76, 0.72)');
 });
 
-test('asset card has no dead zones and keeps child controls independent', async ({ page }, testInfo) => {
-  const mobile = testInfo.project.name === 'mobile-chromium';
+test('#97 asset card semantics and visual layout have no dead zones', async ({ page }) => {
   await mockMachineLibrary(page);
   await page.goto('/machine-library');
 
@@ -144,16 +143,6 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await expect(cards.first()).toBeVisible();
   await expect(cards.nth(1)).toBeVisible();
   await cards.first().scrollIntoViewIfNeeded();
-
-  await page.evaluate(()=>{
-    (window as unknown as { __assetCardDocumentClicks: number }).__assetCardDocumentClicks = 0;
-    document.addEventListener('click', event=>{
-      const target = event.target;
-      if (target instanceof Element && target.closest('.machine-asset-card')) {
-        (window as unknown as { __assetCardDocumentClicks: number }).__assetCardDocumentClicks += 1;
-      }
-    });
-  });
 
   const domAudit = await cards.first().evaluate(card=>{
     const rect = card.getBoundingClientRect();
@@ -213,6 +202,15 @@ test('asset card has no dead zones and keeps child controls independent', async 
   expect(rowPolish.separatorColor).not.toBe(rowPolish.ageColor);
   expect(rowPolish.baselineSpread).toBeLessThanOrEqual(1);
   await expect(cards.first().getByRole('button', { name: /PM: 1 Due Soon/ })).toBeVisible();
+});
+
+test('#97 asset detail preserves identity and visual layout', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  await mockMachineLibrary(page);
+  await page.goto('/machine-library');
+
+  const cards = page.locator('.machine-asset-card');
+  await cards.first().scrollIntoViewIfNeeded();
 
   await activate(cards.first().locator('.machine-asset-number-pill'), mobile);
   await expectSingleDetail(page);
@@ -278,6 +276,15 @@ test('asset card has no dead zones and keeps child controls independent', async 
     expect(Math.max(...detailPolish.yearAgePartCenters)-Math.min(...detailPolish.yearAgePartCenters)).toBeLessThanOrEqual(1);
   }
   await closeDetail(page, mobile);
+});
+
+test('#97 asset card pointer and keyboard activation cover all paths', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  await mockMachineLibrary(page);
+  await page.goto('/machine-library');
+
+  const cards = page.locator('.machine-asset-card');
+  await cards.first().scrollIntoViewIfNeeded();
 
   await activate(cards.first().locator('.machine-card-brand-name'), mobile);
   await expectSingleDetail(page);
@@ -308,6 +315,28 @@ test('asset card has no dead zones and keeps child controls independent', async 
   await page.keyboard.press('Space');
   await expectSingleDetail(page);
   await closeDetail(page, mobile);
+
+  await activate(cards.first(), mobile);
+  await expectSingleDetail(page);
+  await closeDetail(page, mobile);
+});
+
+test('#97 asset child controls stay independent and isolate the second asset', async ({ page }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  await mockMachineLibrary(page);
+  await page.goto('/machine-library');
+
+  const cards = page.locator('.machine-asset-card');
+  await cards.first().scrollIntoViewIfNeeded();
+  await page.evaluate(()=>{
+    (window as unknown as { __assetCardDocumentClicks: number }).__assetCardDocumentClicks = 0;
+    document.addEventListener('click', event=>{
+      const target = event.target;
+      if (target instanceof Element && target.closest('.machine-asset-card')) {
+        (window as unknown as { __assetCardDocumentClicks: number }).__assetCardDocumentClicks += 1;
+      }
+    });
+  });
 
   await activate(cards.first(), mobile);
   await expectSingleDetail(page);
