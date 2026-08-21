@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { withJsonRequestDefaults } from '../../apiRequest';
+import { ActionButtonProgress, useActionProgress } from '../../components/ActionProgress';
 import { MccPermissionBadgeGroup, type SpecialPermissionGrant } from '../../components/MccPermissionBadges';
 import { RoleBadge } from '../../components/RoleBadge';
 import { generateTemporaryPassword, temporaryPasswordRequirements, validateTemporaryPassword } from './passwordValidation';
@@ -122,12 +123,12 @@ function ResetPasswordModal({target,onClose,onReset}:{target:User;onClose:()=>vo
   const [show,setShow]=useState(false);
   const [error,setError]=useState('');
   const [copyMessage,setCopyMessage]=useState('');
-  const [submitting,setSubmitting]=useState(false);
+  const resetAction=useActionProgress();
+  const submitting=resetAction.active;
   const [oneTimePassword,setOneTimePassword]=useState('');
   const [expiresAt,setExpiresAt]=useState('');
   const passwordRef=useRef<HTMLInputElement>(null);
   const confirmationRef=useRef<HTMLInputElement>(null);
-  const submittingRef=useRef(false);
 
   function generate(){
     const generated=generateTemporaryPassword();
@@ -141,19 +142,18 @@ function ResetPasswordModal({target,onClose,onReset}:{target:User;onClose:()=>vo
   }
   async function submit(event:FormEvent){
     event.preventDefault();
-    if(submittingRef.current)return;
     setError('');
     if(!validateTemporaryPassword(password).valid){setError('Temporary password must meet every requirement.');passwordRef.current?.focus();return;}
     if(password!==confirmation){setError('Temporary password confirmation does not match.');confirmationRef.current?.focus();return;}
-    submittingRef.current=true;setSubmitting(true);
-    try{
-      const result=await api<{temporaryPassword:string;tempPasswordExpiresAt:string}>(`/api/users/${target.id}/reset-password`,{method:'POST',body:JSON.stringify({temporaryPassword:password,confirmTemporaryPassword:confirmation})});
-      setOneTimePassword(result.temporaryPassword);setExpiresAt(result.tempPasswordExpiresAt);setPassword('');setConfirmation('');
-      await onReset();
-    }catch(requestError){
-      setError((requestError as Error).message);
-      if(requestError instanceof ApiError&&requestError.field==='confirmTemporaryPassword')confirmationRef.current?.focus();else passwordRef.current?.focus();
-    }finally{submittingRef.current=false;setSubmitting(false);}
+    const actionResult=await resetAction.run(()=>api<{temporaryPassword:string;tempPasswordExpiresAt:string}>(`/api/users/${target.id}/reset-password`,{method:'POST',body:JSON.stringify({temporaryPassword:password,confirmTemporaryPassword:confirmation})}));
+    if(actionResult.status==='duplicate')return;
+    if(actionResult.status==='error'){
+      setError((actionResult.error as Error).message);
+      if(actionResult.error instanceof ApiError&&actionResult.error.field==='confirmTemporaryPassword')confirmationRef.current?.focus();else passwordRef.current?.focus();
+      return;
+    }
+    setOneTimePassword(actionResult.value.temporaryPassword);setExpiresAt(actionResult.value.tempPasswordExpiresAt);setPassword('');setConfirmation('');
+    await onReset();
   }
   return <Modal label={`Reset password for ${target.fullName}`} onClose={onClose}>
     <div className="mcc-modal-heading"><div><p className="eyebrow">Admin / Users · Security</p><h3>Reset Password</h3><p>{target.fullName} · {target.email}</p></div><button type="button" className="secondary-button compact-button" onClick={onClose}>Close</button></div>
@@ -172,7 +172,7 @@ function ResetPasswordModal({target,onClose,onReset}:{target:User;onClose:()=>vo
       <button type="button" className="secondary-button compact-button" onClick={()=>setShow(current=>!current)} aria-label={show?'Hide temporary passwords':'Show temporary passwords'}>{show?'Hide':'Show'}</button>
       <PasswordChecklist password={password} />
       {error&&<p className="form-message error" role="alert">{error}</p>}
-      <div className="mcc-modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={submitting}>{submitting?'Resetting…':'Reset Password'}</button></div>
+      <div className="mcc-modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={submitting} aria-busy={resetAction.pending}><ActionButtonProgress phase={resetAction.phase} idleLabel="Reset Password" pendingLabel="Resetting Password..." successLabel="Password Reset" errorLabel="Try Password Reset" /></button></div>
     </form>}
   </Modal>;
 }
@@ -183,17 +183,18 @@ function UpdatePasswordModal({onClose,onChanged}:{onClose:()=>void;onChanged:()=
   const [confirmPassword,setConfirmPassword]=useState('');
   const [show,setShow]=useState(false);
   const [error,setError]=useState('');
-  const [submitting,setSubmitting]=useState(false);
+  const passwordAction=useActionProgress();
+  const submitting=passwordAction.active;
   const currentRef=useRef<HTMLInputElement>(null);
   async function submit(event:FormEvent){
     event.preventDefault();setError('');
     if(!currentPassword){setError('Current password is required.');currentRef.current?.focus();return;}
     if(!validateTemporaryPassword(newPassword).valid){setError('New password must meet every requirement.');return;}
     if(newPassword!==confirmPassword){setError('New password confirmation does not match.');return;}
-    setSubmitting(true);
-    try{await api('/api/auth/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword,confirmPassword})});onChanged();onClose();}
-    catch(requestError){setError((requestError as Error).message);}
-    finally{setSubmitting(false);}
+    const result=await passwordAction.run(()=>api('/api/auth/change-password',{method:'POST',body:JSON.stringify({currentPassword,newPassword,confirmPassword})}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setError((result.error as Error).message);return;}
+    onChanged();onClose();
   }
   return <Modal label="Update my password" onClose={onClose}>
     <div className="mcc-modal-heading"><div><p className="eyebrow">Self-service security</p><h3>Update My Password</h3></div><button type="button" className="secondary-button compact-button" onClick={onClose}>Close</button></div>
@@ -204,7 +205,7 @@ function UpdatePasswordModal({onClose,onChanged}:{onClose:()=>void;onChanged:()=
       <button type="button" className="secondary-button compact-button" onClick={()=>setShow(current=>!current)}>{show?'Hide':'Show'}</button>
       <PasswordChecklist password={newPassword} label="New password requirements" />
       {error&&<p className="form-message error" role="alert">{error}</p>}
-      <div className="mcc-modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={submitting}>{submitting?'Updating…':'Update Password'}</button></div>
+      <div className="mcc-modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={submitting} aria-busy={passwordAction.pending}><ActionButtonProgress phase={passwordAction.phase} idleLabel="Update Password" pendingLabel="Updating Password..." successLabel="Password Updated" errorLabel="Try Password Update" /></button></div>
     </form>
   </Modal>;
 }
@@ -215,8 +216,8 @@ function SpecialPermissionsModal({target,onClose,onSaved}:{target:User;onClose:(
   const [initial,setInitial]=useState<Set<string>>(new Set());
   const [search,setSearch]=useState('');
   const [error,setError]=useState('');
-  const [saving,setSaving]=useState(false);
-  const saveRef=useRef(false);
+  const permissionsAction=useActionProgress();
+  const saving=permissionsAction.active;
   useEffect(()=>{api<PermissionDetails>(`/api/users/${target.id}/permissions`).then(result=>{setDetails(result);const keys=new Set(result.specialPermissionGrants.map(grant=>grant.permissionKey));setDesired(keys);setInitial(new Set(keys));}).catch(requestError=>setError((requestError as Error).message));},[target.id]);
   const pending=useMemo(()=>{
     const added=[...desired].filter(key=>!initial.has(key));
@@ -224,11 +225,11 @@ function SpecialPermissionsModal({target,onClose,onSaved}:{target:User;onClose:(
     return {added,removed};
   },[desired,initial]);
   async function save(){
-    if(saveRef.current)return;
-    saveRef.current=true;setSaving(true);setError('');
-    try{await api(`/api/users/${target.id}/permissions`,{method:'PUT',body:JSON.stringify({permissionKeys:[...desired]})});await onSaved();onClose();}
-    catch(requestError){setError((requestError as Error).message);}
-    finally{saveRef.current=false;setSaving(false);}
+    setError('');
+    const result=await permissionsAction.run(()=>api(`/api/users/${target.id}/permissions`,{method:'PUT',body:JSON.stringify({permissionKeys:[...desired]})}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setError((result.error as Error).message);return;}
+    await onSaved();onClose();
   }
   const query=search.trim().toLowerCase();
   return <Modal label={`Special permissions for ${target.fullName}`} onClose={onClose} className="special-permissions-modal">
@@ -253,7 +254,7 @@ function SpecialPermissionsModal({target,onClose,onSaved}:{target:User;onClose:(
     </div>}
     <p className="permission-pending-summary" role="status">{pending.added.length} pending grant{pending.added.length===1?'':'s'} · {pending.removed.length} pending revoke{pending.removed.length===1?'':'s'}</p>
     {error&&<p className="form-message error" role="alert">{error}</p>}
-    <div className="mcc-modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={!details||saving||(!pending.added.length&&!pending.removed.length)} onClick={save}>{saving?'Saving…':'Save Changes'}</button></div>
+    <div className="mcc-modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={!details||saving||(!pending.added.length&&!pending.removed.length)} aria-busy={permissionsAction.pending} onClick={save}><ActionButtonProgress phase={permissionsAction.phase} idleLabel="Save Changes" pendingLabel="Saving Permissions..." successLabel="Permissions Saved" errorLabel="Try Permission Save" /></button></div>
   </Modal>;
 }
 
@@ -266,12 +267,12 @@ export function UsersPage(){
   const [fieldErrors,setFieldErrors]=useState<FieldErrors>({});
   const [showPassword,setShowPassword]=useState(false);
   const [copyMessage,setCopyMessage]=useState('');
-  const [isSubmitting,setIsSubmitting]=useState(false);
+  const createAction=useActionProgress();
+  const isSubmitting=createAction.active;
   const [resetTarget,setResetTarget]=useState<User|null>(null);
   const [permissionTarget,setPermissionTarget]=useState<User|null>(null);
   const [updateMyPassword,setUpdateMyPassword]=useState(false);
   const [refreshIntervalMs,setRefreshIntervalMs]=useState(presencePolicy.rosterRefreshIntervalMs);
-  const submittingRef=useRef(false);
   const fullNameRef=useRef<HTMLInputElement>(null);
   const emailRef=useRef<HTMLInputElement>(null);
   const roleRef=useRef<HTMLSelectElement>(null);
@@ -305,12 +306,12 @@ export function UsersPage(){
   function generatePassword(){try{const password=generateTemporaryPassword();updateField('temporaryPassword',password);setShowPassword(true);setMsg('');setError(false);passwordRef.current?.focus();}catch(generateError){setError(true);setMsg((generateError as Error).message);}}
   async function copyPassword(){if(!form.temporaryPassword||!navigator.clipboard?.writeText)return;try{await navigator.clipboard.writeText(form.temporaryPassword);setCopyMessage('Password copied.');}catch{setCopyMessage('Could not copy password. Select it and copy manually.');}}
   async function create(event:FormEvent){
-    event.preventDefault();if(submittingRef.current)return;setMsg('');setError(false);
+    event.preventDefault();setMsg('');setError(false);
     const nextErrors=validateForm();setFieldErrors(nextErrors);if(Object.keys(nextErrors).length){focusFirstInvalid(nextErrors);return;}
-    submittingRef.current=true;setIsSubmitting(true);
-    try{await api('/api/users',{method:'POST',body:JSON.stringify({...form,fullName:form.fullName.trim(),email:form.email.trim()})});setForm(initialForm);setFieldErrors({});setShowPassword(false);setCopyMessage('');setMsg('User created successfully');await load();}
-    catch(requestError){setError(true);setMsg((requestError as Error).message);if(requestError instanceof ApiError&&requestError.field&&requestError.field!=='confirmTemporaryPassword'){const next={[requestError.field]:requestError.message};setFieldErrors(current=>({...current,...next}));focusFirstInvalid(next);}}
-    finally{submittingRef.current=false;setIsSubmitting(false);}
+    const result=await createAction.run(()=>api('/api/users',{method:'POST',body:JSON.stringify({...form,fullName:form.fullName.trim(),email:form.email.trim()})}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){const requestError=result.error;setError(true);setMsg((requestError as Error).message);if(requestError instanceof ApiError&&requestError.field&&requestError.field!=='confirmTemporaryPassword'){const next={[requestError.field]:requestError.message};setFieldErrors(current=>({...current,...next}));focusFirstInvalid(next);}return;}
+    setForm(initialForm);setFieldErrors({});setShowPassword(false);setCopyMessage('');setMsg('User created successfully');await load();
   }
   async function toggle(user:User){setMsg('');setError(false);try{await api(`/api/users/${user.id}/${user.disabled?'enable':'disable'}`,{method:'POST'});await load();}catch(requestError){setError(true);setMsg((requestError as Error).message);}}
   async function deleteUser(user:User){if(!window.confirm(`Delete ${user.fullName}? This hides the user and signs out active sessions.`))return;setMsg('');setError(false);try{await api(`/api/users/${user.id}`,{method:'DELETE'});setMsg('User deleted.');await load();}catch(requestError){setError(true);setMsg((requestError as Error).message);}}
@@ -327,7 +328,7 @@ export function UsersPage(){
         {fieldErrors.temporaryPassword&&<span className="user-field-error" id="temporary-password-error" role="alert">{fieldErrors.temporaryPassword}</span>}
         <div className="user-password-actions"><button type="button" className="secondary-button compact-button" onClick={generatePassword}>Generate Password</button><button type="button" className="secondary-button compact-button" onClick={copyPassword} disabled={!form.temporaryPassword||!navigator.clipboard?.writeText}>Copy Password</button><span className="user-copy-message" role="status" aria-live="polite">{copyMessage}</span></div>
       </div>
-      <button className="primary-button user-create-button" type="submit" disabled={isSubmitting}>{isSubmitting?'Creating User…':'Create User'}</button>
+      <button className="primary-button user-create-button" type="submit" disabled={isSubmitting} aria-busy={createAction.pending}><ActionButtonProgress phase={createAction.phase} idleLabel="Create User" pendingLabel="Creating User…" successLabel="User Created" errorLabel="Try User Creation" /></button>
     </form>
     {msg&&<p className={error?'form-message error':'form-message'} role={error?'alert':'status'}>{msg}</p>}
     <div className="mcc-card table-card user-table-card"><table><thead><tr><th>Name</th><th>Email</th><th>Rank</th><th>Last login</th><th>Presence</th><th>Account status</th><th>Special permissions</th><th>Actions</th></tr></thead><tbody>

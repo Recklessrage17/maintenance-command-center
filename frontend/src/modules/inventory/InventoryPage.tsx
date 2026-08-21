@@ -480,6 +480,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   const [stagingBatchForm,setStagingBatchForm]=useState<RequisitionBatchForm>({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
   const [stagingError,setStagingError]=useState('');
   const [stagingSaving,setStagingSaving]=useState(false);
+  const stagingBatchAction=useActionProgress();
   const [toolsBusy,setToolsBusy]=useState('');
   const [toolsOpen,setToolsOpen]=useState(false);
   const [inventoryImportFile,setInventoryImportFile]=useState<File|null>(null);
@@ -505,7 +506,8 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   const [vendorDetail,setVendorDetail]=useState<VendorRecord|null>(null);
   const [vendorEditorInitial,setVendorEditorInitial]=useState<VendorForm|null>(null);
   const [vendorEditorId,setVendorEditorId]=useState<number|null>(null);
-  const [vendorSaving,setVendorSaving]=useState(false);
+  const vendorAction=useActionProgress();
+  const vendorSaving=vendorAction.active;
   const [vendorError,setVendorError]=useState('');
   const tableScrollRef = useRef<HTMLDivElement|null>(null);
   const lastAutoPageAtRef = useRef(0);
@@ -602,6 +604,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
         setVendorDetail(data.vendor);
         return;
       }
+      vendorAction.reset();
       setVendorEditorInitial({...blankVendorForm,companyName:part.vendor.trim()});
       setVendorEditorId(null);
       setVendorError('');
@@ -611,22 +614,17 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   }
 
   async function saveInventoryVendor(vendorForm: VendorForm) {
-    setVendorSaving(true);
     setVendorError('');
-    try {
-      const data = await api<VendorResponse>(vendorEditorId ? `/api/vendors/${vendorEditorId}` : '/api/vendors', {method:vendorEditorId ? 'PUT' : 'POST',body:JSON.stringify(vendorPayloadFromForm(vendorForm))});
-      const savedVendor = data.vendor;
-      setForm(current=>({...current,vendor:savedVendor.companyName}));
-      setVendorEditorInitial(null);
-      setVendorEditorId(null);
-      setVendorDetail(savedVendor);
-      await loadVendors();
-      showNotice('success', `Vendor saved: ${savedVendor.companyName}`);
-    } catch (err) {
-      setVendorError((err as Error).message);
-    } finally {
-      setVendorSaving(false);
-    }
+    const result=await vendorAction.run(()=>api<VendorResponse>(vendorEditorId ? `/api/vendors/${vendorEditorId}` : '/api/vendors', {method:vendorEditorId ? 'PUT' : 'POST',body:JSON.stringify(vendorPayloadFromForm(vendorForm))}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setVendorError((result.error as Error).message);return;}
+    const savedVendor = result.value.vendor;
+    setForm(current=>({...current,vendor:savedVendor.companyName}));
+    setVendorEditorInitial(null);
+    setVendorEditorId(null);
+    setVendorDetail(savedVendor);
+    await loadVendors();
+    showNotice('success', `Vendor saved: ${savedVendor.companyName}`);
   }
 
   useEffect(()=>{ void refresh(); void loadVendors(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
@@ -979,13 +977,14 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   }
 
   function closeStaging(force = false) {
-    if (stagingSaving && !force) return;
+    if ((stagingSaving||stagingBatchAction.active) && !force) return;
     setStagingParts([]);
     setStagingQuantities({});
     setStagingBatches([]);
     setStagingBatchId(null);
     setCreatingStagingBatch(false);
     setStagingError('');
+    stagingBatchAction.reset();
   }
 
   async function submitStaging(event: FormEvent) {
@@ -1023,18 +1022,13 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   async function createStagingBatchFromInventory() {
     if (!stagingBatchForm.name.trim()) return setStagingError('Batch name is required.');
     if (!isValidMccDateValue(stagingBatchForm.neededByDate)) return setStagingError('Needed-by Date must be valid when entered.');
-    setStagingSaving(true);
     setStagingError('');
-    try {
-      const result = await api<{batch:RequisitionBatch}>('/api/requisition-batches',{method:'POST',body:JSON.stringify(stagingBatchForm)});
-      setStagingBatches(current=>[result.batch,...current]);
-      setStagingBatchId(result.batch.id);
-      setCreatingStagingBatch(false);
-    } catch (err) {
-      setStagingError((err as Error).message);
-    } finally {
-      setStagingSaving(false);
-    }
+    const result=await stagingBatchAction.run(()=>api<{batch:RequisitionBatch}>('/api/requisition-batches',{method:'POST',body:JSON.stringify(stagingBatchForm)}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setStagingError((result.error as Error).message);return;}
+    setStagingBatches(current=>[result.value.batch,...current]);
+    setStagingBatchId(result.value.batch.id);
+    setCreatingStagingBatch(false);
   }
 
   async function submitForm(event: FormEvent){
@@ -1052,6 +1046,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
     const existingVendor = findVendorByName(enteredVendor);
     if (!existingVendor) {
       setVendorEditorInitial({...blankVendorForm,companyName:enteredVendor});
+      vendorAction.reset();
       setVendorEditorId(null);
       setVendorDetail(null);
       setVendorError('');
@@ -1535,7 +1530,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
               </div>
               <button className="link-button compact-button" type="button" onClick={()=>closeStaging()}>Close</button>
             </div>
-            <div className="staging-destination-heading"><strong>Choose a Requisition Batch</strong><button className="secondary-button compact-button" type="button" onClick={()=>{setCreatingStagingBatch(current=>!current);setStagingBatchForm({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});}}>{creatingStagingBatch?'Choose Existing':'Create New Batch'}</button></div>
+            <div className="staging-destination-heading"><strong>Choose a Requisition Batch</strong><button className="secondary-button compact-button" type="button" onClick={()=>{stagingBatchAction.reset();setCreatingStagingBatch(current=>!current);setStagingBatchForm({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});}}>{creatingStagingBatch?'Choose Existing':'Create New Batch'}</button></div>
             {!creatingStagingBatch&&<div className="staging-batch-choice-grid">{stagingBatches.map(batch=><button className={batch.id===stagingBatchId?'staging-batch-choice active':'staging-batch-choice'} type="button" key={batch.id} onClick={()=>setStagingBatchId(batch.id)}><strong>{batch.name}</strong><span>{batch.openItemCount} item{batch.openItemCount===1?'':'s'}</span>{(batch.assetMachine||batch.workOrderNumber)&&<small>{batch.assetMachine||'No asset'}{batch.workOrderNumber?` / WO# ${batch.workOrderNumber}`:''}</small>}</button>)}</div>}
             {creatingStagingBatch&&<div className="staging-editor-grid staging-inline-batch-form">
               <label className="form-field"><span>Batch Name <b className="required-marker">*</b></span><input value={stagingBatchForm.name} onChange={event=>setStagingBatchForm({...stagingBatchForm,name:event.target.value})} placeholder="Maint Restock" autoFocus /></label>
@@ -1544,7 +1539,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
               <label className="form-field"><span>Work Order</span><input value={stagingBatchForm.workOrderNumber} onChange={event=>setStagingBatchForm({...stagingBatchForm,workOrderNumber:event.target.value})} /></label>
               <MccDateInput label="Needed-by Date" value={stagingBatchForm.neededByDate} onChange={neededByDate=>setStagingBatchForm({...stagingBatchForm,neededByDate})} />
               <label className="form-field staging-editor-wide"><span>Description / Notes</span><textarea value={stagingBatchForm.description} onChange={event=>setStagingBatchForm({...stagingBatchForm,description:event.target.value})} /></label>
-              <button className="secondary-button staging-editor-wide" type="button" onClick={()=>void createStagingBatchFromInventory()} disabled={stagingSaving}>{stagingSaving?'Creating...':'Create and Select Batch'}</button>
+              <button className="secondary-button staging-editor-wide" type="button" onClick={()=>void createStagingBatchFromInventory()} disabled={stagingSaving||stagingBatchAction.active} aria-busy={stagingBatchAction.pending}><ActionButtonProgress phase={stagingBatchAction.phase} idleLabel="Create and Select Batch" pendingLabel="Creating Batch..." successLabel="Batch Created" errorLabel="Try Batch Creation" /></button>
             </div>}
             <div className="staging-bulk-quantity-list">{stagingParts.map((part,index)=><div key={part.id}><div><strong>{part.partNumber}</strong><span>{part.description}</span><small>{part.vendor||'No vendor'} / {part.location||'No location'}</small></div><label className="form-field"><span>Quantity Needed <b className="required-marker">*</b></span><input inputMode="decimal" value={stagingQuantities[part.id]??''} onChange={event=>setStagingQuantities(current=>({...current,[part.id]:event.target.value}))} placeholder="Enter quantity" autoFocus={index===0} /></label></div>)}</div>
             {stagingError&&<p className="form-message error">{stagingError}</p>}
@@ -1556,7 +1551,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
         </div>
       )}
 
-      {vendorDetail&&<VendorDetailModal vendor={vendorDetail} onClose={()=>setVendorDetail(null)} onEdit={()=>{ setVendorEditorInitial({
+      {vendorDetail&&<VendorDetailModal vendor={vendorDetail} onClose={()=>setVendorDetail(null)} onEdit={()=>{ vendorAction.reset(); setVendorEditorInitial({
         companyName: vendorDetail.companyName,
         phoneType: vendorDetail.phoneType,
         phoneNumber: vendorDetail.phoneNumber,
@@ -1579,7 +1574,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
         reasonNote: '',
         contacts: vendorDetail.contacts ?? [],
       }); setVendorEditorId(vendorDetail.id); setVendorDetail(null); setVendorError(''); }} />}
-      {vendorEditorInitial&&<VendorEditorModal mode={vendorEditorId ? 'edit' : 'add'} initial={vendorEditorInitial} onClose={()=>{ if(!vendorSaving){ setVendorEditorInitial(null); setVendorEditorId(null); setVendorError(''); } }} onSave={saveInventoryVendor} saving={vendorSaving} error={vendorError} />}
+      {vendorEditorInitial&&<VendorEditorModal mode={vendorEditorId ? 'edit' : 'add'} initial={vendorEditorInitial} onClose={()=>{ if(!vendorSaving){ vendorAction.reset(); setVendorEditorInitial(null); setVendorEditorId(null); setVendorError(''); } }} onSave={saveInventoryVendor} saving={vendorSaving} error={vendorError} actionPhase={vendorAction.phase} />}
 
       {reviewGroups[reviewIndex]&&(
         <div className="modal-backdrop" role="presentation" onMouseDown={event=>{ if(event.target===event.currentTarget) closeReview(); }}>

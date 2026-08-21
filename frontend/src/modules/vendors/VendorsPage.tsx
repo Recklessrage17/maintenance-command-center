@@ -371,7 +371,8 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
   const [expandedContacts,setExpandedContacts]=useState<Set<number>>(()=>new Set((vendor.contacts ?? []).filter(contact=>contact.isPrimary&&contact.id!==undefined).map(contact=>contact.id!)));
   const [contactErrors,setContactErrors]=useState<ContactFieldErrors>({});
   const [error,setError]=useState('');
-  const [saving,setSaving]=useState(false);
+  const contactAction=useActionProgress();
+  const saving=contactAction.active;
 
   async function loadContacts() {
     setLoading(true);
@@ -396,22 +397,19 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
     setContactErrors(contactValidationErrors(editing,vendor.country));
     setError(validation);
     if (validation) { setEditingExpanded(true); return; }
-    setSaving(true);
-    try {
+    const result=await contactAction.run(async()=>{
       const payload = JSON.stringify(cleanContact(editing));
-      const data = await api<{ok:boolean;contact:VendorContactRecord;vendor:VendorRecord}>(editing.id ? `/api/vendors/${vendor.id}/contacts/${editing.id}` : `/api/vendors/${vendor.id}/contacts`, {
+      return api<{ok:boolean;contact:VendorContactRecord;vendor:VendorRecord}>(editing.id ? `/api/vendors/${vendor.id}/contacts/${editing.id}` : `/api/vendors/${vendor.id}/contacts`, {
         method: editing.id ? 'PUT' : 'POST',
         body: payload,
       });
-      onVendorUpdated(data.vendor);
-      setEditing(null);
-      setContactErrors({});
-      await loadContacts();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
+    });
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setError((result.error as Error).message);return;}
+    onVendorUpdated(result.value.vendor);
+    setEditing(null);
+    setContactErrors({});
+    await loadContacts();
   }
 
   async function deleteContact(contact: VendorContactRecord) {
@@ -457,7 +455,7 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
                 </div>
                 {(canEdit||canDelete)&&(
                   <div className="vendor-contact-actions">
-                    {canEdit&&<button className="secondary-button compact-button" type="button" onClick={()=>{setEditing({...blankVendorContact,...contact});setEditingExpanded(true);setContactErrors({});}}>Edit Contact</button>}
+                    {canEdit&&<button className="secondary-button compact-button" type="button" onClick={()=>{contactAction.reset();setEditing({...blankVendorContact,...contact});setEditingExpanded(true);setContactErrors({});}}>Edit Contact</button>}
                     {canDelete&&<button className="danger-button compact-button" type="button" onClick={()=>deleteContact(contact)}>Delete Contact</button>}
                   </div>
                 )}
@@ -467,13 +465,13 @@ function VendorContactsModal({vendor,onClose,onVendorUpdated,onEmailCopied,canEd
         )}
         {canEdit&&(
           <div className="vendor-contact-form-shell">
-            {!editing&&<button className="primary-button compact-button" type="button" onClick={()=>{setEditing({...blankVendorContact,isPrimary:contacts.length === 0});setEditingExpanded(true);setContactErrors({});}}>Add Contact</button>}
+            {!editing&&<button className="primary-button compact-button" type="button" onClick={()=>{contactAction.reset();setEditing({...blankVendorContact,isPrimary:contacts.length === 0});setEditingExpanded(true);setContactErrors({});}}>Add Contact</button>}
             {editing&&(
               <form className="vendor-contact-inline-form" onSubmit={saveContact}>
                 <ContactEditCard contact={editing} index={Math.max(contacts.findIndex(contact=>contact.id === editing.id), 0)} country={vendor.country} expanded={editingExpanded} onToggle={()=>setEditingExpanded(value=>!value)} onChange={setEditing} onRemove={()=>{setEditing(null);setContactErrors({});}} errors={contactErrors} />
                 <div className="modal-actions">
-                  <button className="secondary-button" type="button" onClick={()=>{setEditing(null);setContactErrors({});}} disabled={saving}>Cancel</button>
-                  <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':'Save Contact'}</button>
+                  <button className="secondary-button" type="button" onClick={()=>{contactAction.reset();setEditing(null);setContactErrors({});}} disabled={saving}>Cancel</button>
+                  <button className="primary-button" type="submit" disabled={saving} aria-busy={contactAction.pending}><ActionButtonProgress phase={contactAction.phase} idleLabel="Save Contact" pendingLabel="Saving Contact..." successLabel="Contact Saved" errorLabel="Try Contact Save" /></button>
                 </div>
               </form>
             )}

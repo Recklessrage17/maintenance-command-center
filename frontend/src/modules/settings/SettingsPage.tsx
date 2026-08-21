@@ -864,6 +864,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [brandingMsg,setBrandingMsg]=useState('');
   const [brandingLoading,setBrandingLoading]=useState(false);
   const brandingAction=useActionProgress();
+  const externalLocationAction=useActionProgress();
   const [brandingActionKind,setBrandingActionKind]=useState<'save'|'reset'|null>(null);
   const [resetStatus,setResetStatus]=useState<ResetStatus|null>(null);
   const [resetMsg,setResetMsg]=useState('');
@@ -1173,17 +1174,12 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   }
 
   async function saveExternalLocation() {
-    setPortableLoading(true);
     setPortableMessage('Saving verified external backup configuration...');
-    try {
-      const data=await api('/api/backup/external',{method:'PUT',body:JSON.stringify({destination:externalDestination,enabled:externalEnabled})});
-      setPortableMessage(String(data.message??'External backup configuration saved.'));
-      await loadBackupStatus({quiet:true});
-    } catch(error) {
-      setPortableMessage((error as Error).message);
-    } finally {
-      setPortableLoading(false);
-    }
+    const result=await externalLocationAction.run(()=>api('/api/backup/external',{method:'PUT',body:JSON.stringify({destination:externalDestination,enabled:externalEnabled})}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setPortableMessage((result.error as Error).message);return;}
+    setPortableMessage(String(result.value.message??'External backup configuration saved.'));
+    await loadBackupStatus({quiet:true});
   }
 
   function closeImportedRestore() {
@@ -1849,7 +1845,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
                     <label className="backup-toggle"><input type="checkbox" checked={externalEnabled} onChange={event=>setExternalEnabled(event.target.checked)} disabled={portableLoading||!externalDestination.trim()} /><span>Copy completed Master Backups automatically</span></label>
                     <div className="backup-action-row">
                       <button className="secondary-button compact-button" type="button" onClick={()=>void testExternalLocation()} disabled={portableLoading||!externalDestination.trim()}>Test Backup Location</button>
-                      <button className="primary-button compact-button" type="button" onClick={()=>void saveExternalLocation()} disabled={portableLoading}>Save Backup Location</button>
+                      <button className="primary-button compact-button" type="button" onClick={()=>void saveExternalLocation()} disabled={portableLoading||externalLocationAction.active} aria-busy={externalLocationAction.pending}><ActionButtonProgress phase={externalLocationAction.phase} idleLabel="Save Backup Location" pendingLabel="Saving Location..." successLabel="Location Saved" errorLabel="Try Location Save" /></button>
                     </div>
                   </div>
                 ):<code className="backup-path-code">{backupStatus?.externalBackup?.destination||'No external destination configured'}</code>}

@@ -319,6 +319,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const [logs,setLogs]=useState<{asset:MachineAsset;records:HistoryRecord[]}|null>(null);
   const [replacement,setReplacement]=useState<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>(null);
   const machineAction=useActionProgress();
+  const replacementAction=useActionProgress();
   const fileRef = useRef<HTMLInputElement|null>(null);
   const listScrollPositionRef = useRef(0);
   const openingAssetIdRef = useRef<number|null>(null);
@@ -401,14 +402,12 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
       setMessage({kind:'error',text:'Install Date must be a valid date.'});
       return;
     }
-    try {
-      await api(`/api/machine-library/assets/${replacement.asset.id}/replacements/${replacement.field}`,{method:'POST',body:JSON.stringify({installDate:replacement.installDate,reasonNote:replacement.reasonNote})});
-      setReplacement(null);
-      setMessage({kind:'success',text:`${replacementLabels[replacement.field]} install date updated.`});
-      loadAssets();
-    } catch (error) {
-      setMessage({kind:'error',text:(error as Error).message});
-    }
+    const result=await replacementAction.run(()=>api(`/api/machine-library/assets/${replacement.asset.id}/replacements/${replacement.field}`,{method:'POST',body:JSON.stringify({installDate:replacement.installDate,reasonNote:replacement.reasonNote})}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setMessage({kind:'error',text:(result.error as Error).message});return;}
+    setReplacement(null);
+    setMessage({kind:'success',text:`${replacementLabels[replacement.field]} install date updated.`});
+    loadAssets();
   }
   async function disableAsset(asset: MachineAsset) {
     if (!canDelete) return false;
@@ -432,17 +431,14 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
       setMessage({kind:'error',text:(error as Error).message});
     }
   }
-  async function saveColor(brandName: string) {
-    const draft = colorDrafts[brandName] ?? '';
-    if (!isValidHexColor(draft)) { setMessage({kind:'error',text:`${brandName} color must use the #RRGGBB format.`}); return; }
-    const colorHex = normalizeHexColor(draft);
-    if (!window.confirm(`Are you sure? This will change the color for all ${brandName} machine assets.`)) return;
+  async function saveColor(brandName: string,colorHex:string) {
     try {
       await api(`/api/machine-library/brand-settings/${encodeURIComponent(brandName)}`,{method:'PUT',body:JSON.stringify({colorHex})});
       setMessage({kind:'success',text:`${brandName} color updated.`});
       loadAssets();
     } catch (error) {
       setMessage({kind:'error',text:(error as Error).message});
+      throw error;
     }
   }
   async function importMachineList() {
@@ -517,11 +513,11 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         </div>
       </>}
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
-      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} actionPhase={machineAction.phase} actionActive={machineAction.active} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
+      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} actionPhase={machineAction.phase} actionActive={machineAction.active} onReplacement={(asset,field)=>{replacementAction.reset();setReplacement({asset,field,installDate:'',reasonNote:''});}} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
       {recordLogsAsset&&<AssetMeasurementRecordLogsModal asset={recordLogsAsset} canManageYearFolders={canManageMeasurementYearFolders} onClose={()=>setRecordLogsAsset(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
-      {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} onSubmit={updateReplacement} />}
+      {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} actionPhase={replacementAction.phase} actionActive={replacementAction.active} onSubmit={updateReplacement} />}
       {logs&&<LogsModal logs={logs} onClose={()=>setLogs(null)} onBackToAsset={()=>{ setForm(assetToForm(logs.asset)); setEditing(logs.asset); setLogs(null); setShowEditor(true); }} />}
     </div>
   );
@@ -1043,24 +1039,19 @@ function BrandColorPicker({brandName,value,onChange,disabled}:{brandName:string;
     </div>
   </div>;
 }
-function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string)=>void;onClose:()=>void}) {
+function BrandColorModal({brandSettings,colorDrafts,setColorDrafts,canEdit,onSave,onClose}:{brandSettings:BrandSetting[];colorDrafts:Record<string,string>;setColorDrafts:Dispatch<SetStateAction<Record<string,string>>>;canEdit:boolean;onSave:(brandName:string,colorHex:string)=>Promise<void>;onClose:()=>void}) {
   const [openPicker,setOpenPicker]=useState<string|null>(null);
   const [helpOpen,setHelpOpen]=useState(false);
   function setDraft(brandName:string,value:string) { setColorDrafts(current=>({...current,[brandName]:isValidHexColor(value)?normalizeHexColor(value):value})); }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="machine-brand-color-title"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><div className="machine-color-title-row"><h3 id="machine-brand-color-title">Machine Brand Colors</h3><span className="machine-color-help"><button type="button" aria-label="About machine brand colors" aria-expanded={helpOpen} aria-describedby="machine-color-help-text" onClick={()=>setHelpOpen(value=>!value)}>i</button><span id="machine-color-help-text" role="note" className={helpOpen?'is-open':''}>Brand colors control the Machine Library accent and subtle row tint. Keep a saved preset or choose a custom color visually or with a hex code such as #EB5E41, then preview before saving.</span></span></div></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p className="machine-color-intro">Choose a preset visually or enter an exact six-digit hex color. Changes preview here before they are saved.</p>{brandSettings.map(setting=>{
-    const draft=colorDrafts[setting.brandName] ?? setting.colorHex; const valid=isValidHexColor(draft); const preview=valid?normalizeHexColor(draft):setting.colorHex; const pickerOpen=openPicker===setting.brandName;
-    return <div className={`machine-color-row${valid?'':' is-invalid'}`} key={setting.brandName} style={{'--preview-color':safeCssHex(preview)} as CSSProperties}>
-      <button className={`machine-color-swatch ${isEngelBrand(setting.brandName) ? 'machine-color-swatch-engel' : ''}`} type="button" aria-label={`Choose ${setting.brandName} color`} aria-expanded={pickerOpen} disabled={!canEdit} style={{background:safeCssHex(preview)}} onClick={()=>setOpenPicker(current=>current===setting.brandName?null:setting.brandName)} />
-      <strong>{setting.brandName}</strong>
-      <label className="machine-color-hex"><span>Hex color</span><input className="glass-input" value={draft} disabled={!canEdit} maxLength={7} aria-invalid={!valid} aria-describedby={!valid?`machine-color-error-${setting.brandName}`:undefined} onChange={event=>setDraft(setting.brandName,event.target.value)} onBlur={()=>{if(valid)setDraft(setting.brandName,normalizeHexColor(draft));}} />{!valid&&<small id={`machine-color-error-${setting.brandName}`}>Use a six-digit hex value like #EB5E41.</small>}</label>
-      <button className="secondary-button compact-button" type="button" onClick={()=>onSave(setting.brandName)} disabled={!canEdit||!valid}>Save</button>
-      <div className="machine-color-row-preview" aria-label={`${setting.brandName} row tint preview`}><span>{setting.brandName}</span><small>Machine row accent preview</small></div>
-      {pickerOpen&&<BrandColorPicker brandName={setting.brandName} value={preview} disabled={!canEdit} onChange={value=>setDraft(setting.brandName,value)} />}
-    </div>;
-  })}</section></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="machine-brand-color-title"><section className="mcc-card machine-color-modal"><div className="modal-heading"><div><p className="eyebrow">Brand Color Settings</p><div className="machine-color-title-row"><h3 id="machine-brand-color-title">Machine Brand Colors</h3><span className="machine-color-help"><button type="button" aria-label="About machine brand colors" aria-expanded={helpOpen} aria-describedby="machine-color-help-text" onClick={()=>setHelpOpen(value=>!value)}>i</button><span id="machine-color-help-text" role="note" className={helpOpen?'is-open':''}>Brand colors control the Machine Library accent and subtle row tint. Keep a saved preset or choose a custom color visually or with a hex code such as #EB5E41, then preview before saving.</span></span></div></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><p className="machine-color-intro">Choose a preset visually or enter an exact six-digit hex color. Changes preview here before they are saved.</p>{brandSettings.map(setting=><BrandColorRow key={setting.brandName} setting={setting} draft={colorDrafts[setting.brandName]??setting.colorHex} canEdit={canEdit} pickerOpen={openPicker===setting.brandName} onTogglePicker={()=>setOpenPicker(current=>current===setting.brandName?null:setting.brandName)} onDraft={value=>setDraft(setting.brandName,value)} onSave={onSave} />)}</section></div>;
 }
-function ReplacementModal({replacement,setReplacement,onSubmit}:{replacement:{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string};setReplacement:Dispatch<SetStateAction<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>>;onSubmit:(event:FormEvent)=>void}) {
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-small-modal" onSubmit={onSubmit}><p className="eyebrow">Replacement Update</p><h3>Update New {replacementLabels[replacement.field]} Install Date</h3><DateWithAge label="Install Date *" value={replacement.installDate} set={installDate=>setReplacement(current=>current&&({...current,installDate}))} disabled={false}/><Area label="Reason / Note" value={replacement.reasonNote} set={reasonNote=>setReplacement(current=>current&&({...current,reasonNote}))} disabled={false}/><div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setReplacement(null)}>Cancel</button><button className="primary-button" type="submit">Update {replacementLabels[replacement.field]} Date</button></div></form></div>;
+function BrandColorRow({setting,draft,canEdit,pickerOpen,onTogglePicker,onDraft,onSave}:{setting:BrandSetting;draft:string;canEdit:boolean;pickerOpen:boolean;onTogglePicker:()=>void;onDraft:(value:string)=>void;onSave:(brandName:string,colorHex:string)=>Promise<void>}){
+  const colorAction=useActionProgress();const valid=isValidHexColor(draft);const preview=valid?normalizeHexColor(draft):setting.colorHex;
+  async function save(){if(!valid)return;if(!window.confirm(`Are you sure? This will change the color for all ${setting.brandName} machine assets.`))return;await colorAction.run(()=>onSave(setting.brandName,normalizeHexColor(draft)));}
+  return <div className={`machine-color-row${valid?'':' is-invalid'}`} style={{'--preview-color':safeCssHex(preview)} as CSSProperties}><button className={`machine-color-swatch ${isEngelBrand(setting.brandName) ? 'machine-color-swatch-engel' : ''}`} type="button" aria-label={`Choose ${setting.brandName} color`} aria-expanded={pickerOpen} disabled={!canEdit} style={{background:safeCssHex(preview)}} onClick={onTogglePicker} /><strong>{setting.brandName}</strong><label className="machine-color-hex"><span>Hex color</span><input className="glass-input" value={draft} disabled={!canEdit} maxLength={7} aria-invalid={!valid} aria-describedby={!valid?`machine-color-error-${setting.brandName}`:undefined} onChange={event=>onDraft(event.target.value)} onBlur={()=>{if(valid)onDraft(normalizeHexColor(draft));}} />{!valid&&<small id={`machine-color-error-${setting.brandName}`}>Use a six-digit hex value like #EB5E41.</small>}</label><button className="secondary-button compact-button" type="button" onClick={()=>void save()} disabled={!canEdit||!valid||colorAction.active} aria-busy={colorAction.pending}><ActionButtonProgress phase={colorAction.phase} idleLabel="Save" pendingLabel="Saving..." successLabel="Saved" errorLabel="Try Save" /></button><div className="machine-color-row-preview" aria-label={`${setting.brandName} row tint preview`}><span>{setting.brandName}</span><small>Machine row accent preview</small></div>{pickerOpen&&<BrandColorPicker brandName={setting.brandName} value={preview} disabled={!canEdit} onChange={onDraft} />}</div>;
+}
+function ReplacementModal({replacement,setReplacement,actionPhase,actionActive,onSubmit}:{replacement:{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string};setReplacement:Dispatch<SetStateAction<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>>;actionPhase:ActionProgressPhase;actionActive:boolean;onSubmit:(event:FormEvent)=>void}) {
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-small-modal" onSubmit={onSubmit}><p className="eyebrow">Replacement Update</p><h3>Update New {replacementLabels[replacement.field]} Install Date</h3><DateWithAge label="Install Date *" value={replacement.installDate} set={installDate=>setReplacement(current=>current&&({...current,installDate}))} disabled={false}/><Area label="Reason / Note" value={replacement.reasonNote} set={reasonNote=>setReplacement(current=>current&&({...current,reasonNote}))} disabled={false}/><div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setReplacement(null)}>Cancel</button><button className="primary-button" type="submit" disabled={actionActive} aria-busy={actionPhase==='pending'}><ActionButtonProgress phase={actionPhase} idleLabel={`Update ${replacementLabels[replacement.field]} Date`} pendingLabel="Updating Date..." successLabel="Date Updated" errorLabel="Try Date Update" /></button></div></form></div>;
 }
 function LogsModal({logs,onClose,onBackToAsset}:{logs:{asset:MachineAsset;records:HistoryRecord[]};onClose:()=>void;onBackToAsset:()=>void}) {
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="mcc-card machine-logs-modal mcc-wide-modal"><div className="modal-heading"><div><p className="eyebrow">Machine Asset History</p><h3>{logs.asset.assetNumber}</h3><MccSummaryTokenGroup><MccSummaryToken tone="history">{logs.records.length} history record{logs.records.length===1?'':'s'}</MccSummaryToken></MccSummaryTokenGroup></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div><div className="machine-log-list">{logs.records.map(record=><article className="machine-log-row" key={record.id}><span>{formatDateTime(record.createdAt)}</span><strong>{actionLabel(record.action)}</strong><p>{record.userName || 'Unknown'} / {record.reasonNote || 'No reason note'}</p></article>)}{!logs.records.length&&<p className="form-message">No machine-specific logs yet.</p>}</div><div className="modal-actions"><button className="secondary-button" type="button" onClick={onBackToAsset}>Back to Asset</button><button className="primary-button" type="button" onClick={onClose}>Done</button></div></section></div>;

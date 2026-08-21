@@ -262,6 +262,8 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   const [stagingForm,setStagingForm]=useState<StagingForm>(()=>blankStagingForm(userFullName));
   const [stagingFormError,setStagingFormError]=useState('');
   const [stagingSaving,setStagingSaving]=useState(false);
+  const stagingItemAction=useActionProgress();
+  const batchAction=useActionProgress();
   const [inventoryOptions,setInventoryOptions]=useState<InventoryOption[]>([]);
   const [inventorySearch,setInventorySearch]=useState('');
   const [reviewingStaging,setReviewingStaging]=useState(false);
@@ -487,6 +489,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
 
   function openNewStaging(inventory?: InventoryOption) {
     if (!canWrite || !activeBatchId || batchView !== 'active') return;
+    stagingItemAction.reset();
     setStagingEditing('new');
     setStagingForm(inventory ? {
       ...blankStagingForm(userFullName,activeBatchId),inventoryPartId:Number(inventory.id),partNumber:inventory.partNumber,description:inventory.description,vendor:inventory.vendor,supplierPartNumber:inventory.supplierPartNumber,unitCost:inventory.unitCost === null ? '' : String(inventory.unitCost),location:inventory.location,assetMachine:activeRequisitionBatch?.assetMachine ?? '',workOrderNumber:activeRequisitionBatch?.workOrderNumber ?? '',neededByDate:activeRequisitionBatch?.neededByDate ?? '',
@@ -497,6 +500,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
 
   function openEditStaging(item: StagingItem) {
     if (!canWrite) return;
+    stagingItemAction.reset();
     setStagingEditing(item);
     setStagingForm(stagingFormFromItem(item));
     setStagingFormError('');
@@ -513,7 +517,8 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   }
 
   function closeStagingEditor(force = false) {
-    if (stagingSaving && !force) return;
+    if ((stagingSaving||stagingItemAction.active) && !force) return;
+    stagingItemAction.reset();
     setStagingEditing(null);
     setStagingFormError('');
   }
@@ -539,20 +544,15 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
       setStagingFormError('Needed-by Date must be valid when entered.');
       return;
     }
-    setStagingSaving(true);
     setStagingFormError('');
-    try {
-      const isEdit = stagingEditing !== 'new';
-      await api(isEdit ? `/api/requisition-staging/${stagingEditing.id}` : '/api/requisition-staging', {method:isEdit?'PATCH':'POST',body:JSON.stringify({...stagingForm,quantityRequested:quantity,unitCost})});
-      closeStagingEditor(true);
-      setInventorySearch('');
-      await Promise.all([loadStaging(batchView,activeBatchId),loadInventoryOptions()]);
-      setNotice({kind:'success',text:isEdit?'Staged item updated.':'Item added to Requisition Staging List.'});
-    } catch (err) {
-      setStagingFormError((err as Error).message);
-    } finally {
-      setStagingSaving(false);
-    }
+    const isEdit = stagingEditing !== 'new';
+    const result=await stagingItemAction.run(()=>api(isEdit ? `/api/requisition-staging/${stagingEditing.id}` : '/api/requisition-staging', {method:isEdit?'PATCH':'POST',body:JSON.stringify({...stagingForm,quantityRequested:quantity,unitCost})}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setStagingFormError((result.error as Error).message);return;}
+    closeStagingEditor(true);
+    setInventorySearch('');
+    await Promise.all([loadStaging(batchView,activeBatchId),loadInventoryOptions()]);
+    setNotice({kind:'success',text:isEdit?'Staged item updated.':'Item added to Requisition Staging List.'});
   }
 
   async function removeStagingItem(item: StagingItem) {
@@ -683,6 +683,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   }
 
   function openBatchCreator() {
+    batchAction.reset();
     setBatchForm({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
     setBatchFormError('');
     setEditingBatchId(null);
@@ -691,6 +692,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
 
   function openBatchEditor(batch: RequisitionBatch) {
     if (!canManageBatches || batch.isGeneral) return;
+    batchAction.reset();
     setBatchForm({name:batch.name,description:batch.description,assetMachine:batch.assetMachine,workOrderNumber:batch.workOrderNumber,neededByDate:batch.neededByDate,status:batch.status});
     setBatchFormError('');
     setEditingBatchId(batch.id);
@@ -701,22 +703,17 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
     event.preventDefault();
     if (!batchForm.name.trim()) return setBatchFormError('Batch name is required.');
     if (!isValidMccDateValue(batchForm.neededByDate)) return setBatchFormError('Needed-by Date must be valid when entered.');
-    setStagingSaving(true);
     setBatchFormError('');
-    try {
-      const editingExisting = editingBatchId !== null;
-      const result = await api<{batch:RequisitionBatch}>(editingExisting?`/api/requisition-batches/${editingBatchId}`:'/api/requisition-batches',{method:editingExisting?'PATCH':'POST',body:JSON.stringify(batchForm)});
-      setBatchEditing(false);
-      setEditingBatchId(null);
-      const nextView: 'active'|'completed' = ['Converted','Closed'].includes(result.batch.status) ? 'completed' : 'active';
-      setBatchView(nextView);
-      await loadStaging(nextView,result.batch.id);
-      setNotice({kind:'success',text:editingExisting?`Requisition Batch “${result.batch.name}” updated.`:`Requisition Batch “${result.batch.name}” created.`});
-    } catch (err) {
-      setBatchFormError((err as Error).message);
-    } finally {
-      setStagingSaving(false);
-    }
+    const editingExisting = editingBatchId !== null;
+    const result=await batchAction.run(()=>api<{batch:RequisitionBatch}>(editingExisting?`/api/requisition-batches/${editingBatchId}`:'/api/requisition-batches',{method:editingExisting?'PATCH':'POST',body:JSON.stringify(batchForm)}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setBatchFormError((result.error as Error).message);return;}
+    setBatchEditing(false);
+    setEditingBatchId(null);
+    const nextView: 'active'|'completed' = ['Converted','Closed'].includes(result.value.batch.status) ? 'completed' : 'active';
+    setBatchView(nextView);
+    await loadStaging(nextView,result.value.batch.id);
+    setNotice({kind:'success',text:editingExisting?`Requisition Batch “${result.value.batch.name}” updated.`:`Requisition Batch “${result.value.batch.name}” created.`});
   }
 
   async function deleteRequisitionBatch(batch: RequisitionBatch) {
@@ -1150,9 +1147,9 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
       )}
 
       {batchEditing&&(
-        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!stagingSaving)setBatchEditing(false);}}>
+        <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!batchAction.active){batchAction.reset();setBatchEditing(false);}}}>
           <form className="mcc-card requisition-modal staging-editor-modal mcc-wide-modal" onSubmit={saveRequisitionBatch}>
-            <div className="modal-heading"><div><p className="eyebrow">Requisition Batch</p><h3>{editingBatchId===null?'Create Requisition Batch':'Edit Requisition Batch'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>setBatchEditing(false)}>Close</button></div>
+            <div className="modal-heading"><div><p className="eyebrow">Requisition Batch</p><h3>{editingBatchId===null?'Create Requisition Batch':'Edit Requisition Batch'}</h3></div><button className="link-button compact-button" type="button" onClick={()=>{if(!batchAction.active){batchAction.reset();setBatchEditing(false);}}}>Close</button></div>
             <div className="staging-editor-grid">
               <label className="form-field"><span>Batch Name <b className="required-marker">*</b></span><input value={batchForm.name} onChange={event=>setBatchForm({...batchForm,name:event.target.value})} autoFocus placeholder="Press 51 Repair" /></label>
               <label className="form-field"><span>Status</span><select value={batchForm.status} disabled={batchForm.status==='Converted'} onChange={event=>setBatchForm({...batchForm,status:event.target.value as RequisitionBatchStatus})}>{batchForm.status==='Converted'?<option>Converted</option>:<><option>Open</option><option>Ready</option>{editingBatchId!==null&&<option>Closed</option>}</>}</select></label>
@@ -1162,7 +1159,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
               <label className="form-field staging-editor-wide"><span>Description / Notes</span><textarea value={batchForm.description} onChange={event=>setBatchForm({...batchForm,description:event.target.value})} /></label>
             </div>
             {batchFormError&&<p className="form-message error">{batchFormError}</p>}
-            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>setBatchEditing(false)}>Cancel</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Saving...':editingBatchId===null?'Create Requisition Batch':'Save Batch Changes'}</button></div>
+            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>{if(!batchAction.active){batchAction.reset();setBatchEditing(false);}}}>Cancel</button><button className="primary-button" type="submit" disabled={batchAction.active} aria-busy={batchAction.pending}><ActionButtonProgress phase={batchAction.phase} idleLabel={editingBatchId===null?'Create Requisition Batch':'Save Batch Changes'} pendingLabel={editingBatchId===null?'Creating Batch...':'Saving Batch...'} successLabel={editingBatchId===null?'Batch Created':'Batch Saved'} errorLabel="Try Batch Save" /></button></div>
           </form>
         </div>
       )}
@@ -1188,7 +1185,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
               <label className="form-field staging-editor-wide"><span>Notes</span><textarea value={stagingForm.notes} onChange={event=>setStagingForm({...stagingForm,notes:event.target.value})} /></label>
             </div>
             {stagingFormError&&<p className="form-message error">{stagingFormError}</p>}
-            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>closeStagingEditor()}>Cancel</button><button className="primary-button" type="submit" disabled={stagingSaving}>{stagingSaving?'Saving...':'Save Staged Item'}</button></div>
+            <div className="modal-actions"><button className="secondary-button" type="button" onClick={()=>closeStagingEditor()}>Cancel</button><button className="primary-button" type="submit" disabled={stagingItemAction.active} aria-busy={stagingItemAction.pending}><ActionButtonProgress phase={stagingItemAction.phase} idleLabel={stagingEditing==='new'?'Add Staged Item':'Save Staged Item'} pendingLabel={stagingEditing==='new'?'Adding Item...':'Saving Item...'} successLabel={stagingEditing==='new'?'Item Added':'Item Saved'} errorLabel="Try Item Save" /></button></div>
           </form>
         </div>
       )}
