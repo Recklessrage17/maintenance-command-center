@@ -1361,14 +1361,19 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .inspection-record-viewer-backdrop { z-index: 190; padding: 12px; }
 .inspection-record-viewer { width: min(1280px,100%); height: min(920px,var(--mcc-modal-available-height)); min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr) auto; gap: 10px; }
 .inspection-record-viewer-canvas { min-height: 0; display: grid; place-items: center; overflow: auto; border: 1px solid rgba(143,205,233,.2); border-radius: 16px; background: rgba(0,5,10,.9); }
-.inspection-record-viewer-canvas img { display: block; object-fit: contain; transition: max-width .16s ease,max-height .16s ease; }
-.inspection-record-viewer-canvas.is-fit img { max-width: 100%; max-height: 100%; width: 100%; height: 100%; }
-.inspection-record-viewer-canvas.is-zoom { place-items: start center; }
-.inspection-record-viewer-canvas.is-zoom img { max-width: none; max-height: none; width: auto; height: auto; }
+.inspection-record-viewer-canvas.is-image { position: relative; overflow: hidden; outline: none; cursor: zoom-in; overscroll-behavior: contain; touch-action: pan-y pinch-zoom; user-select: none; }
+.inspection-record-viewer-canvas.is-image:focus-visible { border-color: rgba(125,255,241,.8); box-shadow: inset 0 0 0 1px rgba(191,249,255,.74),0 0 0 3px rgba(68,215,255,.12); }
+.inspection-record-viewer-canvas.is-image.is-zoomed { cursor: grab; touch-action: none; }
+.inspection-record-viewer-canvas.is-image.is-dragging { cursor: grabbing; }
+.inspection-record-viewer-canvas.is-image.is-dragging img { transition: none; }
+.inspection-record-viewer-canvas img { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: center; transition: transform 120ms ease-out; will-change: transform; }
 .inspection-record-viewer-canvas object { width: 100%; height: 100%; min-height: 460px; border: 0; }
 .inspection-record-unsupported { display: grid; gap: 8px; justify-items: center; padding: 24px; color: #9fbdcc; text-align: center; }
 .inspection-record-unsupported strong { color: #f3fbff; }
-.inspection-record-viewer-actions { margin-top: 0; }
+.inspection-record-viewer-actions { align-items: center; margin-top: 0; }
+.asset-image-viewer-controls { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; padding: 4px; border: 1px solid rgba(143,205,233,.2); border-radius: 10px; background: rgba(4,18,34,.72); }
+.asset-image-viewer-controls output { min-width: 58px; color: #f3fbff; font-size: .76rem; font-weight: 950; text-align: center; font-variant-numeric: tabular-nums; }
+.asset-image-viewer-controls .compact-button { min-width: 34px; min-height: 34px; padding: 5px 9px; }
 .asset-notes-card { --machine-detail-card-open-border: rgba(68,215,255,.36); }
 .machine-document-library-card { --machine-detail-card-open-border: rgba(115,83,255,.54); }
 .machine-document-library-card.is-open .machine-document-library-panel { max-height: 24000px; }
@@ -1545,7 +1550,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-entry-heading > div:first-child { min-width: 0; display: grid; gap: 4px; }
 .asset-note-entry h5 { overflow-wrap: anywhere; margin: 0; color: #f3fbff; font-size: 1rem; }
 .asset-note-entry-heading small { color: #94b8c9; font-size: .72rem; }
+.asset-note-entry-heading .asset-note-created-meta { color: #9ebdcc; font-size: .76rem; line-height: 1.4; }
 .asset-note-date-pill { display: inline-flex; width: fit-content; min-height: 23px; align-items: center; padding: 0 8px; border: 1px solid rgba(68,215,255,.3); border-radius: 999px; color: #c8f5ff; background: rgba(6,67,98,.28); font-size: .67rem; font-weight: 950; }
+.asset-note-active-issue-card .asset-note-date-pill { color: #fff; }
 .asset-note-entry .asset-note-warning-badge,.asset-note-active-issue-card .asset-note-warning-badge{display:inline-flex;width:fit-content;min-height:24px;align-items:center;gap:5px;padding:3px 8px;border:1px solid rgba(255,138,76,.72);border-radius:999px;color:#ffd4bd;background:linear-gradient(135deg,rgba(125,43,31,.62),rgba(91,45,19,.5));box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 10px rgba(255,91,68,.06);font-size:.66rem;font-weight:950;letter-spacing:.02em}
 .asset-note-entry .asset-note-warning-badge::before,.asset-note-active-issue-card .asset-note-warning-badge::before{content:"!";width:15px;height:15px;display:inline-grid;place-items:center;border:1px solid rgba(255,174,126,.72);border-radius:50%;color:#fff;background:rgba(151,48,32,.76);font-size:.61rem;font-weight:1000;line-height:1}
 .asset-note-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
@@ -1669,6 +1676,10 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-year-toggle small { justify-self: end; color: #91afbf; font-size: .68rem; }
 .asset-note-resolved-list { padding-left: 10px; border-left: 2px solid rgba(54,229,170,.22); }
 @media (max-width: 700px) {
+  .inspection-record-viewer { height: var(--mcc-modal-available-height); }
+  .inspection-record-viewer-actions { align-content: start; }
+  .asset-image-viewer-controls { width: 100%; margin-right: 0; }
+  .asset-image-viewer-controls output { flex: 1 1 auto; }
   .asset-note-search-toolbar,.asset-note-form { grid-template-columns: 1fr; }
   .asset-note-history-control { justify-self: start; }
   .asset-note-entry-heading { grid-template-columns: 1fr; }
@@ -1685,6 +1696,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .asset-note-year-toggle small { grid-column: 2; justify-self: start; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .inspection-record-viewer-canvas img { transition: none !important; }
   .asset-note-active-issue-card,.asset-note-issue-chevron svg,.asset-note-issue-details { transition: none; }
   .asset-note-active-issue-card.is-deep-link-target,.asset-note-entry.is-deep-link-target { border-color: #7dfff1; outline: 2px solid #bff9ff; outline-offset: 2px; box-shadow: inset 0 0 12px rgba(125,255,241,.14),0 0 0 3px rgba(68,215,255,.14),0 0 16px rgba(68,215,255,.28),0 10px 24px rgba(0,0,0,.28); }
   .asset-note-active-issue-card.is-deep-link-target::after,.asset-note-entry.is-deep-link-target::after { animation: none; opacity: .62; }
