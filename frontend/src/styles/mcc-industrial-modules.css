@@ -3991,6 +3991,131 @@ body {
   .asset-detail-data-chip { max-width: 100%; }
 }
 
+/* Issue 80: ordinary mutation feedback stays inside compact pill controls. */
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button:has(> .action-button-progress) {
+  flex: 0 0 auto;
+  align-self: center;
+  width: max-content;
+  min-width: 0;
+  min-height: var(--mcc-control-height-compact);
+  max-height: var(--mcc-control-height-compact);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--mcc-space-5);
+  border-radius: var(--mcc-radius-pill);
+  font-size: 0.82rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button > .action-button-progress,
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button > .action-button-progress > .action-button-progress__labels {
+  height: 14px;
+  max-height: 14px;
+  line-height: 14px;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button > .action-button-progress > .action-button-progress__labels > span {
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  line-height: 14px;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(
+  .modal-actions,
+  .mcc-modal-actions,
+  .glass-modal__actions,
+  .glass-button-group,
+  .machine-detail-section-actions
+):has(> button > .action-button-progress) {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--mcc-space-3);
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(
+  .modal-actions,
+  .mcc-modal-actions,
+  .glass-modal__actions,
+  .glass-button-group,
+  .machine-detail-section-actions
+):has(> button > .action-button-progress) > button {
+  flex: 0 0 auto;
+  align-self: center;
+  width: max-content;
+  min-width: 86px;
+  min-height: var(--mcc-control-height-compact);
+  max-height: var(--mcc-control-height-compact);
+  padding: 0 var(--mcc-space-5);
+  border-radius: var(--mcc-radius-pill);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) :where(
+  .modal-actions,
+  .mcc-modal-actions,
+  .glass-modal__actions,
+  .glass-button-group,
+  .machine-detail-section-actions
+):has(> button > .action-button-progress) > .secondary-button:is(:hover, :focus-visible):not(:disabled) {
+  color: #fff0f3;
+  border-color: rgba(255, 112, 135, 0.86);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 42%),
+    linear-gradient(145deg, rgba(151, 36, 57, 0.94), rgba(65, 17, 32, 0.98));
+  box-shadow:
+    0 9px 22px rgba(85, 13, 29, 0.34),
+    0 0 18px rgba(255, 82, 108, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .machine-color-help > span,
   .machine-color-modal .machine-color-row,

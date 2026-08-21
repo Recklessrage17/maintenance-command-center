@@ -24,6 +24,42 @@ export async function expectActionPending(button:Locator){
   await expect(button).not.toContainText('%');
 }
 
+export async function expectCompactActionRow(button:Locator,cancel:Locator){
+  const buttonBox=await button.boundingBox();
+  const cancelBox=await cancel.boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(cancelBox).not.toBeNull();
+  expect(buttonBox!.height).toBeGreaterThanOrEqual(34);
+  expect(buttonBox!.height).toBeLessThanOrEqual(38);
+  expect(cancelBox!.height).toBeGreaterThanOrEqual(34);
+  expect(cancelBox!.height).toBeLessThanOrEqual(38);
+  expect(Math.abs((buttonBox!.y+buttonBox!.height/2)-(cancelBox!.y+cancelBox!.height/2))).toBeLessThanOrEqual(1);
+  const radius=Number.parseFloat(await button.evaluate(element=>getComputedStyle(element).borderTopLeftRadius));
+  expect(radius).toBeGreaterThanOrEqual(buttonBox!.height/2-1);
+  const progressBox=await actionProgress(button).boundingBox();
+  expect(progressBox).not.toBeNull();
+  expect(progressBox!.height).toBeLessThanOrEqual(16);
+  expect(progressBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
+  expect(progressBox!.y+progressBox!.height).toBeLessThanOrEqual(buttonBox!.y+buttonBox!.height);
+
+  const before=await cancel.evaluate(element=>{
+    const style=getComputedStyle(element);
+    return {background:style.backgroundImage,border:style.borderColor,shadow:style.boxShadow};
+  });
+  await cancel.hover();
+  await expect.poll(()=>cancel.evaluate(element=>getComputedStyle(element).backgroundImage)).toContain('151, 36, 57');
+  await expect.poll(()=>cancel.evaluate(element=>getComputedStyle(element).borderColor)).toContain('255, 112, 135');
+  const hovered=await cancel.evaluate(element=>{
+    const style=getComputedStyle(element);
+    return {background:style.backgroundImage,border:style.borderColor,shadow:style.boxShadow};
+  });
+  expect(hovered.background).not.toBe(before.background);
+  expect(hovered.border).not.toBe(before.border);
+  expect(hovered.shadow).not.toBe(before.shadow);
+  expect(hovered.background).toContain('151, 36, 57');
+  expect(hovered.border).toContain('255, 112, 135');
+}
+
 export const issue80Owner={id:80,fullName:'Issue 80 Owner',email:'issue80-owner@example.com',role:'Admin',isOwnerAdmin:true,canViewSystemVersion:false,forcePasswordChange:false,disabled:false,lastLoginAt:null,canDisable:false,canDelete:false};
 export const issue80Auth={setupRequired:false,user:issue80Owner};
 

@@ -1,4 +1,5 @@
 import {expect,type Locator,type Page,type Route,test} from '@playwright/test';
+import {expectCompactActionRow} from './issue-80-progress-helpers';
 
 type Deferred={promise:Promise<void>;release:()=>void};
 
@@ -50,15 +51,20 @@ test('Vendor create/edit shows stable pending/success/error states, blocks dupli
   const modal=page.locator('.vendor-modal').filter({has:page.getByRole('heading',{name:'Add vendor record'})});
   await modal.getByLabel(/Company Name/).fill('Deferred Vendor');
   const button=modal.locator('button[type="submit"]');
-  const idleWidth=(await button.boundingBox())!.width;
+  await expectCompactActionRow(button,modal.getByRole('button',{name:'Cancel'}));
+  const idleBox=(await button.boundingBox())!;
   await button.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});
   await expect.poll(()=>requests).toBe(1);
   await expectPending(button);
-  expect(Math.abs((await button.boundingBox())!.width-idleWidth)).toBeLessThanOrEqual(1);
+  let activeBox=(await button.boundingBox())!;
+  expect(Math.abs(activeBox.width-idleBox.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(activeBox.height-idleBox.height)).toBeLessThanOrEqual(1);
   expect(await progress(button).locator('.action-button-progress__indicator').evaluate(element=>getComputedStyle(element).animationName)).toBe('none');
   gate.release();
   await expect(progress(button)).toHaveAttribute('data-action-progress','success');
-  expect(Math.abs((await button.boundingBox())!.width-idleWidth)).toBeLessThanOrEqual(1);
+  activeBox=(await button.boundingBox())!;
+  expect(Math.abs(activeBox.width-idleBox.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(activeBox.height-idleBox.height)).toBeLessThanOrEqual(1);
   expect(await progress(button).locator('.action-button-progress__indicator').evaluate(element=>getComputedStyle(element).animationName)).toBe('none');
   await expect(modal).toHaveCount(0);
 
@@ -111,6 +117,7 @@ test('Inventory create/edit shows pending/success/error and prevents duplicate i
   await modal.locator('.inventory-numeric-grid label').first().locator('input').fill('4');
   await modal.getByLabel(/Unit Cost/).fill('12.50');
   const addButton=modal.locator('button[type="submit"]');
+  await expectCompactActionRow(addButton,modal.getByRole('button',{name:'Cancel'}));
   await addButton.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});
   await expect.poll(()=>requests).toBe(1);
   await expectPending(addButton);

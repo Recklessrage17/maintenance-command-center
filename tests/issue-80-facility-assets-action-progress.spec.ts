@@ -1,5 +1,5 @@
 import {expect,type Page,test} from '@playwright/test';
-import {actionProgress,deferred,expectActionPending,fulfill,issue80Auth,issue80MachineAsset} from './issue-80-progress-helpers';
+import {actionProgress,deferred,expectActionPending,expectCompactActionRow,fulfill,issue80Auth,issue80MachineAsset} from './issue-80-progress-helpers';
 
 const area={id:21,name:'Production',description:'Main production floor.',building:'Building A',location:'North Wing',department:'Molding',status:'active',createdAt:'2026-08-20T12:00:00Z',updatedAt:'2026-08-20T12:00:00Z',summary:{folderCount:1,documentCount:1,pictureCount:0,videoCount:0}};
 const folder={id:31,areaId:21,parentId:null,name:'Manuals',description:'Controlled manuals.',path:'Manuals',itemCount:1,childCount:0,createdAt:area.createdAt,updatedAt:area.updatedAt};
@@ -17,6 +17,7 @@ test('Facility area create uses compact progress and blocks duplicate submission
   });
   await page.goto('/facility-info');await page.getByRole('button',{name:'Create Facility Area'}).click();
   const modal=page.getByRole('dialog',{name:'Create Facility Area'});await modal.getByLabel('Facility / Area Name *').fill('Production');const button=modal.locator('button[type="submit"]');
+  await expectCompactActionRow(button,modal.getByRole('button',{name:'Cancel'}));
   await button.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});await expect.poll(()=>requests).toBe(1);await expectActionPending(button);
   gate.release();await expect(actionProgress(button)).toHaveAttribute('data-action-progress','success');await expect(modal).toHaveCount(0);await expect(page.getByRole('button',{name:'Open Production'})).toBeVisible();
 });
