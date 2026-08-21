@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { withJsonRequestDefaults } from '../../apiRequest';
+import { ActionButtonProgress, useActionProgress } from '../../components/ActionProgress';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusAge } from '../../components/MccStatusAge';
 import { MccSuccessBurst } from '../../components/MccSuccessBurst';
@@ -228,7 +229,8 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   const [editing,setEditing]=useState<Requisition|null>(null);
   const [editForm,setEditForm]=useState<EditForm>({quantityRequested:'1',workOrderNumber:'',notes:''});
   const [editError,setEditError]=useState('');
-  const [saving,setSaving]=useState(false);
+  const editAction=useActionProgress();
+  const saving=editAction.active;
   const [showDeleted,setShowDeleted]=useState(false);
   const [previewing,setPreviewing]=useState<Requisition|null>(null);
   const [previewUrl,setPreviewUrl]=useState('');
@@ -910,6 +912,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
 
   function openEdit(requisition: Requisition) {
     if (!canWrite || requisition.deleted || requisition.status !== 'Requested') return;
+    editAction.reset();
     setEditing(requisition);
     setEditForm(editFormFromRequisition(requisition));
     setEditError('');
@@ -920,6 +923,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
     if (saving && !force) return;
     setEditing(null);
     setEditError('');
+    editAction.reset();
   }
 
   async function saveEdit(event: FormEvent) {
@@ -933,24 +937,26 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
         return;
       }
     }
-    setSaving(true);
     setEditError('');
-    try {
-      await api(`/api/requisitions/${editing.id}`, {
+    const result=await editAction.run(()=>api(`/api/requisitions/${editing.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           ...(isMultiLine ? {} : {quantityRequested: quantity}),
           workOrderNumber: editForm.workOrderNumber,
           notes: editForm.notes,
         }),
-      });
+      }));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){
+      setEditError((result.error as Error).message);
+      return;
+    }
+    try {
       closeEdit(true);
       setNotice({kind:'success',text:`${editing.requisitionNumber} updated.`});
       await loadRequisitions(filter, showDeleted);
     } catch (err) {
       setEditError((err as Error).message);
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -1270,7 +1276,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
             {editError&&<p className="form-message error">{editError}</p>}
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeEdit()}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':'Save Changes'}</button>
+              <button className="primary-button" type="submit" disabled={saving} aria-busy={editAction.pending}><ActionButtonProgress phase={editAction.phase} idleLabel="Save Changes" pendingLabel="Saving Changes..." successLabel="Requisition Saved" errorLabel="Try Requisition Save" /></button>
             </div>
           </form>
         </div>

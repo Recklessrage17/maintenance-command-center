@@ -1,6 +1,7 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { withJsonRequestDefaults } from '../../apiRequest';
+import { ActionButtonProgress, type ActionProgressPhase, useActionProgress } from '../../components/ActionProgress';
 import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { MccAccordionHeader, MccCategoryAccordion, mccCategoryAccentClass, type MccCategoryAccent } from '../../components/MccCategoryAccordion';
 import { MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
@@ -317,6 +318,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const [recordLogsAsset,setRecordLogsAsset]=useState<MachineAsset|null>(null);
   const [logs,setLogs]=useState<{asset:MachineAsset;records:HistoryRecord[]}|null>(null);
   const [replacement,setReplacement]=useState<{asset:MachineAsset;field:ReplacementField;installDate:string;reasonNote:string}|null>(null);
+  const machineAction=useActionProgress();
   const fileRef = useRef<HTMLInputElement|null>(null);
   const listScrollPositionRef = useRef(0);
   const openingAssetIdRef = useRef<number|null>(null);
@@ -345,9 +347,9 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     return()=>window.cancelAnimationFrame(frame);
   },[detailAsset?.id]);
 
-  function openAdd() { setSetupDraft({setupType:'Standard Injection',hasDoubleShotInjection:false,hasPlungerInjection:false}); setShowSetup(true); }
-  function continueAddFromSetup() { setEditing(null); setForm({...blankAssetForm,...setupDraft}); setShowSetup(false); setShowEditor(true); }
-  function openEdit(asset: MachineAsset) { setEditing(asset); setForm(assetToForm(asset)); setShowEditor(true); }
+  function openAdd() { machineAction.reset(); setSetupDraft({setupType:'Standard Injection',hasDoubleShotInjection:false,hasPlungerInjection:false}); setShowSetup(true); }
+  function continueAddFromSetup() { machineAction.reset(); setEditing(null); setForm({...blankAssetForm,...setupDraft}); setShowSetup(false); setShowEditor(true); }
+  function openEdit(asset: MachineAsset) { machineAction.reset(); setEditing(asset); setForm(assetToForm(asset)); setShowEditor(true); }
   function openDetail(asset: MachineAsset) {
     if (openingAssetIdRef.current===asset.id) return;
     openingAssetIdRef.current=asset.id;
@@ -376,10 +378,15 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     if (!validSetupType(form.setupType)) { setMessage({kind:'error',text:'A valid Setup Type is required. Enter a custom setup when Other / Custom is selected.'}); return; }
     const dateError = invalidAssetDateMessage(form, Object.keys(machineDateFieldLabels) as (keyof AssetForm)[]);
     if (dateError) { setMessage({kind:'error',text:dateError}); return; }
+    const path = editing ? `/api/machine-library/assets/${editing.id}` : '/api/machine-library/assets';
+    const method = editing ? 'PUT' : 'POST';
+    const result=await machineAction.run(()=>api(path,{method,body:JSON.stringify(form)}));
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){
+      setMessage({kind:'error',text:(result.error as Error).message});
+      return;
+    }
     try {
-      const path = editing ? `/api/machine-library/assets/${editing.id}` : '/api/machine-library/assets';
-      const method = editing ? 'PUT' : 'POST';
-      await api(path,{method,body:JSON.stringify(form)});
       setShowEditor(false);
       setMessage({kind:'success',text:editing ? 'Machine asset updated.' : 'Machine asset created.'});
       loadAssets();
@@ -510,7 +517,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         </div>
       </>}
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
-      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
+      {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} actionPhase={machineAction.phase} actionActive={machineAction.active} onReplacement={(asset,field)=>setReplacement({asset,field,installDate:'',reasonNote:''})} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
       {recordLogsAsset&&<AssetMeasurementRecordLogsModal asset={recordLogsAsset} canManageYearFolders={canManageMeasurementYearFolders} onClose={()=>setRecordLogsAsset(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
@@ -526,6 +533,7 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
   const [openSection,setOpenSection]=useState<MachineDetailSectionKey|null>(null);
   const [editingSection,setEditingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [savingSection,setSavingSection]=useState<MachineDetailEditableSectionKey|null>(null);
+  const sectionAction=useActionProgress();
   const [sectionErrors,setSectionErrors]=useState<Partial<Record<MachineDetailEditableSectionKey,string>>>({});
   const [showAssetSpec,setShowAssetSpec]=useState(false);
   const [assetSpecError,setAssetSpecError]=useState('');
@@ -565,31 +573,36 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
   }
   function beginSectionEdit(key: MachineDetailEditableSectionKey) {
     if (!canEdit) return;
+    sectionAction.reset();
     setDraft(assetToForm(currentAsset));
     setOpenSection(key);
     setEditingSection(key);
     setSectionErrors(current=>({...current,[key]:undefined}));
   }
   function cancelSectionEdit() {
+    sectionAction.reset();
     setDraft(assetToForm(currentAsset));
     setEditingSection(null);
   }
   async function saveSection(key: MachineDetailEditableSectionKey) {
-    if (!canEdit || savingSection) return;
-    setSavingSection(key);
+    if (!canEdit || savingSection || sectionAction.active) return;
     setSectionErrors(current=>({...current,[key]:undefined}));
+    if (key === 'basic' && !validSetupType(draft.setupType)) {
+      setSectionErrors(current=>({...current,[key]:'A valid Setup Type is required. Enter a custom setup when Other / Custom is selected.'}));
+      return;
+    }
+    const dateError = invalidAssetDateMessage(draft,machineDetailSectionFields[key]);
+    if (dateError) {
+      setSectionErrors(current=>({...current,[key]:dateError}));
+      return;
+    }
+    setSavingSection(key);
+    const payload = mergeAssetSectionDraft(currentAsset,draft,machineDetailSectionFields[key]);
+    const result=await sectionAction.run(()=>api<{ok:boolean;asset:MachineAsset}>(`/api/machine-library/assets/${currentAsset.id}`,{method:'PUT',body:JSON.stringify(payload)}));
+    if(result.status==='duplicate')return;
     try {
-      if (key === 'basic' && !validSetupType(draft.setupType)) {
-        setSectionErrors(current=>({...current,[key]:'A valid Setup Type is required. Enter a custom setup when Other / Custom is selected.'}));
-        return;
-      }
-      const dateError = invalidAssetDateMessage(draft,machineDetailSectionFields[key]);
-      if (dateError) {
-        setSectionErrors(current=>({...current,[key]:dateError}));
-        return;
-      }
-      const payload = mergeAssetSectionDraft(currentAsset,draft,machineDetailSectionFields[key]);
-      const data = await api<{ok:boolean;asset:MachineAsset}>(`/api/machine-library/assets/${currentAsset.id}`,{method:'PUT',body:JSON.stringify(payload)});
+      if(result.status==='error')throw result.error;
+      const data=result.value;
       setCurrentAsset(data.asset);
       setDraft(assetToForm(data.asset));
       setOpenSection(key);
@@ -742,7 +755,7 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
         const isOpen = isEditing || openSection === section.key;
         const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
-        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} accent={machineDetailAccents[section.key]} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} accent={machineDetailAccents[section.key]} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} actionPhase={editableKey&&editingSection===editableKey?sectionAction.phase:'idle'} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
       <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canManagePm} performedBy={performedBy} />
       <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} />
@@ -751,11 +764,11 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section>{showAssetSpec&&<MachineAssetSpecPreview asset={currentAsset} onClose={()=>setShowAssetSpec(false)} />}</>;
 }
-function MachineDetailAccordionSection({sectionKey,accent,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,error,aside,children}:{sectionKey:MachineDetailSectionKey;accent:MccCategoryAccent;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;error?:string;aside?:ReactNode;children:ReactNode}) {
+function MachineDetailAccordionSection({sectionKey,accent,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,actionPhase='idle',error,aside,children}:{sectionKey:MachineDetailSectionKey;accent:MccCategoryAccent;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;actionPhase?:ActionProgressPhase;error?:string;aside?:ReactNode;children:ReactNode}) {
   const panelId = `machine-detail-panel-${sectionKey}`;
   return <MccCategoryAccordion accent={accent} expanded={expanded} editing={editing}>
     <MccAccordionHeader title={title} summary={summary} status={status} expanded={expanded} controls={panelId} onToggle={onToggle} actions={<>
-        {editing&&<><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onCancel} disabled={saving}>Cancel</button></>}
+        {editing&&<><button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={onSave} disabled={saving} aria-busy={actionPhase==='pending'}><ActionButtonProgress phase={actionPhase} idleLabel="Save" pendingLabel="Saving..." successLabel="Saved" errorLabel="Try Save" /></button><button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onCancel} disabled={saving}>Cancel</button></>}
         {!editing&&actionLabel&&onAction&&<button className="secondary-button compact-button glass-button glass-button--secondary" type="button" onClick={onAction}>{actionLabel}</button>}
       </>} />
     <div className="machine-detail-accordion-panel" id={panelId} aria-hidden={!expanded}>
@@ -915,7 +928,7 @@ function InspectionRecordViewer({asset,record,onClose}:{asset:MachineAsset;recor
     <div className="modal-actions inspection-record-viewer-actions glass-modal__actions">{isImage&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>setFit(current=>!current)}>{fit?'Zoom':'Fit Image'}</button>}<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={download} disabled={!url}>{isImage?'Download Image':'Download'}</button>{isImage?<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={printImage} disabled={!url}>Print / Save as PDF</button>:<><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={openOriginal} disabled={!url}>Open Original</button>{isPdf&&<button className="secondary-button glass-button glass-button--secondary" type="button" onClick={openOriginal} disabled={!url}>Print</button>}</>}<button className="link-button glass-button glass-button--secondary" type="button" onClick={onClose}>Close</button></div>
   </section></div>,document.body);
 }
-function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,canDisable,asset,onReplacement,onRecordLogs,onDisable}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;canDisable:boolean;asset:MachineAsset|null;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onRecordLogs:(asset:MachineAsset)=>void;onDisable:(asset:MachineAsset)=>void|Promise<void>}) {
+function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,canDisable,asset,actionPhase,actionActive,onReplacement,onRecordLogs,onDisable}:{form:AssetForm;setField:<K extends keyof AssetForm>(key:K,value:AssetForm[K])=>void;onClose:()=>void;onSubmit:(event:FormEvent)=>void;canEdit:boolean;canDisable:boolean;asset:MachineAsset|null;actionPhase:ActionProgressPhase;actionActive:boolean;onReplacement:(asset:MachineAsset,field:ReplacementField)=>void;onRecordLogs:(asset:MachineAsset)=>void;onDisable:(asset:MachineAsset)=>void|Promise<void>}) {
   const disabled = !canEdit;
   const setupChanged = Boolean(asset && (form.hasDoubleShotInjection !== asset.hasDoubleShotInjection || form.hasPlungerInjection !== asset.hasPlungerInjection));
   return <div className="modal-backdrop glass-modal-backdrop" role="dialog" aria-modal="true"><form className="mcc-card machine-modal machine-editor-modal glass-modal-shell mcc-wide-modal" onSubmit={onSubmit}>
@@ -931,7 +944,7 @@ function MachineEditorModal({form,setField,onClose,onSubmit,canEdit,canDisable,a
     {asset&&<ReplacementUpdatesPanel asset={asset} form={form} canEdit={canEdit} onReplacement={onReplacement} />}
     <div className="machine-placeholder-grid"><section>Linked Inventory Parts coming next</section><section>Machine documents coming next</section></div>
     {asset&&canDisable&&asset.status!=='disabled'&&<section className="machine-disable-zone"><div><strong>Deactivate Machine Asset</strong><span>Removes this asset from normal active use while preserving its records, history, PM schedules, and audit trail.</span></div><button className="danger-button" type="button" onClick={()=>void onDisable(asset)}>Disable / Deactivate</button></section>}
-    <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={!canEdit}>{asset?'Save Machine Asset':'Create Machine Asset'}</button></div>
+    <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="submit" disabled={!canEdit||actionActive} aria-busy={actionPhase==='pending'}><ActionButtonProgress phase={actionPhase} idleLabel={asset?'Save Machine Asset':'Create Machine Asset'} pendingLabel={asset?'Saving Machine...':'Creating Machine...'} successLabel={asset?'Machine Saved':'Machine Created'} errorLabel="Try Machine Save" /></button></div>
   </form></div>;
 }
 function InjectionSetupModal({setup,setSetup,onContinue,onCancel}:{setup:InjectionSetupDraft;setSetup:Dispatch<SetStateAction<InjectionSetupDraft>>;onContinue:()=>void;onCancel:()=>void}) {

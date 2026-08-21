@@ -1,5 +1,6 @@
 import { type FormEvent, type UIEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { withJsonRequestDefaults } from '../../apiRequest';
+import { ActionButtonProgress, useActionProgress } from '../../components/ActionProgress';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusPill, MccTextLink, type MccSemanticVariant } from '../../components/MccPills';
 import { hasPermission } from '../../permissions';
@@ -469,7 +470,8 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   const [editingPart,setEditingPart]=useState<InventoryPart|null>(null);
   const [form,setForm]=useState<PartForm>(blankForm);
   const [formError,setFormError]=useState('');
-  const [saving,setSaving]=useState(false);
+  const inventoryAction=useActionProgress();
+  const saving=inventoryAction.active;
   const [stagingParts,setStagingParts]=useState<InventoryPart[]>([]);
   const [stagingQuantities,setStagingQuantities]=useState<Record<string,string>>({});
   const [stagingBatches,setStagingBatches]=useState<RequisitionBatch[]>([]);
@@ -930,6 +932,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
 
   function openAdd(){
     if (!writeEnabled) return;
+    inventoryAction.reset();
     setModal('add');
     setEditingPart(null);
     setForm(blankForm);
@@ -939,6 +942,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
 
   function openEdit(part: InventoryPart){
     if (!writeEnabled) return;
+    inventoryAction.reset();
     setModal('edit');
     setEditingPart(part);
     setForm(formFromPart(part));
@@ -952,6 +956,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
     setEditingPart(null);
     setForm(blankForm);
     setFormError('');
+    inventoryAction.reset();
   }
 
   async function openStaging(partOrParts: InventoryPart|InventoryPart[]) {
@@ -1055,15 +1060,20 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
     }
     const normalizedForm = existingVendor.companyName !== enteredVendor ? {...form,vendor:existingVendor.companyName} : form;
     if (existingVendor.companyName !== enteredVendor) setForm(normalizedForm);
-    setSaving(true);
     setNotice(null);
     const payload = JSON.stringify(payloadFromForm(normalizedForm));
     const isEdit = modal === 'edit' && editingPart;
-    try {
-      const result = await api<{ part?: InventoryPart }>(isEdit ? `/api/inventory/native/parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/native/parts', {
+    const actionResult=await inventoryAction.run(()=>api<{ part?: InventoryPart }>(isEdit ? `/api/inventory/native/parts/${encodeURIComponent(editingPart.id)}` : '/api/inventory/native/parts', {
         method: isEdit ? 'PATCH' : 'POST',
         body: payload,
-      });
+      }));
+    if(actionResult.status==='duplicate')return;
+    if(actionResult.status==='error'){
+      setFormError((actionResult.error as Error).message);
+      return;
+    }
+    try {
+      const result=actionResult.value;
       closeModal(true);
       const savedPart = result.part;
       const messagePartNumber = savedPart?.partNumber || form.partNumber.trim();
@@ -1077,8 +1087,6 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
       }
     } catch (err) {
       setFormError((err as Error).message);
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -1511,7 +1519,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
             {formError&&<p className="form-message error">{formError}</p>}
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={()=>closeModal()}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':modal==='edit'?'Save Changes':'Add Part'}</button>
+              <button className="primary-button" type="submit" disabled={saving} aria-busy={inventoryAction.pending}><ActionButtonProgress phase={inventoryAction.phase} idleLabel={modal==='edit'?'Save Changes':'Add Part'} pendingLabel={modal==='edit'?'Saving Changes...':'Adding Part...'} successLabel={modal==='edit'?'Changes Saved':'Part Added'} errorLabel="Try Part Save" /></button>
             </div>
           </form>
         </div>

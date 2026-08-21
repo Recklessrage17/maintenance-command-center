@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { withJsonRequestDefaults } from '../../apiRequest';
+import { ActionButtonProgress, useActionProgress } from '../../components/ActionProgress';
 
 type NetworkLinks = {
   accessMode?: 'https' | 'development';
@@ -862,6 +863,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
   const [brandingMsg,setBrandingMsg]=useState('');
   const [brandingLoading,setBrandingLoading]=useState(false);
+  const brandingAction=useActionProgress();
+  const [brandingActionKind,setBrandingActionKind]=useState<'save'|'reset'|null>(null);
   const [resetStatus,setResetStatus]=useState<ResetStatus|null>(null);
   const [resetMsg,setResetMsg]=useState('');
   const [resetModal,setResetModal]=useState<ResetModalState|null>(null);
@@ -873,6 +876,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   useEffect(()=>{
     if (!sharedNetworkUrl) setMobileQrOpen(false);
   },[sharedNetworkUrl]);
+  useEffect(()=>{if(brandingAction.phase==='idle')setBrandingActionKind(null);},[brandingAction.phase]);
   const backupPermissions = backupStatus?.permissions ?? emptyBackupPermissions;
   const displayedBackupResult = lastManualBackupResult ?? backupStatus?.lastBackupResult ?? null;
   const portableRestoreActive=Boolean(portableRestoreStatus?.state==='running'||(recoveryRestoreTarget&&portableLoading&&!portableRestoreStatus));
@@ -993,19 +997,19 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   }
 
   async function saveBranding(nextBranding = branding, resetToDefault = false) {
-    setBrandingLoading(true);
     setBrandingMsg('');
-    try {
-      const data = await api('/api/settings/branding',{method:'PUT',body:JSON.stringify(resetToDefault ? {resetToDefault:true} : nextBranding)});
-      const saved = normalizeBranding(data.branding);
-      setBranding(saved);
-      window.dispatchEvent(new CustomEvent('mcc-branding-updated',{detail:saved}));
-      setBrandingMsg(String(data.message ?? 'Company branding saved.'));
-    } catch (e) {
-      setBrandingMsg((e as Error).message);
-    } finally {
-      setBrandingLoading(false);
-    }
+    const result=await brandingAction.run(async()=>{
+      setBrandingActionKind(resetToDefault?'reset':'save');
+      setBrandingLoading(true);
+      try{return await api('/api/settings/branding',{method:'PUT',body:JSON.stringify(resetToDefault ? {resetToDefault:true} : nextBranding)});}
+      finally{setBrandingLoading(false);}
+    });
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){setBrandingMsg((result.error as Error).message);return;}
+    const saved = normalizeBranding(result.value.branding);
+    setBranding(saved);
+    window.dispatchEvent(new CustomEvent('mcc-branding-updated',{detail:saved}));
+    setBrandingMsg(String(result.value.message ?? 'Company branding saved.'));
   }
 
   async function uploadLogo(event: ChangeEvent<HTMLInputElement>) {
@@ -1583,8 +1587,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
         </div>
 
         <div className="backup-action-row">
-          <button className="primary-button compact-button" type="button" onClick={()=>void saveBranding()} disabled={!isOwnerAdmin || brandingLoading || !branding.companyName.trim()}>{brandingLoading ? 'Saving...' : 'Save Branding'}</button>
-          <button className="secondary-button compact-button" type="button" onClick={()=>void saveBranding(defaultBranding,true)} disabled={!isOwnerAdmin || brandingLoading}>Reset to Default MCC</button>
+          <button className="primary-button compact-button" type="button" onClick={()=>void saveBranding()} disabled={!isOwnerAdmin || brandingLoading || !branding.companyName.trim()} aria-busy={brandingActionKind==='save'&&brandingAction.pending}><ActionButtonProgress phase={brandingActionKind==='save'?brandingAction.phase:'idle'} idleLabel="Save Branding" pendingLabel="Saving Branding..." successLabel="Branding Saved" errorLabel="Try Branding Save" /></button>
+          <button className="secondary-button compact-button" type="button" onClick={()=>void saveBranding(defaultBranding,true)} disabled={!isOwnerAdmin || brandingLoading} aria-busy={brandingActionKind==='reset'&&brandingAction.pending}><ActionButtonProgress phase={brandingActionKind==='reset'?brandingAction.phase:'idle'} idleLabel="Reset to Default MCC" pendingLabel="Resetting Branding..." successLabel="Branding Reset" errorLabel="Try Branding Reset" /></button>
         </div>
         {!isOwnerAdmin&&<p className="form-help">Owner Admin access is required to change branding.</p>}
         {brandingMsg&&<p className="form-message">{brandingMsg}</p>}

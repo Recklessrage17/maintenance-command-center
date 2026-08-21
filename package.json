@@ -60,6 +60,7 @@
     "test:dashboard-requisitions": "playwright test tests/dashboard-requisition-metrics.spec.ts",
     "test:requisitions": "playwright test tests/requisitions-lifecycle.spec.ts",
     "test:requisitions-api": "node tests/requisition-status-api.mjs",
+    "test:action-progress": "playwright test tests/issue-80-action-progress.spec.ts",
     "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",
     "test:background": "playwright test tests/maintenance-lab-background.spec.ts"
   },

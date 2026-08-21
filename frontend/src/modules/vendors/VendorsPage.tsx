@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { withJsonRequestDefaults } from '../../apiRequest';
+import { ActionButtonProgress, type ActionProgressPhase, useActionProgress } from '../../components/ActionProgress';
 import { MccContactPill, MccLinkPill, MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
 import { hasPermission } from '../../permissions';
 import {
@@ -513,7 +514,7 @@ export function VendorDetailModal({vendor,onClose,onEdit,onEmailCopied}:{vendor:
   );
 }
 
-export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,error=''}:{mode:'add'|'edit';initial:VendorForm;onClose:()=>void;onSave:(form:VendorForm)=>void|Promise<void>;saving?:boolean;error?:string}) {
+export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,error='',actionPhase}:{mode:'add'|'edit';initial:VendorForm;onClose:()=>void;onSave:(form:VendorForm)=>void|Promise<void>;saving?:boolean;error?:string;actionPhase?:ActionProgressPhase}) {
   const [form,setForm]=useState<VendorForm>(initial);
   const [localError,setLocalError]=useState('');
   const [fieldError,setFieldError]=useState<{field?:string;message?:string}>({});
@@ -525,6 +526,7 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if(saving)return;
     const validation = validateVendorFormDetails(form, initial.isActive && !form.isActive);
     setLocalError(validation.message);
     setFieldError(validation.field ? {field:validation.field,message:validation.message} : {});
@@ -621,7 +623,7 @@ export function VendorEditorModal({mode,initial,onClose,onSave,saving=false,erro
         {(localError||error)&&<p className="form-message error">{localError||error}</p>}
         <div className="modal-actions">
           <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={saving}>{saving?'Saving...':mode === 'edit' ? 'Save Vendor' : 'Add Vendor'}</button>
+          <button className="primary-button" type="submit" disabled={saving} aria-busy={actionPhase==='pending'}><ActionButtonProgress phase={actionPhase??(saving?'pending':'idle')} idleLabel={mode === 'edit' ? 'Save Vendor' : 'Add Vendor'} pendingLabel={mode === 'edit'?'Saving Vendor...':'Adding Vendor...'} successLabel={mode === 'edit'?'Vendor Saved':'Vendor Added'} errorLabel="Try Vendor Save" /></button>
         </div>
       </form>
     </div>
@@ -677,7 +679,8 @@ export function VendorsPage({userRole='',effectivePermissions}:{userRole?:string
   const [editingVendor,setEditingVendor]=useState<VendorRecord|null>(null);
   const [adding,setAdding]=useState(false);
   const [showDeleted,setShowDeleted]=useState(false);
-  const [saving,setSaving]=useState(false);
+  const vendorAction=useActionProgress();
+  const saving=vendorAction.active;
   const [formError,setFormError]=useState('');
 
   async function loadVendors(nextSearch = search) {
@@ -713,23 +716,28 @@ export function VendorsPage({userRole='',effectivePermissions}:{userRole?:string
   }
 
   async function saveVendor(form: VendorForm) {
-    setSaving(true);
     setFormError('');
-    try {
+    const result=await vendorAction.run(async()=>{
       const payload = JSON.stringify(vendorPayloadFromForm(form));
-      const data = await api<VendorResponse>(editingVendor ? `/api/vendors/${editingVendor.id}` : '/api/vendors', {
+      return api<VendorResponse>(editingVendor ? `/api/vendors/${editingVendor.id}` : '/api/vendors', {
         method: editingVendor ? 'PUT' : 'POST',
         body: payload,
       });
+    });
+    if(result.status==='duplicate')return;
+    if(result.status==='error'){
+      setFormError((result.error as Error).message);
+      return;
+    }
+    const data=result.value;
+    try {
       setAdding(false);
       setEditingVendor(null);
       setDetailVendor(data.vendor ?? null);
       setNotice({kind:'success',text:`Vendor saved: ${data.vendor?.companyName ?? form.companyName}`});
       await loadVendors(search);
     } catch (err) {
-      setFormError((err as Error).message);
-    } finally {
-      setSaving(false);
+      setNotice({kind:'error',text:(err as Error).message});
     }
   }
 
@@ -756,7 +764,7 @@ export function VendorsPage({userRole='',effectivePermissions}:{userRole?:string
           <button className="secondary-button" type="button" onClick={()=>loadVendors(search)} disabled={loading}>{loading?'Searching...':'Search'}</button>
           <button className="link-button" type="button" onClick={()=>{ setSearch(''); void loadVendors(''); }}>Clear</button>
           <label className="show-deleted-toggle vendor-deleted-toggle"><input type="checkbox" checked={showDeleted} onChange={event=>setShowDeleted(event.target.checked)} /> Show Deleted</label>
-          <button className="primary-button" type="button" onClick={()=>{ setAdding(true); setEditingVendor(null); setFormError(''); }}>Add Vendor</button>
+          <button className="primary-button" type="button" onClick={()=>{ vendorAction.reset(); setAdding(true); setEditingVendor(null); setFormError(''); }}>Add Vendor</button>
         </div>
       </section>
 
@@ -770,7 +778,7 @@ export function VendorsPage({userRole='',effectivePermissions}:{userRole?:string
                 key={vendor.id}
                 vendor={vendor}
                 onView={()=>setDetailVendor(vendor)}
-                onEdit={()=>{ setEditingVendor(vendor); setAdding(false); setFormError(''); }}
+                onEdit={()=>{ vendorAction.reset(); setEditingVendor(vendor); setAdding(false); setFormError(''); }}
                 onDelete={()=>deleteVendor(vendor)}
                 onContacts={()=>setContactsVendor(vendor)}
                 onEmailCopied={copiedEmail}
@@ -780,9 +788,9 @@ export function VendorsPage({userRole='',effectivePermissions}:{userRole?:string
         )}
       </section>
 
-      {detailVendor&&<VendorDetailModal vendor={detailVendor} onClose={()=>setDetailVendor(null)} onEmailCopied={copiedEmail} onEdit={()=>{ setEditingVendor(detailVendor); setDetailVendor(null); setFormError(''); }} />}
+      {detailVendor&&<VendorDetailModal vendor={detailVendor} onClose={()=>setDetailVendor(null)} onEmailCopied={copiedEmail} onEdit={()=>{ vendorAction.reset(); setEditingVendor(detailVendor); setDetailVendor(null); setFormError(''); }} />}
       {contactsVendor&&<VendorContactsModal vendor={contactsVendor} onClose={()=>setContactsVendor(null)} onVendorUpdated={updateVendorInState} onEmailCopied={copiedEmail} canEdit={canEditContacts} canDelete={canDeleteContacts} />}
-      {(adding||editingVendor)&&<VendorEditorModal mode={editingVendor ? 'edit' : 'add'} initial={editorInitial} onClose={()=>{ if(!saving){ setAdding(false); setEditingVendor(null); setFormError(''); } }} onSave={saveVendor} saving={saving} error={formError} />}
+      {(adding||editingVendor)&&<VendorEditorModal mode={editingVendor ? 'edit' : 'add'} initial={editorInitial} onClose={()=>{ if(!saving){ setAdding(false); setEditingVendor(null); setFormError(''); vendorAction.reset(); } }} onSave={saveVendor} saving={saving} error={formError} actionPhase={vendorAction.phase} />}
     </div>
   );
 }

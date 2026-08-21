@@ -565,6 +565,18 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .pm-technician-results > button { display:grid; gap:2px; padding:8px 10px; border:1px solid rgba(133,199,220,.18); border-radius:8px; color:#eaf8fb; background:rgba(13,42,58,.7); text-align:left; cursor:pointer; }
 .pm-technician-results > button:hover,.pm-technician-results > button:focus-visible { border-color:rgba(68,215,255,.62); background:rgba(16,61,79,.8); }
 .pm-technician-results > span { padding:8px; color:#9bb6c0; }
+.action-button-progress { display:inline-grid; grid-template-columns:14px minmax(0,auto); align-items:center; justify-content:center; gap:7px; min-width:0; }
+.action-button-progress__indicator { position:relative; width:14px; height:14px; box-sizing:border-box; border:2px solid transparent; border-radius:50%; opacity:0; }
+.action-button-progress__labels { display:grid; align-items:center; justify-items:center; min-width:0; }
+.action-button-progress__labels > span { grid-area:1/1; visibility:hidden; white-space:nowrap; }
+.action-button-progress__labels > span.is-current { visibility:visible; }
+.action-button-progress--pending .action-button-progress__indicator { opacity:1; border-color:rgba(181,248,220,.28); border-top-color:#83efbd; animation:action-progress-spin .7s linear infinite; }
+.action-button-progress--success .action-button-progress__indicator { opacity:1; border-color:#5de0a6; background:linear-gradient(145deg,#50d99d,#17865d); box-shadow:0 0 0 3px rgba(80,217,157,.12),0 0 12px rgba(80,217,157,.38); animation:action-progress-success-pop .38s cubic-bezier(.2,.9,.24,1.35) both; }
+.action-button-progress--success .action-button-progress__indicator::after { content:''; position:absolute; left:3px; top:1px; width:4px; height:7px; border:solid #f2fff9; border-width:0 2px 2px 0; transform:rotate(45deg); }
+.action-button-progress--error .action-button-progress__indicator { opacity:1; border-color:#ff8c9f; background:rgba(126,25,48,.72); box-shadow:0 0 9px rgba(255,91,119,.22); }
+.action-button-progress--error .action-button-progress__indicator::after { content:'!'; position:absolute; inset:-3px 0 0; display:grid; place-items:center; color:#fff3f5; font-size:9px; font-weight:1000; }
+@keyframes action-progress-spin { to { transform:rotate(360deg); } }
+@keyframes action-progress-success-pop { 0% { transform:scale(.72); } 58% { transform:scale(1.22); } 100% { transform:scale(1); } }
 .pm-delete-backdrop { background:radial-gradient(circle at 50% 18%,rgba(164,54,78,.16),transparent 38%),rgba(1,8,15,.76); backdrop-filter:blur(15px) saturate(120%); }
 .pm-delete-modal { width:min(680px,100%); overflow:hidden; border-color:rgba(255,126,145,.32); border-radius:24px; background:linear-gradient(155deg,rgba(35,49,59,.94),rgba(11,21,30,.97) 48%,rgba(28,14,23,.97)); box-shadow:0 30px 90px rgba(0,0,0,.62),0 0 42px rgba(255,70,100,.08),inset 0 1px 0 rgba(255,255,255,.12); }
 .pm-delete-modal form { display:grid; gap:18px; }
@@ -628,6 +640,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .dashboard-pm-actions > button { width:100%; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .action-button-progress__indicator { animation:none !important; transition:none !important; }
   .pm-action-progress,.pm-more-menu-popover button,.pm-task-grid { animation:none; transition:none; }
   .pm-excel-download-button,.pm-excel-download-button .pm-action-button-spinner { animation:none; transition:none; }
   .pm-excel-download-button .pm-action-button-spinner { border-color:rgba(181,248,220,.42); border-top-color:#83efbd; }
