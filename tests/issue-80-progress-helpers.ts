@@ -16,12 +16,32 @@ export function actionProgress(button:Locator){
   return button.locator('.action-button-progress');
 }
 
+export async function expectCurrentActionLabelInsideButton(button:Locator){
+  const label=actionProgress(button).locator('.action-button-progress__labels > .is-current');
+  await expect(label).toBeVisible();
+  const buttonBox=await button.boundingBox();
+  const labelBox=await label.boundingBox();
+  const indicatorBox=await actionProgress(button).locator('.action-button-progress__indicator').boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(labelBox).not.toBeNull();
+  expect(indicatorBox).not.toBeNull();
+  expect(labelBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
+  expect(labelBox!.y+labelBox!.height).toBeLessThanOrEqual(buttonBox!.y+buttonBox!.height);
+  const buttonCenter=buttonBox!.y+buttonBox!.height/2;
+  const labelCenter=labelBox!.y+labelBox!.height/2;
+  const indicatorCenter=indicatorBox!.y+indicatorBox!.height/2;
+  expect(Math.abs(labelCenter-buttonCenter)).toBeLessThanOrEqual(1);
+  expect(Math.abs(indicatorCenter-labelCenter)).toBeLessThanOrEqual(1);
+  return buttonBox!;
+}
+
 export async function expectActionPending(button:Locator){
   await expect(button).toBeDisabled();
   await expect(button).toHaveAttribute('aria-busy','true');
   await expect(actionProgress(button)).toHaveAttribute('data-action-progress','pending');
   await expect(actionProgress(button).locator('[data-action-progress-indicator="pending"]')).toBeVisible();
   await expect(button).not.toContainText('%');
+  await expectCurrentActionLabelInsideButton(button);
 }
 
 export async function expectCompactActionRow(button:Locator,cancel:Locator){
@@ -41,6 +61,7 @@ export async function expectCompactActionRow(button:Locator,cancel:Locator){
   expect(progressBox!.height).toBeLessThanOrEqual(16);
   expect(progressBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
   expect(progressBox!.y+progressBox!.height).toBeLessThanOrEqual(buttonBox!.y+buttonBox!.height);
+  await expectCurrentActionLabelInsideButton(button);
 
   const before=await cancel.evaluate(element=>{
     const style=getComputedStyle(element);

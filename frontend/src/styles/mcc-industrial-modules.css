@@ -4031,7 +4031,29 @@ body {
 ) button > .action-button-progress > .action-button-progress__labels {
   height: 14px;
   max-height: 14px;
+  margin: 0;
+  padding: 0;
   line-height: 14px;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button > .action-button-progress {
+  display: inline-grid;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button > .action-button-progress > .action-button-progress__labels {
+  display: grid;
 }
 
 :is(
@@ -4045,6 +4067,17 @@ body {
   margin: 0;
   padding: 0;
   line-height: 14px;
+}
+
+:is(
+  .mcc-shell,
+  .auth-shell,
+  .modal-backdrop,
+  .mcc-modal-backdrop,
+  .glass-modal-backdrop
+) button > .action-button-progress > .action-button-progress__indicator {
+  margin: 0;
+  padding: 0;
 }
 
 :is(

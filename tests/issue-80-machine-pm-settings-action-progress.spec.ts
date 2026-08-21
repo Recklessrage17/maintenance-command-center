@@ -1,5 +1,5 @@
 import {expect,type Page,test} from '@playwright/test';
-import {actionProgress,deferred,expectActionPending,fulfill,issue80Auth,issue80MachineAsset} from './issue-80-progress-helpers';
+import {actionProgress,deferred,expectActionPending,expectCurrentActionLabelInsideButton,fulfill,issue80Auth,issue80MachineAsset} from './issue-80-progress-helpers';
 
 async function openBrandColors(page:Page){
   await page.getByRole('button',{name:'Machine Library tools'}).click();
@@ -90,7 +90,7 @@ test('One-request Requisition batch and staged-item CRUD use shared progress whi
     return fulfill(route,{ok:true,requisitions:[],summary:{requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0}});
   });
   await page.goto('/requisitions');await page.getByRole('button',{name:'Create Requisition Batch'}).click();let modal=page.locator('.staging-editor-modal').filter({has:page.getByRole('heading',{name:'Create Requisition Batch'})});await modal.getByLabel(/Batch Name/).fill('Issue 80 Batch');let button=modal.locator('button[type="submit"]');
-  await button.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});await expect.poll(()=>batchRequests).toBe(1);await expectActionPending(button);batchGate.release();await expect(actionProgress(button)).toHaveAttribute('data-action-progress','success');await expect(page.locator('.active-requisition-batch-heading')).toContainText('Issue 80 Batch');
+  await expectCurrentActionLabelInsideButton(button);await button.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});await expect.poll(()=>batchRequests).toBe(1);await expectActionPending(button);batchGate.release();await expect(actionProgress(button)).toHaveAttribute('data-action-progress','success');await expectCurrentActionLabelInsideButton(button);await expect(page.locator('.active-requisition-batch-heading')).toContainText('Issue 80 Batch');
 
   await page.getByRole('button',{name:'Manually Add Item'}).first().click();modal=page.locator('.staging-editor-modal').filter({has:page.getByRole('heading',{name:'Add staged item'})});await modal.getByRole('textbox',{name:'Part Number *',exact:true}).fill('STAGED-80');await modal.getByRole('textbox',{name:'Description *',exact:true}).fill('Shared progress staged item');await modal.getByRole('textbox',{name:'Vendor *',exact:true}).fill('Issue 80 Supply');await modal.getByLabel(/Quantity Requested/).fill('2');button=modal.locator('button[type="submit"]');
   await button.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});await expect.poll(()=>itemRequests).toBe(1);await expectActionPending(button);itemGate.release();await expect(actionProgress(button)).toHaveAttribute('data-action-progress','success');await expect(page.getByText('STAGED-80',{exact:true})).toBeVisible();

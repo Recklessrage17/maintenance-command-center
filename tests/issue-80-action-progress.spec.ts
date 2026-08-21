@@ -1,5 +1,5 @@
 import {expect,type Locator,type Page,type Route,test} from '@playwright/test';
-import {expectCompactActionRow} from './issue-80-progress-helpers';
+import {expectCompactActionRow,expectCurrentActionLabelInsideButton} from './issue-80-progress-helpers';
 
 type Deferred={promise:Promise<void>;release:()=>void};
 
@@ -22,6 +22,7 @@ async function expectPending(button:Locator){
   await expect(progress(button)).toHaveAttribute('data-action-progress','pending');
   await expect(progress(button).locator('[data-action-progress-indicator="pending"]')).toBeVisible();
   await expect(button).not.toContainText('%');
+  await expectCurrentActionLabelInsideButton(button);
 }
 
 function vendor(id:number,companyName:string){
@@ -62,7 +63,7 @@ test('Vendor create/edit shows stable pending/success/error states, blocks dupli
   expect(await progress(button).locator('.action-button-progress__indicator').evaluate(element=>getComputedStyle(element).animationName)).toBe('none');
   gate.release();
   await expect(progress(button)).toHaveAttribute('data-action-progress','success');
-  activeBox=(await button.boundingBox())!;
+  activeBox=await expectCurrentActionLabelInsideButton(button);
   expect(Math.abs(activeBox.width-idleBox.width)).toBeLessThanOrEqual(1);
   expect(Math.abs(activeBox.height-idleBox.height)).toBeLessThanOrEqual(1);
   expect(await progress(button).locator('.action-button-progress__indicator').evaluate(element=>getComputedStyle(element).animationName)).toBe('none');
@@ -78,6 +79,7 @@ test('Vendor create/edit shows stable pending/success/error states, blocks dupli
   await expectPending(editButton);
   gate.release();
   await expect(progress(editButton)).toHaveAttribute('data-action-progress','error');
+  await expectCurrentActionLabelInsideButton(editButton);
   await expect(editModal.getByText('Vendor save failed safely.')).toBeVisible();
   await expect(editButton).toBeEnabled();
   await expect(progress(editButton)).not.toHaveAttribute('data-action-progress','success');
@@ -132,10 +134,12 @@ test('Inventory create/edit shows pending/success/error and prevents duplicate i
   const editModal=page.locator('.inventory-modal');
   await editModal.getByLabel(/Description/).fill('Edit must fail');
   const editButton=editModal.locator('button[type="submit"]');
+  await expectCurrentActionLabelInsideButton(editButton);
   await editButton.click();
   await expectPending(editButton);
   gate.release();
   await expect(progress(editButton)).toHaveAttribute('data-action-progress','error');
+  await expectCurrentActionLabelInsideButton(editButton);
   await expect(editModal.getByText('Inventory save failed safely.')).toBeVisible();
   await expect(editButton).toBeEnabled();
   await expect(progress(editButton)).not.toHaveAttribute('data-action-progress','success');
