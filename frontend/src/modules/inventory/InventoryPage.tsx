@@ -32,6 +32,7 @@ type InventoryPart = {
   supplierPartNumber: string;
   leadTime: string;
   importantNote: string;
+  obsolete: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -148,6 +149,7 @@ type PartForm = {
   supplierPartNumber: string;
   leadTime: string;
   importantNote: string;
+  obsolete: boolean;
 };
 
 const blankForm: PartForm = {
@@ -163,6 +165,7 @@ const blankForm: PartForm = {
   supplierPartNumber: '',
   leadTime: '',
   importantNote: '',
+  obsolete: false,
 };
 
 function blankRequisitionForm(userFullName = ''): RequisitionHeaderForm {
@@ -384,6 +387,7 @@ function formFromPart(part: InventoryPart): PartForm {
     supplierPartNumber: part.supplierPartNumber ?? '',
     leadTime: part.leadTime ?? '',
     importantNote: part.importantNote ?? '',
+    obsolete: Boolean(part.obsolete),
   };
 }
 
@@ -446,6 +450,7 @@ function payloadFromForm(form: PartForm) {
     supplierPartNumber: form.supplierPartNumber.trim(),
     leadTime: form.leadTime.trim(),
     importantNote: form.importantNote.trim(),
+    obsolete: form.obsolete,
   };
 }
 
@@ -1400,9 +1405,9 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
             <tbody>
               {visibleParts.map(part=>{
                 const highlighted = activeHighlightedPartIds.has(part.id);
-                const rowClassName = [selectedPartIds.has(part.id) ? 'inventory-row-selected' : '', highlighted ? 'inventory-row-new' : ''].filter(Boolean).join(' ') || undefined;
+                const rowClassName = [part.obsolete ? 'inventory-row-obsolete' : '', selectedPartIds.has(part.id) ? 'inventory-row-selected' : '', highlighted ? 'inventory-row-new' : ''].filter(Boolean).join(' ') || undefined;
                 return (
-                  <tr key={part.id} className={rowClassName}>
+                  <tr key={part.id} className={rowClassName} data-obsolete={part.obsolete ? 'true' : 'false'}>
                     <td>
                       <div className="part-number-stack">
                         {renderPartNumber(part)}
@@ -1427,7 +1432,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
                     </td>
                     <td>{part.quantity}</td>
                     <td className="inventory-cost-cell">{formatCurrency(part.unitCost)}</td>
-                    <td className="inventory-status-cell"><div className="inventory-status-stack"><MccStatusPill variant={inventoryStatusVariant(part.status)} className={inventoryStatusClass(part.status)}>{part.status}</MccStatusPill></div></td>
+                    <td className="inventory-status-cell"><div className="inventory-status-stack"><MccStatusPill variant={inventoryStatusVariant(part.status)} className={inventoryStatusClass(part.status)}>{part.status}</MccStatusPill>{part.obsolete&&<MccStatusPill variant="danger" className="inventory-obsolete-badge">OBSOLETE</MccStatusPill>}</div></td>
                     {showWriteActions&&(
                       <td className="inventory-actions-column">
                         <div className="inventory-row-actions">
@@ -1502,6 +1507,22 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
                 <legend>Notes</legend>
                 <label className="form-field"><span>Important Note</span><textarea value={form.importantNote} onChange={event=>setForm({...form,importantNote:event.target.value})} placeholder="Important note shown in red under description" /></label>
               </fieldset>
+              {modal==='edit'&&<fieldset className="inventory-form-section inventory-lifecycle-section">
+                <legend>Lifecycle</legend>
+                <button
+                  className={form.obsolete?'inventory-obsolete-toggle is-on':'inventory-obsolete-toggle'}
+                  type="button"
+                  role="switch"
+                  aria-checked={form.obsolete}
+                  aria-label="Obsolete"
+                  onClick={()=>setForm(current=>({...current,obsolete:!current.obsolete}))}
+                >
+                  <span className="inventory-obsolete-toggle__track" aria-hidden="true"><span /></span>
+                  <span className="inventory-obsolete-toggle__copy"><strong>Obsolete</strong><small>{form.obsolete?'Flagged as discontinued':'Active inventory record'}</small></span>
+                  <span className="inventory-obsolete-toggle__state" aria-hidden="true">{form.obsolete?'On':'Off'}</span>
+                </button>
+                <p className="inventory-obsolete-help">The part stays searchable with all history and references intact.</p>
+              </fieldset>}
             </div>
 
             <datalist id="native-location-options">

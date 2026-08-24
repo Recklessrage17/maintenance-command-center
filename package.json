@@ -62,6 +62,8 @@
     "test:requisitions-api": "node tests/requisition-status-api.mjs",
     "test:action-progress": "playwright test tests/issue-80-action-progress.spec.ts tests/issue-80-admin-action-progress.spec.ts tests/issue-80-facility-assets-action-progress.spec.ts tests/issue-80-machine-pm-settings-action-progress.spec.ts",
     "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",
+    "test:inventory-obsolete-api": "npm run build --prefix backend && node tests/inventory-obsolete-api.mjs",
+    "test:inventory-obsolete": "playwright test tests/issue-106-inventory-obsolete.spec.ts",
     "test:background": "playwright test tests/maintenance-lab-background.spec.ts"
   },
   "engines": {
