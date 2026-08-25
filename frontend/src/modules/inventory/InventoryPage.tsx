@@ -3,6 +3,7 @@ import { withJsonRequestDefaults } from '../../apiRequest';
 import { ActionButtonProgress, useActionProgress } from '../../components/ActionProgress';
 import { MccDateInput, isValidMccDateValue } from '../../components/MccDateInput';
 import { MccStatusPill, MccTextLink, type MccSemanticVariant } from '../../components/MccPills';
+import type { MccPageLiveStatus } from '../../layout/MccLayout';
 import { hasPermission } from '../../permissions';
 import { blankVendorForm, VendorDetailModal, VendorEditorModal, type VendorForm, type VendorRecord, vendorPayloadFromForm } from '../vendors/VendorsPage';
 
@@ -206,6 +207,8 @@ const emptyNativeSummary: NativeSummary = {
 };
 const noticeDurationMs = 5 * 60 * 1000;
 const newPartHighlightMs = 5 * 60 * 1000;
+const inventoryRefreshIntervalMs = 10_000;
+const inventoryUpdatedDurationMs = 650;
 
 async function api<T>(path:string, options:RequestInit={}): Promise<T> {
   const res=await fetch(path,withJsonRequestDefaults(options));
@@ -458,7 +461,7 @@ function vendorNameKey(value: string) {
   return value.trim().toLowerCase();
 }
 
-export function InventoryPage({ userRole, effectivePermissions, userFullName, onBackToDashboard, onOpenRequisitions }: { userRole: string; effectivePermissions?:string[]; userFullName: string; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
+export function InventoryPage({ userRole, effectivePermissions, userFullName, onRefreshStatusChange, onBackToDashboard, onOpenRequisitions }: { userRole: string; effectivePermissions?:string[]; userFullName: string; onRefreshStatusChange: (status:MccPageLiveStatus) => void; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [parts,setParts]=useState<InventoryPart[]>([]);
   const [search,setSearch]=useState('');
@@ -467,10 +470,9 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   const [sortDirection,setSortDirection]=useState<SortDirection>('asc');
   const [pageSize,setPageSize]=useState<PageSize>(100);
   const [page,setPage]=useState(1);
-  const [error,setError]=useState('');
+  const [refreshError,setRefreshError]=useState('');
   const [notice,setNotice]=useState<Notice|null>(null);
   const [loading,setLoading]=useState(true);
-  const [lastRefreshed,setLastRefreshed]=useState<Date|null>(null);
   const [modal,setModal]=useState<ModalMode|null>(null);
   const [editingPart,setEditingPart]=useState<InventoryPart|null>(null);
   const [form,setForm]=useState<PartForm>(blankForm);
@@ -518,7 +520,10 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
   const lastAutoPageAtRef = useRef(0);
   const pendingScrollTargetRef = useRef<'top'|'bottom'|null>(null);
   const noticeIdRef = useRef(0);
-  const lastRefreshStartedAtRef = useRef<Date|null>(null);
+  const refreshPromiseRef = useRef<Promise<boolean>|null>(null);
+  const initialLoadSettledRef = useRef(false);
+  const mountedRef = useRef(true);
+  const updatedStatusTimerRef = useRef(0);
 
   const canWrite = hasPermission(effectivePermissions,'inventory.create',writeRoles.has(userRole))||hasPermission(effectivePermissions,'inventory.edit',writeRoles.has(userRole));
   const canUseInventoryTools = hasPermission(effectivePermissions,'inventory.import',canWrite)||hasPermission(effectivePermissions,'inventory.export',canWrite);
@@ -540,38 +545,49 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
     });
   }
 
-  async function refresh(options: { notify?: boolean } = {}){
-    setLoading(true);
-    setError('');
-    const previousRefreshStartedAt = lastRefreshStartedAtRef.current;
-    const refreshStartedAt = new Date();
+  function publishRefreshStatus(status: MccPageLiveStatus) {
+    if (mountedRef.current) onRefreshStatusChange(status);
+  }
+
+  async function performRefresh(){
+    const initialLoad = !initialLoadSettledRef.current;
+    if (initialLoad) setLoading(true);
+    window.clearTimeout(updatedStatusTimerRef.current);
+    publishRefreshStatus({state:'refreshing',label:'Refreshing Inventory'});
     try {
       const nextNativeSummary = await api<NativeSummaryResponse>('/api/inventory/native/summary');
-      setNativeSummary(normalizeNativeSummary(nextNativeSummary));
       const partsResponse = await api<PartsResponse>('/api/inventory/native/parts');
+      if (!mountedRef.current) return false;
+      setRefreshError('');
+      setNativeSummary(normalizeNativeSummary(nextNativeSummary));
       if (partsResponse.summary) setNativeSummary(normalizeNativeSummary(partsResponse.summary));
       const nextParts = partsResponse.parts ?? [];
       setParts(nextParts);
-      if (options.notify && previousRefreshStartedAt) {
-        const newPartIds = nextParts.filter(part=>{
-          const createdAt = new Date(part.createdAt);
-          return !Number.isNaN(createdAt.getTime()) && createdAt > previousRefreshStartedAt;
-        }).map(part=>part.id);
-        highlightParts(newPartIds);
-        if (newPartIds.length) setPage(1);
-      }
       const refreshedAt = new Date();
-      setLastRefreshed(refreshedAt);
-      lastRefreshStartedAtRef.current = refreshStartedAt;
-      if (options.notify) showNotice('success', `MCC Inventory refreshed at ${formatRefreshTime(refreshedAt)}.`);
+      const refreshedTime = formatRefreshTime(refreshedAt);
+      publishRefreshStatus({state:'updated',label:`Inventory updated at ${refreshedTime}`});
+      updatedStatusTimerRef.current = window.setTimeout(()=>publishRefreshStatus({state:'live',label:`Inventory live. Last updated at ${refreshedTime}`}),inventoryUpdatedDurationMs);
+      return true;
     } catch (err) {
-      setParts([]);
+      if (!mountedRef.current) return false;
       const message = (err as Error).message;
-      setError(message);
-      if (options.notify) showNotice('error', message);
+      setRefreshError(message);
+      publishRefreshStatus({state:'stale',label:`Inventory stale. ${message}`});
+      return false;
     } finally {
-      setLoading(false);
+      initialLoadSettledRef.current = true;
+      if (mountedRef.current && initialLoad) setLoading(false);
     }
+  }
+
+  function refresh({ensureLatest=true}:{ensureLatest?:boolean}={}):Promise<boolean> {
+    const activeRefresh = refreshPromiseRef.current;
+    if (activeRefresh) return ensureLatest ? activeRefresh.then(()=>refresh({ensureLatest:false})) : activeRefresh;
+    const nextRefresh = performRefresh().finally(()=>{
+      if (refreshPromiseRef.current === nextRefresh) refreshPromiseRef.current = null;
+    });
+    refreshPromiseRef.current = nextRefresh;
+    return nextRefresh;
   }
 
   async function loadBackups(){
@@ -632,7 +648,18 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
     showNotice('success', `Vendor saved: ${savedVendor.companyName}`);
   }
 
-  useEffect(()=>{ void refresh(); void loadVendors(); if (canUseInventoryTools) void loadBackups(); },[canUseInventoryTools]);
+  useEffect(()=>{
+    mountedRef.current = true;
+    void refresh({ensureLatest:false});
+    void loadVendors();
+    if (canUseInventoryTools) void loadBackups();
+    const refreshTimer = window.setInterval(()=>{ void refresh({ensureLatest:false}); },inventoryRefreshIntervalMs);
+    return ()=>{
+      mountedRef.current = false;
+      window.clearInterval(refreshTimer);
+      window.clearTimeout(updatedStatusTimerRef.current);
+    };
+  },[canUseInventoryTools]);
   useEffect(()=>{
     if (!notice?.expiresAt) return;
     const delay = Math.max(0, notice.expiresAt - Date.now());
@@ -1235,7 +1262,6 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
       <div className={className}>
         {showWriteActions&&<button className="primary-button" type="button" onClick={openAdd} disabled={!writeEnabled}>Add Part</button>}
         {canUseInventoryTools&&<button className={toolsOpen?'secondary-button inventory-tools-toggle active':'secondary-button inventory-tools-toggle'} type="button" onClick={()=>setToolsOpen(current=>!current)} aria-expanded={toolsOpen} aria-controls="inventory-tools-panel"><span aria-hidden="true">&#9881;</span><span>Tools</span></button>}
-        <button className="secondary-button" type="button" onClick={()=>void refresh({notify:true})} disabled={loading}>Refresh Inventory</button>
         <label className="top-select-field">
           <span>Filter</span>
           <select value={filter} onChange={event=>{ const value = event.target.value; setFilter(value === 'clear' ? 'all' : value as FilterMode); }} aria-label="Inventory filter">
@@ -1279,7 +1305,6 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
         <button className="secondary-button compact-button inventory-back-button" type="button" onClick={onBackToDashboard}>Back to Command Center</button>
         <div className="inventory-focus-title">
           <div className="inventory-focus-meta">
-            <span>Last refreshed: {formatRefreshTime(lastRefreshed)}</span>
             <span>Selected: {selectedParts.length}</span>
           </div>
         </div>
@@ -1293,7 +1318,6 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
         </details>
       </div>
 
-      {error&&<p className="form-message inventory-toast error">{error}</p>}
       {!canWrite&&<p className="form-message inventory-toast error">View-only access.</p>}
 
       {nativeSummary.totalParts===0&&!loading&&(
@@ -1453,7 +1477,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
                   </tr>
                 );
               })}
-              {!loading&&sortedParts.length===0&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">No inventory rows match this view.</td></tr>}
+              {!loading&&sortedParts.length===0&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">{refreshError?'Inventory data is unavailable. Auto-refresh will retry.':'No inventory rows match this view.'}</td></tr>}
               {loading&&<tr><td colSpan={showWriteActions?8:7} className="empty-table-cell">Loading MCC Inventory...</td></tr>}
             </tbody>
           </table>

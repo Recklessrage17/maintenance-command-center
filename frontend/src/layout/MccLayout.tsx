@@ -7,6 +7,10 @@ import {
 import { mccPageMetadata, type MccSection } from './pageMetadata';
 
 export type { MccSection };
+export type MccPageLiveStatus = {
+  state: 'refreshing' | 'updated' | 'live' | 'stale';
+  label: string;
+};
 type BrandingSettings = {
   companyName: string;
   companySubtitle: string;
@@ -38,7 +42,7 @@ function scrubJbtBrandText(value: unknown, fallback = '') {
   return text;
 }
 
-export function MccLayout({activeSection,children,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,allowedSections,onUpdatePassword,onLogout}:{activeSection:MccSection;children:ReactNode;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;allowedSections?:string[];onUpdatePassword:()=>void;onLogout:()=>void}) {
+export function MccLayout({activeSection,children,pageLiveStatus,onSectionChange,onPrefetchSection,user,canManageUsers,canViewHistory,allowedSections,onUpdatePassword,onLogout}:{activeSection:MccSection;children:ReactNode;pageLiveStatus?:MccPageLiveStatus;onSectionChange:(section:MccSection)=>void;onPrefetchSection?:(section:MccSection)=>void;user:{fullName:string;role:string;isOwnerAdmin?:boolean};canManageUsers:boolean;canViewHistory:boolean;allowedSections?:string[];onUpdatePassword:()=>void;onLogout:()=>void}) {
  const navItems=baseNav.filter(i=>(!i.management||canManageUsers) && (i.id !== 'history' || canViewHistory) && (!allowedSections||allowedSections.includes(i.id)));
  const currentPage=mccPageMetadata[activeSection];
  const pageTooltipId=`mcc-page-tooltip-${activeSection}`;
@@ -194,6 +198,7 @@ export function MccLayout({activeSection,children,onSectionChange,onPrefetchSect
      <header className="mcc-page-topbar" aria-label="Current page">
        <div className="mcc-current-page">
          <h1>{currentPage.title}</h1>
+         {pageLiveStatus&&<span className={`inventory-live-indicator inventory-live-indicator--${pageLiveStatus.state}`} data-inventory-live-state={pageLiveStatus.state} role="status" aria-live="polite" aria-label={pageLiveStatus.label} title={pageLiveStatus.label} tabIndex={0}><span className="inventory-live-indicator__visual" aria-hidden="true" /></span>}
          <span className="mcc-page-help-wrap">
            <button className="mcc-page-help" type="button" aria-label={`About ${currentPage.title}`} aria-describedby={pageTooltipId}>i</button>
            <span className="mcc-page-tooltip" id={pageTooltipId} role="tooltip">{currentPage.description}</span>
