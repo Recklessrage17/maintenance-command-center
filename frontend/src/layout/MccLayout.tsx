@@ -167,14 +167,14 @@ export function MccLayout({activeSection,children,pageLiveStatus,onSectionChange
    <MccIndustrialSurfaceBoundary surface="strong" className={inventoryFocus?'mcc-shell command-shell inventory-focus-shell mcc-scrollbar-hidden':'mcc-shell command-shell mcc-scrollbar-hidden'} data-mcc-module={activeSection} style={routeAccentStyle}>
      <MccLegacyDialogManager />
      <div className={launcherOpen?'command-launcher open':'command-launcher'} ref={launcherRef}>
-       <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
+       <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} data-mcc-header-brand aria-label={[branding.companyName,branding.companyAccentText,branding.companySubtitle].filter(Boolean).join(' ')}>
          <div className="mcc-brand-mark">
            {branding.logoMode==='image'&&branding.logoUrl ? (
              <img className="mcc-brand-image" src={branding.logoUrl} alt={`${branding.companyName} logo`} onError={()=>setBranding(defaultBranding)} />
            ) : (
               <strong><span className="mcc-brand-name">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-accent">{branding.companyAccentText}</span>}</strong>
            )}
-           <span>{branding.companySubtitle}</span>
+           <span className="mcc-brand-subtitle">{branding.companySubtitle}</span>
          </div>
        </div>
        <button ref={launcherButtonRef} className="command-launcher-button" type="button" aria-label={launcherOpen?'Close command menu':'Open command menu'} aria-expanded={launcherOpen} aria-controls="command-launcher-menu" onClick={toggleLauncher}>

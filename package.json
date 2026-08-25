@@ -64,6 +64,7 @@
     "test:inventory-part-link": "playwright test tests/inventory-part-info-link.spec.ts",
     "test:inventory-obsolete-api": "npm run build --prefix backend && node tests/inventory-obsolete-api.mjs",
     "test:inventory-obsolete": "playwright test tests/issue-106-inventory-obsolete.spec.ts",
+    "test:mcc-neon-header": "playwright test tests/issue-108-mcc-neon-header.spec.ts",
     "test:background": "playwright test tests/maintenance-lab-background.spec.ts"
   },
   "engines": {
