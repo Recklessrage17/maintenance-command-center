@@ -46,8 +46,10 @@ test('Issue 108 keeps the illuminated MCC lockup and Inventory title geometry st
   });
   expect(visuals.backgroundImage).not.toBe('none');
   expect(visuals.borderColor).not.toBe('rgba(0, 0, 0, 0)');
-  expect(visuals.boxShadow).toContain('68, 215, 255');
-  expect(visuals.textShadow).toContain('68, 215, 255');
+  expect(visuals.boxShadow).toContain('244, 208, 111');
+  expect(visuals.textShadow).toContain('244, 208, 111');
+  expect(visuals.boxShadow).not.toContain('68, 215, 255');
+  expect(visuals.textShadow).not.toContain('68, 215, 255');
   expect(visuals.animationName).toBe('none');
 
   const [brandBox,menuBox,topbarBox,titleBox,liveBox]=await Promise.all([brand.boundingBox(),menu.boundingBox(),topbar.boundingBox(),title.boundingBox(),live.boundingBox()]);

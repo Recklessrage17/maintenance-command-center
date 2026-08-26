@@ -1094,7 +1094,7 @@ body {
 /* Command Deck and approved Teams parity                                     */
 /* -------------------------------------------------------------------------- */
 
-/* Issue 108: illuminated command-center brand lockup. The treatment remains
+/* Issue 108: illuminated golden-amber command-center brand lockup. The treatment remains
    static so the wordmark stays sharp beside the interactive launcher. */
 .command-brand {
   isolation: isolate;
@@ -1105,12 +1105,12 @@ body {
   color: var(--mcc-text-primary);
   background:
     linear-gradient(180deg, var(--mcc-border-inner-highlight), transparent 2px),
-    radial-gradient(circle at 24% 4%, rgba(var(--mcc-accent-info-rgb), 0.18), transparent 52%),
+    radial-gradient(circle at 24% 4%, rgba(var(--mcc-accent-brand-rgb), 0.14), transparent 52%),
     var(--mcc-surface-panel-strong);
   box-shadow:
     var(--mcc-shadow-card),
-    0 0 18px rgba(var(--mcc-accent-info-rgb), 0.08),
-    inset 0 0 18px rgba(var(--mcc-accent-info-rgb), 0.045),
+    0 0 18px rgba(var(--mcc-accent-brand-rgb), 0.065),
+    inset 0 0 18px rgba(var(--mcc-accent-brand-rgb), 0.04),
     var(--mcc-shadow-inset);
   backdrop-filter: blur(14px) saturate(112%);
   -webkit-backdrop-filter: blur(14px) saturate(112%);
@@ -1124,13 +1124,13 @@ body {
   border-radius: 0 var(--mcc-radius-pill) var(--mcc-radius-pill) 0;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--mcc-accent-info) 72%, white),
-    var(--mcc-accent-info) 58%,
-    var(--mcc-accent-info-strong)
+    color-mix(in srgb, var(--mcc-accent-brand) 78%, white),
+    var(--mcc-accent-brand) 58%,
+    var(--mcc-accent-brand-strong)
   );
   box-shadow:
-    0 0 7px rgba(var(--mcc-accent-info-rgb), 0.58),
-    0 0 14px rgba(var(--mcc-accent-info-rgb), 0.2);
+    0 0 7px rgba(var(--mcc-accent-brand-rgb), 0.46),
+    0 0 14px rgba(var(--mcc-accent-brand-rgb), 0.16);
 }
 
 .command-brand::after {
@@ -1140,11 +1140,11 @@ body {
   height: 1px;
   background: linear-gradient(
     90deg,
-    rgba(var(--mcc-accent-info-rgb), 0.58),
-    rgba(var(--mcc-accent-info-rgb), 0.08) 72%,
+    rgba(var(--mcc-accent-brand-rgb), 0.48),
+    rgba(var(--mcc-accent-brand-rgb), 0.07) 72%,
     transparent
   );
-  box-shadow: 0 0 7px rgba(var(--mcc-accent-info-rgb), 0.16);
+  box-shadow: 0 0 7px rgba(var(--mcc-accent-brand-rgb), 0.13);
 }
 
 .command-brand .mcc-brand-mark {
@@ -1165,27 +1165,27 @@ body {
 .command-brand .mcc-brand-name {
   min-width: 0;
   overflow: hidden;
-  color: color-mix(in srgb, var(--mcc-accent-info) 76%, var(--mcc-text-primary));
+  color: color-mix(in srgb, var(--mcc-accent-brand) 82%, var(--mcc-text-primary));
   font-size: 1.38rem;
   font-weight: 950;
   letter-spacing: 0.12em;
   line-height: 0.94;
   text-overflow: ellipsis;
   text-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.34),
-    0 0 4px rgba(var(--mcc-accent-info-rgb), 0.72),
-    0 0 11px rgba(var(--mcc-accent-info-rgb), 0.32),
-    0 0 20px rgba(var(--mcc-accent-info-rgb), 0.12);
+    0 1px 0 rgba(255, 255, 255, 0.28),
+    0 0 4px rgba(var(--mcc-accent-brand-rgb), 0.54),
+    0 0 11px rgba(var(--mcc-accent-brand-rgb), 0.24),
+    0 0 20px rgba(var(--mcc-accent-brand-rgb), 0.08);
   white-space: nowrap;
 }
 
 .command-brand .mcc-brand-accent {
   flex: 0 1 auto;
   overflow: hidden;
-  color: var(--mcc-accent-maintenance);
+  color: var(--mcc-accent-brand);
   font-size: 0.76rem;
   text-overflow: ellipsis;
-  text-shadow: 0 0 8px rgba(var(--mcc-accent-maintenance-rgb), 0.28);
+  text-shadow: 0 0 8px rgba(var(--mcc-accent-brand-rgb), 0.2);
   white-space: nowrap;
 }
 
