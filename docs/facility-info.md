@@ -27,9 +27,9 @@ Images use authenticated browser-native decoding for safe thumbnails and the ful
 
 Defaults:
 
-- `MCC_FACILITY_DOCUMENT_MAX_MB=50`
-- `MCC_FACILITY_PICTURE_MAX_MB=50`
-- `MCC_FACILITY_VIDEO_MAX_MB=500`
+- `MCC_FACILITY_DOCUMENT_MAX_MB=500`
+- `MCC_FACILITY_PICTURE_MAX_MB=500`
+- `MCC_FACILITY_VIDEO_MAX_MB=1024`
 
 The frontend displays these server values. The backend remains authoritative and validates size, extension, MIME type, signature, safe filename, Facility/folder ownership, and authorization.
 
@@ -40,6 +40,8 @@ Supported types:
 - Videos: MP4, WEBM
 
 MOV is rejected because browser codec support cannot be reliably established from the container alone.
+
+The normal picker supports multi-file uploads. **Upload Folder** preserves the selected root and nested folder structure, validates every relative path, creates folders sequentially, and queues file uploads so large selections do not create unbounded concurrent requests. If a folder or file conflict is found, the import stops and reports the failing path rather than silently skipping it.
 
 ## API route groups
 

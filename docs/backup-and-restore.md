@@ -57,6 +57,8 @@ Excel files are generated from the snapshot database, not changing live tables. 
 
 `MCC_Machine_List.xlsx` includes current and legacy machine/PM tables when present plus `Document Folders`, `Documents`, `Asset Notes`, `Note Attachments`, `Inspection Records`, and `Component Images`. All persisted IDs and fields remain present. The file sheets add machine asset numbers, folder/note relationships, and safe package-relative physical paths where they can be derived. They never turn an old absolute runtime path into a recovery dependency. SQLite and the files under `files/uploads/` remain the authoritative full-fidelity restore sources.
 
+`MCC_Equipment_List.xlsx` includes Equipment document folders and files alongside the existing asset and note sheets. `MCC_Facility_Info.xlsx` includes Facility areas, nested folders, and files. The Machine, Equipment, and Facility library sheets include full nested folder paths and safe package-relative payload locations.
+
 ## Browser download
 
 Manager and higher can use **Download Portable Backup** in Settings. The response is streamed from a fixed MCC backup directory with `application/zip`, a safe attachment filename, `Content-Length`, `private, no-store`, and `nosniff`. The API resolves a backup ID inside the allowlisted Master Backup directory and never accepts a filesystem path.
@@ -80,9 +82,9 @@ When `MCC_DATA_DIR` is already outside the Git checkout, recovery defaults under
 
 Recommended production ownership and permissions are the MCC service account with directory mode `0700`; packages and archives are written as private files. Do not place databases, generated backups, recovery archives, external copies, or secrets in Git.
 
-The compressed upload limit defaults to 512 MB and can be set, up to 2048 MB, with `MCC_PORTABLE_BACKUP_MAX_MB`. The importer also enforces entry-count, expanded-size, and suspicious compression-ratio limits.
+The compressed creation/import limit defaults to 3072 MB and can be set up to the verified 3584 MB classic-ZIP ceiling with `MCC_PORTABLE_BACKUP_MAX_MB`. MCC does not mark an archive above that same importer envelope as recovery-ready. ZIP64 remains unsupported. The importer also enforces entry-count, expanded-size, and suspicious compression-ratio limits.
 
-ZIP inspection and extraction are bounded for Raspberry Pi use. The inspector reads only the final ZIP metadata window (at most 65,557 bytes) and a central directory capped at 32 MB. It never reads the complete archive into a JavaScript buffer. Extraction processes one entry at a time through range-limited file streams, backpressure-aware inflate, expanded-byte accounting, and CRC-32 verification. Package SHA-256, per-file manifest checksums, SQLite integrity, and Machine Library database-to-file relationship validation run after extraction.
+ZIP inspection and extraction are bounded for Raspberry Pi use. The inspector reads only the final ZIP metadata window (at most 65,557 bytes) and a central directory capped at 32 MB. It never reads the complete archive into a JavaScript buffer. Extraction processes one entry at a time through range-limited file streams, backpressure-aware inflate, expanded-byte accounting, and CRC-32 verification. Package SHA-256, per-file manifest checksums, SQLite integrity, and Machine, Equipment, and Facility library database-to-file relationship validation run after extraction.
 
 ## Optional external backup destination
 

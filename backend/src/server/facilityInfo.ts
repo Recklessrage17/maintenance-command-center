@@ -4,7 +4,8 @@ import path from 'node:path';
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import multer from 'multer';
 import { ZipArchive, type Archiver } from 'archiver';
-import { sharedDocumentMimeTypes, validateDocumentFile } from './documentValidation.js';
+import { sharedDocumentMimeTypes } from './documentValidation.js';
+import { LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagingDirectory, promoteStagedFile, validateStagedLibraryFile } from './libraryUpload.js';
 
 type SqlParam = string | number | bigint | Buffer | null;
 type FacilityUser = { id:number; full_name:string; email:string; role:string; is_owner_admin:number };
@@ -51,15 +52,16 @@ export function createFacilityInfoService(deps:{
   const {app,all,one,run,exec,recordHistory,scheduleBackup,now}=deps;
   const root=path.join(deps.uploadsDir,'facility-info');
   const incoming=path.join(root,'.incoming');
-  const configuredDocumentMb=positiveLimit(process.env.MCC_FACILITY_DOCUMENT_MAX_MB,50);
-  const configuredPictureMb=positiveLimit(process.env.MCC_FACILITY_PICTURE_MAX_MB,50);
-  const configuredVideoMb=positiveLimit(process.env.MCC_FACILITY_VIDEO_MAX_MB,500);
+  const configuredDocumentMb=positiveLimit(process.env.MCC_FACILITY_DOCUMENT_MAX_MB,LIBRARY_LIMITS_MB.documents);
+  const configuredPictureMb=positiveLimit(process.env.MCC_FACILITY_PICTURE_MAX_MB,LIBRARY_LIMITS_MB.pictures);
+  const configuredVideoMb=positiveLimit(process.env.MCC_FACILITY_VIDEO_MAX_MB,LIBRARY_LIMITS_MB.videos);
   const limits={
     documentBytes:configuredDocumentMb*1024*1024,
     pictureBytes:configuredPictureMb*1024*1024,
     videoBytes:configuredVideoMb*1024*1024,
   };
   fs.mkdirSync(incoming,{recursive:true});
+  cleanupStagingDirectory(incoming);
 
   const documentTypes=sharedDocumentMimeTypes;
   const pictureTypes=new Map<string,string>([['.jpg','image/jpeg'],['.jpeg','image/jpeg'],['.png','image/png'],['.webp','image/webp']]);
@@ -143,7 +145,8 @@ export function createFacilityInfoService(deps:{
     }
   }
 
-  function receiveFiles(req:Request,res:Response,next:NextFunction) {
+  async function receiveFiles(req:Request,res:Response,next:NextFunction) {
+    const release=await acquireLibraryUploadSlot();res.once('finish',release);res.once('close',release);
     upload.array('files',20)(req,res,error=>{
       if(!error)return next();
       cleanupIncoming(req);
@@ -217,32 +220,11 @@ export function createFacilityInfoService(deps:{
     if(extension==='.mov')throw new Error('MOV upload is disabled because browser codec compatibility cannot be guaranteed. Use MP4 or WEBM.');
     throw new Error('Supported files are PDF, Word, Excel, TXT, JPG, PNG, WEBP, MP4, or WEBM.');
   }
-  function readHeader(filePath:string,length=32) {
-    const handle=fs.openSync(filePath,'r');
-    try{const buffer=Buffer.alloc(length);const bytes=fs.readSync(handle,buffer,0,length,0);return buffer.subarray(0,bytes);}
-    finally{fs.closeSync(handle);}
-  }
-  function validateUpload(file:Express.Multer.File) {
-    const displayFilename=safeFilename(path.basename(file.originalname));
-    const extension=path.extname(displayFilename).toLowerCase();
-    const type=typeForExtension(extension);
-    if(file.size>type.maxBytes)throw new Error(`${displayFilename} must be ${type.maxMb} MB or smaller.`);
-    if(type.mediaType==='document'){
-      const document=validateDocumentFile({originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size,bytes:fs.readFileSync(file.path),maxBytes:type.maxBytes,maxMb:type.maxMb});
-      return {...document,mediaType:type.mediaType,maxBytes:type.maxBytes,maxMb:type.maxMb};
-    }
-    const supplied=String(file.mimetype??'').toLowerCase();
-    const acceptedMime=extension==='.jpg'||extension==='.jpeg'?new Set(['image/jpeg','image/jpg']):new Set([type.mimeType]);
-    if(supplied&&supplied!=='application/octet-stream'&&!acceptedMime.has(supplied))throw new Error(`${displayFilename} has a mismatched content type.`);
-    const bytes=readHeader(file.path);
-    let matches=false;
-    if(extension==='.jpg'||extension==='.jpeg')matches=bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
-    else if(extension==='.png')matches=bytes.subarray(0,8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]));
-    else if(extension==='.webp')matches=bytes.subarray(0,4).toString('ascii')==='RIFF'&&bytes.subarray(8,12).toString('ascii')==='WEBP';
-    else if(extension==='.mp4')matches=bytes.subarray(4,8).toString('ascii')==='ftyp';
-    else if(extension==='.webm')matches=bytes.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3]));
-    if(!matches)throw new Error(`${displayFilename} does not match its file type.`);
-    return {displayFilename,extension,...type};
+  async function validateUpload(file:Express.Multer.File) {
+    const validated=await validateStagedLibraryFile({path:file.path,originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size});
+    const configured=typeForExtension(validated.extension);
+    if(file.size>configured.maxBytes)throw new Error(`${validated.displayFilename} must be ${configured.maxMb} MB or smaller.`);
+    return {...validated,maxBytes:configured.maxBytes,maxMb:configured.maxMb};
   }
   function duplicateItem(folderId:number,name:string,excludeId?:number) {
     return one<FacilityItemRow>(`SELECT * FROM facility_items WHERE folder_id=? AND lower(display_filename)=lower(?)${excludeId?' AND id<>?':''} LIMIT 1`,excludeId?[folderId,name,excludeId]:[folderId,name]);
@@ -389,13 +371,13 @@ export function createFacilityInfoService(deps:{
       res.json({ok:true});
     }catch(error){sendError(res,error,'Folder could not be deleted.');}
   });
-  app.post('/api/facility-info/areas/:areaId/folders/:folderId/items',deps.requireAuth,deps.requirePermission('facility.upload'),receiveFiles,(req:FacilityRequest,res)=>{
+  app.post('/api/facility-info/areas/:areaId/folders/:folderId/items',deps.requireAuth,deps.requirePermission('facility.upload'),receiveFiles,async(req:FacilityRequest,res)=>{
     const written:string[]=[];const replaced:string[]=[];let committed=false;
     try{
       const area=areaById(Number(req.params.areaId));if(!area)throw new Error('Facility area not found.');
       const folder=folderById(area.id,Number(req.params.folderId));if(!folder)throw new Error('Folder not found.');
       const files=(req.files as Express.Multer.File[]|undefined)??[];if(!files.length)throw new Error('Select at least one file to upload.');
-      const validated=files.map(file=>({file,...validateUpload(file)}));const duplicateAction=String(req.body?.duplicateAction??'').toLowerCase();const names=new Set<string>();
+      const validated=[];for(const file of files)validated.push({file,...await validateUpload(file)});const duplicateAction=String(req.body?.duplicateAction??'').toLowerCase();const names=new Set<string>();
       const duplicates=validated.filter(item=>{const key=item.displayFilename.toLowerCase();const duplicate=names.has(key)||Boolean(duplicateItem(folder.id,item.displayFilename));names.add(key);return duplicate;});
       if(duplicates.length&&!['replace','keep_both'].includes(duplicateAction)){cleanupIncoming(req);return res.status(409).json({ok:false,code:'FACILITY_DUPLICATE',error:'A file with this name already exists.',duplicates:duplicates.map(item=>item.displayFilename)});}
       const timestamp=now();const ids:number[]=[];const events:Array<{action:string;id:number;name:string;mediaType:string}>=[];
@@ -405,7 +387,7 @@ export function createFacilityInfoService(deps:{
           let displayFilename=item.displayFilename;let existing=duplicateItem(folder.id,displayFilename);
           if(existing&&duplicateAction==='keep_both'){displayFilename=uniqueItemName(folder.id,displayFilename);existing=undefined;}
           const storedFilename=`${crypto.randomUUID()}${item.extension}`;const destination=path.join(filesDirectory(area.id),storedFilename);
-          fs.renameSync(item.file.path,destination);written.push(destination);
+          await promoteStagedFile(item.file.path,destination);written.push(destination);
           if(existing&&duplicateAction==='replace'){
             replaced.push(itemPath(existing));run(`UPDATE facility_items SET original_filename=?,display_filename=?,stored_filename=?,extension=?,mime_type=?,size_bytes=?,media_type=?,description=?,caption=?,revision=?,item_date=?,duration_seconds=NULL,uploaded_at=?,updated_at=?,uploaded_by_user_id=?,updated_by_user_id=? WHERE id=?`,
               [item.displayFilename,displayFilename,storedFilename,item.extension,item.mimeType,item.file.size,item.mediaType,cleanText(req.body?.description),cleanText(req.body?.caption),cleanText(req.body?.revision,80),validateDate(req.body?.date),timestamp,timestamp,req.user!.id,req.user!.id,existing.id]);
@@ -539,7 +521,7 @@ export function createFacilityInfoService(deps:{
   return {ensureSchema,refreshRecoveryMetadata,validateStorage,limits,root};
 }
 
-function positiveLimit(value:string|undefined,fallback:number){const parsed=Number(value);return Number.isFinite(parsed)&&parsed>0&&parsed<=4096?Math.round(parsed):fallback;}
+function positiveLimit(value:string|undefined,fallback:number){const parsed=Number(value);return Number.isFinite(parsed)&&parsed>0&&parsed<=fallback?Math.round(parsed):fallback;}
 function isRecord(value:unknown):value is Record<string,any>{return Boolean(value)&&typeof value==='object'&&!Array.isArray(value);}
 function facilityStatus(value:unknown){const status=String(value??'active').toLowerCase();if(!['active','archived','disabled'].includes(status))throw new Error('Facility status is invalid.');return status;}
 function escapeLike(value:string){return value.replace(/[\\%_]/g,match=>`\\${match}`);}

@@ -161,6 +161,7 @@ type BackupStatus = {
   importedRecoveryBackups: ImportedRecoveryBackup[];
   recoveryLocation: string;
   recoveryStorage: RecoveryStorageStatus | null;
+  portableArchiveMaxBytes: number;
   externalBackup: ExternalBackupSettings | null;
   latestBackup: BackupSummary | null;
   lastAutoBackup: BackupSummary | null;
@@ -611,6 +612,7 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
       maxPackages: Number(recoveryStorage.maxPackages ?? 0),
       atCapacity: Boolean(recoveryStorage.atCapacity),
     } : null,
+    portableArchiveMaxBytes: Number(data.portableArchiveMaxBytes ?? 0),
     externalBackup: normalizeExternalBackupSettings(data.externalBackup),
     latestBackup: normalizeBackupSummary(data.latestBackup),
     lastAutoBackup: normalizeBackupSummary(data.lastAutoBackup),
@@ -1808,7 +1810,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
                     <input type="file" accept=".zip,application/zip" disabled={portableLoading||backupStatus?.recoveryStorage?.atCapacity} onChange={event=>{const file=event.target.files?.[0];event.target.value='';importPortableBackup(file);}} />
                   </label>
                   {portableUploadProgress!==null&&<div className="backup-byte-progress" aria-label={`Portable backup upload ${portableUploadProgress}%`}><i style={{width:`${portableUploadProgress}%`}} /></div>}
-                  <small>Live MCC data is untouched during upload, copy, extraction, and validation.</small>
+                  <small>Live MCC data is untouched during upload, copy, extraction, and validation. Maximum archive: {formatBytes(backupStatus?.portableArchiveMaxBytes??0)} (classic ZIP; ZIP64 is not required within this verified envelope).</small>
                   {backupStatus?.recoveryStorage&&<small>{formatBytes(backupStatus.recoveryStorage.usedBytes)} of {formatBytes(backupStatus.recoveryStorage.quotaBytes)} used · {backupStatus.recoveryStorage.packageCount} of {backupStatus.recoveryStorage.maxPackages} packages. MCC never auto-deletes recovery packages.</small>}
                 </section>
               </div>

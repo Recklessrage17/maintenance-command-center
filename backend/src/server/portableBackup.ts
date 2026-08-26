@@ -11,8 +11,8 @@ import ExcelJS from 'exceljs';
 export const PORTABLE_PACKAGE_VERSION = 1;
 export const PORTABLE_SCHEMA_VERSION = 1;
 export const PORTABLE_ZIP_MIME = 'application/zip';
-export const DEFAULT_MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
-export const DEFAULT_MAX_EXPANDED_BYTES = 4 * 1024 * 1024 * 1024;
+export const DEFAULT_MAX_ARCHIVE_BYTES = 3 * 1024 * 1024 * 1024;
+export const DEFAULT_MAX_EXPANDED_BYTES = 8 * 1024 * 1024 * 1024;
 export const DEFAULT_MAX_ARCHIVE_ENTRIES = 50_000;
 export const DEFAULT_RECOVERY_QUOTA_BYTES = 8 * 1024 * 1024 * 1024;
 export const DEFAULT_RECOVERY_MAX_PACKAGES = 3;
@@ -224,16 +224,17 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
         {
           table: 'machine_document_folders',
           name: 'Document Folders',
-          query: 'SELECT f.*,a.asset_number AS asset_number FROM machine_document_folders f LEFT JOIN machine_assets a ON a.id=f.asset_id ORDER BY f.rowid',
-          derivedColumns: [{ name: 'asset_number', value: row => row.asset_number }],
+          query: `WITH RECURSIVE tree(id,folder_path) AS (SELECT id,name FROM machine_document_folders WHERE parent_id IS NULL UNION ALL SELECT f.id,tree.folder_path||' / '||f.name FROM machine_document_folders f JOIN tree ON tree.id=f.parent_id) SELECT f.*,a.asset_number AS asset_number,COALESCE(tree.folder_path,f.name) AS folder_path FROM machine_document_folders f LEFT JOIN machine_assets a ON a.id=f.asset_id LEFT JOIN tree ON tree.id=f.id ORDER BY f.rowid`,
+          derivedColumns: [{ name: 'asset_number', value: row => row.asset_number },{ name: 'folder_path', value: row => row.folder_path }],
         },
         {
           table: 'machine_documents',
           name: 'Documents',
-          query: 'SELECT d.*,a.asset_number AS asset_number,f.name AS folder_name FROM machine_documents d LEFT JOIN machine_assets a ON a.id=d.asset_id LEFT JOIN machine_document_folders f ON f.id=d.folder_id ORDER BY d.rowid',
+          query: `WITH RECURSIVE tree(id,folder_path) AS (SELECT id,name FROM machine_document_folders WHERE parent_id IS NULL UNION ALL SELECT f.id,tree.folder_path||' / '||f.name FROM machine_document_folders f JOIN tree ON tree.id=f.parent_id) SELECT d.*,a.asset_number AS asset_number,f.name AS folder_name,COALESCE(tree.folder_path,f.name) AS folder_path FROM machine_documents d LEFT JOIN machine_assets a ON a.id=d.asset_id LEFT JOIN machine_document_folders f ON f.id=d.folder_id LEFT JOIN tree ON tree.id=d.folder_id ORDER BY d.rowid`,
           derivedColumns: [
             { name: 'asset_number', value: row => row.asset_number },
             { name: 'folder_name', value: row => row.folder_name },
+            { name: 'folder_path', value: row => row.folder_path },
             { name: 'portable_relative_path', value: machineDocumentPortablePath },
           ],
         },
@@ -315,6 +316,18 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
         { table: 'equipment', name: 'Equipment' },
         { table: 'equipment_pms', name: 'Equipment PM' },
         {
+          table: 'equipment_document_folders',
+          name: 'Equipment Document Folders',
+          query: `WITH RECURSIVE tree(id,folder_path) AS (SELECT id,name FROM equipment_document_folders WHERE parent_id IS NULL UNION ALL SELECT f.id,tree.folder_path||' / '||f.name FROM equipment_document_folders f JOIN tree ON tree.id=f.parent_id) SELECT f.*,a.asset_number AS asset_number,COALESCE(tree.folder_path,f.name) AS folder_path FROM equipment_document_folders f LEFT JOIN equipment_assets a ON a.id=f.asset_id LEFT JOIN tree ON tree.id=f.id ORDER BY f.rowid`,
+          derivedColumns: [{ name: 'asset_number', value: row => row.asset_number },{ name: 'folder_path', value: row => row.folder_path }],
+        },
+        {
+          table: 'equipment_documents',
+          name: 'Equipment Documents',
+          query: `WITH RECURSIVE tree(id,folder_path) AS (SELECT id,name FROM equipment_document_folders WHERE parent_id IS NULL UNION ALL SELECT f.id,tree.folder_path||' / '||f.name FROM equipment_document_folders f JOIN tree ON tree.id=f.parent_id) SELECT d.*,a.asset_number AS asset_number,f.name AS folder_name,COALESCE(tree.folder_path,f.name) AS folder_path FROM equipment_documents d LEFT JOIN equipment_assets a ON a.id=d.asset_id LEFT JOIN equipment_document_folders f ON f.id=d.folder_id LEFT JOIN tree ON tree.id=d.folder_id ORDER BY d.rowid`,
+          derivedColumns: [{ name: 'asset_number', value: row => row.asset_number },{ name: 'folder_name', value: row => row.folder_name },{ name: 'folder_path', value: row => row.folder_path },{ name: 'portable_relative_path', value: equipmentDocumentPortablePath }],
+        },
+        {
           table: 'equipment_asset_notes',
           name: 'Equipment Asset Notes',
           query: 'SELECT n.*,a.asset_number AS asset_number,a.equipment_name AS equipment_name,a.category AS category FROM equipment_asset_notes n LEFT JOIN equipment_assets a ON a.id=n.asset_id ORDER BY n.rowid',
@@ -377,6 +390,21 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
             { name: 'note_title', value: row => row.note_title },
             { name: 'work_order_reference', value: row => row.work_order_reference },
           ],
+        },
+      ] },
+      { filename: 'MCC_Facility_Info.xlsx', sheets: [
+        { table: 'facility_areas', name: 'Facility Areas' },
+        {
+          table: 'facility_folders',
+          name: 'Facility Folders',
+          query: `WITH RECURSIVE tree(id,folder_path) AS (SELECT id,name FROM facility_folders WHERE parent_id IS NULL UNION ALL SELECT f.id,tree.folder_path||' / '||f.name FROM facility_folders f JOIN tree ON tree.id=f.parent_id) SELECT f.*,a.name AS facility_name,COALESCE(tree.folder_path,f.name) AS folder_path FROM facility_folders f LEFT JOIN facility_areas a ON a.id=f.area_id LEFT JOIN tree ON tree.id=f.id ORDER BY f.rowid`,
+          derivedColumns: [{ name: 'facility_name', value: row => row.facility_name },{ name: 'folder_path', value: row => row.folder_path }],
+        },
+        {
+          table: 'facility_items',
+          name: 'Facility Files',
+          query: `WITH RECURSIVE tree(id,folder_path) AS (SELECT id,name FROM facility_folders WHERE parent_id IS NULL UNION ALL SELECT f.id,tree.folder_path||' / '||f.name FROM facility_folders f JOIN tree ON tree.id=f.parent_id) SELECT i.*,a.name AS facility_name,f.name AS folder_name,COALESCE(tree.folder_path,f.name) AS folder_path FROM facility_items i LEFT JOIN facility_areas a ON a.id=i.area_id LEFT JOIN facility_folders f ON f.id=i.folder_id LEFT JOIN tree ON tree.id=i.folder_id ORDER BY i.rowid`,
+          derivedColumns: [{ name: 'facility_name', value: row => row.facility_name },{ name: 'folder_name', value: row => row.folder_name },{ name: 'folder_path', value: row => row.folder_path },{ name: 'portable_relative_path', value: facilityItemPortablePath }],
         },
       ] },
       { filename: 'MCC_History.xlsx', sheets: (historyTables.length ? historyTables : ['history_logs']).map(table => ({ table, name: table })) },
@@ -907,6 +935,7 @@ export function validatePortablePackage(packagePath: string, currentAppVersion: 
   validateSqliteDatabase(databasePath);
   validateMachineLibraryPackageIntegrity(databasePath, root);
   validateEquipmentLibraryPackageIntegrity(databasePath, root);
+  validateFacilityLibraryPackageIntegrity(databasePath, root);
   const recoveryManifest = JSON.parse(fs.readFileSync(path.join(root, 'recovery', 'restore-manifest.json'), 'utf8')) as Record<string, unknown>;
   if (recoveryManifest.packageVersion !== PORTABLE_PACKAGE_VERSION || recoveryManifest.sourcePathsAreRelative !== true) throw new Error('Portable package restore manifest is incompatible.');
   return {
@@ -927,11 +956,15 @@ export function validateMachineLibraryPackageIntegrity(databasePath: string, pac
     const assetIds = new Set((database.prepare('SELECT id FROM machine_assets').all() as Array<{ id: number }>).map(row => Number(row.id)));
     const userIds = new Set(tables.has('users') ? (database.prepare('SELECT id FROM users').all() as Array<{ id: number }>).map(row => Number(row.id)) : []);
     const folderRelationships = new Set<string>();
+    const folderParents=new Map<number,number|null>();
     if (tables.has('machine_document_folders')) {
-      for (const row of database.prepare('SELECT id,asset_id FROM machine_document_folders').all() as Array<{ id: number; asset_id: number }>) {
+      const hasParent=(database.prepare('PRAGMA table_info(machine_document_folders)').all() as Array<{name:string}>).some(column=>column.name==='parent_id');
+      for (const row of database.prepare(`SELECT id,asset_id${hasParent?',parent_id':''} FROM machine_document_folders`).all() as Array<{ id: number; asset_id: number;parent_id?:number|null }>) {
         assertMachineAssetRelationship(assetIds, row.asset_id, `document folder ${row.id}`);
         folderRelationships.add(`${Number(row.id)}:${Number(row.asset_id)}`);
+        folderParents.set(Number(row.id),row.parent_id===null||row.parent_id===undefined?null:Number(row.parent_id));
       }
+      for(const [folderId,parentId] of folderParents){if(parentId!==null&&!folderRelationships.has(`${parentId}:${Number((database.prepare('SELECT asset_id FROM machine_document_folders WHERE id=?').get(folderId) as {asset_id:number}).asset_id)}`))throw new Error(`Portable package Machine Library folder ${folderId} has an invalid parent relationship.`);const seen=new Set<number>();let current:number|null=folderId;while(current!==null){if(seen.has(current))throw new Error(`Portable package Machine Library folder ${folderId} contains a cycle.`);seen.add(current);current=folderParents.get(current)??null;}}
     }
     if (tables.has('machine_documents')) {
       for (const row of database.prepare('SELECT id,asset_id,folder_id,stored_filename,size_bytes FROM machine_documents').all() as Array<Record<string, unknown>>) {
@@ -985,6 +1018,9 @@ export function validateEquipmentLibraryPackageIntegrity(databasePath: string, p
     if (!tables.has('equipment_assets')) return;
     const assetIds = new Set((database.prepare('SELECT id FROM equipment_assets').all() as Array<{ id: number }>).map(row => Number(row.id)));
     const userIds = new Set(tables.has('users') ? (database.prepare('SELECT id FROM users').all() as Array<{ id: number }>).map(row => Number(row.id)) : []);
+    const folderRelationships=new Set<string>();const folderParents=new Map<number,number|null>();
+    if(tables.has('equipment_document_folders')){const hasParent=(database.prepare('PRAGMA table_info(equipment_document_folders)').all() as Array<{name:string}>).some(column=>column.name==='parent_id');for(const row of database.prepare(`SELECT id,asset_id${hasParent?',parent_id':''} FROM equipment_document_folders`).all() as Array<{id:number;asset_id:number;parent_id?:number|null}>){assertEquipmentAssetRelationship(assetIds,row.asset_id,`document folder ${row.id}`);folderRelationships.add(`${Number(row.id)}:${Number(row.asset_id)}`);folderParents.set(Number(row.id),row.parent_id===null||row.parent_id===undefined?null:Number(row.parent_id));}for(const [folderId,parentId] of folderParents){const assetId=Number((database.prepare('SELECT asset_id FROM equipment_document_folders WHERE id=?').get(folderId) as {asset_id:number}).asset_id);if(parentId!==null&&!folderRelationships.has(`${parentId}:${assetId}`))throw new Error(`Portable package Equipment Library folder ${folderId} has an invalid parent relationship.`);const seen=new Set<number>();let current:number|null=folderId;while(current!==null){if(seen.has(current))throw new Error(`Portable package Equipment Library folder ${folderId} contains a cycle.`);seen.add(current);current=folderParents.get(current)??null;}}}
+    if(tables.has('equipment_documents'))for(const row of database.prepare('SELECT id,asset_id,folder_id,stored_filename,size_bytes FROM equipment_documents').all() as Array<Record<string,unknown>>){const id=Number(row.id);const assetId=Number(row.asset_id);assertEquipmentAssetRelationship(assetIds,assetId,`document ${id}`);if(!folderRelationships.has(`${Number(row.folder_id)}:${assetId}`))throw new Error(`Portable package Equipment Library document ${id} has an invalid folder relationship.`);const storedFilename=String(row.stored_filename??'');if(!storedFilename||storedFilename!==path.basename(storedFilename)||storedFilename.includes('\\'))throw new Error(`Portable package Equipment Library document ${id} has an unsafe stored filename.`);assertEquipmentPayloadFile(packagePath,`files/uploads/equipment-library/asset-${assetId}/${storedFilename}`,row.size_bytes,`document ${id}`);}
     const noteAssets = new Map<number, number>();
     const noteWarnings = new Map<number, boolean>();
     if (tables.has('equipment_asset_notes')) {
@@ -1011,6 +1047,21 @@ export function validateEquipmentLibraryPackageIntegrity(databasePath: string, p
   } finally {
     database.close();
   }
+}
+
+function equipmentDocumentPortablePath(row: Record<string, unknown>) {
+  const assetId=Number(row.asset_id);const storedFilename=String(row.stored_filename??'');
+  return Number.isInteger(assetId)&&assetId>0&&storedFilename===path.basename(storedFilename)&&storedFilename?`files/uploads/equipment-library/asset-${assetId}/${storedFilename}`:'';
+}
+
+function facilityItemPortablePath(row: Record<string, unknown>) {
+  const areaId=Number(row.area_id);const storedFilename=String(row.stored_filename??'');
+  return Number.isInteger(areaId)&&areaId>0&&storedFilename===path.basename(storedFilename)&&storedFilename?`files/uploads/facility-info/facility-${areaId}/files/${storedFilename}`:'';
+}
+
+export function validateFacilityLibraryPackageIntegrity(databasePath:string,packagePath:string){
+  const database=new DatabaseSync(databasePath,{readOnly:true});try{const tables=new Set((database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{name:string}>).map(row=>row.name));if(!tables.has('facility_areas'))return;const areaIds=new Set((database.prepare('SELECT id FROM facility_areas').all() as Array<{id:number}>).map(row=>Number(row.id)));const folders=new Map<number,{areaId:number;parentId:number|null}>();if(tables.has('facility_folders'))for(const row of database.prepare('SELECT id,area_id,parent_id FROM facility_folders').all() as Array<{id:number;area_id:number;parent_id:number|null}>){if(!areaIds.has(Number(row.area_id)))throw new Error(`Portable package Facility folder ${row.id} has an invalid area relationship.`);folders.set(Number(row.id),{areaId:Number(row.area_id),parentId:row.parent_id===null?null:Number(row.parent_id)});}for(const [id,folder] of folders){if(folder.parentId!==null&&folders.get(folder.parentId)?.areaId!==folder.areaId)throw new Error(`Portable package Facility folder ${id} has an invalid parent relationship.`);const seen=new Set<number>();let current:number|null=id;while(current!==null){if(seen.has(current))throw new Error(`Portable package Facility folder ${id} contains a cycle.`);seen.add(current);current=folders.get(current)?.parentId??null;}}if(tables.has('facility_items'))for(const row of database.prepare('SELECT id,area_id,folder_id,stored_filename,size_bytes FROM facility_items').all() as Array<Record<string,unknown>>){const id=Number(row.id);const areaId=Number(row.area_id);if(folders.get(Number(row.folder_id))?.areaId!==areaId)throw new Error(`Portable package Facility item ${id} has an invalid folder relationship.`);const stored=String(row.stored_filename??'');if(!stored||stored!==path.basename(stored)||stored.includes('\\'))throw new Error(`Portable package Facility item ${id} has an unsafe stored filename.`);const candidate=path.join(packagePath,'files','uploads','facility-info',`facility-${areaId}`,'files',stored);if(!fs.existsSync(candidate)||!fs.statSync(candidate).isFile()||fs.statSync(candidate).size!==Number(row.size_bytes))throw new Error(`Portable package Facility item ${id} payload is missing or has the wrong size.`);}}
+  finally{database.close();}
 }
 
 function assertAssetNoteUserRelationship(userIds:Set<number>,value:unknown,label:string) {
