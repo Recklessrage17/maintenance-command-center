@@ -49,7 +49,7 @@ export function prepareShareableFolderArchive(
   }
   visit(selected,'');
 
-  const used=new Set(directories.map(directory=>directory.toLocaleLowerCase()));
+  const used=new Set(directories.map(directory=>directory.replace(/\/+$/g,'').toLocaleLowerCase()));
   const preparedFiles:Array<{sourcePath:string;archivePath:string;sizeBytes:number}>=[];
   for(const file of files){
     const directory=directoryById.get(file.folderId);
@@ -71,12 +71,13 @@ export function streamShareableFolderArchive(res:Response,fileName:string,prepar
   // STORE avoids re-buffering already-compressed media and still streams each
   // source through Archiver with a small, bounded high-water mark.
   const archive:Archiver=new ZipArchive({store:true});
-  let complete=false;
+  let complete=false;let failed=false;
   const abort=()=>{if(!complete)void archive.abort();};
+  const fail=(error:Error)=>{if(failed||complete)return;failed=true;void archive.abort();res.destroy(error);};
   res.once('close',abort);
   archive.once('end',()=>{complete=true;res.off('close',abort);});
-  archive.on('warning',(error:Error&{code?:string})=>{if(error.code!=='ENOENT')res.destroy(error);});
-  archive.on('error',(error:Error)=>res.destroy(error));
+  archive.on('warning',fail);
+  archive.on('error',fail);
   res.setHeader('Content-Type','application/zip');
   res.setHeader('Content-Disposition',`attachment; filename="${asciiFilename(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
   res.setHeader('Cache-Control','private, no-store');
@@ -98,7 +99,7 @@ function uniqueShareablePath(candidate:string,used:Set<string>) {
   if(normalized.startsWith('/')||normalized==='..'||normalized.startsWith('../')||normalized.includes('/../'))throw new Error('Archive path is unsafe.');
   let next=normalized;let suffix=2;
   while(used.has(next.toLocaleLowerCase())){
-    const extension=path.posix.extname(normalized);const base=normalized.slice(0,-extension.length);
+    const extension=path.posix.extname(normalized);const base=extension?normalized.slice(0,-extension.length):normalized;
     next=`${base} (${suffix})${extension}`;suffix+=1;
     if(suffix>10000)throw new Error('Archive entry name could not be made unique.');
   }

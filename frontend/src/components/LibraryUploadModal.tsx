@@ -42,7 +42,7 @@ export function LibraryUploadModal({eyebrow,title,destination,files,limits,busy,
       {metadata&&<div className="library-upload-metadata">{metadata}</div>}
       {busy&&<div className="library-upload-progress" role="status" aria-live="polite"><div><strong>{currentFile?`Uploading ${currentFile}`:'Uploading selected files'}</strong><span>{Math.round(Math.max(0,Math.min(100,progress??0)))}%</span></div><progress max="100" value={Math.max(0,Math.min(100,progress??0))}/><small>{completedCount} of {files.length} files complete</small></div>}
       {error&&<p className="form-message error" role="alert">{error}</p>}
-      {conflictActions??<div className="modal-actions glass-modal__actions library-upload-footer"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onUpload} disabled={busy||!files.length}>{busy?'Uploading…':'Upload'}</button></div>}
+      {conflictActions??<div className="modal-actions glass-modal__actions library-upload-footer"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onUpload} disabled={busy||!files.length}>{busy?'Uploading Files…':'Upload Files'}</button></div>}
     </div>
   </section></div>,document.body);
 }
