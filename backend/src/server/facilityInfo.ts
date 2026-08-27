@@ -6,6 +6,7 @@ import multer from 'multer';
 import { ZipArchive, type Archiver } from 'archiver';
 import { sharedDocumentMimeTypes } from './documentValidation.js';
 import { LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagingDirectory, promoteStagedFile, validateStagedLibraryFile } from './libraryUpload.js';
+import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
 
 type SqlParam = string | number | bigint | Buffer | null;
 type FacilityUser = { id:number; full_name:string; email:string; role:string; is_owner_admin:number };
@@ -479,6 +480,17 @@ export function createFacilityInfoService(deps:{
       res.type(item.mime_type);res.setHeader('Content-Length',String(size));fs.createReadStream(file).pipe(res);
     }catch(error){if(!res.headersSent)sendError(res,error,'Facility file could not be opened.');else res.destroy();}
   }
+
+  app.get('/api/facility-info/areas/:areaId/folders/:folderId/export',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
+    try{
+      const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});
+      const folder=one<FacilityFolderRow>('SELECT * FROM facility_folders WHERE id=? AND area_id=?',[Number(req.params.folderId),area.id]);if(!folder)return res.status(404).json({ok:false,error:'Facility folder not found.'});
+      const folders=all<FacilityFolderRow>('SELECT * FROM facility_folders WHERE area_id=? ORDER BY id',[area.id]);
+      const items=all<FacilityItemRow>('SELECT * FROM facility_items WHERE area_id=? ORDER BY id',[area.id]);
+      const prepared=prepareShareableFolderArchive(folder.id,folders.map(item=>({id:item.id,parentId:item.parent_id,name:item.name})),items.map(item=>({folderId:item.folder_id,displayFilename:item.display_filename,sourcePath:itemPath(item),sizeBytes:Number(item.size_bytes)})));
+      const date=new Date().toISOString().slice(0,10);streamShareableFolderArchive(res,`${safeShareableSegment(folder.name,'Facility Folder')}_${date}.zip`,prepared);
+    }catch(error){if(res.headersSent)res.destroy(error as Error);else res.status(500).json({ok:false,error:clientError(error,'Facility folder export could not be created.')});}
+  });
 
   app.get('/api/facility-info/areas/:areaId/export',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
     const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});const manifest=buildManifest(area);streamArchive(res,`${safeArchiveSegment(area.name,'Facility')}_${new Date().toISOString().slice(0,10)}.zip`,archive=>appendAreaArchive(archive,manifest,''));

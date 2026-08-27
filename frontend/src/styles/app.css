@@ -1424,6 +1424,62 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-document-pending small { color: #9dbcca; font-size: .68rem; }
 .machine-document-conflict { display: grid; gap: 8px; padding: 12px; border-color: rgba(246,190,63,.46); background: rgba(87,58,14,.3); }
 
+/* Shared Facility, Machine, and Equipment upload experience. */
+.library-upload-modal { width: min(860px,calc(100vw - 28px)); max-height: min(92vh,940px); overflow: hidden; }
+.library-upload-body { min-height: 0; display: grid; gap: 11px; overflow-y: auto; padding-right: 3px; }
+.library-upload-destination { min-width: 0; display: grid; gap: 5px; padding: 9px 11px; border: 1px solid rgba(68,215,255,.2); border-radius: 10px; background: rgba(3,18,30,.58); }
+.library-upload-destination > span { color: #8fb6c5; font-size: .65rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
+.library-upload-destination ol { min-width: 0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
+.library-upload-destination li { min-width: 0; max-width: 240px; overflow: hidden; color: #eafaff; font-size: .76rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.library-upload-destination li:not(:last-child)::after { content: "/"; margin-left: 5px; color: #57cde9; }
+.library-upload-selector { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 16px; align-items: center; padding: 11px; border-style: dashed; }
+.library-upload-selector > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.library-upload-selector strong { color: #f0fbff; font-size: .85rem; }
+.library-upload-selector small { color: #9bbdca; font-size: .7rem; line-height: 1.42; }
+.library-upload-selector__actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.library-upload-selector .library-upload-hint { grid-column: 1 / -1; color: #f4ce75; }
+.library-upload-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #9bbdca; font-size: .71rem; }
+.library-upload-summary strong { color: #e9faff; font-size: .77rem; }
+.library-upload-queue { min-height: 76px; max-height: clamp(180px,30vh,330px); display: grid; align-content: start; gap: 6px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; scrollbar-gutter: stable; }
+.library-upload-empty { min-height: 72px; display: grid; place-items: center; border: 1px dashed rgba(143,205,233,.2); border-radius: 10px; color: #89adbb; background: rgba(3,15,26,.35); font-size: .75rem; }
+.library-upload-row { min-width: 0; display: grid; grid-template-columns: 34px minmax(0,1fr) auto auto; gap: 9px; align-items: center; padding: 7px 8px; border: 1px solid rgba(143,205,233,.2); border-radius: 9px; background: linear-gradient(145deg,rgba(5,30,46,.78),rgba(3,17,28,.86)); }
+.library-upload-row.is-active { border-color: rgba(68,215,255,.58); box-shadow: inset 3px 0 0 #44d7ff; }
+.library-upload-row .mcc-file-type-icon { width: 28px; height: 34px; }
+.library-upload-row > .mcc-file-type-icon { grid-column: 1; grid-row: 1; }
+.library-upload-row__main { min-width: 0; display: grid; grid-column: 2; grid-row: 1; gap: 3px; }
+.library-upload-row__main > strong { overflow: hidden; color: #edfaff; font-size: .77rem; text-overflow: ellipsis; white-space: nowrap; }
+.library-upload-row__meta { min-width: 0; display: flex; gap: 7px; flex-wrap: wrap; color: #91b3c0; font-size: .65rem; }
+.library-upload-row__meta span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-upload-row__status { grid-column: 3; grid-row: 1; color: #a8c9d5; font-size: .68rem; font-weight: 850; white-space: nowrap; }
+.library-upload-row.is-active .library-upload-row__status { color: #8be9ff; }
+.library-upload-row__remove { position: relative; z-index: 1; grid-column: 4; grid-row: 1; justify-self: end; pointer-events: auto; }
+.library-upload-metadata { min-width: 0; }
+.library-upload-metadata-grid { min-width: 0; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.library-upload-metadata-wide { grid-column: 1 / -1; }
+.library-upload-progress { display: grid; gap: 6px; padding: 9px 11px; border: 1px solid rgba(68,215,255,.24); border-radius: 10px; background: rgba(4,31,47,.58); }
+.library-upload-progress > div { min-width: 0; display: flex; justify-content: space-between; gap: 12px; color: #dffaff; font-size: .73rem; }
+.library-upload-progress strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-upload-progress progress { width: 100%; height: 9px; accent-color: #44d7ff; }
+.library-upload-progress small { color: #92b7c5; font-size: .65rem; }
+.library-upload-footer { position: sticky; bottom: 0; z-index: 1; padding-top: 10px; border-top: 1px solid rgba(143,205,233,.16); background: linear-gradient(180deg,rgba(3,17,28,0),rgba(3,17,28,.97) 30%); }
+
+@media(max-width:680px){
+  .library-upload-modal { width: min(100vw - 16px,860px); max-height: 96vh; }
+  .library-upload-selector { grid-template-columns: minmax(0,1fr); }
+  .library-upload-selector__actions { justify-content: stretch; }
+  .library-upload-selector__actions .compact-button { flex: 1 1 140px; }
+  .library-upload-row { grid-template-columns: 30px minmax(0,1fr) auto; }
+  .library-upload-row > .mcc-file-type-icon { grid-row: 1 / span 2; }
+  .library-upload-row__main { grid-row: 1; }
+  .library-upload-row__status { grid-column: 2; grid-row: 2; justify-self: start; align-self: end; }
+  .library-upload-row__remove { grid-column: 3; grid-row: 1 / span 2; }
+  .library-upload-metadata-grid { grid-template-columns: minmax(0,1fr); }
+  .library-upload-metadata-wide { grid-column: auto; }
+}
+@media(prefers-reduced-motion:reduce){
+  .library-upload-modal * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+
 /* Facility Info shares the MCC card, token, resource-row, toolbar, menu, and file-icon systems. */
 .facility-info-page { min-width: 0; }
 .facility-toolbar { display: grid; grid-template-columns: minmax(260px,1fr) repeat(3,minmax(120px,170px)) auto; gap: 10px; align-items: end; padding: 10px; border: 1px solid rgba(68,215,255,.2); border-radius: 12px; background: rgba(4,18,34,.52); }
