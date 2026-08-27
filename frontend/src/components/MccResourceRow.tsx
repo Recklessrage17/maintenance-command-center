@@ -12,6 +12,7 @@ type ResourceRowProps = {
   icon: ReactNode;
   title: ReactNode;
   titleText?: string;
+  secondary?: ReactNode;
   metadata?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
@@ -29,8 +30,8 @@ type ResourceRowProps = {
  * - verify desktop, tablet, and 390px mobile layouts
  * - action groups wrap horizontally; vertical action towers are not acceptable
  */
-export function MccResourceRow({icon,title,titleText,metadata,description,actions,trailingContent,className='',onActivate,activateLabel,expanded,controls}:ResourceRowProps) {
-  const content=<><span className="mcc-resource-row__icon">{icon}</span><span className="mcc-resource-row__copy"><strong className="mcc-resource-row__title" title={titleText}>{title}</strong>{metadata&&<span className="mcc-resource-row__metadata">{metadata}</span>}{description&&<span className="mcc-resource-row__description">{description}</span>}</span>{trailingContent&&<span className="mcc-resource-row__trailing" aria-hidden="true">{trailingContent}</span>}</>;
+export function MccResourceRow({icon,title,titleText,secondary,metadata,description,actions,trailingContent,className='',onActivate,activateLabel,expanded,controls}:ResourceRowProps) {
+  const content=<><span className="mcc-resource-row__icon">{icon}</span><span className="mcc-resource-row__copy"><strong className="mcc-resource-row__title" title={titleText}>{title}</strong>{secondary&&<span className="mcc-resource-row__secondary">{secondary}</span>}{metadata&&<span className="mcc-resource-row__metadata">{metadata}</span>}{description&&<span className="mcc-resource-row__description">{description}</span>}</span>{trailingContent&&<span className="mcc-resource-row__trailing" aria-hidden="true">{trailingContent}</span>}</>;
   return <div className={`mcc-resource-row${onActivate?' is-activatable':''}${className?` ${className}`:''}`}>
     {onActivate?<button className="mcc-resource-row__content" type="button" onClick={onActivate} aria-label={activateLabel} aria-expanded={expanded} aria-controls={controls}>{content}</button>:<div className="mcc-resource-row__content">{content}</div>}
     {actions&&<div className="mcc-resource-row__actions">{actions}</div>}
