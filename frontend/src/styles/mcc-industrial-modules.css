@@ -4657,6 +4657,186 @@ body {
   }
 }
 
+/* Issue 114: fixed, scan-first Machine Library row grid. */
+.machine-library-page .machine-asset-card.mcc-pill-card,
+.machine-library-page .machine-asset-card.mcc-pill-card.has-pm-summary {
+  grid-template-columns: minmax(112px,.68fr) minmax(178px,1.05fr) minmax(92px,.56fr) minmax(400px,2.7fr) minmax(132px,.78fr) 58px;
+  grid-template-areas: "number identity status metrics pm open";
+  gap: 8px;
+  min-height: 84px;
+  align-items: stretch;
+  padding: 10px 12px;
+}
+
+.machine-asset-number-cell,
+.machine-card-identity,
+.machine-card-status-cell,
+.machine-card-summary-actions,
+.machine-library-page .asset-row-open-cue {
+  min-width: 0;
+  min-height: 62px;
+  align-content: center;
+}
+
+.machine-asset-number-cell {
+  grid-area: number;
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+}
+
+.machine-card-identity {
+  grid-area: identity;
+  display: grid;
+  gap: 2px;
+  padding: 5px 9px;
+  border-left: 1px solid color-mix(in srgb,var(--mcc-pill-accent) 28%,var(--mcc-border-subtle));
+}
+
+.machine-card-field-label {
+  color: var(--mcc-text-muted);
+  font-size: .58rem;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.machine-card-asset-name,
+.machine-card-identity .machine-card-brand-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-card-asset-name {
+  color: var(--mcc-text-primary);
+  font-size: .95rem;
+  line-height: 1.15;
+}
+
+.machine-card-identity .machine-card-brand-name {
+  color: color-mix(in srgb,var(--mcc-pill-accent) 82%,#fff 18%);
+  font-size: .95rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.machine-card-status-cell {
+  grid-area: status;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 5px 7px;
+}
+
+.machine-library-page .machine-card-status {
+  align-self: auto;
+  justify-self: start;
+}
+
+.machine-library-page .machine-pill-card-metrics {
+  grid-area: metrics;
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.machine-library-page .machine-pill-card-metrics .mcc-metric-pill {
+  min-height: 62px;
+  height: 100%;
+  align-content: center;
+  padding: 7px 9px;
+}
+
+.machine-library-page .machine-card-summary-actions {
+  grid-area: pm;
+  display: grid;
+  grid-template-columns: minmax(0,1fr);
+  justify-items: stretch;
+  gap: 6px;
+  padding: 5px 0;
+}
+
+.machine-library-page .machine-pm-summary-control,
+.machine-library-page .machine-pm-summary-pill {
+  width: 100%;
+  min-width: 0;
+}
+
+.machine-pm-summary-empty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--mcc-border-subtle);
+  border-radius: 999px;
+  color: var(--mcc-text-muted);
+  background: rgba(255,255,255,.025);
+  font-size: .67rem;
+  font-weight: 850;
+}
+
+.machine-library-page .asset-row-open-cue {
+  grid-area: open;
+  justify-content: flex-end;
+  padding-left: 8px;
+  border-left: 1px solid var(--mcc-border-subtle);
+}
+
+@media (max-width: 1180px) {
+  .machine-library-page .machine-asset-card.mcc-pill-card,
+  .machine-library-page .machine-asset-card.mcc-pill-card.has-pm-summary {
+    grid-template-columns: minmax(112px,.7fr) minmax(178px,1.25fr) minmax(92px,.6fr) minmax(132px,.8fr) 58px;
+    grid-template-areas:
+      "number identity status pm open"
+      "metrics metrics metrics metrics metrics";
+  }
+}
+
+@media (max-width: 760px) {
+  .machine-library-page .machine-asset-card.mcc-pill-card,
+  .machine-library-page .machine-asset-card.mcc-pill-card.has-pm-summary {
+    grid-template-columns: minmax(0,1fr) auto;
+    grid-template-areas:
+      "number status"
+      "identity identity"
+      "metrics metrics"
+      "pm open";
+    gap: 8px 10px;
+  }
+
+  .machine-asset-number-cell,
+  .machine-card-status-cell,
+  .machine-card-identity,
+  .machine-card-summary-actions,
+  .machine-library-page .asset-row-open-cue {
+    min-height: 0;
+  }
+
+  .machine-card-identity {
+    padding: 7px 9px;
+    border-top: 1px solid var(--mcc-border-subtle);
+    border-left: 0;
+  }
+
+  .machine-library-page .machine-pill-card-metrics {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+
+  .machine-library-page .machine-card-summary-actions {
+    grid-template-columns: auto minmax(0,1fr);
+    align-items: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .machine-library-page .machine-pill-card-metrics { grid-template-columns: minmax(0,1fr); }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Light, economical application print fallback                              */
 /* Dedicated PM/spec/requisition PDF rules remain authoritative.              */

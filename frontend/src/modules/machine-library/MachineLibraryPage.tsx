@@ -491,12 +491,17 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         <div className={`machine-card-grid ${assets.length === 1 ? 'single-result' : 'multi-results'}`}>
         {assets.map(asset=>(
           <MccPillCard className={`machine-asset-card${asset.pmSummary ? ' has-pm-summary' : ''}${highlightedAssets.has(asset.assetNumber) ? ' machine-import-highlight' : ''}${isEngelBrand(asset.brand) ? ' machine-brand-engel' : ''}${machineBrandTintClass(asset.brand)}`} accentColor={safeCssHex(asset.brandColorHex)} key={asset.id} ariaLabel={`View details for ${asset.assetNumber}`} onActivate={()=>openDetail(asset)} variant="brand">
-            <div className="machine-pill-card-heading">
-              <div className="machine-pill-card-title">
-                <span className="machine-asset-number-label">Asset #</span>
-                <span className="machine-asset-number-pill">{asset.assetNumber}</span>
-                <strong className="machine-card-brand-name">{asset.brand || 'Unknown brand'}</strong>
-              </div>
+            <div className="machine-asset-number-cell">
+              <span className="machine-asset-number-label">Asset #</span>
+              <span className="machine-asset-number-pill">{asset.assetNumber}</span>
+            </div>
+            <div className="machine-card-identity">
+              <span className="machine-card-field-label">Machine / Brand</span>
+              <strong className="machine-card-asset-name" title={asset.assetName||asset.assetNumber}>{asset.assetName||asset.assetNumber}</strong>
+              <span className="machine-card-brand-name" title={asset.brand||'Unknown brand'}>{asset.brand||'Unknown brand'}</span>
+            </div>
+            <div className="machine-card-status-cell">
+              <span className="machine-card-field-label">Status</span>
               <MccStatusPill variant={machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.status}`}>{machineStatusLabel(asset.status)}</MccStatusPill>
             </div>
             <div className="machine-pill-card-metrics">
@@ -505,8 +510,8 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
               <MccMetricPill label="Model" value={asset.model || '-'} />
               <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
             </div>
-            {asset.pmSummary&&<div className="machine-card-summary-actions"><button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button></div>}
-            <span className="asset-row-open-cue" aria-hidden="true">Open <b>›</b></span>
+            <div className="machine-card-summary-actions"><span className="machine-card-field-label">PM</span>{asset.pmSummary?<button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button>:<span className="machine-pm-summary-empty">No PM</span>}</div>
+            <span className="asset-row-open-cue" aria-hidden="true"><span>Open</span><b>›</b></span>
           </MccPillCard>
         ))}
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}

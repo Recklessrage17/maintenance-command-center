@@ -361,3 +361,40 @@ test('#97 asset child controls stay independent and isolate the second asset', a
   await expectSingleDetail(page, 'Press 52');
   await expect(page.locator('.machine-detail-modal')).toHaveCount(1);
 });
+
+test('Issue #114 Machine Library rows align as a stable desktop grid and wrap intentionally on mobile',async({page},testInfo)=>{
+  const mobile=testInfo.project.name==='mobile-chromium';
+  await mockMachineLibrary(page);
+  await page.goto('/machine-library');
+  const cards=page.locator('.machine-asset-card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.first().getByText('Machine / Brand',{exact:true})).toBeVisible();
+  await expect(cards.first().locator('.machine-card-asset-name')).toHaveText('North Cell Press');
+  await expect(cards.first().locator('.machine-card-brand-name')).toHaveText('Toyo');
+  await expect(cards.first().getByText('Status',{exact:true})).toBeVisible();
+  await expect(cards.first().locator('.machine-card-summary-actions > .machine-card-field-label')).toHaveText('PM');
+  await expect(cards.first().locator('.asset-row-open-cue')).toContainText('Open');
+
+  const selectors=['.machine-asset-number-cell','.machine-card-identity','.machine-card-status-cell','.machine-pill-card-metrics','.machine-card-summary-actions','.asset-row-open-cue'];
+  const layout=await cards.evaluateAll((rows,selectors)=>rows.map(row=>{
+    const card=row.getBoundingClientRect();
+    const cells=Object.fromEntries(selectors.map(selector=>{const rect=row.querySelector(selector)!.getBoundingClientRect();return[selector,{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,height:rect.height}];}));
+    return{height:card.height,width:card.width,overflow:(row as HTMLElement).scrollWidth-(row as HTMLElement).clientWidth,cells};
+  }),selectors);
+  expect(Math.max(...layout.map(row=>row.height))-Math.min(...layout.map(row=>row.height))).toBeLessThanOrEqual(1);
+  expect(Math.max(...layout.map(row=>row.overflow))).toBeLessThanOrEqual(1);
+
+  if(mobile){
+    const cells=layout[0].cells;
+    expect(Math.abs(cells['.machine-asset-number-cell'].top-cells['.machine-card-status-cell'].top)).toBeLessThanOrEqual(4);
+    expect(cells['.machine-card-identity'].top).toBeGreaterThanOrEqual(cells['.machine-asset-number-cell'].bottom-2);
+    expect(cells['.machine-pill-card-metrics'].top).toBeGreaterThanOrEqual(cells['.machine-card-identity'].bottom-2);
+    expect(cells['.machine-card-summary-actions'].top).toBeGreaterThanOrEqual(cells['.machine-pill-card-metrics'].bottom-2);
+    expect(Math.abs(cells['.machine-card-summary-actions'].top-cells['.asset-row-open-cue'].top)).toBeLessThanOrEqual(4);
+  }else{
+    for(const selector of selectors)expect(Math.abs(layout[0].cells[selector].left-layout[1].cells[selector].left)).toBeLessThanOrEqual(1);
+    const cells=layout[0].cells;
+    for(let index=1;index<selectors.length;index+=1)expect(cells[selectors[index]].left).toBeGreaterThanOrEqual(cells[selectors[index-1]].right-1);
+    expect(Math.max(...selectors.map(selector=>cells[selector].height))-Math.min(...selectors.map(selector=>cells[selector].height))).toBeLessThanOrEqual(1);
+  }
+});
