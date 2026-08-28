@@ -10,7 +10,7 @@ const extensionTypes:Record<string,MccFileTypeIconVariant>={
   ppt:'powerpoint',pptx:'powerpoint',
   txt:'text',md:'text',
   png:'image',jpg:'image',jpeg:'image',gif:'image',webp:'image',bmp:'image',svg:'image',
-  mp4:'video',webm:'video',
+  mp4:'video',webm:'video',mov:'video',
   zip:'archive',
 };
 

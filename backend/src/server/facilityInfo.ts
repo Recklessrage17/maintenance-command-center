@@ -4,8 +4,8 @@ import path from 'node:path';
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import multer from 'multer';
 import { ZipArchive, type Archiver } from 'archiver';
-import { sharedDocumentMimeTypes } from './documentValidation.js';
-import { LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagingDirectory, promoteStagedFile, validateStagedLibraryFile } from './libraryUpload.js';
+
+import { LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
 
 type SqlParam = string | number | bigint | Buffer | null;
@@ -21,7 +21,7 @@ type FacilityFolderRow = {
   created_by_user_id:number|null; updated_by_user_id:number|null;
 };
 type FacilityItemRow = {
-  id:number; area_id:number; folder_id:number; media_type:'document'|'picture'|'video'; original_filename:string;
+  id:number; area_id:number; folder_id:number; media_type:'document'|'picture'|'video'|'file'; original_filename:string;
   display_filename:string; stored_filename:string; extension:string; mime_type:string; size_bytes:number;
   description:string; caption:string; revision:string; item_date:string; duration_seconds:number|null;
   uploaded_at:string; updated_at:string; uploaded_by_user_id:number|null; updated_by_user_id:number|null;
@@ -64,9 +64,6 @@ export function createFacilityInfoService(deps:{
   fs.mkdirSync(incoming,{recursive:true});
   cleanupStagingDirectory(incoming);
 
-  const documentTypes=sharedDocumentMimeTypes;
-  const pictureTypes=new Map<string,string>([['.jpg','image/jpeg'],['.jpeg','image/jpeg'],['.png','image/png'],['.webp','image/webp']]);
-  const videoTypes=new Map<string,string>([['.mp4','video/mp4'],['.webm','video/webm']]);
   const upload=multer({
     storage:multer.diskStorage({
       destination:(_req,_file,callback)=>callback(null,incoming),
@@ -183,11 +180,32 @@ export function createFacilityInfoService(deps:{
   }
   function filesDirectory(areaId:number){return path.join(areaRoot(areaId),'files');}
   function itemPath(item:Pick<FacilityItemRow,'area_id'|'stored_filename'>) {
-    const filename=path.basename(item.stored_filename);
-    if(filename!==item.stored_filename||!/^[0-9a-f]{8}-[0-9a-f-]{27}\.[a-z0-9]+$/i.test(filename))throw new Error('Facility file reference is invalid.');
-    const directory=filesDirectory(item.area_id);
+    const filename=String(item.stored_filename??'');
+
+    if(
+      !filename||
+      filename!==path.basename(filename)||
+      /[\x00-\x1f\x7f<>:"/\\|?*]/.test(filename)||
+      /[. ]$/.test(filename)
+    )throw new Error('Facility file reference is invalid.');
+
+    const extension=path.extname(filename);
+
+    if(extension.length>=180)throw new Error('Facility file reference is invalid.');
+
+    const id=path.basename(filename,extension);
+
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)){
+      throw new Error('Facility file reference is invalid.');
+    }
+
+    const directory=path.resolve(filesDirectory(item.area_id));
     const resolved=path.resolve(directory,filename);
-    if(path.dirname(resolved)!==path.resolve(directory))throw new Error('Facility file reference is invalid.');
+
+    if(path.dirname(resolved)!==directory){
+      throw new Error('Facility file reference is invalid.');
+    }
+
     return resolved;
   }
   function cleanText(value:unknown,max=2000){return String(value??'').replace(/\r/g,'').trim().slice(0,max);}
@@ -198,15 +216,7 @@ export function createFacilityInfoService(deps:{
     return name;
   }
   function safeFilename(value:unknown,requiredExtension?:string) {
-    const input=String(value??'').trim();
-    if(!input||input!==path.basename(input)||/[\x00-\x1f\x7f<>:"/\\|?*]/.test(input))throw new Error('Filename is invalid.');
-    const supplied=path.extname(input).toLowerCase();
-    const extension=requiredExtension??supplied;
-    if(!documentTypes.has(extension)&&!pictureTypes.has(extension)&&!videoTypes.has(extension))throw new Error('Supported files are PDF, Word, Excel, TXT, JPG, PNG, WEBP, MP4, or WEBM.');
-    if(requiredExtension&&supplied&&supplied!==requiredExtension)throw new Error('Renaming must preserve the original file extension.');
-    const base=path.basename(input,supplied).trim();
-    if(!base)throw new Error('Filename is required.');
-    return `${base.slice(0,Math.max(1,180-extension.length))}${extension}`;
+    return safeLibraryFilename(value,requiredExtension);
   }
   function validateDate(value:unknown) {
     const date=String(value??'').trim();
@@ -215,17 +225,40 @@ export function createFacilityInfoService(deps:{
     return date;
   }
   function typeForExtension(extension:string) {
-    if(documentTypes.has(extension))return {mediaType:'document' as const,mimeType:documentTypes.get(extension)!,maxBytes:limits.documentBytes,maxMb:configuredDocumentMb};
-    if(pictureTypes.has(extension))return {mediaType:'picture' as const,mimeType:pictureTypes.get(extension)!,maxBytes:limits.pictureBytes,maxMb:configuredPictureMb};
-    if(videoTypes.has(extension))return {mediaType:'video' as const,mimeType:videoTypes.get(extension)!,maxBytes:limits.videoBytes,maxMb:configuredVideoMb};
-    if(extension==='.mov')throw new Error('MOV upload is disabled because browser codec compatibility cannot be guaranteed. Use MP4 or WEBM.');
-    throw new Error('Supported files are PDF, Word, Excel, TXT, JPG, PNG, WEBP, MP4, or WEBM.');
+    const type=libraryFileType(extension);
+
+    if(type.mediaType==='video'){
+      return {...type,maxBytes:limits.videoBytes,maxMb:configuredVideoMb};
+    }
+
+    if(type.mediaType==='picture'){
+      return {...type,maxBytes:limits.pictureBytes,maxMb:configuredPictureMb};
+    }
+
+    return {...type,maxBytes:limits.documentBytes,maxMb:configuredDocumentMb};
   }
+
   async function validateUpload(file:Express.Multer.File) {
-    const validated=await validateStagedLibraryFile({path:file.path,originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size});
+    const validated=await validateStagedLibraryFile({
+      path:file.path,
+      originalName:file.originalname,
+      mimeType:file.mimetype,
+      sizeBytes:file.size
+    });
+
     const configured=typeForExtension(validated.extension);
-    if(file.size>configured.maxBytes)throw new Error(`${validated.displayFilename} must be ${configured.maxMb} MB or smaller.`);
-    return {...validated,maxBytes:configured.maxBytes,maxMb:configured.maxMb};
+
+    if(file.size>configured.maxBytes){
+      throw new Error(`${validated.displayFilename} must be ${configured.maxMb} MB or smaller.`);
+    }
+
+    return {
+      ...validated,
+      mediaType:configured.mediaType,
+      mimeType:configured.mimeType,
+      maxBytes:configured.maxBytes,
+      maxMb:configured.maxMb,
+    };
   }
   function duplicateItem(folderId:number,name:string,excludeId?:number) {
     return one<FacilityItemRow>(`SELECT * FROM facility_items WHERE folder_id=? AND lower(display_filename)=lower(?)${excludeId?' AND id<>?':''} LIMIT 1`,excludeId?[folderId,name,excludeId]:[folderId,name]);
@@ -244,15 +277,33 @@ export function createFacilityInfoService(deps:{
     return names.join(' / ');
   }
   function publicArea(area:FacilityAreaRow) {
-    const summary=one<{folderCount:number;documentCount:number;pictureCount:number;videoCount:number;lastUpdated:string}>(`SELECT
+    const summary=one<{folderCount:number;documentCount:number;pictureCount:number;videoCount:number;fileCount:number;lastUpdated:string}>(`SELECT
       (SELECT COUNT(*) FROM facility_folders WHERE area_id=a.id) AS folderCount,
       SUM(CASE WHEN i.media_type='document' THEN 1 ELSE 0 END) AS documentCount,
       SUM(CASE WHEN i.media_type='picture' THEN 1 ELSE 0 END) AS pictureCount,
       SUM(CASE WHEN i.media_type='video' THEN 1 ELSE 0 END) AS videoCount,
+      SUM(CASE WHEN i.media_type='file' THEN 1 ELSE 0 END) AS fileCount,
       MAX(COALESCE(i.updated_at,a.updated_at)) AS lastUpdated
       FROM facility_areas a LEFT JOIN facility_items i ON i.area_id=a.id WHERE a.id=? GROUP BY a.id`,[area.id]);
-    return {id:area.id,name:area.name,description:area.description,building:area.building,location:area.location,department:area.department,status:area.status,
-      createdAt:area.created_at,updatedAt:summary?.lastUpdated??area.updated_at,summary:{folderCount:Number(summary?.folderCount??0),documentCount:Number(summary?.documentCount??0),pictureCount:Number(summary?.pictureCount??0),videoCount:Number(summary?.videoCount??0)}};
+
+    return {
+      id:area.id,
+      name:area.name,
+      description:area.description,
+      building:area.building,
+      location:area.location,
+      department:area.department,
+      status:area.status,
+      createdAt:area.created_at,
+      updatedAt:summary?.lastUpdated??area.updated_at,
+      summary:{
+        folderCount:Number(summary?.folderCount??0),
+        documentCount:Number(summary?.documentCount??0),
+        pictureCount:Number(summary?.pictureCount??0),
+        videoCount:Number(summary?.videoCount??0),
+        fileCount:Number(summary?.fileCount??0),
+      }
+    };
   }
   function publicFolder(folder:FacilityFolderRow) {
     const counts=one<{itemCount:number;childCount:number}>('SELECT (SELECT COUNT(*) FROM facility_items WHERE folder_id=?) AS itemCount,(SELECT COUNT(*) FROM facility_folders WHERE parent_id=?) AS childCount',[folder.id,folder.id]);
@@ -260,10 +311,33 @@ export function createFacilityInfoService(deps:{
   }
   function publicItem(item:FacilityItemRow) {
     const base=`/api/facility-info/items/${item.id}`;
-    return {id:item.id,areaId:item.area_id,folderId:item.folder_id,facilityName:item.facility_name??areaById(item.area_id)?.name??'',folderName:item.folder_name??folderById(item.area_id,item.folder_id)?.name??'',folderPath:folderPath(item.area_id,item.folder_id),
-      mediaType:item.media_type,originalFilename:item.original_filename,displayFilename:item.display_filename,extension:item.extension,mimeType:item.mime_type,sizeBytes:Number(item.size_bytes),
-      description:item.description,caption:item.caption,revision:item.revision,date:item.item_date,durationSeconds:item.duration_seconds,uploadedAt:item.uploaded_at,updatedAt:item.updated_at,uploadedBy:item.uploaded_by_name??'Unknown user',
-      contentUrl:`${base}/content`,downloadUrl:`${base}/download`,canPrint:item.media_type!=='video'&&(item.media_type==='picture'||item.extension==='.pdf')};
+    const fileType=libraryFileType(item.extension);
+
+    return {
+      id:item.id,
+      areaId:item.area_id,
+      folderId:item.folder_id,
+      facilityName:item.facility_name??areaById(item.area_id)?.name??'',
+      folderName:item.folder_name??folderById(item.area_id,item.folder_id)?.name??'',
+      folderPath:folderPath(item.area_id,item.folder_id),
+      mediaType:fileType.mediaType,
+      originalFilename:item.original_filename,
+      displayFilename:item.display_filename,
+      extension:item.extension,
+      mimeType:fileType.mimeType,
+      sizeBytes:Number(item.size_bytes),
+      description:item.description,
+      caption:item.caption,
+      revision:item.revision,
+      date:item.item_date,
+      durationSeconds:item.duration_seconds,
+      uploadedAt:item.uploaded_at,
+      updatedAt:item.updated_at,
+      uploadedBy:item.uploaded_by_name??'Unknown user',
+      contentUrl:`${base}/content`,
+      downloadUrl:`${base}/download`,
+      canPrint:fileType.mediaType==='picture'||String(item.extension).toLowerCase()==='.pdf'
+    };
   }
   function record(action:string,actor:FacilityUser,area:FacilityAreaRow,entityType:string,entityId:number,label:string,value:Record<string,unknown>={}) {
     recordHistory({section:'facility_info',action,entityType,entityId,entityLabel:label,locationName:[area.building,area.location,area.department].filter(Boolean).join(' / '),newValue:{facilityId:area.id,facilityName:area.name,...value},actor});
@@ -411,7 +485,7 @@ export function createFacilityInfoService(deps:{
     const query=String(req.query.q??req.query.search??'').trim();const mediaType=String(req.query.type??'all').toLowerCase();const areaId=Number(req.query.areaId??0);const fileType=String(req.query.fileType??'').toLowerCase();const sort=String(req.query.sort??'name');
     const params:SqlParam[]=[];let where='a.deleted=0';
     if(query){const like=`%${escapeLike(query)}%`;where+=` AND (a.name LIKE ? ESCAPE '\\' COLLATE NOCASE OR f.name LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.display_filename LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.description LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.caption LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.revision LIKE ? ESCAPE '\\' COLLATE NOCASE OR COALESCE(u.full_name,'') LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.extension LIKE ? ESCAPE '\\' COLLATE NOCASE)`;params.push(like,like,like,like,like,like,like,like);}
-    if(['document','picture','video'].includes(mediaType)){where+=' AND i.media_type=?';params.push(mediaType);}
+    if(['document','picture','video','file'].includes(mediaType)){where+=' AND i.media_type=?';params.push(mediaType);}
     if(areaId>0){where+=' AND i.area_id=?';params.push(areaId);}
     if(fileType){where+=' AND i.extension=?';params.push(fileType.startsWith('.')?fileType:`.${fileType}`);}
     const order=sort==='newest'?'i.uploaded_at DESC,i.id DESC':sort==='oldest'?'i.uploaded_at ASC,i.id ASC':sort==='file_type'?'i.extension COLLATE NOCASE,i.display_filename COLLATE NOCASE':sort==='size'?'i.size_bytes DESC,i.display_filename COLLATE NOCASE':'i.display_filename COLLATE NOCASE,i.id';
@@ -464,23 +538,86 @@ export function createFacilityInfoService(deps:{
 
   function sendItemFile(req:Request,res:Response,download:boolean) {
     try{
-      const item=itemById(Number(req.params.itemId));if(!item)return res.status(404).json({ok:false,error:'Facility item not found.'});const file=itemPath(item);
-      if(!fs.existsSync(file))return res.status(404).json({ok:false,error:'Stored Facility file is missing.'});
-      const size=fs.statSync(file).size;res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');
-      res.setHeader('Content-Disposition',`${download?'attachment':'inline'}; filename="${asciiFilename(item.display_filename)}"; filename*=UTF-8''${encodeURIComponent(item.display_filename)}`);
-      if(item.media_type==='video'&&!download){
-        res.setHeader('Accept-Ranges','bytes');const range=String(req.headers.range??'');
+      const item=itemById(Number(req.params.itemId));
+
+      if(!item){
+        return res.status(404).json({ok:false,error:'Facility item not found.'});
+      }
+
+      const file=itemPath(item);
+
+      if(!fs.existsSync(file)){
+        return res.status(404).json({ok:false,error:'Stored Facility file is missing.'});
+      }
+
+      const fileType=libraryFileType(item.extension);
+      const extension=String(item.extension??'').toLowerCase();
+
+      const forceDownload=
+        download||
+        fileType.mediaType==='file'||
+        (fileType.mediaType==='document'&&extension!=='.pdf');
+
+      const size=fs.statSync(file).size;
+
+      res.setHeader('X-Content-Type-Options','nosniff');
+      res.setHeader('Cache-Control','private, no-store');
+      res.setHeader(
+        'Content-Disposition',
+        `${forceDownload?'attachment':'inline'}; filename="${asciiFilename(item.display_filename)}"; filename*=UTF-8''${encodeURIComponent(item.display_filename)}`
+      );
+
+      if(fileType.mediaType==='video'&&!forceDownload){
+        res.setHeader('Accept-Ranges','bytes');
+
+        const range=String(req.headers.range??'');
+
         if(range){
-          const match=/^bytes=(\d*)-(\d*)$/.exec(range);if(!match)return res.status(416).setHeader('Content-Range',`bytes */${size}`).end();
-          const start=match[1]?Number(match[1]):Math.max(0,size-Number(match[2]||0));const end=match[2]?Math.min(Number(match[2]),size-1):size-1;
-          if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<start||start>=size)return res.status(416).setHeader('Content-Range',`bytes */${size}`).end();
-          res.status(206);res.setHeader('Content-Range',`bytes ${start}-${end}/${size}`);res.setHeader('Content-Length',String(end-start+1));res.type(item.mime_type);fs.createReadStream(file,{start,end}).pipe(res);return;
+          const match=/^bytes=(\d*)-(\d*)$/.exec(range);
+
+          if(!match){
+            return res.status(416).setHeader('Content-Range',`bytes */${size}`).end();
+          }
+
+          const start=match[1]
+            ?Number(match[1])
+            :Math.max(0,size-Number(match[2]||0));
+
+          const end=match[2]
+            ?Math.min(Number(match[2]),size-1)
+            :size-1;
+
+          if(
+            !Number.isInteger(start)||
+            !Number.isInteger(end)||
+            start<0||
+            end<start||
+            start>=size
+          ){
+            return res.status(416).setHeader('Content-Range',`bytes */${size}`).end();
+          }
+
+          res.status(206);
+          res.setHeader('Content-Range',`bytes ${start}-${end}/${size}`);
+          res.setHeader('Content-Length',String(end-start+1));
+          res.type(fileType.mimeType);
+
+          fs.createReadStream(file,{start,end}).pipe(res);
+          return;
         }
       }
-      res.type(item.mime_type);res.setHeader('Content-Length',String(size));fs.createReadStream(file).pipe(res);
-    }catch(error){if(!res.headersSent)sendError(res,error,'Facility file could not be opened.');else res.destroy();}
-  }
 
+      res.type(fileType.mimeType);
+      res.setHeader('Content-Length',String(size));
+      fs.createReadStream(file).pipe(res);
+    }catch(error){
+      if(!res.headersSent){
+        sendError(res,error,'Facility file could not be opened.');
+      }else{
+        res.destroy();
+      }
+    }
+  }
   app.get('/api/facility-info/areas/:areaId/folders/:folderId/export',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
     try{
       const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});
@@ -508,9 +645,9 @@ export function createFacilityInfoService(deps:{
     const folders=all<FacilityFolderRow>('SELECT * FROM facility_folders WHERE area_id=? ORDER BY id',[area.id]);
     const items=all<FacilityItemRow>(`SELECT i.*,COALESCE(u.full_name,'Unknown user') AS uploaded_by_name FROM facility_items i LEFT JOIN users u ON u.id=i.uploaded_by_user_id WHERE i.area_id=? ORDER BY i.id`,[area.id]);
     return {schemaVersion:1,generatedAt:now(),storageDirectory:`facility-${area.id}`,facility:{id:area.id,name:area.name,description:area.description,building:area.building,location:area.location,department:area.department,status:area.status,createdAt:area.created_at,updatedAt:area.updated_at},
-      summary:{folderCount:folders.length,documentCount:items.filter(item=>item.media_type==='document').length,pictureCount:items.filter(item=>item.media_type==='picture').length,videoCount:items.filter(item=>item.media_type==='video').length,totalBytes:items.reduce((sum,item)=>sum+Number(item.size_bytes),0)},
+      summary:{folderCount:folders.length,documentCount:items.filter(item=>item.media_type==='document').length,pictureCount:items.filter(item=>item.media_type==='picture').length,videoCount:items.filter(item=>item.media_type==='video').length,fileCount:items.filter(item=>item.media_type==='file').length,totalBytes:items.reduce((sum,item)=>sum+Number(item.size_bytes),0)},
       folders:folders.map(folder=>({id:folder.id,parentId:folder.parent_id,name:folder.name,description:folder.description,path:folderPath(area.id,folder.id),createdAt:folder.created_at,updatedAt:folder.updated_at})),
-      items:items.map(item=>({id:item.id,folderId:item.folder_id,folderPath:folderPath(area.id,item.folder_id),mediaType:item.media_type,originalFilename:item.original_filename,visibleFilename:item.display_filename,storedFilename:item.stored_filename,extension:item.extension,mimeType:item.mime_type,sizeBytes:Number(item.size_bytes),description:item.description,caption:item.caption,revision:item.revision,date:item.item_date,durationSeconds:item.duration_seconds,uploadedAt:item.uploaded_at,updatedAt:item.updated_at,uploadedBy:item.uploaded_by_name??'Unknown user',checksumSha256:fs.existsSync(itemPath(item))?sha256File(itemPath(item)):''}))};
+      items:items.map(item=>({id:item.id,folderId:item.folder_id,folderPath:folderPath(area.id,item.folder_id),mediaType:libraryFileType(item.extension).mediaType,originalFilename:item.original_filename,visibleFilename:item.display_filename,storedFilename:item.stored_filename,extension:item.extension,mimeType:libraryFileType(item.extension).mimeType,sizeBytes:Number(item.size_bytes),description:item.description,caption:item.caption,revision:item.revision,date:item.item_date,durationSeconds:item.duration_seconds,uploadedAt:item.uploaded_at,updatedAt:item.updated_at,uploadedBy:item.uploaded_by_name??'Unknown user',checksumSha256:fs.existsSync(itemPath(item))?sha256File(itemPath(item)):''}))};
   }
   function refreshRecoveryMetadata(areaId?:number) {
     fs.mkdirSync(root,{recursive:true});const areas=all<FacilityAreaRow>(`SELECT * FROM facility_areas WHERE deleted=0${areaId?' AND id=?':''} ORDER BY name COLLATE NOCASE`,areaId?[areaId]:[]);
