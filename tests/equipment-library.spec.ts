@@ -52,3 +52,33 @@ test('Equipment folder import immediately reconciles nested folders, uploaded fi
 test('Equipment create form requires and persists custom category input',async({page})=>{
   await mockEquipment(page);await page.goto('/equipment-library');await page.getByRole('button',{name:'Add Equipment'}).click();const modal=page.locator('.equipment-form-modal');await modal.getByLabel('Equipment Name *').fill('Laser Marker');await modal.getByLabel('Equipment Asset # *').fill('EQ-302');const combo=modal.getByRole('combobox',{name:'Category *'});await combo.click();await combo.fill('Other');await modal.getByRole('option',{name:'Other / Custom'}).click();const customField=modal.getByLabel('Custom Category *');await expect(customField).toBeVisible();await expect(combo.locator('..')).toHaveClass(/equipment-custom-category-control/);await expect(customField.locator('..')).toHaveClass(/equipment-custom-category-field/);expect(await customField.evaluate(element=>getComputedStyle(element).borderColor)).toBe('rgba(246, 157, 80, 0.7)');await customField.fill('Stale Category');await combo.click();await combo.fill('Dryer');await modal.getByRole('option',{name:'Dryer',exact:true}).click();await expect(customField).toHaveCount(0);await expect(combo.locator('..')).not.toHaveClass(/equipment-custom-category-control/);await combo.click();await combo.fill('Other');await modal.getByRole('option',{name:'Other / Custom'}).click();await modal.getByLabel('Custom Category *').fill('Laser Marker');const requestPromise=page.waitForRequest(request=>request.url().endsWith('/api/equipment-library/assets')&&request.method()==='POST');await modal.getByRole('button',{name:'Create Equipment'}).click();const request=await requestPromise;const payload=request.postDataJSON();expect(payload).toMatchObject({assetNumber:'EQ-302',equipmentName:'Laser Marker',category:'Other / Custom',customCategory:'Laser Marker',equipmentType:'N/A',manufacturer:'N/A',model:'N/A',serialNumber:'N/A',equipmentYear:'N/A',location:'N/A',department:'N/A',powerType:'N/A',voltage:'N/A',phase:'N/A',amperage:'N/A',airRequirement:'N/A',waterRequirement:'N/A',specificationNotes:'N/A',capacityRating:'0',dimensions:'0',weight:'0'});
 });
+
+test('Issue #114 Equipment Library renders image thumbnails and retains non-image file icons',async({page})=>{
+  await mockEquipment(page);
+  const baseDocument={assetId:301,folderId:401,folderName:'Equipment Manuals',folderPath:'Equipment Manuals',sizeBytes:4096,description:'Equipment file',revision:'A',uploadedAt:'2026-07-23T12:00:00Z',updatedAt:'2026-07-23T12:00:00Z',uploadedBy:'Equipment Tester'};
+  const equipmentDocuments=[
+    {...baseDocument,id:410,mediaType:'picture',originalFilename:'Dryer Photo.webp',displayFilename:'Dryer Photo.webp',extension:'.webp',mimeType:'image/webp',openUrl:'/api/equipment-library/assets/301/documents/410/open',downloadUrl:'/api/equipment-library/assets/301/documents/410/download',canPrint:true},
+    {...baseDocument,id:411,mediaType:'document',originalFilename:'Dryer Manual.pdf',displayFilename:'Dryer Manual.pdf',extension:'.pdf',mimeType:'application/pdf',openUrl:'/api/equipment-library/assets/301/documents/411/open',downloadUrl:'/api/equipment-library/assets/301/documents/411/download',canPrint:true},
+    {...baseDocument,id:412,mediaType:'video',originalFilename:'Dryer Tour.mp4',displayFilename:'Dryer Tour.mp4',extension:'.mp4',mimeType:'video/mp4',openUrl:'/api/equipment-library/assets/301/documents/412/open',downloadUrl:'/api/equipment-library/assets/301/documents/412/download',canPrint:false},
+  ];
+  let videoOpenRequests=0;
+  page.on('request',request=>{if(request.url().endsWith('/documents/412/open'))videoOpenRequests+=1;});
+  await page.route(/\/api\/equipment-library\/assets\/301\/document-folders$/,route=>route.fulfill({json:{ok:true,folders:[{id:401,assetId:301,parentId:null,name:'Equipment Manuals',path:'Equipment Manuals',description:'OEM equipment documentation',documentCount:3,childCount:0,createdAt:'2026-07-20T12:00:00Z',updatedAt:'2026-07-23T12:00:00Z'}],summary:{folderCount:1,documentCount:3}}}));
+  await page.route(/\/api\/equipment-library\/assets\/301\/documents$/,route=>route.fulfill({json:{ok:true,documents:equipmentDocuments}}));
+  await page.route(/\/api\/equipment-library\/assets\/301\/documents\/410\/open$/,route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="80" height="60"><rect width="80" height="60" fill="#f59e0b"/></svg>'}));
+  await page.goto('/equipment-library');
+  await page.locator('.equipment-asset-card').click();
+  const detail=page.locator('.equipment-detail-page');
+  await detail.getByRole('button',{name:/Asset Document Library/}).click();
+  await detail.getByRole('button',{name:/Equipment Manuals.*3 documents/}).click();
+  const imageRow=detail.locator('.machine-document-row',{hasText:'Dryer Photo.webp'});
+  const image=imageRow.locator('.mcc-library-file-thumbnail');
+  await expect(image).toHaveAttribute('src','/api/equipment-library/assets/301/documents/410/open');
+  await expect.poll(()=>image.evaluate(element=>(element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(imageRow.locator('.mcc-file-type-icon')).toHaveCount(0);
+  await expect(detail.locator('.machine-document-row',{hasText:'Dryer Manual.pdf'}).locator('.mcc-file-type-icon--pdf')).toHaveCount(1);
+  const videoRow=detail.locator('.machine-document-row',{hasText:'Dryer Tour.mp4'});
+  await expect(videoRow.locator('.mcc-file-type-icon--video')).toHaveCount(1);
+  await expect(videoRow.locator('.mcc-library-file-thumbnail')).toHaveCount(0);
+  expect(videoOpenRequests).toBe(0);
+});
