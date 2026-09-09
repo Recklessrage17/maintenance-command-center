@@ -247,3 +247,13 @@
 .dashboard-stock-actions,.dashboard-stock-request { min-width: 0; display: grid; gap: 8px; }
 .dashboard-stock-actions > * { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 @media (max-width:520px) { .dashboard-stock-item { grid-template-columns: minmax(0,1fr); } .dashboard-stock-dialog { padding: 12px; } .dashboard-stock-counter { flex: 1 1 140px; } }
+
+/* Override generic mcc-card span spacing inside the unified metrics. */
+.dashboard-requisition-summary.mcc-card { min-height: 0; }
+.dashboard-requisition-summary .dashboard-metric-pill span,
+.dashboard-requisition-summary .dashboard-metric-pill strong { margin: 0; }
+.dashboard-requisition-summary .dashboard-metric-heading,
+.dashboard-requisition-summary .dashboard-metric-value-row,
+.dashboard-requisition-summary .dashboard-metric-label { display: flex; }
+.dashboard-requisition-summary .dashboard-metric-arrow { display: grid; }
+.dashboard-requisition-summary .dashboard-metric-note { font-size: .72rem; }

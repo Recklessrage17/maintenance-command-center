@@ -1536,7 +1536,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
               </fieldset>
               <fieldset className="inventory-form-section">
                 <legend>Notes</legend>
-                <label className="form-field"><span>Dashboard Stock Alert</span><input type="checkbox" checked={form.dashboardStockAlertEnabled} onChange={event=>setForm({...form,dashboardStockAlertEnabled:event.target.checked})} /><small>Show this part in Dashboard Inventory Attention when Low Stock or Out of Stock. Off by default.</small></label>
+                <label className="inventory-stock-alert-toggle"><input type="checkbox" aria-describedby="inventory-stock-alert-help" checked={form.dashboardStockAlertEnabled} onChange={event=>setForm({...form,dashboardStockAlertEnabled:event.target.checked})} /><span>Dashboard Stock Alert</span><strong>{form.dashboardStockAlertEnabled?'ON':'OFF'}</strong></label><p id="inventory-stock-alert-help" className="inventory-stock-alert-help">Show this part in Dashboard Inventory Attention when Low Stock or Out of Stock. Off by default.</p>
                 <label className="form-field"><span>Important Note</span><textarea value={form.importantNote} onChange={event=>setForm({...form,importantNote:event.target.value})} placeholder="Important note shown in red under description" /></label>
               </fieldset>
               {modal==='edit'&&<fieldset className="inventory-form-section inventory-lifecycle-section">

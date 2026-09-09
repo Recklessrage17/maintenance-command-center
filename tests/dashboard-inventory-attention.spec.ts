@@ -86,5 +86,6 @@ test('inventory deep link opens edit and persists the opt-in toggle',async({page
 
 test('inventory create defaults stock alert OFF',async({page},testInfo)=>{
   await mockApp(page);await page.goto('/inventory');if(testInfo.project.name==='mobile-chromium')await page.locator('.mobile-inventory-controls summary').click();await page.getByRole('button',{name:'Add Part',exact:true}).click();
-  await expect(page.getByRole('checkbox',{name:/Dashboard Stock Alert/})).not.toBeChecked();
+  const toggle=page.getByRole('checkbox',{name:/Dashboard Stock Alert/});await expect(toggle).not.toBeChecked();
+  const box=await toggle.boundingBox();expect(box!.width).toBeLessThanOrEqual(40);expect(box!.height).toBeLessThanOrEqual(24);
 });

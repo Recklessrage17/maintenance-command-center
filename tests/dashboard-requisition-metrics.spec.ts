@@ -50,6 +50,9 @@ test('metric pills show live counts and navigate once to the correct existing re
   await expect(active).toHaveCSS('cursor','pointer');
   const boxes=await page.locator('.dashboard-metric-pill').evaluateAll(elements=>elements.map(element=>{const box=element.getBoundingClientRect();return{x:box.x,y:box.y,width:box.width,height:box.height};}));
   expect(boxes).toHaveLength(3);
+  const card=await page.locator('.dashboard-requisition-summary').boundingBox();
+  expect(card!.height).toBeLessThanOrEqual(mobile?280:200);
+  expect(card!.width).toBeLessThanOrEqual(620);
   expect(boxes.every(box=>box.height>=44)).toBe(true);
   if(mobile){expect(boxes[1].y).toBeGreaterThan(boxes[0].y);expect(boxes[2].y).toBeGreaterThan(boxes[1].y);}else{expect(boxes[1].y).toBeGreaterThan(boxes[0].y);expect(Math.abs(boxes[1].y-boxes[2].y)).toBeLessThanOrEqual(1);}
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
