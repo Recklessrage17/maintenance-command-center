@@ -207,3 +207,15 @@ test('keeps empty, populated, converted, tablet, mobile, and zoom-equivalent lay
     await expectStableLayout(page);
   }
 });
+
+test('staging hover shares Inventory cyan surface without moving cells; selection and focus stay distinct',async({page},testInfo)=>{
+  await mockStaging(page);await page.goto('/requisitions?batch=2&search=STG-A1');
+  const row=page.locator('tr',{hasText:'STG-A1'});await expect(row).toBeVisible();
+  const inspect=()=>row.evaluate(el=>({height:el.getBoundingClientRect().height,surface:getComputedStyle(el).backgroundImage,cells:[...el.querySelectorAll('td')].map(td=>({x:td.getBoundingClientRect().x,width:td.getBoundingClientRect().width,background:getComputedStyle(td).backgroundImage})),status:getComputedStyle(el.querySelector('.staging-status-pill')??el.querySelector('td:nth-child(3) span')!).backgroundImage}));
+  const before=await inspect();
+  if(testInfo.project.name==='desktop-chromium')await row.locator('td').first().hover();else await row.getByRole('checkbox').focus();
+  await expect.poll(async()=>(await inspect()).surface).toContain('68, 215, 255');
+  const active=await inspect();expect(active.height).toBeCloseTo(before.height,2);expect(active.cells.map(c=>[c.x,c.width])).toEqual(before.cells.map(c=>[c.x,c.width]));expect(active.status).toBe(before.status);
+  await row.getByRole('checkbox').check();await expect(row).toHaveAttribute('aria-selected','true');
+  await row.getByRole('checkbox').uncheck();await row.getByRole('checkbox').focus();await expect.poll(async()=>(await inspect()).surface).toContain('68, 215, 255');
+});

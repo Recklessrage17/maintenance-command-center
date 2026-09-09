@@ -422,14 +422,10 @@
     box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease);
 }
 
-.mcc-industrial-table tbody tr:hover {
-  background: rgba(var(--mcc-module-accent-rgb), 0.055);
+@media (hover: hover) and (pointer: fine) {
+  .mcc-industrial-table tbody tr:hover { background: rgba(var(--mcc-accent-info-rgb), 0.055); }
 }
-
-.mcc-industrial-table tbody tr:focus-within {
-  background: rgba(var(--mcc-module-accent-rgb), 0.08);
-  box-shadow: inset var(--mcc-space-1) 0 var(--mcc-module-accent);
-}
+.mcc-industrial-table tbody tr:focus-within { background: rgba(var(--mcc-accent-info-rgb), 0.08); box-shadow: inset 2px 0 var(--mcc-accent-info); }
 
 .mcc-industrial-table tbody tr:last-child > * {
   border-bottom: 0;

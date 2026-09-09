@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { PmCompleteWorkflowModal } from '../preventive-maintenance/PmWorkflowModals';
 import { PmFormModal, PmHistoryModal, type AssetIdentity, type AssetLibraryScope, type PmTask } from '../machine-library/PreventiveMaintenanceTracking';
 import { PM_UPDATED_EVENT } from '../machine-library/pmEvents';
+import { DashboardInventoryAttention } from './DashboardInventoryAttention';
 import { DashboardRequisitionSummary, type DashboardRequisitionView } from './DashboardRequisitionSummary';
 import { dueInformation, intervalSummary, PmAttentionSection } from './DashboardPmAttention';
 import { relativeNoteAge, sortedAttentionAlerts, type PmAlert, type PmAssetGroup, type WarningNote } from './dashboardPm';
@@ -86,6 +87,7 @@ export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermi
   }
   return <div className="page-stack dashboard-page">
     <DashboardRequisitionSummary activeCount={requisitionSummary.activeCount} requestedCount={requisitionSummary.requestedCount} orderedCount={requisitionSummary.orderedCount} onOpen={openRequisitions}/>
+    {effectivePermissions.includes('inventory.view')&&<DashboardInventoryAttention effectivePermissions={effectivePermissions}/>}
     <section className="mcc-card dashboard-pm-panel glass-panel glass-panel--highlight" aria-labelledby="dashboard-pm-title">
       <div className="dashboard-pm-heading"><div><p className="eyebrow">Preventive maintenance</p><h2 id="dashboard-pm-title">Maintenance Attention</h2><p>Urgent schedules grouped by asset and library.</p></div></div>
       {pmLoading&&<p className="dashboard-pm-state">Loading preventive maintenance…</p>}

@@ -222,7 +222,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   const [requisitions,setRequisitions]=useState<Requisition[]>([]);
   const [summary,setSummary]=useState<Summary>(emptySummary);
   const [filter,setFilter]=useState<StatusFilter>(()=>filterFromLocation());
-  const [search,setSearch]=useState('');
+  const [search,setSearch]=useState(()=>new URLSearchParams(window.location.search).get('search')??'');
   const [loading,setLoading]=useState(true);
   const [notice,setNotice]=useState<Notice|null>(null);
   const [busyId,setBusyId]=useState<number|null>(null);
@@ -244,7 +244,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   const [stagingItems,setStagingItems]=useState<StagingItem[]>([]);
   const [requisitionBatches,setRequisitionBatches]=useState<RequisitionBatch[]>([]);
   const [batchView,setBatchView]=useState<'active'|'completed'>('active');
-  const [activeBatchId,setActiveBatchId]=useState<number|null>(null);
+  const [activeBatchId,setActiveBatchId]=useState<number|null>(()=>Number(new URLSearchParams(window.location.search).get('batch'))||null);
   const [batchEditing,setBatchEditing]=useState(false);
   const [editingBatchId,setEditingBatchId]=useState<number|null>(null);
   const [batchForm,setBatchForm]=useState<RequisitionBatchForm>({name:'',description:'',assetMachine:'',workOrderNumber:'',neededByDate:'',status:'Open'});
@@ -256,7 +256,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
   const [moveSaving,setMoveSaving]=useState(false);
   const [moveError,setMoveError]=useState('');
   const dragFromInteractiveControl=useRef(false);
-  const [stagingSearch,setStagingSearch]=useState('');
+  const [stagingSearch,setStagingSearch]=useState(()=>new URLSearchParams(window.location.search).get('search')??'');
   const [stagingSelectedIds,setStagingSelectedIds]=useState<Set<number>>(()=>new Set());
   const [stagingEditing,setStagingEditing]=useState<StagingItem|'new'|null>(null);
   const [stagingForm,setStagingForm]=useState<StagingForm>(()=>blankStagingForm(userFullName));
@@ -1041,7 +1041,7 @@ export function RequisitionsPage({ userRole, effectivePermissions, userFullName 
                 {filteredStagingItems.map(item=>{
                   const selectable=['Need to Order','Ready for Requisition'].includes(item.status);
                   const draggable=batchView==='active'&&selectable;
-                  return <tr className={draggable?`staging-draggable-row${draggedStagingItemId===item.id?' dragging':''}`:''} key={item.id} draggable={draggable} onPointerDownCapture={event=>{dragFromInteractiveControl.current=Boolean((event.target as Element).closest('button,input,select,textarea,a,label,[contenteditable="true"]'));}} onDragStart={event=>{if(dragFromInteractiveControl.current){event.preventDefault();dragFromInteractiveControl.current=false;return;}event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id));setDraggedStagingItemId(item.id);setDragOverBatchId(null);}} onDragEnd={()=>{dragFromInteractiveControl.current=false;setDraggedStagingItemId(null);setDragOverBatchId(null);}}>
+                  return <tr aria-selected={stagingSelectedIds.has(item.id)} className={draggable?`staging-draggable-row${draggedStagingItemId===item.id?' dragging':''}`:''} key={item.id} draggable={draggable} onPointerDownCapture={event=>{dragFromInteractiveControl.current=Boolean((event.target as Element).closest('button,input,select,textarea,a,label,[contenteditable="true"]'));}} onDragStart={event=>{if(dragFromInteractiveControl.current){event.preventDefault();dragFromInteractiveControl.current=false;return;}event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id));setDraggedStagingItemId(item.id);setDragOverBatchId(null);}} onDragEnd={()=>{dragFromInteractiveControl.current=false;setDraggedStagingItemId(null);setDragOverBatchId(null);}}>
                     <td>{batchView==='active'?<input className="table-checkbox" type="checkbox" checked={stagingSelectedIds.has(item.id)} onChange={()=>toggleStagingSelection(item.id)} disabled={!selectable} aria-label={`Select staged ${item.partNumber}`} />:'-'}</td>
                     <td><span className={`staging-priority-pill priority-${item.priority.toLowerCase()}`}>{item.priority}</span></td>
                     <td><span className={`staging-status-pill status-${item.status.toLowerCase().replace(/[^a-z]+/g,'-')}`}>{item.status}</span></td>

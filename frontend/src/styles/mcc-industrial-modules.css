@@ -920,21 +920,6 @@ body {
     box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease);
 }
 
-.mcc-shell table tbody tr:is(:hover, :focus-within) > td {
-  color: var(--mcc-text-primary);
-  background:
-    linear-gradient(
-      90deg,
-      rgba(var(--mcc-module-accent-rgb), 0.09),
-      transparent 78%
-    ),
-    var(--mcc-surface-dense);
-}
-
-.mcc-shell table tbody tr:focus-within {
-  box-shadow: inset 3px 0 0 var(--mcc-module-accent);
-}
-
 .mcc-shell :where(
   .inventory-row-selected,
   .staging-draggable-row.dragging,
@@ -1783,7 +1768,7 @@ body {
     box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within {
   background-color: color-mix(in srgb, var(--mcc-surface-dense) 89%, var(--mcc-accent-info) 11%);
   background:
     linear-gradient(180deg, rgba(var(--mcc-accent-info-rgb), 0.13), rgba(var(--mcc-accent-info-rgb), 0.025)),
@@ -1794,7 +1779,7 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) > td {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within > td {
   border-bottom-color: rgba(var(--mcc-accent-info-rgb), 0.46);
   color: var(--mcc-text-primary);
   background: transparent;
@@ -1803,7 +1788,7 @@ body {
     inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) > td:first-child {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within > td:first-child {
   border-radius: var(--mcc-radius-sm) 0 0 var(--mcc-radius-sm);
   box-shadow:
     inset 2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
@@ -1811,12 +1796,51 @@ body {
     inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) > td:last-child {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within > td:last-child {
   border-radius: 0 var(--mcc-radius-sm) var(--mcc-radius-sm) 0;
   box-shadow:
     inset -2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
     inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
     inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
+@media (hover: hover) and (pointer: fine) {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover {
+  background-color: color-mix(in srgb, var(--mcc-surface-dense) 89%, var(--mcc-accent-info) 11%);
+  background:
+    linear-gradient(180deg, rgba(var(--mcc-accent-info-rgb), 0.13), rgba(var(--mcc-accent-info-rgb), 0.025)),
+    linear-gradient(90deg, rgba(var(--mcc-accent-info-rgb), 0.09), transparent 38% 72%, rgba(var(--mcc-accent-info-rgb), 0.045)),
+    color-mix(in srgb, var(--mcc-surface-dense) 89%, var(--mcc-accent-info) 11%);
+  box-shadow:
+    0 0 12px rgba(var(--mcc-accent-info-rgb), 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover > td {
+  border-bottom-color: rgba(var(--mcc-accent-info-rgb), 0.46);
+  color: var(--mcc-text-primary);
+  background: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
+    inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover > td:first-child {
+  border-radius: var(--mcc-radius-sm) 0 0 var(--mcc-radius-sm);
+  box-shadow:
+    inset 2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
+    inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
+    inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover > td:last-child {
+  border-radius: 0 var(--mcc-radius-sm) var(--mcc-radius-sm) 0;
+  box-shadow:
+    inset -2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
+    inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
+    inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
 }
 
 .mcc-shell .inventory-table-wrap tbody tr.inventory-row-obsolete {
