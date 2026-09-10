@@ -40,6 +40,7 @@ test('stock popup shows all workflow states, stages an editable shortage quantit
   const fixture=await mockApp(page);await page.goto('/');
   await page.getByRole('button',{name:/Out of Stock: 4/}).click();
   const dialog=page.getByRole('dialog',{name:'Out of Stock Inventory'});await expect(dialog).toBeVisible();
+  const closeBox=await dialog.getByRole('button',{name:'Close',exact:true}).boundingBox();expect(closeBox!.width).toBeLessThanOrEqual(100);
   await expect(dialog.getByText('Requisition Added',{exact:true})).toBeVisible();await expect(dialog.getByText('REQ-4',{exact:true})).toBeVisible();
   await expect(dialog.getByText('Ordered',{exact:true})).toBeVisible();
   await expect(dialog.getByRole('link',{name:'View/Edit Staged Qty'})).toHaveAttribute('href','/requisitions?batch=7&search=STOCK-3');
