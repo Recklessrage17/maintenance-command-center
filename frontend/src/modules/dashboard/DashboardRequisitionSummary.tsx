@@ -1,4 +1,4 @@
-import { MccPillCard } from '../../components/MccPills';
+import type { CSSProperties } from 'react';
 
 export type DashboardRequisitionView = 'active'|'requested'|'ordered';
 type DashboardMetric = {view:DashboardRequisitionView;label:string;value:number;note:string;accentColor:string;variant:'info'|'warning'|'brand'};
@@ -9,8 +9,8 @@ export function DashboardRequisitionSummary({activeCount,requestedCount,orderedC
     {view:'requested',label:'Requested',value:requestedCount,note:'Waiting for order action',accentColor:'#f6be3f',variant:'warning'},
     {view:'ordered',label:'Ordered',value:orderedCount,note:'Ordered, not yet received',accentColor:'#7d8cff',variant:'brand'},
   ];
-  return <div className="dashboard-metric-grid" aria-label="Requisition summary">{metrics.map(metric=><MccPillCard key={metric.view} className={`dashboard-metric-pill dashboard-metric-pill--${metric.view}`} variant={metric.variant} accentColor={metric.accentColor} onActivate={()=>onOpen(metric.view)} ariaLabel={`${metric.label}: ${metric.value}. Open ${metric.label.toLowerCase()} view`}>
+  return <div className="dashboard-requisition-summary mcc-card" role="group" aria-label="Requisition summary">{metrics.map(metric=><button type="button" key={metric.view} className={`dashboard-metric-pill dashboard-metric-pill--${metric.view}`} style={{'--mcc-pill-accent':metric.accentColor} as CSSProperties} onClick={()=>onOpen(metric.view)} aria-label={`${metric.label}: ${metric.value}. Open ${metric.label.toLowerCase()} view`}>
     <span className="dashboard-metric-heading"><span className="dashboard-metric-label"><i aria-hidden="true"/>{metric.label}</span><span className="dashboard-metric-arrow" aria-hidden="true">&rarr;</span></span>
     <span className="dashboard-metric-value-row"><strong>{metric.value.toLocaleString()}</strong><span className="dashboard-metric-note">{metric.note}</span></span>
-  </MccPillCard>)}</div>;
+  </button>)}</div>;
 }

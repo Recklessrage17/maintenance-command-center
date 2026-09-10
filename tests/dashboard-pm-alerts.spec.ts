@@ -368,7 +368,7 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
     expect(layout.groups.every(group=>group.width<=layout.listWidth+1&&group.scrollWidth<=group.clientWidth+1)).toBeTruthy();
     expect(Math.abs(layout.groups[0].left-layout.listLeft)).toBeLessThanOrEqual(2);
     expect(layout.tokenWidths.every(width=>width<150)).toBeTruthy();
-    expect(layout.groups.every(group=>group.width>=layout.listWidth-2)).toBeTruthy();
+    expect(layout.groups.every(group=>group.width<=400)).toBeTruthy();
     expect(layout.listWidth).toBeLessThanOrEqual(layout.panelWidth);
     expect(Math.abs((layout.listLeft-layout.sectionLeft)-(layout.sectionRight-layout.listRight))).toBeLessThanOrEqual(2);
   }
@@ -381,4 +381,23 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
   expect(titleLayout.scrollWidth).toBeLessThanOrEqual(titleLayout.clientWidth+1);
   await activate(firstGroup.locator('.dashboard-pm-task-row').first(),mobile);
   await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('compact PM columns hold ten assets and animate accessible expansion independently for both libraries',async({page},testInfo)=>{
+  const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:21},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:`${library} ${String(i+1).padStart(2,'0')}`})));
+  await mockDashboard(page,alerts);await page.goto('/');
+  for(const library of ['machine','equipment']){
+    const section=page.locator(`.dashboard-pm-section--${library}`);const columns=section.locator('.dashboard-pm-column');await expect(columns).toHaveCount(3);
+    await expect(columns.nth(0).locator('.dashboard-pm-asset-group')).toHaveCount(10);await expect(columns.nth(1).locator('.dashboard-pm-asset-group')).toHaveCount(10);await expect(columns.nth(2).locator('.dashboard-pm-asset-group')).toHaveCount(1);
+    const first=columns.nth(0).locator('.dashboard-pm-asset-group').first();const eleventh=columns.nth(1).locator('.dashboard-pm-asset-group').first();
+    await expect(eleventh).toContainText(`${library} 11`);
+    const a=await first.boundingBox();const b=await eleventh.boundingBox();
+    if(testInfo.project.name==='desktop-chromium'){expect(b!.x).toBeGreaterThan(a!.x);expect(Math.abs(b!.y-a!.y)).toBeLessThan(2);}else{expect(b!.y).toBeGreaterThan(a!.y);}
+    const toggle=first.locator('.dashboard-pm-asset-toggle');const body=first.locator('.dashboard-pm-accordion-body');await toggle.click();await expect(toggle).toHaveAttribute('aria-expanded','true');
+    await expect(body).toHaveAttribute('aria-hidden','false');await expect(body).not.toHaveAttribute('inert');
+    expect(await body.evaluate(el=>getComputedStyle(el).transitionDuration)).toContain('0.22s');
+    await expect(first.locator('.dashboard-pm-task-row')).toBeVisible();await toggle.press('Escape');await expect(toggle).toBeFocused();await expect(body).toHaveAttribute('inert','');
+    await page.emulateMedia({reducedMotion:'reduce'});await expect(body).toHaveCSS('transition-duration','0s');await toggle.click();await expect(first.locator('.dashboard-pm-task-row')).toBeVisible();await toggle.click();await page.emulateMedia({reducedMotion:'no-preference'});
+  }
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });

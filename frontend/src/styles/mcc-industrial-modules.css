@@ -920,21 +920,6 @@ body {
     box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease);
 }
 
-.mcc-shell table tbody tr:is(:hover, :focus-within) > td {
-  color: var(--mcc-text-primary);
-  background:
-    linear-gradient(
-      90deg,
-      rgba(var(--mcc-module-accent-rgb), 0.09),
-      transparent 78%
-    ),
-    var(--mcc-surface-dense);
-}
-
-.mcc-shell table tbody tr:focus-within {
-  box-shadow: inset 3px 0 0 var(--mcc-module-accent);
-}
-
 .mcc-shell :where(
   .inventory-row-selected,
   .staging-draggable-row.dragging,
@@ -1783,7 +1768,7 @@ body {
     box-shadow var(--mcc-motion-fast) var(--mcc-motion-ease);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within {
   background-color: color-mix(in srgb, var(--mcc-surface-dense) 89%, var(--mcc-accent-info) 11%);
   background:
     linear-gradient(180deg, rgba(var(--mcc-accent-info-rgb), 0.13), rgba(var(--mcc-accent-info-rgb), 0.025)),
@@ -1794,7 +1779,7 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) > td {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within > td {
   border-bottom-color: rgba(var(--mcc-accent-info-rgb), 0.46);
   color: var(--mcc-text-primary);
   background: transparent;
@@ -1803,7 +1788,7 @@ body {
     inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) > td:first-child {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within > td:first-child {
   border-radius: var(--mcc-radius-sm) 0 0 var(--mcc-radius-sm);
   box-shadow:
     inset 2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
@@ -1811,12 +1796,51 @@ body {
     inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
 }
 
-.mcc-shell .inventory-table-wrap tbody tr:not(.inventory-row-obsolete):is(:hover, :focus-within) > td:last-child {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):focus-within > td:last-child {
   border-radius: 0 var(--mcc-radius-sm) var(--mcc-radius-sm) 0;
   box-shadow:
     inset -2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
     inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
     inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
+@media (hover: hover) and (pointer: fine) {
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover {
+  background-color: color-mix(in srgb, var(--mcc-surface-dense) 89%, var(--mcc-accent-info) 11%);
+  background:
+    linear-gradient(180deg, rgba(var(--mcc-accent-info-rgb), 0.13), rgba(var(--mcc-accent-info-rgb), 0.025)),
+    linear-gradient(90deg, rgba(var(--mcc-accent-info-rgb), 0.09), transparent 38% 72%, rgba(var(--mcc-accent-info-rgb), 0.045)),
+    color-mix(in srgb, var(--mcc-surface-dense) 89%, var(--mcc-accent-info) 11%);
+  box-shadow:
+    0 0 12px rgba(var(--mcc-accent-info-rgb), 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover > td {
+  border-bottom-color: rgba(var(--mcc-accent-info-rgb), 0.46);
+  color: var(--mcc-text-primary);
+  background: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
+    inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover > td:first-child {
+  border-radius: var(--mcc-radius-sm) 0 0 var(--mcc-radius-sm);
+  box-shadow:
+    inset 2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
+    inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
+    inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
+.mcc-shell table tbody tr:not(.inventory-row-obsolete):not(.inventory-row-selected):not([aria-selected="true"]):not(.dragging):hover > td:last-child {
+  border-radius: 0 var(--mcc-radius-sm) var(--mcc-radius-sm) 0;
+  box-shadow:
+    inset -2px 0 0 rgba(var(--mcc-accent-info-rgb), 0.72),
+    inset 0 1px 0 rgba(var(--mcc-accent-info-rgb), 0.5),
+    inset 0 -1px 0 rgba(var(--mcc-accent-info-rgb), 0.38);
+}
+
 }
 
 .mcc-shell .inventory-table-wrap tbody tr.inventory-row-obsolete {
@@ -5026,3 +5050,15 @@ body {
     break-inside: avoid;
   }
 }
+
+/* Dashboard stock alert uses a compact labeled switch without enlarging form checkboxes. */
+.inventory-modal .inventory-stock-alert-toggle { min-height: 44px; display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--mcc-border-default); border-radius: 12px; cursor: pointer; }
+.inventory-modal .inventory-stock-alert-toggle input[type="checkbox"] { appearance: none; position: relative; width: 38px; max-width: 38px; height: 22px; min-height: 22px; margin: 0; padding: 0; border: 1px solid var(--mcc-border-strong); border-radius: 999px; background: var(--mcc-surface-dense); cursor: pointer; }
+.inventory-modal .inventory-stock-alert-toggle input[type="checkbox"]::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--mcc-text-muted); }
+.inventory-modal .inventory-stock-alert-toggle input[type="checkbox"]:checked { border-color: var(--mcc-accent-info); background: rgba(var(--mcc-accent-info-rgb),.22); }
+.inventory-modal .inventory-stock-alert-toggle input[type="checkbox"]:checked::after { left: 19px; background: var(--mcc-accent-info); }
+.inventory-modal .inventory-stock-alert-toggle input[type="checkbox"]:focus-visible { outline: 2px solid var(--mcc-accent-info); outline-offset: 3px; }
+.inventory-modal .inventory-stock-alert-toggle span,
+.inventory-modal .inventory-stock-alert-toggle strong { margin: 0; font-size: .8rem; line-height: 1.3; }
+.inventory-modal .inventory-stock-alert-toggle strong { color: var(--mcc-accent-info); }
+.inventory-modal .inventory-stock-alert-help { margin: 8px 0 14px; color: var(--mcc-text-muted); font-size: .75rem; line-height: 1.4; }

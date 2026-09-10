@@ -525,6 +525,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_permission_grants_active ON user_perm
   if (!inventoryPartColumns.has('supplier_part_number')) run("ALTER TABLE inventory_parts ADD COLUMN supplier_part_number TEXT NOT NULL DEFAULT ''");
   if (!inventoryPartColumns.has('lead_time')) run("ALTER TABLE inventory_parts ADD COLUMN lead_time TEXT NOT NULL DEFAULT ''");
   if (!inventoryPartColumns.has('important_note')) run("ALTER TABLE inventory_parts ADD COLUMN important_note TEXT NOT NULL DEFAULT ''");
+  if (!inventoryPartColumns.has('dashboard_stock_alert_enabled')) run('ALTER TABLE inventory_parts ADD COLUMN dashboard_stock_alert_enabled INTEGER NOT NULL DEFAULT 0');
   if (!inventoryPartColumns.has('obsolete')) run('ALTER TABLE inventory_parts ADD COLUMN obsolete INTEGER NOT NULL DEFAULT 0');
   run('UPDATE inventory_parts SET unit_cost=0 WHERE unit_cost IS NULL');
   run('UPDATE inventory_parts SET obsolete=0 WHERE obsolete IS NULL OR obsolete NOT IN (0,1)');
@@ -1759,6 +1760,7 @@ interface NativePartRow {
   supplier_part_number: string;
   lead_time: string;
   important_note: string;
+  dashboard_stock_alert_enabled: number;
   obsolete: number;
   notes: string;
   source: string;
@@ -2423,6 +2425,7 @@ function normalizeNativePart(row: NativePartRow) {
     supplierPartNumber: row.supplier_part_number ?? '',
     leadTime: row.lead_time ?? '',
     importantNote: row.important_note ?? '',
+    dashboardStockAlertEnabled: Boolean(row.dashboard_stock_alert_enabled),
     obsolete: Boolean(row.obsolete ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -2455,6 +2458,7 @@ function nativePartHistoryValue(row: NativePartRow | (NativePartInput & { locati
     supplierPartNumber: 'supplier_part_number' in row ? row.supplier_part_number ?? '' : row.supplierPartNumber,
     leadTime: 'lead_time' in row ? row.lead_time ?? '' : row.leadTime,
     importantNote: 'important_note' in row ? row.important_note ?? '' : row.importantNote,
+    dashboardStockAlertEnabled: 'dashboard_stock_alert_enabled' in row ? Boolean(row.dashboard_stock_alert_enabled) : Boolean(row.dashboardStockAlertEnabled),
     obsolete: Boolean(row.obsolete ?? 0),
     partInfoUrl: 'part_info_url' in row ? row.part_info_url ?? '' : row.partInfoUrl,
     notes: 'notes' in row ? row.notes ?? '' : '',
@@ -2498,7 +2502,7 @@ LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
 WHERE ${where.join(' AND ')}
 ORDER BY p.part_number COLLATE NOCASE, p.description COLLATE NOCASE, p.id`, params).map(normalizeNativePart);
 }
-const nativeExportHeaders = ['MCC Item ID','Part Number','Description','Location','Vendor','Quantity','Minimum Quantity','Requisition','Part Info URL','Manufacturer/Brand','Unit Cost','Supplier Part Number','Lead Time','Important Note','Obsolete','Notes'] as const;
+const nativeExportHeaders = ['MCC Item ID','Part Number','Description','Location','Vendor','Quantity','Minimum Quantity','Requisition','Part Info URL','Manufacturer/Brand','Unit Cost','Supplier Part Number','Lead Time','Important Note','Obsolete','Dashboard Stock Alert','Notes'] as const;
 const nativeBlankImportHeaders = nativeExportHeaders.filter(header => header !== 'MCC Item ID');
 type NativeExportHeader = typeof nativeExportHeaders[number];
 type NativeExportRecord = Record<NativeExportHeader, string | number>;
@@ -2519,6 +2523,7 @@ type NativeImportRow = {
   supplierPartNumber: string;
   leadTime: string;
   importantNote: string;
+  dashboardStockAlertEnabled: string;
   obsolete: string | null;
   notes: string;
 };
@@ -2550,6 +2555,7 @@ type PreparedNativeImportRow = {
   supplierPartNumber: string;
   leadTime: string;
   importantNote: string;
+  dashboardStockAlertEnabled: boolean;
   obsolete: boolean | null;
   notes: string;
   status: string;
@@ -2579,6 +2585,7 @@ function nativeExportRecord(row: NativePartRow): NativeExportRecord {
     'Lead Time': row.lead_time ?? '',
     'Important Note': row.important_note ?? '',
     Obsolete: row.obsolete ? 'Yes' : 'No',
+    'Dashboard Stock Alert': row.dashboard_stock_alert_enabled ? 'Yes' : 'No',
     Notes: row.notes,
   };
 }
@@ -3852,6 +3859,7 @@ function importRowFromRecord(record: Record<string, string>, rowNumber: number):
     supplierPartNumber: value('Supplier Part Number','Supplier Part No','Supplier Part','Vendor Part Number','Vendor Part No','Manufacturer Part Number','Manufacturer Part No'),
     leadTime: value('Lead Time','LeadTime','Delivery Time','ETA'),
     importantNote: value('Important Note','Important','Alert Note','Red Note'),
+    dashboardStockAlertEnabled: value('Dashboard Stock Alert','dashboardStockAlertEnabled'),
     obsolete: has('Obsolete','Is Obsolete','Discontinued') ? value('Obsolete','Is Obsolete','Discontinued') : null,
     notes,
   };
@@ -3981,6 +3989,12 @@ function requisitionImportValue(value: string) {
   if (['false','no','n','0'].includes(normalized)) return '';
   return clean.slice(0, 120);
 }
+function stockAlertImportValue(value: string, rowNumber: number) {
+  const normalized = value.trim().toLowerCase();
+  if (['','false','no','n','0'].includes(normalized)) return false;
+  if (['true','yes','y','1'].includes(normalized)) return true;
+  throw new Error(`Row ${rowNumber}: Dashboard Stock Alert must be Yes or No.`);
+}
 function obsoleteImportValue(value: string | null, rowNumber: number) {
   if (value === null) return null;
   const normalized = value.trim().toLowerCase();
@@ -4022,6 +4036,7 @@ function prepareNativeImportRow(row: NativeImportRow, summary: NativeImportSumma
     supplierPartNumber: row.supplierPartNumber.trim(),
     leadTime: row.leadTime.trim().slice(0, 120),
     importantNote: row.importantNote.trim().slice(0, 500),
+    dashboardStockAlertEnabled: stockAlertImportValue(row.dashboardStockAlertEnabled, row.rowNumber),
     obsolete: obsoleteImportValue(row.obsolete, row.rowNumber),
     notes: row.notes.trim(),
     status,
@@ -4082,7 +4097,7 @@ function updateNativeImportPart(req: Request, actor: User, existing: NativePartR
   const quantityBefore = Number(existing.quantity ?? 0);
   const quantityAfter = Number(input.quantity ?? 0);
   const obsolete = input.obsolete === null ? Number(existing.obsolete ?? 0) : input.obsolete ? 1 : 0;
-  run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, lead_time=?, important_note=?, obsolete=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.requisition,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,obsolete,input.notes,'mcc',actor.id,timestamp,existing.id]);
+  run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, requisition=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, lead_time=?, important_note=?, dashboard_stock_alert_enabled=?, obsolete=?, notes=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.requisition,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.dashboardStockAlertEnabled === null ? Number(existing.dashboard_stock_alert_enabled ?? 0) : Number(input.dashboardStockAlertEnabled),obsolete,input.notes,'mcc',actor.id,timestamp,existing.id]);
   const updatedRow = nativePartRowById(existing.id);
   summary.updatedCount += 1;
   inventoryAudit(req,'inventory import update','part',existing.id,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created,rowNumber:input.rowNumber});
@@ -4104,6 +4119,7 @@ function insertNativeImportPart(req: Request, actor: User, input: PreparedNative
   if (location.created) summary.locationCreatedCount += 1;
   if (vendor.created) summary.vendorCreatedCount += 1;
   const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,lead_time,important_note,obsolete,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.requisition,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.obsolete ? 1 : 0,input.notes,'mcc',null,actor.id,actor.id,timestamp,timestamp]);
+  run('UPDATE inventory_parts SET dashboard_stock_alert_enabled=? WHERE id=?', [Number(input.dashboardStockAlertEnabled ?? false),Number(result.lastInsertRowid)]);
   const partId = Number(result.lastInsertRowid);
   const createdRow = nativePartRowById(partId);
   summary.addedCount += 1;
@@ -4234,7 +4250,8 @@ function validateNativePartInput(body: unknown) {
   const partInfoUrl = rawUrl ? safePartInfoUrl(rawUrl) : '';
   if (rawUrl && !partInfoUrl) throw new Error('Part Info URL must be blank or a valid http/https URL.');
   const obsolete = Object.prototype.hasOwnProperty.call(input, 'obsolete') ? booleanField(input, ['obsolete']) : null;
-  return {partNumber,description,location,vendor,quantity,minQuantity,manufacturerBrand,unitCost,supplierPartNumber,leadTime,importantNote,partInfoUrl,obsolete,status:nativePartStatus(quantity,minQuantity)};
+  const dashboardStockAlertEnabled = Object.prototype.hasOwnProperty.call(input, 'dashboardStockAlertEnabled') ? booleanField(input, ['dashboardStockAlertEnabled']) : null;
+  return {partNumber,description,location,vendor,quantity,minQuantity,manufacturerBrand,unitCost,supplierPartNumber,leadTime,importantNote,partInfoUrl,obsolete,dashboardStockAlertEnabled,status:nativePartStatus(quantity,minQuantity)};
 }
 type NativePartInput = ReturnType<typeof validateNativePartInput>;
 function findDuplicateNativePart(partNumber: string, excludeId?: number) {
@@ -11571,6 +11588,12 @@ app.post('/api/requisition-staging/bulk', requireAuth, requirePermission('invent
       if (!part) throw new Error('Inventory part not found.');
       return {part,quantityRequested:validateQuantityRequested(item.quantityRequested ?? item.quantity)};
     });
+    if (input.dashboardAttention === true) {
+      for (const {part} of prepared) {
+        if (activeRequisitionForPart(part.id) || part.requisition || activeStagingForPart(part.id)) return res.status(409).json({ok:false,error:`${part.part_number} is already in the requisition workflow. Refresh to view the current request.`});
+        if (part.obsolete) return res.status(409).json({ok:false,error:`${part.part_number} is obsolete.`});
+      }
+    }
     const duplicates = prepared.map(item=>({item,existing:activeStagingForPart(item.part.id,batch.id)})).filter(entry=>Boolean(entry.existing));
     if (duplicates.length && !updateExisting) {
       return res.status(409).json({ok:false,error:`${duplicates.length} selected part${duplicates.length===1?' is':'s are'} already in ${batch.name}. Confirm to update the existing quantities.`,duplicates:duplicates.map(entry=>({inventoryPartId:entry.item.part.id,stagingItemId:entry.existing!.id,partNumber:entry.item.part.part_number}))});
@@ -12202,6 +12225,22 @@ app.post('/api/requisitions/bulk-delete', requireAuth, requirePermission('requis
     res.status(/not found/i.test(message) ? 404 : /permission/i.test(message) ? 403 : /required|select/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
+app.get('/api/dashboard/inventory-attention', requireAuth, requirePermission('inventory.view'), (_req,res)=>{
+  const rows = all<NativePartRow>(`SELECT p.*, l.name AS location_name, v.name AS vendor_name
+    FROM inventory_parts p LEFT JOIN inventory_locations l ON l.id=p.location_id AND l.deleted=0
+    LEFT JOIN inventory_vendors v ON v.id=p.vendor_id
+    WHERE p.deleted=0 AND p.obsolete=0 AND p.dashboard_stock_alert_enabled=1
+      AND (p.quantity<=0 OR (p.min_quantity>0 AND p.quantity<=p.min_quantity))
+    ORDER BY p.quantity<=0 DESC, p.part_number COLLATE NOCASE, p.id`);
+  const items = rows.map(row=>{
+    const part = normalizeNativePart(row);
+    const staging = activeStagingForPart(row.id);
+    // The legacy orderPlaced flag means any active request; use its resolved status first.
+    const workflow = part.requisition === 'Ordered' ? 'Ordered' : part.hasActiveRequisitionRecord ? 'Requisition Added' : staging ? 'Added to Stage' : part.orderPlaced ? 'Ordered' : 'Needs Action';
+    return {...part,status:nativePartStatus(row.quantity,row.min_quantity),workflow,requisitionStagingBatchId:staging?.batch_id ?? null};
+  });
+  res.json({ok:true,items,outOfStockCount:items.filter(item=>item.status==='Out of Stock').length,lowStockCount:items.filter(item=>item.status==='Low Stock').length});
+});
 app.get('/api/inventory/native/summary', requireAuth, requirePermission('inventory.view'), (_req,res)=>res.json({ok:true,...nativeInventorySummary()}));
 app.get('/api/inventory/native/parts', requireAuth, requirePermission('inventory.view'), (req,res)=>{
   const search = queryText(req.query.search ?? req.query.q);
@@ -12286,6 +12325,7 @@ app.post('/api/inventory/native/parts', requireAuth, requirePermission('inventor
       const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
       const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
       const result = run(`INSERT INTO inventory_parts (mit3_item_id,part_number,description,location_id,vendor_id,quantity,min_quantity,status,requisition,part_info_url,manufacturer_brand,unit_cost,supplier_part_number,lead_time,important_note,obsolete,notes,source,imported_from_mit3_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, [null,input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,'',input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.obsolete ? 1 : 0,'','mcc',null,actor.id,actor.id,timestamp,timestamp]);
+      run('UPDATE inventory_parts SET dashboard_stock_alert_enabled=? WHERE id=?', [Number(input.dashboardStockAlertEnabled ?? false),Number(result.lastInsertRowid)]);
       partId = Number(result.lastInsertRowid);
       const createdRow = nativePartRowById(partId);
       inventoryAudit(req,'native part create','part',partId,{partNumber:input.partNumber,locationAutoCreated:location.created,vendorAutoCreated:vendor.created});
@@ -12324,7 +12364,7 @@ app.patch('/api/inventory/native/parts/:id', requireAuth, requirePermission('inv
       const location = getOrCreateMccNativeLookup(req,'inventory_locations',input.location,timestamp);
       const vendor = getOrCreateMccNativeLookup(req,'inventory_vendors',input.vendor,timestamp);
       const obsolete = input.obsolete === null ? Number(existing.obsolete ?? 0) : input.obsolete ? 1 : 0;
-      run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, lead_time=?, important_note=?, obsolete=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,obsolete,'mcc',actor.id,timestamp,partId]);
+      run(`UPDATE inventory_parts SET part_number=?, description=?, location_id=?, vendor_id=?, quantity=?, min_quantity=?, status=?, part_info_url=?, manufacturer_brand=?, unit_cost=?, supplier_part_number=?, lead_time=?, important_note=?, dashboard_stock_alert_enabled=?, obsolete=?, source=?, updated_by_user_id=?, updated_at=? WHERE id=?`, [input.partNumber,input.description,location.id,vendor.id,input.quantity,input.minQuantity,input.status,input.partInfoUrl,input.manufacturerBrand,input.unitCost,input.supplierPartNumber,input.leadTime,input.importantNote,input.dashboardStockAlertEnabled === null ? Number(existing.dashboard_stock_alert_enabled ?? 0) : Number(input.dashboardStockAlertEnabled),obsolete,'mcc',actor.id,timestamp,partId]);
       const updatedRow = nativePartRowById(partId);
       const quantityBefore = Number(existing.quantity ?? 0);
       const quantityAfter = Number(input.quantity ?? 0);

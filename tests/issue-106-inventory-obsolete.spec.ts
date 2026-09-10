@@ -49,7 +49,7 @@ test('Issue 106 marks and clears obsolete inventory with persistent compact visu
   const activeRest=await inspectRow(activeRow);const obsoleteRest=await inspectRow(obsoleteRow);
   expect(obsoleteRest.rowSurface).toContain('255, 117, 138');expect(obsoleteRest.rowSurface).not.toContain('68, 215, 255');expectTransparentCells(obsoleteRest);expect(obsoleteRest.cells[0].boxShadow).toContain('255, 117, 138');expect(obsoleteRest.transitionDuration).toBe('0s');
   if(process.env.MCC_ISSUE_106_VISUAL_QA==='1')await page.screenshot({path:testInfo.outputPath('normal-row-rest.png')});
-  await activeRow.locator('td').first().hover();const activeHover=await inspectRow(activeRow);
+  if(testInfo.project.name==='mobile-chromium')await activeRow.getByRole('button',{name:'Edit',exact:true}).focus();else await activeRow.locator('td').first().hover();const activeHover=await inspectRow(activeRow);
   expect(activeHover.rowSurface).toContain('68, 215, 255');expect(activeHover.rowSurface).not.toContain('255, 117, 138');expect(activeHover.rowShadow).toContain('68, 215, 255');expectTransparentCells(activeHover);expect(activeHover.cells[0].boxShadow).toContain('68, 215, 255');expect(activeHover.cells.at(-1)!.boxShadow).toContain('68, 215, 255');expect(activeHover.cells[0].borderTopLeftRadius).not.toBe('0px');expect(activeHover.cells.at(-1)!.borderTopRightRadius).not.toBe('0px');expect(activeHover.height).toBeCloseTo(activeRest.height,3);expect(activeHover.transitionDuration).toBe('0s');
   if(process.env.MCC_ISSUE_106_VISUAL_QA==='1')await page.screenshot({path:testInfo.outputPath('normal-row-hover.png')});
   await page.mouse.move(0,0);if(process.env.MCC_ISSUE_106_VISUAL_QA==='1')await page.screenshot({path:testInfo.outputPath('obsolete-row-rest.png')});

@@ -33,6 +33,7 @@ type InventoryPart = {
   supplierPartNumber: string;
   leadTime: string;
   importantNote: string;
+  dashboardStockAlertEnabled: boolean;
   obsolete: boolean;
   createdAt: string;
   updatedAt: string;
@@ -150,6 +151,7 @@ type PartForm = {
   supplierPartNumber: string;
   leadTime: string;
   importantNote: string;
+  dashboardStockAlertEnabled: boolean;
   obsolete: boolean;
 };
 
@@ -166,6 +168,7 @@ const blankForm: PartForm = {
   supplierPartNumber: '',
   leadTime: '',
   importantNote: '',
+  dashboardStockAlertEnabled: false,
   obsolete: false,
 };
 
@@ -390,6 +393,7 @@ function formFromPart(part: InventoryPart): PartForm {
     supplierPartNumber: part.supplierPartNumber ?? '',
     leadTime: part.leadTime ?? '',
     importantNote: part.importantNote ?? '',
+    dashboardStockAlertEnabled: Boolean(part.dashboardStockAlertEnabled),
     obsolete: Boolean(part.obsolete),
   };
 }
@@ -453,6 +457,7 @@ function payloadFromForm(form: PartForm) {
     supplierPartNumber: form.supplierPartNumber.trim(),
     leadTime: form.leadTime.trim(),
     importantNote: form.importantNote.trim(),
+    dashboardStockAlertEnabled: form.dashboardStockAlertEnabled,
     obsolete: form.obsolete,
   };
 }
@@ -464,7 +469,7 @@ function vendorNameKey(value: string) {
 export function InventoryPage({ userRole, effectivePermissions, userFullName, onRefreshStatusChange, onBackToDashboard, onOpenRequisitions }: { userRole: string; effectivePermissions?:string[]; userFullName: string; onRefreshStatusChange: (status:MccPageLiveStatus) => void; onBackToDashboard: () => void; onOpenRequisitions: () => void }) {
   const [nativeSummary,setNativeSummary]=useState<NativeSummary>(emptyNativeSummary);
   const [parts,setParts]=useState<InventoryPart[]>([]);
-  const [search,setSearch]=useState('');
+  const [search,setSearch]=useState(()=>new URLSearchParams(window.location.search).get('search')??'');
   const [filter,setFilter]=useState<FilterMode>('all');
   const [sortKey,setSortKey]=useState<SortKey>('partNumber');
   const [sortDirection,setSortDirection]=useState<SortDirection>('asc');
@@ -563,6 +568,8 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
       if (partsResponse.summary) setNativeSummary(normalizeNativeSummary(partsResponse.summary));
       const nextParts = partsResponse.parts ?? [];
       setParts(nextParts);
+      const partId = new URLSearchParams(window.location.search).get('part');
+      if (initialLoad && partId) { const linkedPart = nextParts.find(part=>String(part.id)===partId); if (linkedPart) openEdit(linkedPart); }
       const refreshedAt = new Date();
       const refreshedTime = formatRefreshTime(refreshedAt);
       publishRefreshStatus({state:'updated',label:`Inventory updated at ${refreshedTime}`});
@@ -1529,6 +1536,7 @@ export function InventoryPage({ userRole, effectivePermissions, userFullName, on
               </fieldset>
               <fieldset className="inventory-form-section">
                 <legend>Notes</legend>
+                <label className="inventory-stock-alert-toggle"><input type="checkbox" aria-describedby="inventory-stock-alert-help" checked={form.dashboardStockAlertEnabled} onChange={event=>setForm({...form,dashboardStockAlertEnabled:event.target.checked})} /><span>Dashboard Stock Alert</span><strong>{form.dashboardStockAlertEnabled?'ON':'OFF'}</strong></label><p id="inventory-stock-alert-help" className="inventory-stock-alert-help">Show this part in Dashboard Inventory Attention when Low Stock or Out of Stock. Off by default.</p>
                 <label className="form-field"><span>Important Note</span><textarea value={form.importantNote} onChange={event=>setForm({...form,importantNote:event.target.value})} placeholder="Important note shown in red under description" /></label>
               </fieldset>
               {modal==='edit'&&<fieldset className="inventory-form-section inventory-lifecycle-section">
