@@ -85,9 +85,12 @@ export function DashboardPage({onOpenRequisitions,userFullName='',effectivePermi
     requisitionNavigationPending.current=true;
     onOpenRequisitions(view);
   }
+  const showInventoryAttention=effectivePermissions.includes('inventory.view');
   return <div className="page-stack dashboard-page">
-    <DashboardRequisitionSummary activeCount={requisitionSummary.activeCount} requestedCount={requisitionSummary.requestedCount} orderedCount={requisitionSummary.orderedCount} onOpen={openRequisitions}/>
-    {effectivePermissions.includes('inventory.view')&&<DashboardInventoryAttention effectivePermissions={effectivePermissions}/>}
+    <div className={`dashboard-command-row${showInventoryAttention?' has-inventory-attention':''}`}>
+      <DashboardRequisitionSummary activeCount={requisitionSummary.activeCount} requestedCount={requisitionSummary.requestedCount} orderedCount={requisitionSummary.orderedCount} onOpen={openRequisitions}/>
+      {showInventoryAttention&&<DashboardInventoryAttention effectivePermissions={effectivePermissions}/>}
+    </div>
     <section className="mcc-card dashboard-pm-panel glass-panel glass-panel--highlight" aria-labelledby="dashboard-pm-title">
       <div className="dashboard-pm-heading"><div><p className="eyebrow">Preventive maintenance</p><h2 id="dashboard-pm-title">Maintenance Attention</h2><p>Urgent schedules grouped by asset and library.</p></div></div>
       {pmLoading&&<p className="dashboard-pm-state">Loading preventive maintenance…</p>}

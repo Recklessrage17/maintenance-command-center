@@ -69,6 +69,7 @@ function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{gro
 
 export function PmAttentionSection({library,title,description,alerts,warningNotes,onOpenTask,onOpenWarnings}:{library:PmLibrary;title:string;description:string;alerts:PmAlert[];warningNotes:WarningNote[];onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
   const groups=useMemo(()=>groupPmAlerts(alerts,library,warningNotes),[alerts,library,warningNotes]);
+  const columns=useMemo(()=>Array.from({length:Math.ceil(groups.length/4)},(_,column)=>groups.slice(column*4,column*4+4)),[groups]);
   const sectionAlerts=useMemo(()=>groups.flatMap(group=>group.alerts),[groups]);
   const sectionWarningCount=useMemo(()=>groups.reduce((count,group)=>count+group.warningNotes.length,0),[groups]);
   const [openGroup,setOpenGroup]=useState<string|null>(null);
@@ -105,6 +106,6 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
       <div><p className="dashboard-pm-library-label">{library==='machine'?'Machine Library':'Equipment Library'}</p><h3 id={`dashboard-${library}-pm-title`}>{title}</h3><p>{description}</p></div>
       {(sectionAlerts.length>0||sectionWarningCount>0)&&<PmStatusSummary alerts={sectionAlerts} warningCount={sectionWarningCount} className="dashboard-pm-section-counts"/>}
     </header>
-    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div className="dashboard-pm-asset-list">{Array.from({length:Math.ceil(groups.length/10)},(_,column)=><div className="dashboard-pm-column" key={column}>{groups.slice(column*10,column*10+10).map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
+    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div className={`dashboard-pm-asset-list${openGroup?' has-open-group':''}`}>{columns.map((columnGroups,column)=><div className={`dashboard-pm-column${columnGroups.some(group=>group.key===openGroup)?' is-expanded-column':''}`} key={column}>{columnGroups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
   </section>;
 }

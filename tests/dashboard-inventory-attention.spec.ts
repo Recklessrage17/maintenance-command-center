@@ -59,6 +59,21 @@ test('stock popup shows all workflow states, stages an editable shortage quantit
   await page.getByRole('button',{name:'Add to Stage',exact:true}).click();await expect(page.getByLabel('How many do you want to request?')).toHaveValue('3');
 });
 
+test('requisition summary and inventory attention share the desktop command row and stack on mobile',async({page},testInfo)=>{
+  await mockApp(page);await page.goto('/');
+  const requisitions=page.locator('.dashboard-requisition-summary');const inventory=page.locator('.dashboard-inventory-attention');
+  await expect(requisitions).toBeVisible();await expect(inventory).toBeVisible();
+  const requisitionBox=await requisitions.boundingBox();const inventoryBox=await inventory.boundingBox();
+  if(testInfo.project.name==='desktop-chromium'){
+    expect(inventoryBox!.x).toBeGreaterThan(requisitionBox!.x+requisitionBox!.width);
+    expect(Math.abs(inventoryBox!.y-requisitionBox!.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs((inventoryBox!.y+inventoryBox!.height)-(requisitionBox!.y+requisitionBox!.height))).toBeLessThanOrEqual(2);
+  }else{
+    expect(inventoryBox!.y).toBeGreaterThan(requisitionBox!.y+requisitionBox!.height);
+  }
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
 test('popup keeps focus, supports Escape and reports staging conflicts without duplicate success',async({page})=>{
   const fixture=await mockApp(page);fixture.rejectNext();await page.goto('/');
   const trigger=page.getByRole('button',{name:/Low Stock: 1/});await trigger.click();

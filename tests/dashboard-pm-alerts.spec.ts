@@ -377,26 +377,34 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
   await activate(firstGroup.locator('.dashboard-pm-asset-toggle'),mobile);
   const title=firstGroup.locator('.dashboard-pm-task-main strong').first();
   const titleLayout=await title.evaluate(element=>({height:element.getBoundingClientRect().height,lineHeight:Number.parseFloat(getComputedStyle(element).lineHeight),scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));
-  expect(titleLayout.height).toBeGreaterThan(titleLayout.lineHeight);
+  expect(titleLayout.height).toBeGreaterThanOrEqual(titleLayout.lineHeight-.1);
+  if(mobile)expect(titleLayout.height).toBeGreaterThan(titleLayout.lineHeight);
   expect(titleLayout.scrollWidth).toBeLessThanOrEqual(titleLayout.clientWidth+1);
   await activate(firstGroup.locator('.dashboard-pm-task-row').first(),mobile);
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('compact PM columns hold ten assets and animate accessible expansion independently for both libraries',async({page},testInfo)=>{
+test('PM columns hold four collapsed assets and expanded cards use the available row for both libraries',async({page},testInfo)=>{
   const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:21},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:`${library} ${String(i+1).padStart(2,'0')}`})));
   await mockDashboard(page,alerts);await page.goto('/');
   for(const library of ['machine','equipment']){
-    const section=page.locator(`.dashboard-pm-section--${library}`);const columns=section.locator('.dashboard-pm-column');await expect(columns).toHaveCount(3);
-    await expect(columns.nth(0).locator('.dashboard-pm-asset-group')).toHaveCount(10);await expect(columns.nth(1).locator('.dashboard-pm-asset-group')).toHaveCount(10);await expect(columns.nth(2).locator('.dashboard-pm-asset-group')).toHaveCount(1);
-    const first=columns.nth(0).locator('.dashboard-pm-asset-group').first();const eleventh=columns.nth(1).locator('.dashboard-pm-asset-group').first();
-    await expect(eleventh).toContainText(`${library} 11`);
-    const a=await first.boundingBox();const b=await eleventh.boundingBox();
-    if(testInfo.project.name==='desktop-chromium'){expect(b!.x).toBeGreaterThan(a!.x);expect(Math.abs(b!.y-a!.y)).toBeLessThan(2);}else{expect(b!.y).toBeGreaterThan(a!.y);}
+    const section=page.locator(`.dashboard-pm-section--${library}`);const columns=section.locator('.dashboard-pm-column');await expect(columns).toHaveCount(6);
+    for(let index=0;index<5;index+=1)await expect(columns.nth(index).locator('.dashboard-pm-asset-group')).toHaveCount(4);
+    await expect(columns.nth(5).locator('.dashboard-pm-asset-group')).toHaveCount(1);
+    const first=columns.nth(0).locator('.dashboard-pm-asset-group').first();const fifth=columns.nth(1).locator('.dashboard-pm-asset-group').first();const ninth=columns.nth(2).locator('.dashboard-pm-asset-group').first();
+    await expect(fifth).toContainText(`${library} 05`);await expect(ninth).toContainText(`${library} 09`);
+    const compactBox=await first.boundingBox();const fifthBox=await fifth.boundingBox();const ninthBox=await ninth.boundingBox();
+    if(testInfo.project.name==='desktop-chromium'){
+      expect(fifthBox!.x).toBeGreaterThan(compactBox!.x);expect(ninthBox!.x).toBeGreaterThan(fifthBox!.x);
+      expect(Math.abs(fifthBox!.y-compactBox!.y)).toBeLessThan(2);expect(Math.abs(ninthBox!.y-compactBox!.y)).toBeLessThan(2);
+    }else{expect(fifthBox!.y).toBeGreaterThan(compactBox!.y);expect(ninthBox!.y).toBeGreaterThan(fifthBox!.y);}
     const toggle=first.locator('.dashboard-pm-asset-toggle');const body=first.locator('.dashboard-pm-accordion-body');await toggle.click();await expect(toggle).toHaveAttribute('aria-expanded','true');
     await expect(body).toHaveAttribute('aria-hidden','false');await expect(body).not.toHaveAttribute('inert');
     expect(await body.evaluate(el=>getComputedStyle(el).transitionDuration)).toContain('0.22s');
+    const expandedBox=await first.boundingBox();const listBox=await section.locator('.dashboard-pm-asset-list').boundingBox();
+    if(testInfo.project.name==='desktop-chromium'){expect(expandedBox!.width).toBeGreaterThan(compactBox!.width*2);expect(Math.abs(expandedBox!.width-listBox!.width)).toBeLessThanOrEqual(2);}else{expect(Math.abs(expandedBox!.width-listBox!.width)).toBeLessThanOrEqual(2);}
     await expect(first.locator('.dashboard-pm-task-row')).toBeVisible();await toggle.press('Escape');await expect(toggle).toBeFocused();await expect(body).toHaveAttribute('inert','');
+    const closedBox=await first.boundingBox();expect(Math.abs(closedBox!.width-compactBox!.width)).toBeLessThanOrEqual(2);
     await page.emulateMedia({reducedMotion:'reduce'});await expect(body).toHaveCSS('transition-duration','0s');await toggle.click();await expect(first.locator('.dashboard-pm-task-row')).toBeVisible();await toggle.click();await page.emulateMedia({reducedMotion:'no-preference'});
   }
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);

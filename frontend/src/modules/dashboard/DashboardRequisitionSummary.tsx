@@ -10,7 +10,7 @@ export function DashboardRequisitionSummary({activeCount,requestedCount,orderedC
     {view:'ordered',label:'Ordered',value:orderedCount,note:'Ordered, not yet received',accentColor:'#7d8cff',variant:'brand'},
   ];
   return <div className="dashboard-requisition-summary mcc-card" role="group" aria-label="Requisition summary">{metrics.map(metric=><button type="button" key={metric.view} className={`dashboard-metric-pill dashboard-metric-pill--${metric.view}`} style={{'--mcc-pill-accent':metric.accentColor} as CSSProperties} onClick={()=>onOpen(metric.view)} aria-label={`${metric.label}: ${metric.value}. Open ${metric.label.toLowerCase()} view`}>
-    <span className="dashboard-metric-heading"><span className="dashboard-metric-label"><i aria-hidden="true"/>{metric.label}</span><span className="dashboard-metric-arrow" aria-hidden="true">&rarr;</span></span>
+    <span className="dashboard-metric-heading"><span className="dashboard-metric-label"><i aria-hidden="true"/>{metric.label}</span><span className="dashboard-metric-arrow" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M5 10h9m-3.5-3.5L14 10l-3.5 3.5"/></svg></span></span>
     <span className="dashboard-metric-value-row"><strong>{metric.value.toLocaleString()}</strong><span className="dashboard-metric-note">{metric.note}</span></span>
   </button>)}</div>;
 }
