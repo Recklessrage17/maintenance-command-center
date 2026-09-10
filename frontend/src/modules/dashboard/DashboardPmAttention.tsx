@@ -46,7 +46,21 @@ function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{gro
   const contentId=`dashboard-pm-group-${group.library}-${group.assetId}`;
   const label=`${group.assetNumber}${group.brand?` (${group.brand})`:''}`;
   const inactiveContentProps=isOpen?{}:{inert:''};
-  return <article className={`dashboard-pm-asset-group${isOpen?' is-open':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
+  const groupRef=useRef<HTMLElement>(null);
+  const wasOpen=useRef(false);
+  useEffect(()=>{
+    const justOpened=isOpen&&!wasOpen.current;
+    wasOpen.current=isOpen;
+    if(!justOpened)return;
+    const frame=window.requestAnimationFrame(()=>{
+      const element=groupRef.current;
+      if(!element?.isConnected)return;
+      const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      element.scrollIntoView({behavior:reducedMotion?'auto':'smooth',block:'center',inline:'nearest'});
+    });
+    return()=>window.cancelAnimationFrame(frame);
+  },[isOpen]);
+  return <article ref={groupRef} className={`dashboard-pm-asset-group${isOpen?' is-open':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
     <button className="dashboard-pm-asset-toggle" type="button" aria-expanded={isOpen} aria-controls={contentId} onClick={onToggle}>
       <span className="dashboard-pm-asset-identity"><strong>{label}</strong>{group.assetName&&<span>{group.assetName}</span>}</span>
       <AssetStatusPills group={group}/>

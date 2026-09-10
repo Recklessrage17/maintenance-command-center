@@ -409,3 +409,51 @@ test('PM columns hold four collapsed assets and expanded cards use the available
   }
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
+
+test('positions each user-expanded PM card once without repositioning on close',async({page})=>{
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await page.addInitScript(()=>{
+    const state=window as unknown as {__dashboardScrollCalls:ScrollIntoViewOptions[]};state.__dashboardScrollCalls=[];
+    Element.prototype.scrollIntoView=function(options?:boolean|ScrollIntoViewOptions){state.__dashboardScrollCalls.push(typeof options==='object'?options:{});};
+  });
+  await mockDashboard(page);await page.goto('/');
+  const machine=page.getByRole('button',{name:/Press 51 \(Toyo\)/});const equipment=page.getByRole('button',{name:/EQ-301 \(Atlas Copco\)/});
+  await machine.click();
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {__dashboardScrollCalls:ScrollIntoViewOptions[]}).__dashboardScrollCalls)).toEqual([{behavior:'smooth',block:'center',inline:'nearest'}]);
+  await machine.click();await page.waitForTimeout(50);
+  expect(await page.evaluate(()=>(window as unknown as {__dashboardScrollCalls:ScrollIntoViewOptions[]}).__dashboardScrollCalls)).toHaveLength(1);
+  await equipment.click();
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {__dashboardScrollCalls:ScrollIntoViewOptions[]}).__dashboardScrollCalls)).toHaveLength(2);
+});
+
+test('uses immediate PM positioning when reduced motion is requested',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.addInitScript(()=>{
+    const state=window as unknown as {__dashboardScrollCalls:ScrollIntoViewOptions[]};state.__dashboardScrollCalls=[];
+    Element.prototype.scrollIntoView=function(options?:boolean|ScrollIntoViewOptions){state.__dashboardScrollCalls.push(typeof options==='object'?options:{});};
+  });
+  await mockDashboard(page);await page.goto('/');await page.getByRole('button',{name:/Press 51 \(Toyo\)/}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {__dashboardScrollCalls:ScrollIntoViewOptions[]}).__dashboardScrollCalls)).toEqual([{behavior:'auto',block:'center',inline:'nearest'}]);
+});
+
+test('keeps Dashboard scrolling on the document without snap, nested traps, or stale locks',async({page},testInfo)=>{
+  test.skip(testInfo.project.name!=='desktop-chromium','Wheel continuity is exercised in desktop Chromium.');
+  const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:21},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:`${library} ${String(i+1).padStart(2,'0')}`})));
+  await mockDashboard(page,alerts);await page.goto('/');await expect(page.locator('.dashboard-page')).toBeVisible();
+  const scrolling=await page.evaluate(()=>{
+    const elements={html:document.documentElement,body:document.body,root:document.getElementById('root'),shell:document.querySelector('.mcc-shell'),page:document.querySelector('.dashboard-page'),panel:document.querySelector('.dashboard-pm-panel')};
+    const missing=Object.entries(elements).filter(([,element])=>!element).map(([name])=>name);
+    const styles=(element:Element|null)=>{if(!element)return null;const style=getComputedStyle(element);return {overflowX:style.overflowX,overflowY:style.overflowY,overscrollY:style.overscrollBehaviorY,scrollSnapType:style.scrollSnapType,touchAction:style.touchAction};};
+    return {scrollingElement:document.scrollingElement?.tagName,missing,...Object.fromEntries(Object.entries(elements).map(([name,element])=>[name,styles(element)]))};
+  });
+  expect(scrolling.missing).toEqual([]);
+  expect(scrolling.scrollingElement).toBe('HTML');
+  for(const key of ['html','body','root','shell','page','panel'] as const)expect(scrolling[key]!.overflowY,`${key} vertical overflow`).not.toBe('hidden');
+  expect(scrolling.html!.overflowX).toBe('clip');expect(scrolling.body!.overflowX).toBe('clip');expect(scrolling.root!.overflowX).toBe('clip');expect(scrolling.shell!.overflowX).toBe('clip');
+  expect(scrolling.page).toMatchObject({overflowY:'visible',overscrollY:'auto',scrollSnapType:'none',touchAction:'auto'});
+  const toggle=page.locator('.dashboard-pm-section--machine .dashboard-pm-asset-toggle').first();await toggle.click();await expect(toggle).toHaveAttribute('aria-expanded','true');await toggle.click();
+  const unlocked=await page.evaluate(()=>({html:getComputedStyle(document.documentElement).overflowY,body:getComputedStyle(document.body).overflowY}));expect(unlocked).toEqual({html:'visible',body:'visible'});
+  await page.evaluate(()=>window.scrollTo(0,0));await page.mouse.move(720,650);await page.mouse.wheel(0,280);
+  await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(0);const first=await page.evaluate(()=>window.scrollY);
+  await page.mouse.wheel(0,280);await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(first);
+});

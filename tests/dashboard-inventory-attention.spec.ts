@@ -59,7 +59,7 @@ test('stock popup shows all workflow states, stages an editable shortage quantit
   await page.getByRole('button',{name:'Add to Stage',exact:true}).click();await expect(page.getByLabel('How many do you want to request?')).toHaveValue('3');
 });
 
-test('requisition summary and inventory attention share the desktop command row and stack on mobile',async({page},testInfo)=>{
+test('inventory attention is compact with centered counts beside the requisition summary',async({page},testInfo)=>{
   await mockApp(page);await page.goto('/');
   const requisitions=page.locator('.dashboard-requisition-summary');const inventory=page.locator('.dashboard-inventory-attention');
   await expect(requisitions).toBeVisible();await expect(inventory).toBeVisible();
@@ -67,11 +67,42 @@ test('requisition summary and inventory attention share the desktop command row 
   if(testInfo.project.name==='desktop-chromium'){
     expect(inventoryBox!.x).toBeGreaterThan(requisitionBox!.x+requisitionBox!.width);
     expect(Math.abs(inventoryBox!.y-requisitionBox!.y)).toBeLessThanOrEqual(2);
-    expect(Math.abs((inventoryBox!.y+inventoryBox!.height)-(requisitionBox!.y+requisitionBox!.height))).toBeLessThanOrEqual(2);
+    expect(inventoryBox!.height).toBeLessThan(requisitionBox!.height-35);
   }else{
     expect(inventoryBox!.y).toBeGreaterThan(requisitionBox!.y+requisitionBox!.height);
   }
+  expect(inventoryBox!.height).toBeLessThan(140);
+  const counterGeometry=await inventory.locator('.dashboard-stock-counter').evaluateAll(counters=>counters.map(counter=>{
+    const counterBox=counter.getBoundingClientRect();const countBox=counter.querySelector('strong')!.getBoundingClientRect();
+    return {centerOffset:Math.abs((countBox.left+countBox.width/2)-(counterBox.left+counterBox.width/2)),height:counterBox.height};
+  }));
+  expect(counterGeometry).toHaveLength(2);
+  expect(counterGeometry.every(metric=>metric.centerOffset<=1&&metric.height>=44)).toBeTruthy();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test('both compact inventory metrics remain independent touch-friendly workflows',async({page})=>{
+  await mockApp(page);await page.goto('/');
+  const outOfStock=page.getByRole('button',{name:/Out of Stock: 4/});const lowStock=page.getByRole('button',{name:/Low Stock: 1/});
+  await expect(outOfStock).toBeVisible();await expect(lowStock).toBeVisible();
+  for(const [trigger,title] of [[outOfStock,'Out of Stock Inventory'],[lowStock,'Low Stock Inventory']] as const){
+    const box=await trigger.boundingBox();expect(box!.height).toBeGreaterThanOrEqual(44);
+    await trigger.click();const dialog=page.getByRole('dialog',{name:title});await expect(dialog).toBeVisible();
+    await dialog.getByRole('button',{name:'Close',exact:true}).click();await expect(dialog).toHaveCount(0);
+    const overflow=await page.evaluate(()=>({html:getComputedStyle(document.documentElement).overflowY,body:getComputedStyle(document.body).overflowY}));
+    expect(overflow).toEqual({html:'visible',body:'visible'});
+  }
+});
+
+test('dashboard command cards do not overflow at desktop, tablet, or mobile widths',async({page},testInfo)=>{
+  test.skip(testInfo.project.name!=='desktop-chromium','One Chromium context covers the responsive breakpoints.');
+  await mockApp(page);
+  for(const width of [1440,834,390]){
+    await page.setViewportSize({width,height:900});await page.goto('/');
+    const layout=await page.evaluate(()=>({documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,cards:[...document.querySelectorAll<HTMLElement>('.dashboard-command-row > *')].map(card=>card.scrollWidth-card.clientWidth)}));
+    expect(layout.documentOverflow,`${width}px document overflow`).toBeLessThanOrEqual(1);
+    expect(layout.cards.every(overflow=>overflow<=1),`${width}px command-card overflow`).toBeTruthy();
+  }
 });
 
 test('popup keeps focus, supports Escape and reports staging conflicts without duplicate success',async({page})=>{
