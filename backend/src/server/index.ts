@@ -10107,6 +10107,10 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', require
   scheduleAutoBackup('preventive maintenance deactivated',req.user!);
   res.json({ok:true,task:publicPmTask(updated)});
 });
+app.get('/api/preventive-maintenance/work-order-upload-rules',requireAuth,(_req,res)=>{
+  res.setHeader('Cache-Control','private, no-store');
+  res.json({ok:true,rules:{maxBytes:pmWorkOrderMaxBytes,acceptedMimeTypes:[PM_WORK_ORDER_MIME],filenameExtension:'.pdf'}});
+});
 app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), receivePmWorkOrder, async(req:AuthRequest,res)=>{
   let staged:StagedPmWorkOrder|null=null;
   try {
