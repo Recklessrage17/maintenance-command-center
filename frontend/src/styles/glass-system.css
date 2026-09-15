@@ -2012,6 +2012,17 @@ button.mcc-resource-row__content { cursor: pointer; }
   background: rgba(12, 66, 51, 0.3);
 }
 
+.pm-work-order-attachment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.pm-work-order-attachment-actions .glass-button {
+  min-height: 44px;
+}
+
 .pm-work-order-attachment-summary > span:nth-child(2),
 .pm-work-order-pending-pages > span {
   min-width: 0;
@@ -2162,6 +2173,48 @@ button.mcc-resource-row__content { cursor: pointer; }
 
 .pm-photo-preview-actions {
   margin-top: 0;
+}
+
+.pm-generated-pdf-preview-modal {
+  width: min(920px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+}
+
+.pm-generated-pdf-preview-frame {
+  height: clamp(240px, 58dvh, 720px);
+  overflow: hidden;
+  border: 1px solid rgba(68, 215, 255, 0.3);
+  border-radius: 15px;
+  background: #fff;
+}
+
+.pm-generated-pdf-preview-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.pm-generated-pdf-preview-help {
+  margin: 0;
+  color: #a9c8d7;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.pm-generated-pdf-preview-actions {
+  margin-top: 0;
+}
+
+.pm-generated-pdf-preview-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .pm-inline-error {
@@ -2623,14 +2676,15 @@ button.mcc-resource-row__content { cursor: pointer; }
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .pm-work-order-attachment-summary > .glass-button,
+  .pm-work-order-attachment-actions,
   .pm-work-order-pending-pages > div {
     grid-column: 1 / -1;
     width: 100%;
   }
 
-  .pm-work-order-attachment-summary > .glass-button {
-    min-height: 44px;
+  .pm-work-order-attachment-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pm-work-order-pending-pages > div {
@@ -2639,6 +2693,11 @@ button.mcc-resource-row__content { cursor: pointer; }
   }
 
   .pm-photo-preview-modal {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .pm-generated-pdf-preview-modal {
     width: 100%;
     max-height: calc(100dvh - 16px);
   }
@@ -2675,6 +2734,11 @@ button.mcc-resource-row__content { cursor: pointer; }
 
   .pm-photo-preview-actions .primary-button {
     grid-column: 1 / -1;
+  }
+
+  .pm-generated-pdf-preview-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .pm-task-card {
