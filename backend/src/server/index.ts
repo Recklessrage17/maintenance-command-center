@@ -75,6 +75,16 @@ import {
   type PortablePackageManifest,
 } from './portableBackup.js';
 import {
+  buildWorkOrderArchivePlan,
+  streamWorkOrderArchive,
+  workOrderArchiveInfo,
+  writeWorkOrderArchiveDirectory,
+  type WorkOrderArchivePlan,
+  type WorkOrderRecordAttachmentSource,
+  type WorkOrderRecordLibrary,
+  type WorkOrderRecordSource,
+} from './workOrderRecordsExport.js';
+import {
   inheritedPermissions,
   isPermissionKey,
   permissionByKey,
@@ -2725,6 +2735,7 @@ type BackupManifest = {
   recordCounts: Record<string, number>;
   documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
   workOrderAttachments?: { attachmentCount: number; fileCount: number; sizeBytes: number };
+  workOrderRecords?: { year: number; assetCount: number; recordCount: number; attachmentCount: number; recordPdfCount: number; fileCount: number; totalBytes: number; failedCount: number; manifestSha256: string };
   checksumSha256: string;
   fileChecksums?: Record<string,string>;
   packageVersion?: number;
@@ -2749,6 +2760,7 @@ type BackupSummary = {
   recordCounts: Record<string, number>;
   documentLibrary?: { folderCount: number; documentCount: number; fileCount: number; sizeBytes: number };
   workOrderAttachments?: { attachmentCount: number; fileCount: number; sizeBytes: number };
+  workOrderRecords?: BackupManifest['workOrderRecords'];
   checksumSha256: string;
   notes: string;
   restorable: boolean;
@@ -3143,6 +3155,7 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     recordCounts: manifest?.recordCounts ?? {},
     documentLibrary: manifest?.documentLibrary,
     workOrderAttachments: manifest?.workOrderAttachments,
+    workOrderRecords: manifest?.workOrderRecords,
     checksumSha256: manifest?.checksumSha256 ?? '',
     notes: manifest?.notes ?? '',
     restorable: fs.existsSync(dbFile),
@@ -3238,6 +3251,26 @@ async function createBackup(input: { category: CreatableBackupCategory; type?: B
         includedFolders.push(`files/${includedFolder}/`);
       }
     }
+    let workOrderRecords: BackupManifest['workOrderRecords'];
+    if (portable) {
+      const exportYear = new Date().getFullYear();
+      const workOrderPlan = workOrderArchivePlanForLibraries(exportYear, ['machine','equipment']);
+      const writtenArchive = writeWorkOrderArchiveDirectory(targetDir, workOrderPlan);
+      workOrderRecords = {
+        year: exportYear,
+        assetCount: writtenArchive.assetCount,
+        recordCount: writtenArchive.recordCount,
+        attachmentCount: writtenArchive.attachmentCount,
+        recordPdfCount: writtenArchive.recordPdfCount,
+        fileCount: writtenArchive.fileCount,
+        totalBytes: writtenArchive.totalBytes,
+        failedCount: writtenArchive.failedCount,
+        manifestSha256: writtenArchive.manifestSha256,
+      };
+      fs.writeFileSync(path.join(targetDir, 'MCC_EXPORT_INFO.txt'), `${workOrderArchiveInfo(workOrderPlan, { added: workOrderPlan.entries.length, updated: 0, skipped: 0, failed: workOrderPlan.failures.length, mode: 'master' })}\nMaster package: ${portableIdentity!.packageRoot}\nApplication version: ${applicationVersion ?? '0.0.0'}\n`, { flag: 'wx' });
+      includedPaths.push(`${workOrderPlan.directoryName}/`, 'MCC_EXPORT_INFO.txt');
+      includedFolders.push(`${workOrderPlan.directoryName}/`);
+    }
     let excelExports: string[] = [];
     if (portable && portableIdentity) {
       excelExports = await writeExcelInsuranceExports(backupDbPath, path.join(targetDir, 'excel'));
@@ -3272,6 +3305,7 @@ async function createBackup(input: { category: CreatableBackupCategory; type?: B
       recordCounts: masterBackupRecordCounts(),
       documentLibrary: machineDocumentLibraryBackupStats(),
       workOrderAttachments: pmWorkOrderBackupStats(),
+      ...(workOrderRecords ? { workOrderRecords } : {}),
       checksumSha256: sha256File(backupDbPath),
       ...(portable ? {
         packageVersion: PORTABLE_PACKAGE_VERSION,
@@ -10306,7 +10340,7 @@ app.get('/api/machine-library/assets/:id/notes', requireAuth, requirePermission(
   const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name
     FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
     WHERE n.asset_id=? AND n.deleted=0 AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(row=>publicMachineAssetNote(row,req.user));
-  res.json({ok:true,notes,permissions:{canCreate:hasPermission(req.user!,'machine.notes_manage')}});
+  res.json({ok:true,notes,permissions:{canCreate:hasPermission(req.user!,'machine.notes_manage'),canExportWorkOrderRecords:hasPermission(req.user!,'machine.import_export')}});
 });
 app.post('/api/machine-library/assets/:id/notes', requireAuth, requirePermission('machine.notes_manage'), receiveMachineAssetNote, async (req:AuthRequest,res)=>{
   let noteId=0;
@@ -10965,7 +10999,7 @@ app.get('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission(
   const asset=equipmentAssetById(Number(req.params.id));
   if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});
   const notes=all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.asset_id=? AND n.deleted=0 AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`,[asset.id]).map(row=>publicEquipmentAssetNote(row,req.user));
-  res.json({ok:true,notes,permissions:{canCreate:hasPermission(req.user!,'equipment.notes_manage')}});
+  res.json({ok:true,notes,permissions:{canCreate:hasPermission(req.user!,'equipment.notes_manage'),canExportWorkOrderRecords:hasPermission(req.user!,'equipment.import_export')}});
 });
 app.post('/api/equipment-library/assets/:id/notes',requireAuth,requirePermission('equipment.write'),receiveMachineAssetNote,async(req:AuthRequest,res)=>{
   let noteId=0;const stored:string[]=[];
@@ -11013,6 +11047,38 @@ function assetNoteStoredFilePath(library:AssetLibrary,storedReference:string) {
 }
 function assetNoteStorage(library:AssetLibrary) {
   return library==='machine'?{directory:machineAssetNotesDir,prefix:'uploads/machine-asset-notes/'}:{directory:equipmentAssetNotesDir,prefix:'uploads/equipment-asset-notes/'};
+}
+function workOrderRecordAttachmentSource(library:WorkOrderRecordLibrary,row:MachineAssetNoteAttachmentRow|AssetNoteUpdateAttachmentRow,update=false):WorkOrderRecordAttachmentSource {
+  const base=`/api/${library}-library/${update?'asset-note-update-attachments':'asset-note-attachments'}/${row.id}/file`;let sourcePath='';let sourceError='';try{sourcePath=assetNoteStoredFilePath(library,row.stored_file_reference);}catch(error){sourceError=safeErrorMessage(error,[],'Stored attachment reference is invalid.');}
+  return {id:row.id,filename:row.original_filename,mimeType:row.mime_type,sizeBytes:Number(row.file_size),sourcePath,downloadUrl:`${base}?download=true&v=${encodeURIComponent(row.created_at)}`,...(sourceError?{sourceError}:{})};
+}
+function workOrderRecordRows(library:WorkOrderRecordLibrary,year:number) {
+  if(library==='machine')return all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.deleted=0 AND a.deleted=0 AND n.note_date LIKE ? ORDER BY a.id,n.note_date,n.id`,[`${year}-%`]);
+  return all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.deleted=0 AND a.deleted=0 AND n.note_date LIKE ? ORDER BY a.id,n.note_date,n.id`,[`${year}-%`]);
+}
+function workOrderRecordSource(library:WorkOrderRecordLibrary,row:MachineAssetNoteRow):WorkOrderRecordSource {
+  const updates=assetNoteUpdates(library,row.id);let pdfPath='';let pdfError='';if(row.pdf_stored_reference){try{pdfPath=assetNoteStoredFilePath(library,row.pdf_stored_reference);}catch(error){pdfError=safeErrorMessage(error,[],'Generated note PDF reference is invalid.');}}let pdfSize=0;try{pdfSize=pdfPath?fs.statSync(pdfPath).size:0;}catch{}
+  return {
+    library,
+    asset:{id:row.asset_id,assetNumber:row.asset_number??'',assetName:row.asset_name??'',brand:row.brand??'',model:row.model??'',serialNumber:row.serial_number??'',location:row.location??'',category:row.category??''},
+    note:{id:row.id,title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),workOrder:row.work_order_reference??'',status:row.is_warning?(row.issue_status==='resolved'?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??''},
+    generatedPdf:row.pdf_stored_reference?{id:row.id,filename:row.pdf_filename||`Asset_Note_${row.id}.pdf`,mimeType:'application/pdf',sizeBytes:pdfSize,sourcePath:pdfPath,downloadUrl:`/api/${library}-library/asset-notes/${row.id}/pdf?download=true&v=${encodeURIComponent(row.updated_at)}`,...(pdfError?{sourceError:pdfError}:{})}:null,
+    attachments:assetNoteAttachments(library,row.id).map(item=>workOrderRecordAttachmentSource(library,item)),
+    updates:updates.map(update=>({id:update.id,body:update.body,createdByUserId:update.created_by_user_id,createdBy:update.created_by_name,createdAt:update.created_at,attachments:assetNoteUpdateAttachments(update.id).map(item=>workOrderRecordAttachmentSource(library,item,true))})),
+    lifecycle:assetNoteLifecycleEvents(library,row.id).map(item=>publicAssetNoteLifecycleEvent(item) as Record<string,unknown>),
+  };
+}
+function workOrderArchivePlanForLibraries(year:number,libraries:WorkOrderRecordLibrary[],generatedAt=now()):WorkOrderArchivePlan {
+  return buildWorkOrderArchivePlan({year,generatedAt,records:libraries.flatMap(library=>workOrderRecordRows(library,year).map(row=>workOrderRecordSource(library,row)))});
+}
+function workOrderExportLibraries(actor:User) {
+  return (['machine','equipment'] as WorkOrderRecordLibrary[]).filter(library=>hasPermission(actor,`${library}.import_export` as PermissionKey));
+}
+function workOrderExportYear(value:unknown) {
+  const fallback=new Date().getFullYear();const clean=String(value??'').trim();if(!clean)return fallback;const year=Number(clean);if(!/^\d{4}$/.test(clean)||!Number.isInteger(year)||year<2000||year>9999)throw new Error('Work-order export year is invalid.');return year;
+}
+function publicWorkOrderArchivePlan(plan:WorkOrderArchivePlan) {
+  return {...plan,entries:plan.entries.map(({sourcePath:_sourcePath,...entry})=>entry)};
 }
 async function regenerateAssetNotePdf(library:AssetLibrary,noteId:number) {
   if(library==='machine')await regenerateMachineAssetNotePdf(noteId);else await regenerateEquipmentAssetNotePdf(noteId);
@@ -11081,6 +11147,26 @@ for(const library of ['machine','equipment'] as const){
     }catch(error){res.status(500).json({ok:false,error:safeErrorMessage(error,[],'Maintenance update attachment could not be opened.')});}
   });
 }
+
+app.get('/api/work-order-records/export-plan',requireAuth,(req:AuthRequest,res)=>{
+  try{
+    const libraries=workOrderExportLibraries(req.user!);if(!libraries.length)return res.status(403).json({ok:false,code:'PERMISSION_REQUIRED',permission:'machine.import_export or equipment.import_export',error:'You do not have permission to export work-order records.'});
+    const year=workOrderExportYear(req.query.year);const plan=workOrderArchivePlanForLibraries(year,libraries);res.setHeader('Cache-Control','private, no-store');res.json({ok:true,authorizedLibraries:libraries,plan:publicWorkOrderArchivePlan(plan)});
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Work-order export could not be prepared.')});}
+});
+app.get('/api/work-order-records/export.zip',requireAuth,(req:AuthRequest,res)=>{
+  try{
+    const libraries=workOrderExportLibraries(req.user!);if(!libraries.length)return res.status(403).json({ok:false,code:'PERMISSION_REQUIRED',permission:'machine.import_export or equipment.import_export',error:'You do not have permission to export work-order records.'});
+    const year=workOrderExportYear(req.query.year);const plan=workOrderArchivePlanForLibraries(year,libraries);res.setHeader('X-MCC-Asset-Count',String(plan.totals.assetCount));res.setHeader('X-MCC-Record-Count',String(plan.totals.recordCount));res.setHeader('X-MCC-Attachment-Count',String(plan.totals.attachmentCount));res.setHeader('X-MCC-File-Count',String(plan.totals.fileCount));res.setHeader('X-MCC-Uncompressed-Bytes',String(plan.totals.totalBytes));
+    let completed=false;res.once('finish',()=>{completed=true;try{audit(req,'work order records export downloaded','work_order_records',String(year),{mode:'download',libraries,assets:plan.totals.assetCount,records:plan.totals.recordCount,attachments:plan.totals.attachmentCount,files:plan.totals.fileCount,totalBytes:plan.totals.totalBytes,failed:plan.failures.length});}catch{}});const archive=streamWorkOrderArchive(res,plan);req.once('aborted',()=>{if(!completed)archive.abort();});
+  }catch(error){if(res.headersSent)res.destroy(error as Error);else res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Work-order export package could not be created.')});}
+});
+app.post('/api/work-order-records/export-complete',requireAuth,(req:AuthRequest,res)=>{
+  try{
+    const libraries=workOrderExportLibraries(req.user!);if(!libraries.length)return res.status(403).json({ok:false,code:'PERMISSION_REQUIRED',permission:'machine.import_export or equipment.import_export',error:'You do not have permission to export work-order records.'});
+    const body=isRecord(req.body)?req.body:{};const year=workOrderExportYear(body.year);const count=(key:string)=>Math.max(0,Math.min(1_000_000,Math.trunc(Number(body[key])||0)));audit(req,'work order records directory export completed','work_order_records',String(year),{mode:'directory',libraries,new:count('added'),updated:count('updated'),skipped:count('skipped'),failed:count('failed'),totalBytes:Math.max(0,Number(body.totalBytes)||0),canceled:false});res.json({ok:true});
+  }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Work-order export completion could not be recorded.')});}
+});
 
 app.get('/api/history/summary', requireAuth, requirePermission('history.view'), (_req,res)=>{
   const rows = all<{ section: HistorySection; count: number; latestCreatedAt: string | null }>('SELECT section, COUNT(*) AS count, MAX(created_at) AS latestCreatedAt FROM history_logs GROUP BY section');

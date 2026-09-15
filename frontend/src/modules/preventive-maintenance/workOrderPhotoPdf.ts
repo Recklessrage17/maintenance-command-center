@@ -108,9 +108,9 @@ export async function createWorkOrderPhotoPdf({files,filename,maxBytes,onProgres
   throw new Error('The photographed work order could not be compressed within the server upload limit. Remove a page, retake photos closer to the document, or use Choose PDF.');
 }
 
-export function workOrderPhotoPdfFilename(workOrderNumber:string,assetNumber:string,taskTitle:string){
+export function workOrderPhotoPdfFilename(workOrderNumber:string,assetNumber:string,taskTitle:string,recordDate=''){
   const clean=(value:string)=>value.normalize('NFKD').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^[._-]+|[._-]+$/g,'').slice(0,72);
-  const workOrder=/^n\s*\/\s*a$/i.test(workOrderNumber.trim())?'':clean(workOrderNumber);const identity=[workOrder,clean(assetNumber),clean(taskTitle)].filter(Boolean).join('_').slice(0,210)||'PM-work-order';return `${identity}_photos.pdf`;
+  const workOrder=/^n\s*\/\s*a$/i.test(workOrderNumber.trim())?'':clean(workOrderNumber);const identity=[workOrder,clean(assetNumber),clean(recordDate),clean(taskTitle)].filter(Boolean).join('_').slice(0,210)||'PM-work-order';return `${identity}_photos.pdf`;
 }
 
 export function formatWorkOrderFileSize(bytes:number){
