@@ -740,9 +740,9 @@ function validateApprovedPackageEntry(name: string, rootName: string) {
   const relative = name.slice(rootName.length).replace(/^\//, '').replace(/\/$/, '');
   if (!relative) return;
   const top = relative.split('/')[0];
-  const approved = new Set(['manifest.json', 'RECOVERY_README.txt', 'database', 'excel', 'files', 'pm', 'recovery']);
-  if (!approved.has(top)) throw new Error(`Portable archive contains an entry outside the approved package structure: ${relative}`);
-  if ((top === 'manifest.json' || top === 'RECOVERY_README.txt') && relative !== top) throw new Error(`Portable archive contains an invalid package entry: ${relative}`);
+  const approved = new Set(['manifest.json', 'RECOVERY_README.txt', 'MCC_EXPORT_INFO.txt', 'database', 'excel', 'files', 'pm', 'recovery']);
+  if (!approved.has(top) && !/^WO_\d{4}_records$/.test(top)) throw new Error(`Portable archive contains an entry outside the approved package structure: ${relative}`);
+  if ((top === 'manifest.json' || top === 'RECOVERY_README.txt' || top === 'MCC_EXPORT_INFO.txt') && relative !== top) throw new Error(`Portable archive contains an invalid package entry: ${relative}`);
 }
 
 export async function extractAndImportPortableArchive(input: {

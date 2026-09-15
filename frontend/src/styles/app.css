@@ -1611,6 +1611,26 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-attachment-picker > div { display: grid; gap: 3px; }
 .asset-note-attachment-picker strong { color: #eafaff; font-size: .82rem; }
 .asset-note-attachment-picker small { color: #94b8c9; font-size: .7rem; }
+.asset-notes-toolbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.asset-note-work-order-photo-row { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px dashed rgba(68,215,255,.34); }
+.asset-note-work-order-photo-row > div:first-child { display: grid; gap: 3px; }
+.asset-note-work-order-photo-row strong { color: #eafaff; font-size: .82rem; }
+.asset-note-work-order-photo-row small { color: #94b8c9; font-size: .7rem; }
+.mcc-shell .asset-note-work-order-photo-row .asset-note-camera-button { height: 44px; min-height: 44px; white-space: nowrap; }
+.asset-note-camera-error,.asset-note-camera-limit { flex-basis: 100%; margin: 6px 0 0; }
+.asset-note-photo-pending { grid-column: 1 / -1; width: 100%; }
+.work-order-export-modal { width: min(720px,calc(100vw - 28px)); }
+.work-order-export-status { display: grid; gap: 5px; padding: 11px 12px; border: 1px solid rgba(68,215,255,.24); border-radius: 10px; background: rgba(4,18,34,.56); }
+.work-order-export-status strong { color: #eafaff; font-size: .84rem; }
+.work-order-export-status span { overflow: hidden; color: #95bdcf; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.work-order-export-status.is-success { border-color: rgba(54,229,170,.42); }
+.work-order-export-status.is-error { border-color: rgba(255,117,138,.48); }
+.work-order-export-totals,.work-order-export-counts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-top: 12px; }
+.work-order-export-totals span,.work-order-export-counts span { display: grid; gap: 2px; padding: 8px; border: 1px solid rgba(143,205,233,.16); border-radius: 8px; color: #92b9cc; background: rgba(7,25,45,.46); font-size: .68rem; }
+.work-order-export-totals strong,.work-order-export-counts strong { color: #f2fbff; font-size: .9rem; }
+.work-order-export-progress { height: 8px; overflow: hidden; margin-top: 12px; border-radius: 999px; background: rgba(1,10,18,.76); box-shadow: inset 0 0 0 1px rgba(143,205,233,.12); }
+.work-order-export-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#1e9fff,#36e5aa); transition: width .16s ease; }
+.work-order-export-meter { margin: 6px 0 0; color: #9cc5d8; font-size: .72rem; }
 .asset-note-list { display: grid; gap: 10px; }
 .asset-note-entry { min-width: 0; display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(143,205,233,.18); border-radius: 12px; background: linear-gradient(145deg,rgba(9,34,55,.56),rgba(3,13,24,.68)); }
 .asset-note-entry-heading { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: start; }
@@ -4049,8 +4069,10 @@ tr:hover td {
   .machine-record-newest-preview { grid-template-columns: 1fr; }
   .machine-record-preview-thumbnail { width: 100%; height: 150px; }
   .machine-record-preview-open { grid-column: 1; }
-  .asset-notes-toolbar,.asset-note-attachment-picker { align-items: stretch; flex-direction: column; }
-  .asset-notes-toolbar .compact-button,.asset-note-attachment-picker .compact-button { width: 100%; }
+  .asset-notes-toolbar,.asset-note-attachment-picker,.asset-note-work-order-photo-row { align-items: stretch; flex-direction: column; }
+  .asset-notes-toolbar-actions { align-items: stretch; flex-direction: column; }
+  .asset-notes-toolbar .compact-button,.asset-note-attachment-picker .compact-button,.asset-note-work-order-photo-row .compact-button { width: 100%; }
+  .work-order-export-totals,.work-order-export-counts { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .asset-attachment-chip { grid-template-columns: auto minmax(0,1fr); }
   .asset-attachment-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .maintenance-photo-preview-canvas { min-height: 220px; }
