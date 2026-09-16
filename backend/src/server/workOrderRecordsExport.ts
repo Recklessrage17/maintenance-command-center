@@ -13,6 +13,8 @@ export type WorkOrderRecordAttachmentSource = {
   sizeBytes: number;
   sourcePath: string;
   downloadUrl: string;
+  sourceType?: 'supporting' | 'work_order_photo';
+  sha256?: string;
   sourceError?: string;
 };
 
@@ -56,6 +58,8 @@ export type WorkOrderRecordSource = {
     reopenedAt: string | null;
     reopenedByUserId: number | null;
     reopenedBy: string;
+    labor: Array<{ userId: number | null; displayName: string; hours: number; isPrimary: boolean; order: number }>;
+    totalLaborHours: number;
   };
   generatedPdf: WorkOrderRecordAttachmentSource | null;
   attachments: WorkOrderRecordAttachmentSource[];
