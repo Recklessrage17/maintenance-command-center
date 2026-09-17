@@ -580,10 +580,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .pm-delete-backdrop { background:radial-gradient(circle at 50% 18%,rgba(164,54,78,.16),transparent 38%),rgba(1,8,15,.76); backdrop-filter:blur(15px) saturate(120%); }
 .pm-delete-modal { width:min(680px,100%); overflow:hidden; border-color:rgba(255,126,145,.32); border-radius:24px; background:linear-gradient(155deg,rgba(35,49,59,.94),rgba(11,21,30,.97) 48%,rgba(28,14,23,.97)); box-shadow:0 30px 90px rgba(0,0,0,.62),0 0 42px rgba(255,70,100,.08),inset 0 1px 0 rgba(255,255,255,.12); }
 .pm-delete-modal form { display:grid; gap:18px; }
-.pm-delete-heading { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:13px; }
+.pm-delete-heading { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:13px; }
+.pm-delete-heading__identity { min-width:0; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:11px; }
+.pm-delete-heading__copy { min-width:0; }
+.pm-delete-heading > button { min-height:40px; }
 .pm-delete-heading :where(h3,p) { margin:0; }
-.pm-delete-heading h3 { margin-top:3px; color:#fff6f7; font-size:clamp(1.25rem,3vw,1.65rem); }
-.pm-delete-icon { display:grid; place-items:center; width:42px; height:42px; border:1px solid rgba(255,112,135,.52); border-radius:50%; color:#ffe6e9; background:linear-gradient(180deg,rgba(189,47,76,.8),rgba(102,20,40,.86)); box-shadow:0 0 22px rgba(255,66,98,.18),inset 0 1px 0 rgba(255,255,255,.18); font-size:1.15rem; font-weight:1000; }
+.pm-delete-heading h3 { margin-top:3px; overflow-wrap:anywhere; color:#fff6f7; font-size:clamp(1.25rem,3vw,1.65rem); }
+.pm-delete-icon { position:relative; box-sizing:border-box; width:34px; height:34px; display:block; flex:0 0 34px; overflow:hidden; border:1px solid rgba(255,119,139,.58); border-radius:50%; color:#fff4f5; background:linear-gradient(155deg,rgba(202,53,82,.9),rgba(103,20,42,.94)); box-shadow:0 0 14px rgba(255,66,98,.16),inset 0 1px 0 rgba(255,255,255,.2); line-height:0; }
+.pm-delete-icon svg { position:absolute; left:50%; top:50%; width:17px; height:17px; display:block; overflow:visible; fill:none; stroke:currentColor; stroke-width:2.35; stroke-linecap:round; transform:translate(-50%,-50%); }
+.pm-delete-icon circle { fill:currentColor; stroke:none; }
 .pm-delete-schedule-pill { width:max-content; min-height:25px; margin-top:9px; color:#ffc4ce; border-color:rgba(255,112,135,.4); background:rgba(103,28,45,.4); font-size:.67rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
 .pm-delete-warning { display:grid; gap:9px; margin:0; padding:15px; border:1px solid rgba(255,111,132,.3); border-radius:18px; color:#f5dce1; background:linear-gradient(145deg,rgba(91,27,43,.48),rgba(39,17,27,.58)); box-shadow:inset 0 1px 0 rgba(255,255,255,.06); line-height:1.48; }
 .pm-delete-warning :where(strong,p) { margin:0; }
@@ -632,8 +637,10 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .pm-machine-meter-grid,.pm-meter-correction,.pm-task-metrics--meter { grid-template-columns:minmax(0,1fr); }
   .pm-task-card .pm-card-actions { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .pm-more-menu-popover { right:auto; left:0; }
-  .pm-delete-heading { grid-template-columns:auto minmax(0,1fr); }
+  .pm-delete-heading { grid-template-columns:minmax(0,1fr); }
   .pm-delete-heading > button { grid-column:1/-1; width:100%; }
+  .pm-delete-heading__identity { gap:9px; }
+  .pm-delete-icon { width:32px; height:32px; flex-basis:32px; }
   .pm-delete-confirm { border-radius:18px; }
   .pm-technician-heading { align-items:flex-start; flex-direction:column; }
   .pm-technician-heading button { width:100%; }
@@ -644,6 +651,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   .pm-action-progress,.pm-more-menu-popover button,.pm-task-grid { animation:none; transition:none; }
   .pm-excel-download-button,.pm-excel-download-button .pm-action-button-spinner { animation:none; transition:none; }
   .pm-excel-download-button .pm-action-button-spinner { border-color:rgba(181,248,220,.42); border-top-color:#83efbd; }
+  .pm-delete-icon,.pm-delete-confirm { animation:none !important; transition:none !important; }
 }
 .user-table-card table { min-width: 1260px; }
 .user-actions { width: fit-content; max-width: 420px; }

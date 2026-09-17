@@ -146,6 +146,85 @@ test('uses an explicit audited confirmation before deleting a PM schedule',async
   let deletionBody:Record<string,unknown>|undefined;await mockPmUi(page,{});await page.route(/\/api\/machine-library\/preventive-maintenance\/700$/,async route=>{deletionBody=route.request().postDataJSON();await route.fulfill({json:{ok:true,historyPreserved:true,historyCount:1,attachmentCount:1,sync:{status:'success'}}});});await page.goto('/machine-library');await page.locator('.machine-asset-card .machine-asset-number-pill').click();await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();const card=page.locator('.pm-task-card').first();await card.getByLabel('More actions for Hydraulic service').first().click();await card.getByRole('menuitem',{name:'Delete Schedule'}).click();const dialog=page.getByRole('alertdialog',{name:'Delete Hydraulic service?'});await expect(dialog).toContainText('PM History');await expect(dialog).toContainText('Technicians & audits');const submit=dialog.getByRole('button',{name:'Delete Schedule'});await expect(submit).toBeDisabled();await dialog.getByRole('checkbox').check();await expect(submit).toBeEnabled();await submit.click();await expect(dialog.getByRole('alert')).toContainText('meaningful deletion reason');await dialog.getByRole('textbox',{name:'Deletion reason'}).fill('Duplicate schedule replaced after reviewed maintenance migration.');await submit.click();await expect(dialog).toHaveCount(0);expect(deletionBody).toEqual({reason:'Duplicate schedule replaced after reviewed maintenance migration.'});
 });
 
+test('keeps the destructive warning badge centered and header aligned at responsive breakpoints',async({page})=>{
+  const longTitle='Quarterly hydraulic safety interlock and pressure relief inspection schedule';
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await mockPmUi(page,{},[{...task,title:longTitle}]);
+  await page.goto('/machine-library');
+  await page.locator('.machine-asset-card .machine-asset-number-pill').click();
+  await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();
+  const trigger=page.getByLabel(`More actions for ${longTitle}`).first();
+  await trigger.click();
+  await page.getByRole('menuitem',{name:'Delete Schedule'}).click();
+  const dialog=page.getByRole('alertdialog',{name:`Delete ${longTitle}?`});
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.pm-delete-icon')).toHaveAttribute('aria-hidden','true');
+
+  const breakpoints=[
+    {name:'phone portrait',width:390,height:844},
+    {name:'phone landscape',width:844,height:390},
+    {name:'tablet portrait',width:768,height:1024},
+    {name:'tablet landscape',width:1024,height:768},
+    {name:'desktop',width:1440,height:900},
+  ];
+  for(const breakpoint of breakpoints){
+    await page.setViewportSize({width:breakpoint.width,height:breakpoint.height});
+    const geometry=await dialog.evaluate(element=>{
+      const icon=element.querySelector<HTMLElement>('.pm-delete-icon')!;
+      const glyph=icon.querySelector<SVGElement>('svg')!;
+      const identity=element.querySelector<HTMLElement>('.pm-delete-heading__identity')!;
+      const eyebrow=element.querySelector<HTMLElement>('.pm-delete-heading .eyebrow')!;
+      const title=element.querySelector<HTMLElement>('#pm-delete-title')!;
+      const close=element.querySelector<HTMLButtonElement>('.pm-delete-heading > button')!;
+      const confirm=element.querySelector<HTMLElement>('.pm-delete-confirm')!;
+      const iconRect=icon.getBoundingClientRect();
+      const glyphRect=glyph.getBoundingClientRect();
+      const identityRect=identity.getBoundingClientRect();
+      const eyebrowRect=eyebrow.getBoundingClientRect();
+      const titleRect=title.getBoundingClientRect();
+      const dialogRect=element.getBoundingClientRect();
+      const closeRect=close.getBoundingClientRect();
+      const titleFontSize=Number.parseFloat(getComputedStyle(title).fontSize);
+      return {
+        iconWidth:iconRect.width,
+        iconHeight:iconRect.height,
+        glyphCenterX:glyphRect.left+glyphRect.width/2,
+        glyphCenterY:glyphRect.top+glyphRect.height/2,
+        iconCenterX:iconRect.left+iconRect.width/2,
+        iconCenterY:iconRect.top+iconRect.height/2,
+        identityTopDelta:Math.abs(iconRect.top-identityRect.top),
+        eyebrowTopDelta:Math.abs(iconRect.top-eyebrowRect.top),
+        titleHeightInEms:titleRect.height/titleFontSize,
+        titleOutsideRight:Math.max(0,titleRect.right-dialogRect.right),
+        iconOutsideLeft:Math.max(0,dialogRect.left-iconRect.left),
+        dialogOverflow:element.scrollWidth-element.clientWidth,
+        documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+        closeHeight:closeRect.height,
+        iconTransition:getComputedStyle(icon).transitionDuration,
+        confirmTransition:getComputedStyle(confirm).transitionDuration,
+      };
+    });
+    expect(geometry.iconWidth,breakpoint.name).toBeCloseTo(geometry.iconHeight,1);
+    expect(Math.abs(geometry.glyphCenterX-geometry.iconCenterX),breakpoint.name).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.glyphCenterY-geometry.iconCenterY),breakpoint.name).toBeLessThanOrEqual(.5);
+    expect(geometry.identityTopDelta,breakpoint.name).toBeLessThanOrEqual(.5);
+    expect(geometry.eyebrowTopDelta,breakpoint.name).toBeLessThanOrEqual(.5);
+    expect(geometry.titleOutsideRight,breakpoint.name).toBe(0);
+    expect(geometry.iconOutsideLeft,breakpoint.name).toBe(0);
+    expect(geometry.dialogOverflow,breakpoint.name).toBeLessThanOrEqual(1);
+    expect(geometry.documentOverflow,breakpoint.name).toBeLessThanOrEqual(1);
+    expect(geometry.closeHeight,breakpoint.name).toBeGreaterThanOrEqual(40);
+    expect(geometry.iconTransition,breakpoint.name).toBe('0s');
+    expect(geometry.confirmTransition,breakpoint.name).toBe('0s');
+    if(breakpoint.width===390)expect(geometry.titleHeightInEms,breakpoint.name).toBeGreaterThan(2);
+  }
+
+  expect(await dialog.evaluate(element=>element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
 test('shows shared PM action progress and polls status every three seconds while a save is pending',async({page})=>{
   let statusChecks=0;let releaseDelete:()=>void=()=>{};const deleteGate=new Promise<void>(resolve=>{releaseDelete=resolve;});
   await mockPmUi(page,{});await page.unroute('/api/pm-excel/status');await page.route('/api/pm-excel/status',route=>{statusChecks+=1;return route.fulfill({json:{ok:true,sync:{status:'running',attemptedAt:'2026-08-04T12:00:00Z',synchronizedAt:null,originalFilename:'PM_report _1.2v.xlsx',errorMessage:'',downloadAvailable:true}}});});
