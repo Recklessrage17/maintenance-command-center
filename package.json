@@ -55,6 +55,7 @@
     "test:work-order-records": "npm run build && node tests/work-order-records-export.mjs && node tests/issue-128-work-order-records-api.mjs && playwright test tests/issue-128-asset-notes-work-orders.spec.ts",
     "test:issue-129": "npm run build && node tests/issue-129-asset-notes-api.mjs && playwright test tests/issue-129-asset-notes-ui.spec.ts",
     "test:pm-workflow-upgrade": "npm run build --prefix backend && node tests/pm-workflow-upgrade.mjs",
+    "test:issue-125": "playwright test tests/pm-excel-ui.spec.ts --grep \"keeps the destructive warning badge centered\"",
     "test:portable-master-backup": "npm run build --prefix backend && node tests/portable-master-backup.mjs",
     "test:issue-111-uploads": "npm run build --prefix backend && node tests/issue-111-large-library-upload.mjs",
     "test:folder-export": "npm run build --prefix backend && node tests/library-folder-export.mjs",
