@@ -17,11 +17,11 @@ export type PreparedMasterExport={
 
 export async function prepareMasterExport(input:{rootName:string;appVersion:string;directories:string[];files:MasterExportSource[];signal?:AbortSignal}):Promise<PreparedMasterExport>{
   const root=safeArchivePath(input.rootName);const used=new Set<string>();const directories:string[]=[];
-  for(const value of input.directories){const relative=safeArchivePath(value);const full=`${root}/${relative}/`;const key=full.toLocaleLowerCase();if(!used.has(key)){used.add(key);directories.push(full);}}
+  for(const value of input.directories){const relative=safeArchivePath(value);const full=`${root}/${relative}/`;const key=archiveCollisionKey(full);if(!used.has(key)){used.add(key);directories.push(full);}}
   const files:Array<MasterExportSource&{checksumSha256:string}>=[];
   for(const item of input.files){
     if(input.signal?.aborted)throw new Error('Master Export was cancelled.');
-    const archivePath=`${root}/${safeArchivePath(item.archivePath)}`;const key=archivePath.toLocaleLowerCase();if(used.has(key))throw new Error(`Master Export contains a duplicate path: ${item.archivePath}`);used.add(key);
+    const archivePath=`${root}/${safeArchivePath(item.archivePath)}`;const key=archiveCollisionKey(archivePath);if(used.has(key))throw new Error(`Master Export contains a duplicate path: ${item.archivePath}`);used.add(key);
     let stat:fs.Stats;try{stat=await fs.promises.stat(item.sourcePath);}catch{throw new Error(`Stored file is missing: ${item.archivePath}`);}
     if(!stat.isFile()||stat.size!==item.sizeBytes)throw new Error(`Stored file size does not match: ${item.archivePath}`);
     files.push({...item,archivePath,checksumSha256:await sha256File(item.sourcePath,input.signal)});
@@ -53,4 +53,5 @@ async function sha256File(filePath:string,signal?:AbortSignal){
   return new Promise<string>((resolve,reject)=>{const hash=crypto.createHash('sha256');const stream=fs.createReadStream(filePath,{highWaterMark:1024*1024});const cancel=()=>stream.destroy(new Error('Master Export was cancelled.'));signal?.addEventListener('abort',cancel,{once:true});stream.on('data',chunk=>hash.update(chunk));stream.once('error',reject);stream.once('end',()=>resolve(hash.digest('hex')));stream.once('close',()=>signal?.removeEventListener('abort',cancel));});
 }
 function safeArchivePath(value:string){const normalized=path.posix.normalize(String(value??'').replace(/\\/g,'/')).replace(/^\/+|\/+$/g,'');if(!normalized||normalized==='.'||normalized==='..'||normalized.startsWith('../')||normalized.includes('/../')||/\x00/.test(normalized))throw new Error('Master Export path is unsafe.');return normalized.split('/').map(segment=>segment.replace(/[\x00-\x1f\x7f<>:"\\|?*]/g,'_').replace(/[. ]+$/g,'').trim().slice(0,180)||'Unnamed').join('/');}
+function archiveCollisionKey(value:string){return value.replace(/\/+$/g,'').normalize('NFC').toLocaleLowerCase();}
 function asciiFilename(value:string){return value.replace(/[^\x20-\x7e]/g,'_').replace(/["\\]/g,'_');}

@@ -18,7 +18,7 @@ import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpe
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { LIBRARY_LIMITS_BYTES, LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagedFiles, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
-import { ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError } from './libraryResumableUpload.js';
+import { LibraryUploadReservationCoordinator, ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError } from './libraryResumableUpload.js';
 import { prepareMasterExport, publicMasterExportPlan, streamMasterExport, type MasterExportSource } from './libraryMasterExport.js';
 import { createPmMachineAssetResolver } from './pmAssetResolver.js';
 import { canonicalHttpsAccess } from './networkAccess.js';
@@ -301,8 +301,9 @@ const equipmentAssetNotesDir = path.join(uploadsDir, 'equipment-asset-notes');
 const equipmentDocumentLibraryDir = path.join(uploadsDir, 'equipment-library');
 const equipmentDocumentIncomingDir = path.join(equipmentDocumentLibraryDir, '.incoming');
 const libraryUploadPolicyConfig=libraryUploadPolicy();
-const machineDocumentResumableStore=new ResumableLibraryUploadStore({directory:path.join(machineDocumentLibraryDir,'.resumable'),scope:'machine',policy:libraryUploadPolicyConfig});
-const equipmentDocumentResumableStore=new ResumableLibraryUploadStore({directory:path.join(equipmentDocumentLibraryDir,'.resumable'),scope:'equipment',policy:libraryUploadPolicyConfig});
+const libraryUploadReservationCoordinator=new LibraryUploadReservationCoordinator();
+const machineDocumentResumableStore=new ResumableLibraryUploadStore({directory:path.join(machineDocumentLibraryDir,'.resumable'),scope:'machine',policy:libraryUploadPolicyConfig,reservationCoordinator:libraryUploadReservationCoordinator});
+const equipmentDocumentResumableStore=new ResumableLibraryUploadStore({directory:path.join(equipmentDocumentLibraryDir,'.resumable'),scope:'equipment',policy:libraryUploadPolicyConfig,reservationCoordinator:libraryUploadReservationCoordinator});
 const pmExcelDir = path.resolve(process.env.MCC_PM_EXCEL_DIR || path.join(dataDir, 'pm-excel'));
 const pmExcelSourceDir = path.join(pmExcelDir, 'sources');
 const pmExcelBackupDir = path.join(pmExcelDir, 'backups');
@@ -9368,6 +9369,7 @@ function requirePermission(permission:string) {
 facilityInfoService=createFacilityInfoService({
   app,
   uploadsDir,
+  libraryUploadReservationCoordinator,
   requireAuth,
   requirePermission,
   hasPermission:(user,permission)=>isPermissionKey(permission)&&hasPermission(user as User,permission),

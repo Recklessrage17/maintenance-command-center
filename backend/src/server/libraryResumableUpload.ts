@@ -39,6 +39,27 @@ export class LibraryUploadError extends Error{
   constructor(message:string,status=400,code='UPLOAD_INVALID'){super(message);this.name='LibraryUploadError';this.status=status;this.code=code;}
 }
 
+export class LibraryUploadReservationCoordinator{
+  private readonly directories=new Map<string,number>();
+
+  register(directory:string,sessionTtlMs:number){this.directories.set(path.resolve(directory),sessionTtlMs);}
+
+  reservedBytes(exclude?:{directory:string;id:string}){
+    let reserved=0;const now=Date.now();
+    for(const [directory,sessionTtlMs] of this.directories){
+      let entries:fs.Dirent[];try{entries=fs.readdirSync(directory,{withFileTypes:true});}catch{continue;}
+      for(const entry of entries){
+        if(!entry.isFile()||!entry.name.endsWith('.json'))continue;
+        const id=entry.name.slice(0,-5);if(exclude&&directory===path.resolve(exclude.directory)&&id===exclude.id)continue;
+        const metadata=readSessionMetadata(path.join(directory,entry.name));
+        if(!metadata||Date.parse(metadata.updatedAt)<now-sessionTtlMs)continue;
+        reserved+=Math.max(0,metadata.sizeBytes-metadata.receivedBytes);
+      }
+    }
+    return reserved;
+  }
+}
+
 export function libraryUploadPolicy(overrides:{documents?:string;pictures?:string;videos?:string}={}):LibraryUploadPolicy{
   return {
     documentsMb:optionalLimit(overrides.documents??process.env.MCC_LIBRARY_DOCUMENT_MAX_MB),
@@ -80,10 +101,14 @@ export class ResumableLibraryUploadStore{
   readonly directory:string;
   readonly scope:string;
   readonly policy:LibraryUploadPolicy;
+  private readonly reservationCoordinator:LibraryUploadReservationCoordinator;
+  private readonly availableBytes:()=>number;
 
-  constructor(input:{directory:string;scope:string;policy:LibraryUploadPolicy}){
+  constructor(input:{directory:string;scope:string;policy:LibraryUploadPolicy;reservationCoordinator?:LibraryUploadReservationCoordinator;availableBytes?:()=>number}){
     this.directory=path.resolve(input.directory);this.scope=input.scope;this.policy=input.policy;
-    fs.mkdirSync(this.directory,{recursive:true});this.cleanupExpired();
+    this.reservationCoordinator=input.reservationCoordinator??new LibraryUploadReservationCoordinator();
+    this.availableBytes=input.availableBytes??(()=>{try{const stats=fs.statfsSync(this.directory);return Number(stats.bavail)*Number(stats.bsize);}catch{return Number.POSITIVE_INFINITY;}});
+    fs.mkdirSync(this.directory,{recursive:true});this.reservationCoordinator.register(this.directory,this.policy.sessionTtlMs);this.cleanupExpired();
   }
 
   create(input:{ownerUserId:number;originalName:unknown;mimeType?:unknown;sizeBytes:unknown;context:Record<string,string|number|null>;fields?:Record<string,unknown>}){
@@ -152,11 +177,11 @@ export class ResumableLibraryUploadStore{
   private safeId(value:unknown){const id=String(value??'');if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))throw new LibraryUploadError('Upload session identifier is invalid.',404,'UPLOAD_NOT_FOUND');return id;}
   private partPath(id:string){return path.join(this.directory,`${id}.part`);}
   private metadataPath(id:string){return path.join(this.directory,`${id}.json`);}
-  private readMetadata(id:string){try{const value=JSON.parse(fs.readFileSync(this.metadataPath(id),'utf8')) as SessionMetadata;return value?.schemaVersion===1?value:null;}catch{return null;}}
+  private readMetadata(id:string){return readSessionMetadata(this.metadataPath(id));}
   private writeMetadata(metadata:SessionMetadata){const target=this.metadataPath(metadata.id);const temporary=`${target}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;try{fs.writeFileSync(temporary,`${JSON.stringify(metadata)}\n`,{encoding:'utf8',flag:'wx'});fs.renameSync(temporary,target);}catch(error){fs.rmSync(temporary,{force:true});throw error;}}
   private assertCapacity(requiredBytes:number,excludeId?:string){
-    let reserved=0;for(const entry of fs.readdirSync(this.directory,{withFileTypes:true})){if(!entry.isFile()||!entry.name.endsWith('.json')||entry.name===`${excludeId}.json`)continue;const metadata=this.readMetadata(entry.name.slice(0,-5));if(metadata)reserved+=Math.max(0,metadata.sizeBytes-metadata.receivedBytes);}
-    let available=Number.POSITIVE_INFINITY;try{const stats=fs.statfsSync(this.directory);available=Number(stats.bavail)*Number(stats.bsize);}catch{}
+    const reserved=this.reservationCoordinator.reservedBytes(excludeId?{directory:this.directory,id:excludeId}:undefined);
+    const available=this.availableBytes();
     if(available<requiredBytes+reserved+this.policy.storageReserveBytes)throw new LibraryUploadError(`Insufficient server storage for this upload (${formatBytes(Math.max(0,available))} available; ${formatBytes(this.policy.storageReserveBytes)} reserved).`,507,'INSUFFICIENT_STORAGE');
   }
 }
@@ -170,4 +195,5 @@ function optionalLimit(value:string|undefined){if(value===undefined||value.trim(
 function boundedPositive(value:string|undefined,fallback:number,min:number,max:number){if(value===undefined||value.trim()==='')return fallback;const parsed=Number(value);return Number.isFinite(parsed)&&parsed>=min&&parsed<=max?Math.round(parsed):fallback;}
 function normalizedContext(value:Record<string,string|number|null>){return Object.fromEntries(Object.entries(value).sort(([left],[right])=>left.localeCompare(right)).map(([key,item])=>[key,typeof item==='number'?Number(item):item===null?null:String(item)]));}
 function normalizedFields(value:Record<string,unknown>|undefined){const output:Record<string,string>={};for(const [key,item] of Object.entries(value??{}))output[key.slice(0,80)]=String(item??'').slice(0,4000);return output;}
+function readSessionMetadata(filePath:string){try{const value=JSON.parse(fs.readFileSync(filePath,'utf8')) as SessionMetadata;return value?.schemaVersion===1?value:null;}catch{return null;}}
 function formatBytes(value:number){if(value<1024)return `${Math.round(value)} B`;if(value<1024**2)return `${(value/1024).toFixed(1)} KB`;if(value<1024**3)return `${(value/1024**2).toFixed(1)} MB`;return `${(value/1024**3).toFixed(1)} GB`;}

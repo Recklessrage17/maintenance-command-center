@@ -7,7 +7,7 @@ import { ZipArchive, type Archiver } from 'archiver';
 
 import { acquireLibraryUploadSlot, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
-import { ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError } from './libraryResumableUpload.js';
+import { ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError, type LibraryUploadReservationCoordinator } from './libraryResumableUpload.js';
 import type { MasterExportSource } from './libraryMasterExport.js';
 
 type SqlParam = string | number | bigint | Buffer | null;
@@ -41,6 +41,7 @@ export type FacilityInfoService = ReturnType<typeof createFacilityInfoService>;
 export function createFacilityInfoService(deps:{
   app:Application;
   uploadsDir:string;
+  libraryUploadReservationCoordinator:LibraryUploadReservationCoordinator;
   requireAuth:RequestHandler;
   requirePermission:(permission:string)=>RequestHandler;
   hasPermission:(user:FacilityUser,permission:string)=>boolean;
@@ -56,7 +57,7 @@ export function createFacilityInfoService(deps:{
   const root=path.join(deps.uploadsDir,'facility-info');
   const incoming=path.join(root,'.incoming');
   const uploadPolicy=libraryUploadPolicy({documents:process.env.MCC_FACILITY_DOCUMENT_MAX_MB,pictures:process.env.MCC_FACILITY_PICTURE_MAX_MB,videos:process.env.MCC_FACILITY_VIDEO_MAX_MB});
-  const resumableStore=new ResumableLibraryUploadStore({directory:path.join(root,'.resumable'),scope:'facility',policy:uploadPolicy});
+  const resumableStore=new ResumableLibraryUploadStore({directory:path.join(root,'.resumable'),scope:'facility',policy:uploadPolicy,reservationCoordinator:deps.libraryUploadReservationCoordinator});
   fs.mkdirSync(incoming,{recursive:true});
   cleanupStagingDirectory(incoming);
 
