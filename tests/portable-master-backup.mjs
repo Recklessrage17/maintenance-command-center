@@ -13,7 +13,7 @@ const require=createRequire(import.meta.url);
 const ExcelJS=require('../backend/node_modules/exceljs');
 const JSZip=require('../backend/node_modules/jszip');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const fixture=path.join(root,'tmp',`portable-master-backup-${Date.now()}-${process.pid}`);
+const fixture=path.join(os.tmpdir(),`mcc-portable-master-backup-${Date.now()}-${process.pid}`);
 const externalFixture=path.join(os.tmpdir(),`mcc-portable-external-${Date.now()}-${process.pid}`);
 const password='Portable-Backup-Test!9a';
 const source={root:path.join(fixture,'source')};
@@ -132,18 +132,20 @@ async function run(){
   const machineFixture=seedInsuranceAndMachineFixture(source);
   const equipmentFixture=await createEquipmentNoteFixture(source,sourceBase,ownerCookie);
   const issue111Fixture=await createIssue111LibraryFixtures(source,sourceBase,ownerCookie,equipmentFixture.assetId);
+  const resumableSentinel=path.join(source.uploads,'machine-library','.resumable','active.part');fs.mkdirSync(path.dirname(resumableSentinel),{recursive:true});fs.writeFileSync(resumableSentinel,'partial upload must not enter a backup');
   const managerCookie=await login(sourceBase,'manager@example.com');const techCookie=await login(sourceBase,'tech@example.com');
 
   let result=await request(sourceBase,'/api/backup/status',{cookie:managerCookie});assert.equal(result.response.status,200);assert.equal(result.data.permissions.canUsePortableRecovery,true);assert.equal(result.data.permissions.canViewMaster,false);assert.equal(result.data.permissions.canRestoreMaster,false);assert.equal(result.data.recoveryStorage.maxPackages,1);assert.equal(result.data.recoveryStorage.quotaBytes,128*1024*1024);
   result=await request(sourceBase,'/api/backup/status',{cookie:techCookie});assert.equal(result.data.permissions.canUsePortableRecovery,false);
   result=await request(sourceBase,'/api/backup/create',{method:'POST',cookie:ownerCookie,body:{category:'daily'}});assert.equal(result.response.status,201);assert.equal(result.data.backup.type,'daily_manual');
-  result=await request(sourceBase,'/api/backup/create',{method:'POST',cookie:ownerCookie,body:{category:'weekly'}});assert.equal(result.response.status,201);assert.equal(result.data.backup.type,'weekly_manual');
+  result=await request(sourceBase,'/api/backup/create',{method:'POST',cookie:ownerCookie,body:{category:'weekly'}});assert.equal(result.response.status,201,`${JSON.stringify(result.data)}\n${runtime.output()}`);assert.equal(result.data.backup.type,'weekly_manual');
 
   const externalSuccess=path.join(externalFixture,'removable-success');
   result=await request(sourceBase,'/api/backup/external/test',{method:'POST',cookie:ownerCookie,body:{destination:source.data}});assert.equal(result.response.status,400);assert.match(result.data.error,/cannot overlap/i);
   result=await request(sourceBase,'/api/backup/external',{method:'PUT',cookie:ownerCookie,body:{destination:externalSuccess,enabled:true}});assert.equal(result.response.status,200,result.data.error);assert.equal(result.data.settings.enabled,true);
   result=await request(sourceBase,'/api/backup/create',{method:'POST',cookie:ownerCookie,body:{category:'master'}});assert.equal(result.response.status,201,result.data.error);const backup=result.data.backup;assert.equal(backup.type,'master_manual');assert.equal(backup.portableReady,true);
   const packageDir=path.join(source.backups,'MCC Master back up',backup.id);const manifest=JSON.parse(fs.readFileSync(path.join(packageDir,'manifest.json'),'utf8'));const localDatabase=path.join(packageDir,'database','mcc.sqlite');
+  assert.equal(fs.existsSync(path.join(packageDir,'files','uploads','machine-library','.resumable','active.part')),false,'In-progress resumable payloads must not enter recovery backups.');
   assert.equal(sqliteQuickCheck(localDatabase),'ok');assert.equal(manifest.checksumSha256,fileDigest(localDatabase));assert.equal(manifest.packageVersion,1);assert.equal(manifest.schemaVersion,1);assert.equal(manifest.recordCounts.users,3);
   for(const relative of ['RECOVERY_README.txt','recovery/restore-manifest.json','excel/MCC_Inventory.xlsx','excel/MCC_Vendors.xlsx','excel/MCC_Machine_List.xlsx','excel/MCC_Equipment_List.xlsx','excel/MCC_History.xlsx','excel/PM/PM_report_latest.xlsx','files/uploads/portable-marker.txt','files/pm-work-orders/WO-PORTABLE-1.pdf'])assert.ok(fs.existsSync(path.join(packageDir,...relative.split('/'))),`missing ${relative}`);
   assert.ok(fs.existsSync(path.join(packageDir,'excel','MCC_Facility_Info.xlsx')),'missing Facility Info insurance workbook');
@@ -239,4 +241,4 @@ async function run(){
   console.log('Portable Master Backup tests passed: bounded ZIP inspection/streamed CRC extraction, readable Machine/Equipment note exports, Machine Library coverage, Equipment warning-note relationship/file/size integrity rejection, exact note PDF/attachment hash round trip, recovery quota/retention, permissions, external-copy isolation, pre_restore protection, and clean-runtime restore after source removal.');
 }
 
-try{await run();}finally{await stop(server);const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});const externalResolved=path.resolve(externalFixture);const externalAllowed=path.resolve(os.tmpdir());if(externalResolved.startsWith(`${externalAllowed}${path.sep}`)&&fs.existsSync(externalResolved))fs.rmSync(externalResolved,{recursive:true,force:true});}
+try{await run();}finally{await stop(server);const resolved=path.resolve(fixture);const allowed=path.resolve(os.tmpdir());if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});const externalResolved=path.resolve(externalFixture);const externalAllowed=path.resolve(os.tmpdir());if(externalResolved.startsWith(`${externalAllowed}${path.sep}`)&&fs.existsSync(externalResolved))fs.rmSync(externalResolved,{recursive:true,force:true});}

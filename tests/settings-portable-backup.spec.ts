@@ -28,6 +28,17 @@ async function mockSettings(page:Page,role:FixtureRole){
   await page.route('**/api/admin/reset/status',route=>route.fulfill({status:403,json:{error:'Owner Admin only.'}}));
 }
 
+async function installDirectoryPicker(page:Page){
+  await page.addInitScript(()=>{
+    const exportWindow=window as Window&{__mccExportFiles?:Record<string,number[]>;showDirectoryPicker?:()=>Promise<unknown>};exportWindow.__mccExportFiles={};
+    const directory=(prefix:string):any=>({
+      getDirectoryHandle:async(name:string)=>directory(prefix?`${prefix}/${name}`:name),
+      getFileHandle:async(name:string,options?:{create?:boolean})=>{const key=prefix?`${prefix}/${name}`:name;if(!options?.create&&!(key in exportWindow.__mccExportFiles!))throw new DOMException('Not found.','NotFoundError');if(options?.create&&!(key in exportWindow.__mccExportFiles!))exportWindow.__mccExportFiles![key]=[];return{createWritable:async()=>{const chunks:number[][]=[];return{write:async(data:Uint8Array)=>{chunks.push(Array.from(data));},close:async()=>{exportWindow.__mccExportFiles![key]=chunks.flat();},abort:async()=>{delete exportWindow.__mccExportFiles![key];}};}};},
+    });
+    exportWindow.showDirectoryPicker=async()=>directory('');
+  });
+}
+
 test('Manager sees portable import/download but not destructive restore or external configuration',async({page})=>{
   await mockSettings(page,'manager');await page.goto('/settings');
   const panel=page.getByRole('region',{name:'Portable Master Backup and Recovery'});await expect(panel).toBeVisible();await expect(panel.getByText('Download Portable Backup')).toBeVisible();await expect(panel.getByText('Pull Master Backup into MCC')).toBeVisible();await expect(panel.getByText(/1 of 3 packages\. MCC never auto-deletes recovery packages/)).toBeVisible();await expect(panel.getByText(/External backup drive may now be disconnected/)).toBeVisible();await expect(panel.getByRole('button',{name:'Restore Verified Backup'})).toHaveCount(0);await expect(panel.getByLabel('Server-side external backup destination')).toHaveCount(0);
@@ -35,6 +46,17 @@ test('Manager sees portable import/download but not destructive restore or exter
 
 test('Admin sees external controls and protected portable restore confirmation',async({page})=>{
   await mockSettings(page,'admin');await page.goto('/settings');const panel=page.getByRole('region',{name:'Portable Master Backup and Recovery'});await expect(panel.getByLabel('Server-side external backup destination')).toHaveValue('/media/usb/MCC_Backups');await expect(panel.getByRole('button',{name:'Test Backup Location'})).toBeVisible();await panel.getByRole('button',{name:'Restore Verified Backup'}).click();await expect(page.getByText('Type RESTORE MCC to continue')).toBeVisible();await expect(page.getByRole('button',{name:'Restore Verified Backup'}).last()).toBeDisabled();await page.setViewportSize({width:390,height:844});const widths=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));expect(widths.scroll).toBeLessThanOrEqual(widths.client);
+});
+
+test('Master Export writes all libraries plus a clean versioned manifest to a chosen directory',async({page})=>{
+  await installDirectoryPicker(page);await mockSettings(page,'admin');
+  const checksum='a'.repeat(64);const generatedAt='2026-09-18T12:00:00.000Z';
+  await page.route('**/api/asset-libraries/master-export/plan',route=>route.fulfill({json:{ok:true,plan:{schemaVersion:1,appVersion:'1.5.10',generatedAt,rootName:'MCC_Asset_Library_Export',directories:['MCC_Asset_Library_Export/Machines/M-1/Manuals','MCC_Asset_Library_Export/Equipment/E-1/Vendor','MCC_Asset_Library_Export/Facility/Plant/Electrical'],files:[{archivePath:'MCC_Asset_Library_Export/Machines/M-1/Manuals/manual.txt',sizeBytes:7,downloadUrl:'/api/export-fixtures/machine',checksumSha256:checksum},{archivePath:'MCC_Asset_Library_Export/Equipment/E-1/Vendor/vendor.txt',sizeBytes:9,downloadUrl:'/api/export-fixtures/equipment',checksumSha256:checksum},{archivePath:'MCC_Asset_Library_Export/Facility/Plant/Electrical/panel.txt',sizeBytes:8,downloadUrl:'/api/export-fixtures/facility',checksumSha256:checksum}],summary:{fileCount:3,totalBytes:24}}}}));
+  await page.route('**/api/export-fixtures/machine',route=>route.fulfill({body:'machine'}));await page.route('**/api/export-fixtures/equipment',route=>route.fulfill({body:'equipment'}));await page.route('**/api/export-fixtures/facility',route=>route.fulfill({body:'facility'}));
+  await page.goto('/settings');await page.getByRole('button',{name:'Master Export Asset Libraries'}).click();const dialog=page.getByRole('dialog',{name:'Master Export Asset Libraries'});await expect(dialog).toContainText('Export complete.');
+  const exported=await page.evaluate(()=>{const values=(window as Window&{__mccExportFiles?:Record<string,number[]>}).__mccExportFiles??{};return Object.fromEntries(Object.entries(values).map(([key,value])=>[key,new TextDecoder().decode(new Uint8Array(value))]));});
+  expect(exported['MCC_Asset_Library_Export/Machines/M-1/Manuals/manual.txt']).toBe('machine');expect(exported['MCC_Asset_Library_Export/Equipment/E-1/Vendor/vendor.txt']).toBe('equipment');expect(exported['MCC_Asset_Library_Export/Facility/Plant/Electrical/panel.txt']).toBe('facility');
+  const manifest=JSON.parse(exported['MCC_Asset_Library_Export/MCC_ASSET_LIBRARY_MANIFEST.json']);expect(manifest.appVersion).toBe('1.5.10');expect(manifest.summary).toEqual({fileCount:3,totalBytes:24});expect(manifest.files.every((file:Record<string,unknown>)=>!('downloadUrl' in file))).toBe(true);expect(exported['MCC_Asset_Library_Export/MCC_EXPORT_INFO.txt']).toContain('MCC version: 1.5.10');
 });
 
 test('Portable restore renders real progress, locks controls, and preserves a clear success state',async({page})=>{
