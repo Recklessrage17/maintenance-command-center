@@ -88,24 +88,26 @@ export function safeUploadPath(value:unknown){
   return segments;
 }
 
-export async function validateStagedLibraryFile(input:{path:string;originalName:string;mimeType?:string;sizeBytes:number}):Promise<ValidatedLibraryFile>{
+export async function validateStagedLibraryFile(input:{path:string;originalName:string;mimeType?:string;sizeBytes:number;maxBytes?:number|null;maxMb?:number|null}):Promise<ValidatedLibraryFile>{
   const displayFilename=safeLibraryFilename(path.basename(input.originalName));
   const extension=path.extname(displayFilename).toLowerCase();
   const type=libraryFileType(extension);
 
-  const maxBytes=type.mediaType==='video'
+  const legacyMaxBytes=type.mediaType==='video'
     ?LIBRARY_LIMITS_BYTES.videos
     :type.mediaType==='picture'
       ?LIBRARY_LIMITS_BYTES.pictures
       :LIBRARY_LIMITS_BYTES.documents;
-
-  const maxMb=type.mediaType==='video'
+  const legacyMaxMb=type.mediaType==='video'
     ?LIBRARY_LIMITS_MB.videos
     :type.mediaType==='picture'
       ?LIBRARY_LIMITS_MB.pictures
       :LIBRARY_LIMITS_MB.documents;
+  const maxBytes=input.maxBytes===undefined?legacyMaxBytes:input.maxBytes;
+  const maxMb=input.maxMb===undefined?legacyMaxMb:input.maxMb;
 
-  if(!Number.isFinite(input.sizeBytes)||input.sizeBytes<=0||input.sizeBytes>maxBytes)throw new Error(`${displayFilename} must be ${maxMb} MB or smaller.`);
+  if(!Number.isFinite(input.sizeBytes)||input.sizeBytes<=0)throw new Error(`${displayFilename} is empty or has an invalid size.`);
+  if(maxBytes!==null&&input.sizeBytes>maxBytes)throw new Error(`${displayFilename} must be ${maxMb} MB or smaller.`);
 
   const stat=await fs.promises.lstat(input.path);
   if(!stat.isFile()||stat.size!==input.sizeBytes)throw new Error(`${displayFilename} staged upload is invalid.`);
