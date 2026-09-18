@@ -8058,17 +8058,21 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   const margin = 44;
   const generatedAt = new Date();
   const library:AssetLibrary=note.asset_library==='equipment'?'equipment':'machine';
-  const supportingAttachments=attachments.filter(item=>assetNoteAttachmentSource(item)==='supporting');
   const workOrderPhotoPdfs=attachments.filter(item=>assetNoteAttachmentSource(item)==='work_order_photo'&&item.mime_type==='application/pdf');
   const labor=publicAssetNoteLabor(library,note.id);const technicians=labor.technicians.length?labor.technicians:[{id:0,userId:note.created_by_user_id,displayName:note.created_by_name||'Unknown user',hours:0,isPrimary:true,order:0}];
+  const primaryTechnician=technicians.find(technician=>technician.isPrimary)??technicians[0];
   let page: PDFPage;
   let y = 0;
   const addPage = () => {
     page = pdf.addPage([width,height]);
+    const headerAsideWidth=184;const headerGap=20;const headerMainWidth=width-margin*2-headerAsideWidth-headerGap;const headerAsideX=margin+headerMainWidth+headerGap;
     page.drawText('ASSET MAINTENANCE RECORD',{x:margin,y:height-35,size:10,font:bold,color:blue});
-    page.drawText(truncateToFit(safeMachineAssetNotePdfText(note.title),bold,19,width-margin*2),{x:margin,y:height-59,size:19,font:bold,color:blueDark});
-    page.drawRectangle({x:margin,y:height-72,width:width-margin*2,height:1,color:rule});
-    y=height-96;
+    page.drawText(truncateToFit(safeMachineAssetNotePdfText(note.title),bold,19,headerMainWidth),{x:margin,y:height-61,size:19,font:bold,color:blueDark});
+    page.drawRectangle({x:headerAsideX-10,y:height-67,width:1,height:34,color:rule});
+    page.drawText('PRIMARY TECHNICIAN',{x:headerAsideX,y:height-43,size:7,font:bold,color:blue});
+    page.drawText(truncateToFit(safeMachineAssetNotePdfText(primaryTechnician.displayName),bold,10.5,headerAsideWidth),{x:headerAsideX,y:height-60,size:10.5,font:bold,color:ink});
+    page.drawRectangle({x:margin,y:height-78,width:width-margin*2,height:1,color:rule});
+    y=height-101;
     return page;
   };
   const ensureSpace = (heightNeeded:number) => { if (y-heightNeeded<52) addPage(); };
@@ -8078,13 +8082,10 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   const identityValue=note.asset_library==='equipment'?[note.brand,note.category].filter(Boolean).join(' / '):(note.brand||'-');
   const metadata:string[][] = [
     ['Asset # / Name',assetLabel || '-'],[identityLabel,identityValue || '-'],['Model',note.model || '-'],['Serial #',note.serial_number || '-'],
-    ['Location',note.location || '-'],['Opened / Note Date',note.note_date],['Created By',note.created_by_name || 'Unknown user'],['Created',new Date(note.created_at).toLocaleString('en-US')],
-    ['Lifecycle / Status',note.is_warning?(note.issue_status==='resolved'?'RESOLVED':'ACTIVE - NEEDS ATTENTION'):'STANDARD RECORD'],
+    ['Location',note.location || '-'],['Opened / Note Date',note.note_date],['Created',new Date(note.created_at).toLocaleString('en-US')],
   ];
   if(note.is_warning)metadata.push(['Work Order #',note.work_order_reference||'Not assigned']);
   if(note.resolved_at)metadata.push(['Resolved',new Date(note.resolved_at).toLocaleString('en-US')],['Resolved By',note.resolved_by_name||'Unknown user']);
-  technicians.forEach(technician=>metadata.push([technician.isPrimary?'Primary Technician':'Additional Technician',`${technician.displayName} - ${technician.hours.toFixed(2)} hr`]));
-  metadata.push(['Total Labor Hours',labor.totalHours.toFixed(2)]);
   metadata.forEach(([label,value],index)=>{
     const column=index%2;
     const row=Math.floor(index/2);
@@ -8094,7 +8095,25 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
     page.drawText(label.toUpperCase(),{x,y:top,size:7,font:bold,color:warning&&note.is_warning?amber:blue});
     page.drawText(truncateToFit(safeMachineAssetNotePdfText(value),warning?bold:regular,10,238),{x,y:top-17,size:10,font:warning?bold:regular,color:warning&&note.is_warning?amber:ink});
   });
-  y-=Math.ceil(metadata.length/2)*48+10;
+  y-=Math.ceil(metadata.length/2)*48+8;
+  const laborLogHeight=34+technicians.length*21;
+  ensureSpace(laborLogHeight+12);
+  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
+  const laborHeading='TECHS / LABOR HOUR LOGS';const laborHeadingWidth=bold.widthOfTextAtSize(laborHeading,9);
+  page.drawText(laborHeading,{x:(width-laborHeadingWidth)/2,y:y-12,size:9,font:bold,color:blue});
+  y-=34;
+  const laborCenter=width/2;
+  const laborNameLeft=margin+64;const laborNameRight=laborCenter-18;const laborNameWidth=laborNameRight-laborNameLeft;const laborSlash='/';const laborSlashWidth=bold.widthOfTextAtSize(laborSlash,10);const laborSlashX=laborCenter-laborSlashWidth/2;const laborHoursX=laborCenter+18;
+  technicians.forEach((technician,index)=>{
+    const name=truncateToFit(safeMachineAssetNotePdfText(technician.displayName),regular,10,laborNameWidth);const hours=`${technician.hours.toFixed(2)} hr`;
+    const laborNameX=laborNameRight-regular.widthOfTextAtSize(name,10);
+    page.drawText(name,{x:laborNameX,y,size:10,font:regular,color:ink});
+    page.drawText(laborSlash,{x:laborSlashX,y,size:10,font:bold,color:muted});
+    page.drawText(hours,{x:laborHoursX,y,size:10,font:regular,color:ink});
+    if(index<technicians.length-1)page.drawRectangle({x:laborNameLeft,y:y-7,width:width-laborNameLeft*2,height:.4,color:rule,opacity:.55});
+    y-=21;
+  });
+  y-=4;
   page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
   page.drawText(note.is_warning?'ORIGINAL ISSUE':'TECHNICIAN NOTE',{x:margin,y:y-12,size:9,font:bold,color:blue});
   y-=34;
@@ -8119,20 +8138,6 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
       ensureSpace(70);page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});page.drawText('RESOLUTION',{x:margin,y:y-12,size:9,font:bold,color:blue});y-=34;
       page.drawText(truncateToFit(`Resolved ${note.resolved_at?new Date(note.resolved_at).toLocaleString('en-US'):'-'} by ${safeMachineAssetNotePdfText(note.resolved_by_name||'Unknown user')}`,bold,9.5,width-margin*2),{x:margin+4,y,size:9.5,font:bold,color:blueDark});y-=17;
       for(const line of notePdfLines(note.resolution_summary,regular,9.5,width-margin*2-8)){ensureSpace(14);if(line)page.drawText(line,{x:margin+8,y,size:9.5,font:regular,color:ink});y-=14;}
-    }
-  }
-  y-=12;
-  ensureSpace(56);
-  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
-  page.drawText('SUPPORTING ATTACHMENTS',{x:margin,y:y-12,size:9,font:bold,color:blue});
-  y-=34;
-  const attachmentLines=supportingAttachments.length ? supportingAttachments.map(item=>`${item.original_filename} (${path.extname(item.original_filename).replace('.','').toUpperCase() || item.mime_type})`) : ['No supporting attachments'];
-  for (const attachmentLine of attachmentLines) {
-    const wrapped=notePdfLines(attachmentLine,regular,9.5,width-margin*2-18);
-    for (let index=0;index<wrapped.length;index+=1) {
-      ensureSpace(15);
-       page.drawText(`${index===0?'- ':'  '}${wrapped[index]}`,{x:margin+4,y,size:9.5,font:regular,color:supportingAttachments.length?ink:muted});
-      y-=14;
     }
   }
   const summaryPages=[...pdf.getPages()];const embedded=new Set<string>();
