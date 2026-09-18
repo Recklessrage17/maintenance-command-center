@@ -270,7 +270,7 @@ function PmTaskCard({asset,task,canEdit,busy,onView,onEdit,onComplete,onDeactiva
   const statusClass=status.toLowerCase().replace(/\s+/g,'-');
   const countdown=safeString(task.countdown,status==='Setup incomplete'?'PM setup is incomplete':'');
   const countdownDisplay=countdownParts(countdown,status);
-  const moreRef=useRef<HTMLDetailsElement>(null);const moreAction=(action:()=>void)=>{if(moreRef.current)moreRef.current.open=false;action();};
+  const moreRef=useRef<HTMLDetailsElement>(null);const moreAction=(action:()=>void)=>{if(moreRef.current){moreRef.current.open=false;moreRef.current.querySelector<HTMLElement>('summary')?.focus();}action();};
   return <article className="pm-task-card glass-card">
     <div className="pm-card-identity"><span className="glass-pill pm-card-asset">{asset.assetNumber.toUpperCase()}</span><span className="glass-pill pm-card-brand">{(asset.brand||'Brand not set').toUpperCase()}</span></div>
     <div className="pm-task-card-heading"><div><h4>{safeString(task.title,'Untitled PM task')}</h4><span className={`pm-interval-label${task.intervalType==='hourly'?' pm-interval-label--hourly':''}`}><span>Interval:</span> <strong className={`pm-interval-value pm-interval-value--${intervalTone(task.intervalType,task.intervalValue)}`}>{cadenceLabel(task.intervalType,task.intervalValue)}</strong></span></div><span className={`glass-pill pm-status pm-status--${statusClass}`}>{status==='Hold'?'HOLD':status}</span></div>
