@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { withJsonRequestDefaults } from '../../apiRequest';
 import { ActionButtonProgress, useActionProgress } from '../../components/ActionProgress';
+import { LibraryExportProgress, useLibraryExport } from '../../components/LibraryExportProgress';
 
 type NetworkLinks = {
   accessMode?: 'https' | 'development';
@@ -867,6 +868,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [brandingLoading,setBrandingLoading]=useState(false);
   const brandingAction=useActionProgress();
   const externalLocationAction=useActionProgress();
+  const libraryExport=useLibraryExport();
   const [brandingActionKind,setBrandingActionKind]=useState<'save'|'reset'|null>(null);
   const [resetStatus,setResetStatus]=useState<ResetStatus|null>(null);
   const [resetMsg,setResetMsg]=useState('');
@@ -1671,6 +1673,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
               <p>Daily change backups, Friday weekly backups, and monthly master backups are separated by role and folder.</p>
             </div>
             <div className="backup-row-actions">
+              {backupPermissions.canViewMaster&&<button className="secondary-button compact-button" type="button" onClick={()=>void libraryExport.start({title:'Master Export Asset Libraries',planUrl:'/api/asset-libraries/master-export/plan',zipUrl:'/api/asset-libraries/master-export',zipFilename:`MCC_Asset_Library_Master_Export_${new Date().toISOString().slice(0,10)}.zip`})}>Master Export Asset Libraries</button>}
               {backupPermissions.canViewWeekly&&<a className="secondary-button compact-button" href="/api/machine-library/documents/recovery-export" download>Export Document Recovery ZIP</a>}
               <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackupStatus()} disabled={backupLoading}>{backupLoading ? 'Working...' : 'Refresh status'}</button>
             </div>
@@ -2048,6 +2051,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
           </section>
         </div>
       )}
+      <LibraryExportProgress state={libraryExport.state} onCancel={libraryExport.cancel} onClose={libraryExport.close} />
     </div>
   );
 }

@@ -5,8 +5,10 @@ import type { Application, NextFunction, Request, RequestHandler, Response } fro
 import multer from 'multer';
 import { ZipArchive, type Archiver } from 'archiver';
 
-import { LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
+import { acquireLibraryUploadSlot, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
+import { ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError, type LibraryUploadReservationCoordinator } from './libraryResumableUpload.js';
+import type { MasterExportSource } from './libraryMasterExport.js';
 
 type SqlParam = string | number | bigint | Buffer | null;
 type FacilityUser = { id:number; full_name:string; email:string; role:string; is_owner_admin:number };
@@ -39,6 +41,7 @@ export type FacilityInfoService = ReturnType<typeof createFacilityInfoService>;
 export function createFacilityInfoService(deps:{
   app:Application;
   uploadsDir:string;
+  libraryUploadReservationCoordinator:LibraryUploadReservationCoordinator;
   requireAuth:RequestHandler;
   requirePermission:(permission:string)=>RequestHandler;
   hasPermission:(user:FacilityUser,permission:string)=>boolean;
@@ -53,23 +56,20 @@ export function createFacilityInfoService(deps:{
   const {app,all,one,run,exec,recordHistory,scheduleBackup,now}=deps;
   const root=path.join(deps.uploadsDir,'facility-info');
   const incoming=path.join(root,'.incoming');
-  const configuredDocumentMb=positiveLimit(process.env.MCC_FACILITY_DOCUMENT_MAX_MB,LIBRARY_LIMITS_MB.documents);
-  const configuredPictureMb=positiveLimit(process.env.MCC_FACILITY_PICTURE_MAX_MB,LIBRARY_LIMITS_MB.pictures);
-  const configuredVideoMb=positiveLimit(process.env.MCC_FACILITY_VIDEO_MAX_MB,LIBRARY_LIMITS_MB.videos);
-  const limits={
-    documentBytes:configuredDocumentMb*1024*1024,
-    pictureBytes:configuredPictureMb*1024*1024,
-    videoBytes:configuredVideoMb*1024*1024,
-  };
+  const uploadPolicy=libraryUploadPolicy({documents:process.env.MCC_FACILITY_DOCUMENT_MAX_MB,pictures:process.env.MCC_FACILITY_PICTURE_MAX_MB,videos:process.env.MCC_FACILITY_VIDEO_MAX_MB});
+  const resumableStore=new ResumableLibraryUploadStore({directory:path.join(root,'.resumable'),scope:'facility',policy:uploadPolicy,reservationCoordinator:deps.libraryUploadReservationCoordinator});
   fs.mkdirSync(incoming,{recursive:true});
   cleanupStagingDirectory(incoming);
+
+  const configuredLimits=[uploadPolicy.documentsMb,uploadPolicy.picturesMb,uploadPolicy.videosMb];
+  const configuredMultipartMaxBytes=configuredLimits.some(value=>value===null)?null:Math.max(...configuredLimits.map(value=>Number(value)))*1024*1024;
 
   const upload=multer({
     storage:multer.diskStorage({
       destination:(_req,_file,callback)=>callback(null,incoming),
       filename:(_req,_file,callback)=>callback(null,`${crypto.randomUUID()}.upload`),
     }),
-    limits:{files:20,fileSize:limits.videoBytes},
+    limits:{files:20,...(configuredMultipartMaxBytes===null?{}:{fileSize:configuredMultipartMaxBytes})},
   });
 
   function ensureSchema() {
@@ -149,7 +149,7 @@ export function createFacilityInfoService(deps:{
       if(!error)return next();
       cleanupIncoming(req);
       const message=error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE'
-        ?`Files exceed the configured maximum of ${configuredVideoMb} MB.`
+        ?'File exceeds the configured server limit.'
         :clientError(error,'Facility upload failed.');
       res.status(400).json({ok:false,error:message});
     });
@@ -225,17 +225,7 @@ export function createFacilityInfoService(deps:{
     return date;
   }
   function typeForExtension(extension:string) {
-    const type=libraryFileType(extension);
-
-    if(type.mediaType==='video'){
-      return {...type,maxBytes:limits.videoBytes,maxMb:configuredVideoMb};
-    }
-
-    if(type.mediaType==='picture'){
-      return {...type,maxBytes:limits.pictureBytes,maxMb:configuredPictureMb};
-    }
-
-    return {...type,maxBytes:limits.documentBytes,maxMb:configuredDocumentMb};
+    return {...libraryFileType(extension),...configuredLibraryLimit(uploadPolicy,`file${extension}`)};
   }
 
   async function validateUpload(file:Express.Multer.File) {
@@ -243,12 +233,14 @@ export function createFacilityInfoService(deps:{
       path:file.path,
       originalName:file.originalname,
       mimeType:file.mimetype,
-      sizeBytes:file.size
+      sizeBytes:file.size,
+      maxBytes:typeForExtension(path.extname(file.originalname).toLowerCase()).maxBytes,
+      maxMb:typeForExtension(path.extname(file.originalname).toLowerCase()).maxMb,
     });
 
     const configured=typeForExtension(validated.extension);
 
-    if(file.size>configured.maxBytes){
+    if(configured.maxBytes!==null&&file.size>configured.maxBytes){
       throw new Error(`${validated.displayFilename} must be ${configured.maxMb} MB or smaller.`);
     }
 
@@ -355,7 +347,7 @@ export function createFacilityInfoService(deps:{
   app.get('/api/facility-info',deps.requireAuth,deps.requirePermission('facility.view'),(req:FacilityRequest,res)=>{
     const areas=all<FacilityAreaRow>('SELECT * FROM facility_areas WHERE deleted=0 ORDER BY name COLLATE NOCASE').map(publicArea);
     const user=req.user!;const canWrite=['facility.create','facility.edit','facility.delete','facility.folders_manage','facility.upload','facility.rename_move','facility.content_delete'].some(permission=>deps.hasPermission(user,permission));
-    res.json({ok:true,areas,permissions:{canWrite,canRecoveryExport:deps.hasPermission(user,'facility.recovery_export')},limits:{documentsMb:configuredDocumentMb,picturesMb:configuredPictureMb,videosMb:configuredVideoMb}});
+    res.json({ok:true,areas,permissions:{canWrite,canRecoveryExport:deps.hasPermission(user,'facility.recovery_export')},limits:publicLibraryUploadLimits(uploadPolicy)});
   });
   app.get('/api/facility-info/permissions',deps.requireAuth,deps.requirePermission('facility.view'),(req:FacilityRequest,res)=>{
     const user=req.user!;const canWrite=['facility.create','facility.edit','facility.delete','facility.folders_manage','facility.upload','facility.rename_move','facility.content_delete'].some(permission=>deps.hasPermission(user,permission));
@@ -445,6 +437,29 @@ export function createFacilityInfoService(deps:{
       run('DELETE FROM facility_folders WHERE id=? AND area_id=?',[folder.id,area.id]);record('folder_deleted',req.user!,area,'facility_folder',folder.id,folder.name);mutateComplete(area.id,'facility folder deleted',req.user!);
       res.json({ok:true});
     }catch(error){sendError(res,error,'Folder could not be deleted.');}
+  });
+  const uploadContext=(req:Request)=>({areaId:Number(req.params.areaId),folderId:Number(req.params.folderId)});
+  app.post('/api/facility-info/areas/:areaId/folders/:folderId/items/upload-sessions',deps.requireAuth,deps.requirePermission('facility.upload'),(req:FacilityRequest,res)=>{
+    try{
+      const context=uploadContext(req);const area=areaById(context.areaId);if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});const folder=folderById(area.id,context.folderId);if(!folder)return res.status(404).json({ok:false,error:'Folder not found.'});
+      const body=isRecord(req.body)?req.body:{};const filename=safeFilename(body.filename);const duplicateAction=String(body.duplicateAction??'').trim().toLowerCase();if(duplicateItem(folder.id,filename)&&!['replace','keep_both'].includes(duplicateAction))return res.status(409).json({ok:false,code:'FACILITY_DUPLICATE',error:'A file with this name already exists.',duplicates:[filename]});
+      const upload=resumableStore.create({ownerUserId:req.user!.id,originalName:filename,mimeType:body.mimeType,sizeBytes:body.sizeBytes,context,fields:{description:body.description,caption:body.caption,revision:body.revision,date:body.date,duplicateAction}});res.status(201).json({ok:true,upload});
+    }catch(error){sendLibraryUploadError(res,error);}
+  });
+  app.get('/api/facility-info/areas/:areaId/folders/:folderId/items/upload-sessions/:uploadId',deps.requireAuth,deps.requirePermission('facility.upload'),(req:FacilityRequest,res)=>{try{res.json({ok:true,upload:resumableStore.status(req.params.uploadId,req.user!.id,uploadContext(req))});}catch(error){sendLibraryUploadError(res,error);}});
+  app.patch('/api/facility-info/areas/:areaId/folders/:folderId/items/upload-sessions/:uploadId',deps.requireAuth,deps.requirePermission('facility.upload'),receiveLibraryChunk(uploadPolicy),(req:FacilityRequest,res)=>{try{const upload=resumableStore.append(req.params.uploadId,req.user!.id,uploadContext(req),req.get('Upload-Offset'),Buffer.isBuffer(req.body)?req.body:Buffer.alloc(0));res.setHeader('Upload-Offset',String(upload.receivedBytes));res.json({ok:true,upload});}catch(error){sendLibraryUploadError(res,error);}});
+  app.delete('/api/facility-info/areas/:areaId/folders/:folderId/items/upload-sessions/:uploadId',deps.requireAuth,deps.requirePermission('facility.upload'),(req:FacilityRequest,res)=>{try{resumableStore.status(req.params.uploadId,req.user!.id,uploadContext(req));resumableStore.cancel(req.params.uploadId,req.user!.id);res.status(204).end();}catch(error){sendLibraryUploadError(res,error);}});
+  app.post('/api/facility-info/areas/:areaId/folders/:folderId/items/upload-sessions/:uploadId/complete',deps.requireAuth,deps.requirePermission('facility.upload'),async(req:FacilityRequest,res)=>{
+    const context=uploadContext(req);let destination='';
+    try{
+      const area=areaById(context.areaId);if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});const folder=folderById(area.id,context.folderId);if(!folder)return res.status(404).json({ok:false,error:'Folder not found.'});const staged=resumableStore.stagedFile(req.params.uploadId,req.user!.id,context);const validated=await validateUpload(staged.file);const fields=staged.metadata.fields;const duplicateAction=String(fields.duplicateAction??'').toLowerCase();let displayFilename=validated.displayFilename;let existing=duplicateItem(folder.id,displayFilename);if(existing&&!['replace','keep_both'].includes(duplicateAction)){resumableStore.cancel(req.params.uploadId,req.user!.id);return res.status(409).json({ok:false,code:'FACILITY_DUPLICATE',error:'A file with this name already exists.',duplicates:[displayFilename]});}if(existing&&duplicateAction==='keep_both'){displayFilename=uniqueItemName(folder.id,displayFilename);existing=undefined;}
+      const storedFilename=`${crypto.randomUUID()}${validated.extension}`;destination=path.join(filesDirectory(area.id),storedFilename);fs.mkdirSync(filesDirectory(area.id),{recursive:true});await promoteStagedFile(staged.file.path,destination);const timestamp=now();let id=0;let replacedPath='';exec('BEGIN IMMEDIATE');try{
+        if(existing){id=existing.id;replacedPath=itemPath(existing);run(`UPDATE facility_items SET original_filename=?,display_filename=?,stored_filename=?,extension=?,mime_type=?,size_bytes=?,media_type=?,description=?,caption=?,revision=?,item_date=?,duration_seconds=NULL,uploaded_at=?,updated_at=?,uploaded_by_user_id=?,updated_by_user_id=? WHERE id=?`,[validated.displayFilename,displayFilename,storedFilename,validated.extension,validated.mimeType,staged.file.size,validated.mediaType,cleanText(fields.description),cleanText(fields.caption),cleanText(fields.revision,80),validateDate(fields.date),timestamp,timestamp,req.user!.id,req.user!.id,id]);}
+        else{const result=run(`INSERT INTO facility_items (area_id,folder_id,media_type,original_filename,display_filename,stored_filename,extension,mime_type,size_bytes,description,caption,revision,item_date,uploaded_at,updated_at,uploaded_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[area.id,folder.id,validated.mediaType,validated.displayFilename,displayFilename,storedFilename,validated.extension,validated.mimeType,staged.file.size,cleanText(fields.description),cleanText(fields.caption),cleanText(fields.revision,80),validateDate(fields.date),timestamp,timestamp,req.user!.id,req.user!.id]);id=Number(result.lastInsertRowid);}
+        run('UPDATE facility_folders SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,folder.id]);run('UPDATE facility_areas SET updated_at=?,updated_by_user_id=? WHERE id=?',[timestamp,req.user!.id,area.id]);exec('COMMIT');
+      }catch(error){exec('ROLLBACK');throw error;}
+      resumableStore.complete(req.params.uploadId);if(replacedPath&&replacedPath!==destination&&fs.existsSync(replacedPath))fs.rmSync(replacedPath,{force:true});record(existing?'file_replaced':`${validated.mediaType}_uploaded`,req.user!,area,'facility_item',id,displayFilename,{folderId:folder.id,folderPath:folderPath(area.id,folder.id),mediaType:validated.mediaType});mutateComplete(area.id,'facility file uploaded',req.user!);res.status(201).json({ok:true,items:[publicItem(itemById(id)!)]});
+    }catch(error){if(destination&&fs.existsSync(destination))fs.rmSync(destination,{force:true});try{resumableStore.cancel(req.params.uploadId,req.user?.id);}catch{}sendLibraryUploadError(res,error,'File could not be uploaded.');}
   });
   app.post('/api/facility-info/areas/:areaId/folders/:folderId/items',deps.requireAuth,deps.requirePermission('facility.upload'),receiveFiles,async(req:FacilityRequest,res)=>{
     const written:string[]=[];const replaced:string[]=[];let committed=false;
@@ -628,6 +643,9 @@ export function createFacilityInfoService(deps:{
       const date=new Date().toISOString().slice(0,10);streamShareableFolderArchive(res,`${safeShareableSegment(folder.name,'Facility Folder')}_${date}.zip`,prepared);
     }catch(error){if(res.headersSent)res.destroy(error as Error);else res.status(500).json({ok:false,error:clientError(error,'Facility folder export could not be created.')});}
   });
+  app.get('/api/facility-info/areas/:areaId/folders/:folderId/export/plan',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
+    try{const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});const folder=folderById(area.id,Number(req.params.folderId));if(!folder)return res.status(404).json({ok:false,error:'Facility folder not found.'});const folders=all<FacilityFolderRow>('SELECT * FROM facility_folders WHERE area_id=? ORDER BY id',[area.id]);const items=all<FacilityItemRow>('SELECT * FROM facility_items WHERE area_id=? ORDER BY id',[area.id]);const prepared=prepareShareableFolderArchive(folder.id,folders.map(item=>({id:item.id,parentId:item.parent_id,name:item.name})),items.map(item=>({folderId:item.folder_id,displayFilename:item.display_filename,sourcePath:itemPath(item),sizeBytes:Number(item.size_bytes)})));const urls=new Map(items.map(item=>[path.resolve(itemPath(item)),`/api/facility-info/items/${item.id}/download`]));res.json({ok:true,plan:{rootName:prepared.rootName,directories:prepared.directories,files:prepared.files.map(file=>({archivePath:file.archivePath,sizeBytes:file.sizeBytes,downloadUrl:urls.get(path.resolve(file.sourcePath))})),summary:{fileCount:prepared.files.length,totalBytes:prepared.files.reduce((sum,file)=>sum+file.sizeBytes,0)}}});}catch(error){res.status(400).json({ok:false,error:clientError(error,'Facility folder export could not be prepared.')});}
+  });
 
   app.get('/api/facility-info/areas/:areaId/export',deps.requireAuth,deps.requirePermission('facility.view'),(req,res)=>{
     const area=areaById(Number(req.params.areaId));if(!area)return res.status(404).json({ok:false,error:'Facility area not found.'});const manifest=buildManifest(area);streamArchive(res,`${safeArchiveSegment(area.name,'Facility')}_${new Date().toISOString().slice(0,10)}.zip`,archive=>appendAreaArchive(archive,manifest,''));
@@ -666,11 +684,21 @@ export function createFacilityInfoService(deps:{
     if(missing.length)throw new Error(`Backup restore is missing ${missing.length} Facility file${missing.length===1?'':'s'}.`);
   }
 
+  function masterExportSources(){
+    const directories:string[]=[];const files:MasterExportSource[]=[];
+    for(const area of all<FacilityAreaRow>('SELECT * FROM facility_areas WHERE deleted=0 ORDER BY name COLLATE NOCASE')){
+      const areaPath=`Facility/${safeShareableSegment(area.name,'Facility')} (${area.id})`;directories.push(areaPath);
+      const folders=all<FacilityFolderRow>('SELECT * FROM facility_folders WHERE area_id=? ORDER BY id',[area.id]);
+      for(const folder of folders)directories.push(`${areaPath}/${folderPath(area.id,folder.id).split(' / ').map(segment=>safeShareableSegment(segment,'Folder')).join('/')}`);
+      for(const item of all<FacilityItemRow>('SELECT * FROM facility_items WHERE area_id=? ORDER BY id',[area.id]))files.push({archivePath:`${areaPath}/${folderPath(area.id,item.folder_id).split(' / ').map(segment=>safeShareableSegment(segment,'Folder')).join('/')}/${safeShareableSegment(item.display_filename,`item-${item.id}`)}`,sourcePath:itemPath(item),sizeBytes:Number(item.size_bytes),downloadUrl:`/api/facility-info/items/${item.id}/download`});
+    }
+    return{directories,files};
+  }
+
   ensureSchema();
-  return {ensureSchema,refreshRecoveryMetadata,validateStorage,limits,root};
+  return {ensureSchema,refreshRecoveryMetadata,validateStorage,masterExportSources,limits:publicLibraryUploadLimits(uploadPolicy),root};
 }
 
-function positiveLimit(value:string|undefined,fallback:number){const parsed=Number(value);return Number.isFinite(parsed)&&parsed>0&&parsed<=fallback?Math.round(parsed):fallback;}
 function isRecord(value:unknown):value is Record<string,any>{return Boolean(value)&&typeof value==='object'&&!Array.isArray(value);}
 function facilityStatus(value:unknown){const status=String(value??'active').toLowerCase();if(!['active','archived','disabled'].includes(status))throw new Error('Facility status is invalid.');return status;}
 function escapeLike(value:string){return value.replace(/[\\%_]/g,match=>`\\${match}`);}

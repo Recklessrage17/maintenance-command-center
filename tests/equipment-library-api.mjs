@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
@@ -11,7 +12,7 @@ import ExcelJS from '../backend/node_modules/exceljs/excel.js';
 
 const {PDFDocument}=pdfLib;
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const fixture=path.join(root,'tmp',`equipment-library-api-${Date.now()}-${process.pid}`);
+const fixture=path.join(os.tmpdir(),`mcc-equipment-library-api-${Date.now()}-${process.pid}`);
 const dataDir=path.join(fixture,'data');
 const uploadsDir=path.join(fixture,'uploads');
 const backupsDir=path.join(fixture,'backups');
@@ -73,7 +74,7 @@ async function run(){
   const archive=await fetch(`${base}/api/equipment-library/assets/${assetId}/documents/export`,{headers:{Cookie:ownerCookie}});assert.equal(archive.status,200);assert.match(archive.headers.get('content-type')||'',/zip/);
 
   const noteBody=new FormData();noteBody.append('title','Dryer observation');noteBody.append('noteDate','2026-07-23');noteBody.append('body','Fans are going bad and will need to be replaced soon.');noteBody.append('warning','true');
-  result=await request(base,`/api/equipment-library/assets/${assetId}/notes`,{method:'POST',cookie:ownerCookie,body:noteBody});assert.equal(result.response.status,201);let note=result.data.note;assert.equal(note.warning,true);assert.match(note.pdfFilename,/Maintenance_Note/);
+  result=await request(base,`/api/equipment-library/assets/${assetId}/notes`,{method:'POST',cookie:ownerCookie,body:noteBody});assert.equal(result.response.status,201);let note=result.data.note;assert.equal(note.warning,true);assert.match(note.pdfFilename,/Maintenance_Record/);
   result=await request(base,'/api/dashboard/preventive-maintenance-due',{cookie:ownerCookie});assert.equal(result.data.warningNotes.filter(item=>item.assetLibrary==='equipment'&&item.assetId===assetId).length,1,'Dashboard must aggregate Equipment warning notes without per-asset requests.');
   const unflagBody=new FormData();unflagBody.append('title',note.title);unflagBody.append('noteDate',note.noteDate);unflagBody.append('body',note.body);unflagBody.append('warning','false');result=await request(base,`/api/equipment-library/asset-notes/${note.id}`,{method:'PUT',cookie:ownerCookie,body:unflagBody});assert.equal(result.response.status,400,'Warning issues must use the audited resolve workflow instead of clearing the warning flag.');result=await request(base,`/api/equipment-library/asset-notes/${note.id}/resolve`,{method:'POST',cookie:ownerCookie,body:{resolutionSummary:'Airflow repair completed and verified.'}});assert.equal(result.response.status,200);assert.equal(result.data.note.status,'resolved');result=await request(base,'/api/dashboard/preventive-maintenance-due',{cookie:ownerCookie});assert.equal(result.data.warningNotes.some(item=>item.assetLibrary==='equipment'&&item.id===note.id),false,'Resolving must remove Dashboard attention.');result=await request(base,`/api/equipment-library/asset-notes/${note.id}/reopen`,{method:'POST',cookie:ownerCookie,body:{reopenReason:'Follow-up airflow reading dropped.'}});assert.equal(result.response.status,200);note=result.data.note;assert.equal(note.status,'active');result=await request(base,'/api/dashboard/preventive-maintenance-due',{cookie:ownerCookie});assert.equal(result.data.warningNotes.some(item=>item.assetLibrary==='equipment'&&item.id===note.id),true,'Reopening must restore Dashboard attention.');
   const notePdf=await fetch(`${base}${note.pdfUrl}`,{headers:{Cookie:ownerCookie}});assert.equal(notePdf.status,200);assert.match(notePdf.headers.get('content-type')||'',/application\/pdf/);
@@ -113,4 +114,4 @@ async function run(){
   result=await request(base,`/api/equipment-library/asset-notes/${note.id}`,{method:'DELETE',cookie:ownerCookie,body:{deleteReason:'Post-restore warning lifecycle validation complete.'}});assert.equal(result.response.status,200);result=await request(base,'/api/dashboard/preventive-maintenance-due',{cookie:ownerCookie});assert.equal(result.data.warningNotes.some(item=>item.assetLibrary==='equipment'&&item.id===note.id),false,'Deleting a warning note must remove Dashboard attention.');
   console.log('Machine + Equipment Library API tests passed across N/A normalization/partial edits, custom category, Tier 2 write 403s, shared PM/dashboard/history, documents/ZIP, warning-note lifecycle and no-logo PDFs, CSV/XLSX import/export, audit, full backup/restore, and normal specification=1 page.');
 }
-try{await run();}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
+try{await run();}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(os.tmpdir());if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
