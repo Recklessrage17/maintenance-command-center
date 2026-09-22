@@ -1497,7 +1497,7 @@ button.mcc-resource-row__content { cursor: pointer; }
 .mcc-overflow-menu__trigger { display: inline-flex; gap: 6px; align-items: center; justify-content: center; }
 .mcc-overflow-menu__panel {
   position: fixed;
-  z-index: 65;
+  z-index: 300;
   width: max-content;
   min-width: 170px;
   max-width: min(240px, calc(100vw - 20px));

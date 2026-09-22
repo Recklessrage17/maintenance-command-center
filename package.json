@@ -1,6 +1,6 @@
 {
   "name": "maintenance-command-center",
-  "version": "1.5.10",
+  "version": "1.5.12",
   "private": true,
   "description": "Maintenance Command Center website shell.",
   "scripts": {
@@ -54,6 +54,7 @@
     "test:pm-work-orders": "npm run build --prefix backend && node tests/pm-work-order-attachments.mjs",
     "test:work-order-records": "npm run build && node tests/work-order-records-export.mjs && node tests/issue-128-work-order-records-api.mjs && playwright test tests/issue-128-asset-notes-work-orders.spec.ts",
     "test:issue-129": "npm run build && node tests/issue-129-asset-notes-api.mjs && playwright test tests/issue-129-asset-notes-ui.spec.ts",
+    "test:issue-136": "playwright test tests/issue-136-work-order-pdf-history.spec.ts",
     "test:pm-workflow-upgrade": "npm run build --prefix backend && node tests/pm-workflow-upgrade.mjs",
     "test:issue-125": "playwright test tests/pm-excel-ui.spec.ts --grep \"keeps the destructive warning badge centered\"",
     "test:portable-master-backup": "npm run build --prefix backend && node tests/portable-master-backup.mjs",
