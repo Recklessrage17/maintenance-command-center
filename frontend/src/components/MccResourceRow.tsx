@@ -1,6 +1,8 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+const overflowMenuOpenEvent='mcc:overflow-menu-open';
+
 export type MccOverflowMenuItem = {
   label: string;
   onSelect: () => void;
@@ -122,6 +124,14 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
     };
   },[open,updatePosition]);
 
+  useEffect(()=>{
+    function onAnotherMenuOpen(event:Event){
+      if((event as CustomEvent<string>).detail!==panelId)setOpen(false);
+    }
+    window.addEventListener(overflowMenuOpenEvent,onAnotherMenuOpen);
+    return()=>window.removeEventListener(overflowMenuOpenEvent,onAnotherMenuOpen);
+  },[panelId]);
+
   useLayoutEffect(()=>{
     if(!open)return;
     setPanelStyle({visibility:'hidden'});
@@ -138,6 +148,13 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
   useEffect(()=>{if(!items.length)setOpen(false);},[items.length]);
 
   function handlePanelKeyDown(event:ReactKeyboardEvent<HTMLDivElement>){
+    if(event.key==='Escape'){
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
     if(event.key==='Tab'){
       event.preventDefault();
       const trigger=triggerRef.current;
@@ -182,9 +199,14 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
     buttons[next].focus();
   }
 
+  function toggleMenu(){
+    if(!open)window.dispatchEvent(new CustomEvent<string>(overflowMenuOpenEvent,{detail:panelId}));
+    setOpen(current=>!current);
+  }
+
   if(!items.length)return null;
   return <div className={`mcc-overflow-menu${open?' is-open':''}${className?` ${className}`:''}`} ref={rootRef} onClick={event=>event.stopPropagation()} onPointerDown={event=>event.stopPropagation()}>
-    <button ref={triggerRef} className="secondary-button compact-button glass-button glass-button--secondary mcc-overflow-menu__trigger" type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={panelId} aria-label={ariaLabel??label} onKeyDown={event=>{if(['Enter',' ','ArrowDown'].includes(event.key))focusMenuOnOpenRef.current=true;if(event.key==='ArrowDown'&&!open){event.preventDefault();setOpen(true);}}} onClick={()=>setOpen(current=>!current)}>{label}<span aria-hidden="true">&#9662;</span></button>
+    <button ref={triggerRef} className="secondary-button compact-button glass-button glass-button--secondary mcc-overflow-menu__trigger" type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={panelId} aria-label={ariaLabel??label} onKeyDown={event=>{if(event.key==='Escape'&&open){event.preventDefault();event.stopPropagation();setOpen(false);return;}if(['Enter',' ','ArrowDown'].includes(event.key))focusMenuOnOpenRef.current=true;if(event.key==='ArrowDown'&&!open){event.preventDefault();window.dispatchEvent(new CustomEvent<string>(overflowMenuOpenEvent,{detail:panelId}));setOpen(true);}}} onClick={toggleMenu}>{label}<span aria-hidden="true">&#9662;</span></button>
     {open&&createPortal(<div id={panelId} ref={panelRef} className="mcc-overflow-menu__panel" role="menu" aria-label={ariaLabel??label} style={panelStyle} onKeyDown={handlePanelKeyDown} onClick={event=>event.stopPropagation()} onPointerDown={event=>event.stopPropagation()}>{items.map(item=><button className={`mcc-overflow-menu__item${item.danger?' is-danger':''}`} type="button" role="menuitem" tabIndex={-1} disabled={item.disabled} key={item.label} onClick={()=>{triggerRef.current?.focus();setOpen(false);item.onSelect();}}>{item.label}</button>)}</div>,document.body)}
   </div>;
 }

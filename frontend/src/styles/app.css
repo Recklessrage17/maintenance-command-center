@@ -1766,6 +1766,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-audit-history li span,.asset-note-audit-history li p { margin: 0; color: #98b6c6; font-size: .67rem; }
 .asset-note-audit-history li p { grid-column: 2; color: #c6d9e2; white-space: pre-wrap; }
 .asset-note-history-backdrop { z-index: 215; }
+.asset-note-resolve-pdf-backdrop { z-index: 225; place-items: center; }
+.asset-note-resolve-pdf-prompt.glass-modal-shell { width: min(470px,calc(100vw - 24px)); max-height: min(420px,var(--mcc-modal-available-height)); align-content: start; gap: 10px; overflow: auto; }
+.asset-note-resolve-pdf-prompt > :is(p,h3) { margin: 0; }
+.asset-note-resolve-pdf-prompt > p:not(.eyebrow) { color: #a9cad8; font-size: .8rem; line-height: 1.45; }
+.asset-note-resolve-pdf-prompt .modal-actions { margin-top: 4px; }
 .asset-note-history-modal.glass-modal-shell { width: min(1080px,calc(100vw - 24px)); max-height: var(--mcc-modal-available-height); grid-template-rows: auto minmax(0,1fr); overflow: hidden; }
 .asset-note-history-modal .modal-heading { align-items: start; }
 .asset-note-history-modal .modal-heading p { margin: 4px 0 0; color: #9fc8b8; font-size: .72rem; }
