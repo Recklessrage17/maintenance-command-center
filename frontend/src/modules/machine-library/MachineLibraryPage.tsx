@@ -302,6 +302,8 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const [search,setSearch]=useState('');
   const [brandFilter,setBrandFilter]=useState('');
   const [statusFilter,setStatusFilter]=useState('');
+  const [filtersOpen,setFiltersOpen]=useState(false);
+  const activeFilterCount = (brandFilter ? 1 : 0) + (statusFilter ? 1 : 0);
   const [message,setMessage]=useState<{kind:'success'|'error';text:string}|null>(null);
   const [importMode,setImportMode]=useState<ImportMode>('add_new_only');
   const [isImporting,setIsImporting]=useState(false);
@@ -476,10 +478,28 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'}`}>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
       {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} canManagePm={canManagePm} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
+        <div className="library-mobile-search-filter" role="search" aria-label="Machine Library search and filters">
+          <label className="form-field library-mobile-search">
+            <span>Search assets</span>
+            <input className="glass-input" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." />
+          </label>
+          <button
+            className={`secondary-button compact-button glass-button glass-button--secondary library-mobile-filter-toggle${activeFilterCount ? ' has-active-filters' : ''}`}
+            type="button"
+            aria-label={activeFilterCount ? `Filter, ${activeFilterCount} active` : 'Filter'}
+            aria-expanded={filtersOpen}
+            aria-controls="machine-library-mobile-filters"
+            onClick={()=>setFiltersOpen(current=>!current)}
+          >
+            Filter{activeFilterCount ? ` (${activeFilterCount})` : ''}
+          </button>
+        </div>
         <section className="mcc-card machine-toolbar-card glass-panel glass-panel--highlight">
         <label className="form-field machine-search"><span>Search assets</span><input className="glass-input" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>
-        <label className="form-field"><span>Brand</span><select className="glass-input" value={brandFilter} onChange={event=>setBrandFilter(event.target.value)}><option value="">All brands</option>{brands.map(brand=><option key={brand} value={brand}>{brand}</option>)}</select></label>
-        <label className="form-field"><span>Status</span><select className="glass-input" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="">All status</option><option value="active">Active</option><option value="down">Down</option><option value="disabled">Disabled</option><option value="removed">Removed</option></select></label>
+        <div id="machine-library-mobile-filters" className={`library-mobile-filter-panel${filtersOpen ? ' is-open' : ''}`}>
+          <label className="form-field"><span>Brand</span><select className="glass-input" value={brandFilter} onChange={event=>setBrandFilter(event.target.value)}><option value="">All brands</option>{brands.map(brand=><option key={brand} value={brand}>{brand}</option>)}</select></label>
+          <label className="form-field"><span>Status</span><select className="glass-input" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="">All status</option><option value="active">Active</option><option value="down">Down</option><option value="disabled">Disabled</option><option value="removed">Removed</option></select></label>
+        </div>
         <div className="machine-toolbar-actions">
           <button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={openAdd} disabled={!canEdit}>Add Machine Asset</button>
           <MachineLibraryToolsDropdown canEdit={canEdit} canManageYearFolders={canManageMeasurementYearFolders} importMode={importMode} setImportMode={setImportMode} isImporting={isImporting} onImportMachineList={()=>fileRef.current?.click()} onExportTemplate={downloadTemplate} onOpenBrandColors={()=>setShowColors(true)} />
