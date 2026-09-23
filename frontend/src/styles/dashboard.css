@@ -165,7 +165,7 @@
 .dashboard-tech-note-toggle .dashboard-tech-note-meta-line { min-width: 0; display: grid; grid-template-columns: 72px minmax(0,1fr); gap: 8px; color: var(--mcc-text-muted); font-size: .72rem; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
 .dashboard-tech-note-toggle .dashboard-tech-note-meta-label { color: var(--mcc-text-secondary); font-size: .64rem; font-weight: 900; letter-spacing: .045em; text-transform: uppercase; }
 .dashboard-tech-note-toggle .dashboard-tech-note-meta-age,.dashboard-tech-note-toggle .dashboard-tech-note-meta-age .dashboard-tech-note-meta-label { color: #c4b5fd; }
-.dashboard-tech-note-meta-age > span:last-child { font-weight: 900; }
+.dashboard-tech-note-toggle .dashboard-tech-note-meta-age > span:last-child { color: #ffe09a; font-weight: 900; }
 .dashboard-tech-note-toggle .dashboard-tech-note-expand { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid rgba(246,190,63,.32); border-radius: 50%; color: #ffe09a; font-size: 1rem; font-weight: 700; }
 .dashboard-tech-note-body { padding: 0 14px 14px 54px; }
 .dashboard-tech-note-body p { margin: 0; padding-top: 10px; border-top: 1px solid rgba(246,190,63,.18); color: var(--mcc-text-secondary); font-size: .82rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }

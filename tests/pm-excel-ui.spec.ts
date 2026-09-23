@@ -24,7 +24,8 @@ async function mockPmUi(page:Page,captured:{completionBody?:string|null;completi
 
 async function openPmImportPreview(page:Page){await page.goto('/machine-library');await page.locator('.machine-asset-card .machine-asset-number-pill').click();await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();const sync=page.locator('.pm-excel-sync');await sync.locator('input[type=file]').setInputFiles(path.resolve('tests/fixtures/pm-report-sanitized.xlsx'));await sync.getByRole('button',{name:'Preview Changes'}).click();return page.getByRole('dialog',{name:'PM Excel Import Preview'});}
 
-test('presents compact PM cards with semantic intervals, due states, and actions',async({page},testInfo)=>{
+for(const library of ['machine','equipment']){
+test(`presents compact ${library} PM cards with semantic intervals, due states, and actions`,async({page},testInfo)=>{
   const tasks=[
     task,
     {...task,id:701,title:'Thirty day inspection',intervalType:'days',intervalValue:30,lastCompletedDate:'2026-07-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-07-31',nextDueMeter:null,status:'Due Soon',countdown:'Due in 5 days'},
@@ -35,8 +36,15 @@ test('presents compact PM cards with semantic intervals, due states, and actions
     {...task,id:706,title:'Annual fixed service',intervalType:'annual',intervalValue:1,lastCompletedDate:'2025-08-01',lastCompletedMeter:null,currentMeter:null,nextDueDate:'2026-08-01',nextDueMeter:null,status:'Current',countdown:'Due in 128 days'},
     {...task,id:707,title:'Cycle service',intervalType:'cycles',intervalValue:5000,lastCompletedMeter:1000,currentMeter:1250,nextDueDate:null,nextDueMeter:6000,status:'Current',countdown:'4,750 cycles remaining'},
   ];
-  await mockPmUi(page,{},tasks);await page.goto('/machine-library');await page.locator('.machine-asset-card .machine-asset-number-pill').click();await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();
-  const meterPanel=page.getByRole('region',{name:'Machine-level meters'});await expect(meterPanel).toContainText('3,560');await expect(meterPanel.getByRole('button',{name:'Update Hours'})).toBeVisible();await expect(meterPanel.getByRole('button',{name:'Update Cycles'})).toBeVisible();
+  await mockPmUi(page,{},tasks);
+  if(library==='equipment'){
+    await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'PM Owner',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false,effectivePermissions:['equipment.view','equipment.pm_manage']}}}));
+    await page.route(/\/api\/equipment-library\/assets(?:\?.*)?$/,route=>route.fulfill({json:{ok:true,assets:[{...asset,equipmentName:asset.assetName,manufacturer:asset.brand,category:'Dryer',equipmentType:'Dryer',equipmentYear:'2024',criticality:'high',voltage:'480',phase:'3',amperage:'100',airRequirement:'',waterRequirement:'',capacityRating:'0',dimensions:'0',weight:'0',specificationNotes:''}],categories:['Dryer'],permissions:{canEdit:true,canDelete:true,canManagePm:true}}}));
+    await page.route('**/api/equipment-library/assets/100/preventive-maintenance',route=>route.fulfill({json:{ok:true,tasks,summary:{total:tasks.length}}}));
+    await page.route(/\/api\/equipment-library\/assets\/100\/(?:history|notes|document-folders|documents)$/,route=>route.fulfill({json:{ok:true,records:[],notes:[],folders:[],documents:[]}}));
+  }
+  await page.goto(`/${library}-library`);await page.locator(library==='machine'?'.machine-asset-card .machine-asset-number-pill':'.equipment-asset-card').click();await page.locator('.pm-tracking-card .machine-detail-accordion-toggle').click();
+  const meterPanel=page.getByRole('region',{name:'Machine-level meters'});if(library==='machine'){await expect(meterPanel).toContainText('3,560');await expect(meterPanel.getByRole('button',{name:'Update Hours'})).toBeVisible();await expect(meterPanel.getByRole('button',{name:'Update Cycles'})).toBeVisible();}
   const cards=page.locator('.pm-task-card');await expect(cards).toHaveCount(8);
   const intervalTones=[['hours','rgb(154, 243, 199)'],['30-days','rgb(255, 135, 151)'],['60-days','rgb(255, 173, 112)'],['90-days','rgb(255, 210, 117)'],['180-days','rgb(112, 229, 208)'],['365-days','rgb(255, 230, 111)'],['annual','rgb(200, 175, 255)'],['cycles','rgb(196, 156, 255)']];
   for(const [index,[tone,color]] of intervalTones.entries()){const value=cards.nth(index).locator('.pm-interval-value');await expect(value).toHaveClass(new RegExp(`pm-interval-value--${tone}`));await expect(value).toHaveCSS('color',color);}
@@ -64,14 +72,19 @@ test('presents compact PM cards with semantic intervals, due states, and actions
   await expect(actions.getByRole('button',{name:'Complete PM'})).toHaveClass(/glass-button--success.*pm-card-action--complete/);
   const more=actions.getByLabel('More actions for Hydraulic service').first();await expect(more).toBeVisible();await more.click();const menu=actions.getByRole('menu',{name:'More actions for Hydraulic service'});await expect(menu.getByRole('menuitem',{name:'View'})).toBeVisible();await expect(menu.getByRole('menuitem',{name:'History (0)'})).toBeVisible();await expect(menu.getByRole('menuitem',{name:'Deactivate'})).toBeVisible();await expect(menu.getByRole('menuitem',{name:'Delete Schedule'})).toBeVisible();
   await expect(menu.getByRole('menuitem',{name:'View'})).toHaveCSS('border-radius','999px');
-  const actionLayout=await actions.evaluate(element=>{const style=getComputedStyle(element);return {display:style.display,columns:style.gridTemplateColumns.split(' ').length,gap:style.gap};});
-  expect(actionLayout.display).toBe('grid');expect(actionLayout.gap).toBe('7px');
-  expect(actionLayout.columns).toBe(3);
+  const actionLayout=await actions.evaluate(element=>{const style=getComputedStyle(element);return {display:style.display,gap:style.gap};});
+  expect(actionLayout.display).toBe('flex');expect(actionLayout.gap).toBe('7px');
+  for(const card of await cards.all()){await expect(card.locator('.pm-metric-pill--next-due')).toHaveCSS('border-color','rgba(246, 190, 63, 0.65)');await expect(card.locator('.pm-metric-pill--next-due strong')).toHaveCSS('color','rgb(255, 224, 154)');}
+  const widths=await actions.evaluate(element=>({row:element.clientWidth,buttons:[...element.querySelectorAll(':scope > button, :scope > details')].reduce((sum,button)=>sum+button.getBoundingClientRect().width,0)}));expect(widths.buttons).toBeLessThan(widths.row);
   const actionButtons=await actions.locator(':scope > button, :scope > details > summary').all();const expectedHeight=testInfo.project.name==='mobile-chromium'?42:40;
   for(const button of actionButtons){const box=await button.evaluate(element=>({height:element.getBoundingClientRect().height,clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));expect(box.height).toBeCloseTo(expectedHeight,2);expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth);}
   const primaryActions=actions.locator(':scope > button, :scope > details > summary');const actionRows=await Promise.all((await primaryActions.all()).map(button=>button.evaluate(element=>Math.round(element.getBoundingClientRect().top))));
   expect(actionRows).toHaveLength(3);expect(Math.max(...actionRows)-Math.min(...actionRows)).toBeLessThanOrEqual(1);
+  await more.click();
+  for(const width of [768,320]){await page.setViewportSize({width,height:900});const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);expect(overflow).toBeLessThanOrEqual(1);for(const button of actionButtons){const box=await button.boundingBox();expect(box!.height).toBeGreaterThanOrEqual(40);expect(box!.x+box!.width).toBeLessThanOrEqual(width);}}
 });
+
+}
 
 test('disables Apply Workbook for unresolvable machine or structure blockers',async({page})=>{
   const captured:{}={};await mockPmUi(page,captured);await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({json:{ok:true,preview:{token:'22222222-2222-4222-8222-222222222222',filename:'rejected-only.xlsx',expiresAt:'2026-08-04T13:00:00Z',additions:[],updates:[],historyAdditions:[],conflicts:[{sheet:'Machine Pm Tracker',rowNumber:7,code:'AMBIGUOUS_MCC_MATCH',message:'More than one MCC PM task matches this row.'}],warnings:[],rejectedRows:[{sheet:'Machine Pm Tracker',rowNumber:6,reason:'No active MCC machine asset matches this Asset Number.'}],confirmEligibility:{importableRows:0,resolutionRequiredRows:[],canConfirm:false},summary:{additions:0,updates:0,historyAdditions:0,conflicts:1,warnings:0,rejectedRows:1}}}}));
