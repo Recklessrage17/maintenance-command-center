@@ -1810,6 +1810,12 @@ button.mcc-resource-row__content { cursor: pointer; }
 .pm-metric-pill strong { color: var(--glass-text); font-size: 0.88rem; white-space: nowrap; }
 .pm-metric-pill--last { border-color: rgba(63, 199, 244, 0.58); box-shadow: 0 0 12px rgba(46, 184, 232, 0.08), inset 0 1px 0 rgba(255,255,255,0.09); }
 .pm-metric-pill--current { border-color: rgba(63, 220, 166, 0.58); }
+.pm-task-card .pm-metric-pill--next-due {
+  border-color: rgba(246, 190, 63, 0.65);
+  box-shadow: 0 0 12px rgba(246, 190, 63, 0.1), inset 0 1px 0 rgba(255,255,255,0.09);
+}
+.pm-task-card .pm-metric-pill--next-due strong { color: #ffe09a; }
+
 .pm-metric-pill--due-soon { border-color: rgba(246, 185, 65, 0.62); }
 .pm-metric-pill--due-now,
 .pm-metric-pill--overdue { border-color: rgba(255, 82, 107, 0.72); box-shadow: 0 0 13px rgba(255, 58, 91, 0.12), inset 0 1px 0 rgba(255,255,255,0.09); }
@@ -2046,17 +2052,9 @@ button.mcc-resource-row__content { cursor: pointer; }
   font-weight: 750;
 }
 
-.pm-work-order-pdf-icon {
-  display: grid;
+.pm-work-order-pdf-icon.mcc-file-type-icon {
   width: 39px;
   height: 44px;
-  place-items: center;
-  border: 1px solid rgba(255, 117, 138, 0.48);
-  border-radius: 8px;
-  color: #ffd8df;
-  background: rgba(107, 29, 43, 0.4);
-  font-size: 0.65rem;
-  font-weight: 950;
 }
 
 .pm-work-order-pending-pages {

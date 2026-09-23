@@ -536,9 +536,9 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .pm-card-brand,.pm-identity-chip--brand { color:#d7c8ff; border-color:rgba(158,126,255,.45); }
 .pm-task-metrics--meter { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .pm-metric-pill--current { border-color:rgba(68,215,255,.28); background:rgba(6,40,58,.52); }
-.pm-task-card .pm-card-actions { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.pm-task-card .pm-card-actions { position:relative; display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
 .pm-task-card .pm-card-actions > :where(button,.pm-more-menu) { grid-column:auto; min-width:0; }
-.pm-task-card .pm-card-actions .glass-button { width:100%; min-width:0; }
+.pm-task-card .pm-card-actions .glass-button { width:auto; min-width:0; padding-inline:14px; }
 .pm-more-menu { position:relative; }
 .pm-more-menu > summary { display:grid; place-items:center; min-height:100%; cursor:pointer; list-style:none; }
 .pm-more-menu > summary::-webkit-details-marker { display:none; }
