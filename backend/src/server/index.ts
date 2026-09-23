@@ -8904,7 +8904,8 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   }
   const resolutionRequiredRows:number[]=[];const importableRows=trackerActions.length+historyActions.length;
   const blockingTrackerConflict=conflicts.some(item=>item.sheet==='Machine Pm Tracker'&&item.code!=='INCONSISTENT_SHARED_METER');
-  const replacementEligible=importableRows===0&&parsed.trackerRows.length>0&&!blockingTrackerConflict&&!rejectedRows.some(item=>item.sheet==='Machine Pm Tracker')&&[...trackerAssetResolutions.values()].every(resolution=>resolution.status!=='ambiguous');
+  // Fatal sheet/header errors fail inspection; rejected individual rows are skippable.
+  const replacementEligible=importableRows===0&&parsed.trackerRows.length>0&&!blockingTrackerConflict&&[...trackerAssetResolutions.values()].every(resolution=>resolution.status!=='ambiguous');
   const preview={token,filename,sha256,previewedAt,expiresAt:new Date(Date.parse(previewedAt)+pmImportStageLifetimeMs).toISOString(),additions,updates,historyAdditions,conflicts,warnings,rejectedRows,ignoredRows,assetResolutions:[...aliasResolutionAudit.values()],confirmEligibility:{importableRows,resolutionRequiredRows,...(replacementEligible?{replacementEligible:true}:{}),canConfirm:importableRows>0||replacementEligible},summary:{additions:additions.length,updates:updates.length,historyAdditions:historyAdditions.length,conflicts:conflicts.length,warnings:warnings.length,rejectedRows:rejectedRows.length,ignoredRows:ignoredRows.length,ignoredAssets:new Set(ignoredRows.map(row=>normalizedPmKey(String(row.assetNumber)))).size},sheetNames:parsed.sheetNames};
   const stage={token,filename,sha256,buffer,parsed,importedByUserId,previewedAt,trackerActions,trackerSyncActions,meterActions,historyActions,preview};if(store)pmImportStages.set(token,stage);return stage;
 }

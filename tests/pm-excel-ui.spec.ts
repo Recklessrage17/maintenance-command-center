@@ -73,9 +73,17 @@ test('presents compact PM cards with semantic intervals, due states, and actions
   expect(actionRows).toHaveLength(3);expect(Math.max(...actionRows)-Math.min(...actionRows)).toBeLessThanOrEqual(1);
 });
 
+test('fatal workbook structure errors prevent Apply',async({page})=>{
+  const captured:{confirmation?:Record<string,unknown>}={};await mockPmUi(page,captured);
+  await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({status:400,json:{ok:false,error:'Workbook must contain Machine Pm Tracker and PMHistory.'}}));
+  await openPmImportPreview(page);
+  await expect(page.locator('.pm-excel-sync')).toContainText('Workbook must contain Machine Pm Tracker and PMHistory.');
+  await expect(page.getByRole('button',{name:/Apply Workbook/})).toHaveCount(0);expect(captured.confirmation).toBeUndefined();
+});
+
 test('disables Apply Workbook for ambiguous identity or structure blockers',async({page})=>{
   const captured:{}={};await mockPmUi(page,captured);await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({json:{ok:true,preview:{token:'22222222-2222-4222-8222-222222222222',filename:'rejected-only.xlsx',expiresAt:'2026-08-04T13:00:00Z',additions:[],updates:[],historyAdditions:[],conflicts:[{sheet:'Machine Pm Tracker',rowNumber:7,code:'AMBIGUOUS_MCC_MATCH',message:'More than one MCC PM task matches this row.'}],warnings:[],rejectedRows:[{sheet:'Machine Pm Tracker',rowNumber:6,reason:'PM task title is required.'}],confirmEligibility:{importableRows:0,resolutionRequiredRows:[],canConfirm:false},summary:{additions:0,updates:0,historyAdditions:0,conflicts:1,warnings:0,rejectedRows:1}}}}));
-  const preview=await openPmImportPreview(page);await expect(preview).toContainText('required structure and conflicting rows are resolved');await expect(preview.getByRole('button',{name:'Apply Workbook'})).toBeDisabled();
+  const preview=await openPmImportPreview(page);await expect(preview).toContainText('blocking conflicts or ambiguous asset matches are resolved');await expect(preview.getByRole('button',{name:'Apply Workbook'})).toBeDisabled();
 });
 
 test('enables Apply Workbook for a zero-row repairable shared-meter conflict',async({page})=>{
@@ -83,9 +91,9 @@ test('enables Apply Workbook for a zero-row repairable shared-meter conflict',as
   const preview=await openPmImportPreview(page);await expect(preview).toContainText('Repairable · Canonical meter retained');const submit=preview.getByRole('button',{name:'Apply Workbook'});await expect(submit).toBeEnabled();await submit.click();expect(captured.confirmation).toEqual({previewToken:'25252525-2525-4252-8252-252525252525',meterOverrides:[]});
 });
 
-test('enables partial import for valid rows alongside rejected rows and excludes rejected data from the payload',async({page})=>{
-  const captured:{confirmation?:Record<string,unknown>;confirmationKey?:string}={};await mockPmUi(page,captured);await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({json:{ok:true,preview:{token:'33333333-3333-4333-8333-333333333333',filename:'valid-and-rejected.xlsx',expiresAt:'2026-08-04T13:00:00Z',additions:[{sheet:'Machine Pm Tracker',rowNumber:6,assetNumber:'M-100',taskTitle:'Hydraulic service'}],updates:[],historyAdditions:[],conflicts:[],warnings:[],rejectedRows:[{sheet:'PMHistory',rowNumber:31,reason:'End/Completion Date is required.'}],confirmEligibility:{importableRows:1,resolutionRequiredRows:[],canConfirm:true},summary:{additions:1,updates:0,historyAdditions:0,conflicts:0,warnings:0,rejectedRows:1}}}}));
-  const preview=await openPmImportPreview(page);const submit=preview.getByRole('button',{name:'Apply Workbook (1 database row)'});await expect(submit).toBeEnabled();await expect(preview).toContainText('Row 31');await expect(preview).toContainText('Rejected · Will be skipped');await submit.click();expect(captured.confirmation).toEqual({previewToken:'33333333-3333-4333-8333-333333333333',meterOverrides:[]});
+for(const importableRows of [0,1])test(`enables Apply with four skippable rejections and ${importableRows} valid changes`,async({page})=>{
+  const captured:{confirmation?:Record<string,unknown>;confirmationKey?:string}={};await mockPmUi(page,captured);await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({json:{ok:true,preview:{token:'33333333-3333-4333-8333-333333333333',filename:'valid-and-rejected.xlsx',expiresAt:'2026-08-04T13:00:00Z',additions:importableRows?[{sheet:'Machine Pm Tracker',rowNumber:6,assetNumber:'M-100',taskTitle:'Hydraulic service'}]:[],updates:[],historyAdditions:[],conflicts:[],warnings:[],rejectedRows:[{sheet:'Machine Pm Tracker',rowNumber:31,reason:'Last Completed must be a valid non-negative number.'},{sheet:'PMHistory',rowNumber:6,reason:'Work-order Number is required.'},...[12,13].map(rowNumber=>({sheet:'PMHistory',rowNumber,reason:'End/Completion Date is required.'}))],confirmEligibility:{importableRows,resolutionRequiredRows:[],replacementEligible:importableRows===0,canConfirm:true},summary:{additions:importableRows,updates:0,historyAdditions:0,conflicts:0,warnings:0,rejectedRows:4,ignoredRows:82}}}}));
+  const preview=await openPmImportPreview(page);const submit=preview.getByRole('button',{name:importableRows?'Apply Workbook (1 database row)':'Apply Workbook'});await expect(submit).toBeEnabled();await expect(preview).toContainText('Row 31');await expect(preview).toContainText('Rejected · Will be skipped');await expect(preview.locator('.pm-import-preview-footer')).not.toContainText('conflict');await expect(preview.locator('.pm-import-summary-card').filter({hasText:'Rejected'}).locator('strong')).toHaveText('4');await submit.click();expect(captured.confirmation).toEqual({previewToken:'33333333-3333-4333-8333-333333333333',meterOverrides:[]});
 });
 
 test('enables partial import for valid rows alongside conflicts and excludes conflicts from the payload',async({page})=>{
