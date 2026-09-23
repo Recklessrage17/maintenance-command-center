@@ -73,6 +73,26 @@ test('presents compact PM cards with semantic intervals, due states, and actions
   expect(actionRows).toHaveLength(3);expect(Math.max(...actionRows)-Math.min(...actionRows)).toBeLessThanOrEqual(1);
 });
 
+test('enables Apply for the exact staging no-op summary',async({page})=>{
+  const captured:{confirmation?:Record<string,unknown>}={};await mockPmUi(page,captured);
+  await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({json:{ok:true,preview:{
+    token:'99999999-9999-4999-8999-999999999999',filename:'sanitized-staging-noop.xlsx',expiresAt:'2026-09-23T20:00:00Z',
+    additions:[],updates:[],historyAdditions:[],conflicts:[],
+    warnings:Array.from({length:65},(_,index)=>({sheet:'Machine Pm Tracker',rowNumber:index+6,message:'Status will be recalculated as Current.'})),
+    ignoredRows:Array.from({length:96},(_,index)=>({sheet:'Machine Pm Tracker',rowNumber:index+6,assetNumber:`SYN-${index}`,reason:'Machine not in MCC; this workbook section is preserved.'})),
+    rejectedRows:[{sheet:'Machine Pm Tracker',rowNumber:31,reason:'Last Completed must be a valid non-negative number.'}],
+    confirmEligibility:{importableRows:0,resolutionRequiredRows:[],replacementEligible:true,canConfirm:true},
+    summary:{additions:0,updates:0,historyAdditions:0,conflicts:0,warnings:65,rejectedRows:1,ignoredRows:96,ignoredAssets:15},
+  }}}));
+  const preview=await openPmImportPreview(page);
+  for(const [label,count] of [['Ignored / Skipped','96'],['Rejected','1'],['Conflicts','0']])await expect(preview.locator('.pm-import-summary-card').filter({hasText:label}).locator('strong')).toHaveText(count);
+  await expect(preview.getByRole('button',{name:/No Changes.*65/})).toBeVisible();
+  await expect(preview).toContainText('Last Completed must be a valid non-negative number.');await expect(preview).toContainText('Rejected · Will be skipped');
+  await expect(preview.locator('.pm-import-disabled-reason')).toHaveCount(0);
+  const submit=preview.getByRole('button',{name:'Apply Workbook',exact:true});await expect(submit).toBeEnabled();await submit.click();
+  expect(captured.confirmation).toEqual({previewToken:'99999999-9999-4999-8999-999999999999',meterOverrides:[]});
+});
+
 test('fatal workbook structure errors prevent Apply',async({page})=>{
   const captured:{confirmation?:Record<string,unknown>}={};await mockPmUi(page,captured);
   await page.unroute('/api/pm-excel/preview');await page.route('/api/pm-excel/preview',route=>route.fulfill({status:400,json:{ok:false,error:'Workbook must contain Machine Pm Tracker and PMHistory.'}}));

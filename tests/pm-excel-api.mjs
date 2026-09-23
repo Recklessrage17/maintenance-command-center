@@ -7,6 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { buildPmStagingNoopWorkbook } from './fixtures/pm-staging-noop.mjs';
 
 const require=createRequire(import.meta.url);
 const ExcelJS=require('../backend/node_modules/exceljs');
@@ -158,5 +159,29 @@ try{
   assert.equal(dbScalar("SELECT COUNT(*) AS value FROM pm_history WHERE work_order_number IN ('WO-SKIP-1','WO-SKIP-2')"),0);
   assert.equal(dbScalar("SELECT COUNT(*) AS value FROM pm_history WHERE work_order_number='WO-VALID-WITH-REJECTIONS'"),1);
 
-  console.log('PM Excel API tests passed: preview gating/no mutation, same-workbook no-op apply, authoritative shared-meter repair, deleted-task restoration/audit, stale tombstone cleanup, stable second preview, inserted meter OOXML, synchronized history, and download/status.');
+  const exactStagingWorkbook=buildPmStagingNoopWorkbook();
+  const exactStagingPath=path.join(fixtureRoot,'exact-staging-noop.xlsx');await exactStagingWorkbook.xlsx.writeFile(exactStagingPath);
+  const countsBeforeNoop=['machine_assets','pm_tasks','pm_history'].map(dbCount);
+  const backupsBeforeNoop=fs.readdirSync(path.join(pmExcelDir,'backups')).length;
+  preview=await previewWorkbook(base,cookie,exactStagingPath);assert.equal(preview.response.status,200);
+  assert.deepEqual(preview.data.preview.summary,{additions:0,updates:0,historyAdditions:0,conflicts:0,warnings:65,rejectedRows:1,ignoredRows:96,ignoredAssets:15});
+  assert.deepEqual(preview.data.preview.rejectedRows,[{sheet:'Machine Pm Tracker',rowNumber:31,reason:'Last Completed must be a valid non-negative number.'}]);
+  assert.deepEqual(preview.data.preview.confirmEligibility,{importableRows:0,resolutionRequiredRows:[],replacementEligible:true,canConfirm:true});
+  result=await jsonRequest(base,'/api/pm-excel/confirm',{method:'POST',cookie,headers:{'Idempotency-Key':'pm-exact-staging-noop'},body:{previewToken:preview.data.preview.token}});
+  assert.equal(result.response.status,200,JSON.stringify(result.data));assert.equal(result.data.sync.status,'success');
+  assert.equal(result.data.import.added+result.data.import.updated+result.data.import.historyAdded,0);
+  assert.deepEqual(['machine_assets','pm_tasks','pm_history'].map(dbCount),countsBeforeNoop);
+  assert.ok(fs.readdirSync(path.join(pmExcelDir,'backups')).length>backupsBeforeNoop);
+  const activeNoop=new ExcelJS.Workbook();await activeNoop.xlsx.readFile(path.join(pmExcelDir,'PM_report_latest.xlsx'));
+  assert.equal(activeNoop.getWorksheet('Machine Pm Tracker').getCell('C31').value,'invalid','rejected source row must remain preserved in the replacement');
+  assert.equal(activeNoop.getWorksheet('Machine Pm Tracker').getCell('G6').value,'Synthetic task 6','the uploaded no-op workbook must become active');
+
+  const exactTracker=exactStagingWorkbook.getWorksheet('Machine Pm Tracker');
+  const activeBeforeFatal=sha(path.join(pmExcelDir,'PM_report_latest.xlsx'));
+  exactTracker.getRow(5).values=[];await exactStagingWorkbook.xlsx.writeFile(exactStagingPath);
+  preview=await previewWorkbook(base,cookie,exactStagingPath);assert.equal(preview.response.status,400);
+  assert.equal(preview.data.preview,undefined,'missing required headers must not issue an applyable preview');
+  assert.equal(sha(path.join(pmExcelDir,'PM_report_latest.xlsx')),activeBeforeFatal);
+
+  console.log('PM Excel API tests passed: exact staging no-op gating, fatal structure rejection, preview gating/no mutation, same-workbook no-op apply, authoritative shared-meter repair, deleted-task restoration/audit, stale tombstone cleanup, stable second preview, inserted meter OOXML, synchronized history, and download/status.');
 }finally{await stopServer(server);const resolved=path.resolve(fixtureRoot);const allowed=path.resolve(repoRoot,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}

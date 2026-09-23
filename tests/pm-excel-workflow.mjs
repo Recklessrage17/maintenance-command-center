@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { buildPmStagingNoopWorkbook } from './fixtures/pm-staging-noop.mjs';
 import {
   calculateWorkbookPm,
   defaultPmCompletionNote,
@@ -26,6 +27,12 @@ const backups=path.join(temporaryRoot,'backups');
 const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 try {
+  const stagingWorkbook=buildPmStagingNoopWorkbook();
+  const stagingParsed=await inspectPmWorkbook(Buffer.from(await stagingWorkbook.xlsx.writeBuffer()));
+  assert.equal(stagingParsed.trackerRows.length,68);assert.equal(stagingParsed.historyRows.length,28);assert.equal(stagingParsed.warnings.length,65);
+  assert.deepEqual(stagingParsed.rejectedRows,[{sheet:'Machine Pm Tracker',rowNumber:31,reason:'Last Completed must be a valid non-negative number.'}]);
+  stagingWorkbook.removeWorksheet(stagingWorkbook.getWorksheet('PMHistory').id);
+  await assert.rejects(inspectPmWorkbook(Buffer.from(await stagingWorkbook.xlsx.writeBuffer())),/must contain.*PMHistory/);
   assert.deepEqual(calculateWorkbookPm({intervalType:'hourly',intervalValue:3000,lastCompletedMeter:3456,currentMeter:3560}),{nextDueDate:null,nextDueMeter:6456,remaining:2896,status:'Current'});
   assert.deepEqual(calculateWorkbookPm({intervalType:'cycles',intervalValue:10000,lastCompletedMeter:120000,currentMeter:125000}),{nextDueDate:null,nextDueMeter:130000,remaining:5000,status:'Current'});
   assert.deepEqual(calculateWorkbookPm({intervalType:'days',intervalValue:30,lastCompletedDate:'2026-07-01',currentDate:'2026-07-20'}),{nextDueDate:'2026-07-31',nextDueMeter:null,remaining:11,status:'Due Soon'});
