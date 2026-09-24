@@ -47,11 +47,11 @@ test('groups and separates PMs, manages accordion state, priority sorts overdue 
   await expect(equipmentSection.getByRole('heading',{name:'Equipment PM Attention'})).toBeVisible();
   await expect(machineSection.locator('.dashboard-pm-asset-group')).toHaveCount(2);
   await expect(equipmentSection.locator('.dashboard-pm-asset-group')).toHaveCount(1);
-  await expect(machineSection.getByText('1 Due Soon',{exact:true})).toBeVisible();
-  await expect(machineSection.getByText('1 Due Now',{exact:true})).toBeVisible();
-  await expect(machineSection.getByText('2 Past Due',{exact:true})).toBeVisible();
-  await expect(equipmentSection.getByText('1 Due Soon',{exact:true})).toBeVisible();
-  await expect(equipmentSection.getByText('1 Past Due',{exact:true})).toBeVisible();
+  await expect(machineSection.getByText('Due Soon 1',{exact:true})).toBeVisible();
+  await expect(machineSection.getByText('Due Now 1',{exact:true})).toBeVisible();
+  await expect(machineSection.getByText('Past Due 2',{exact:true})).toBeVisible();
+  await expect(equipmentSection.getByText('Due Soon 1',{exact:true})).toBeVisible();
+  await expect(equipmentSection.getByText('Past Due 1',{exact:true})).toBeVisible();
   await expect(page.getByText('Held PM must be excluded')).toHaveCount(0);
   await expect(page.getByText('Inactive PM must be excluded')).toHaveCount(0);
   const press51=machineSection.getByRole('button',{name:/Press 51 \(Toyo\)/});
@@ -194,13 +194,13 @@ test('surfaces visually distinct Machine and Equipment Tech Notes with accessibl
   await page.clock.setFixedTime(new Date('2026-08-19T12:00:00Z'));await page.emulateMedia({reducedMotion:'no-preference'});await mockDashboard(page,[],warnings);await page.goto('/');
   const machine=page.locator('.dashboard-pm-section--machine');const equipment=page.locator('.dashboard-pm-section--equipment');
   await expect(machine.locator('.dashboard-pm-asset-group')).toHaveCount(1);await expect(equipment.locator('.dashboard-pm-asset-group')).toHaveCount(1);
-  const machinePill=machine.getByRole('button',{name:'Open 2 warning Tech Notes for Press 900'});const equipmentPill=equipment.getByRole('button',{name:'Open 1 warning Tech Note for EQ-901'});
-  await expect(machinePill).toContainText('Tech Note 2');await expect(equipmentPill).toContainText('Tech Note 1');await expect(machinePill).toHaveCSS('color','rgb(238, 233, 255)');await expect(machinePill).toHaveCSS('animation-name','dashboard-tech-note-pulse');await expect(machinePill).toHaveCSS('animation-duration','4.8s');await expect(machine.locator('.dashboard-tech-note-summary')).toHaveCSS('border-color','rgba(167, 139, 250, 0.58)');expect(await machinePill.evaluate(element=>({name:getComputedStyle(element,'::after').animationName,duration:getComputedStyle(element,'::after').animationDuration}))).toEqual({name:'dashboard-tech-note-shine',duration:'4.8s'});
+  const machinePill=machine.getByRole('button',{name:'Open 2 Open work orders for Press 900'});const equipmentPill=equipment.getByRole('button',{name:'Open 1 Open work orders for EQ-901'});
+  await expect(machinePill).toContainText('Open 2');await expect(equipmentPill).toContainText('Open 1');await expect(machinePill).toHaveCSS('color','rgb(238, 233, 255)');await expect(machine.locator('.dashboard-pm-section-counts')).toHaveCount(0);await expect(machine.getByRole('group',{name:'Work order counts for Press 900'})).toHaveText('WO(Open 2/Hold 0)');await expect(machine.getByRole('button',{name:'Open 0 Hold work orders for Press 900'})).toBeDisabled();
   await page.emulateMedia({reducedMotion:'reduce'});await expect(machinePill).toHaveCSS('animation-name','none');expect(await machinePill.evaluate(element=>getComputedStyle(element,'::after').animationName)).toBe('none');
-  await activate(machinePill,mobile);const dialog=page.getByRole('dialog',{name:/Tech Notes for Press 900/});await expect(dialog).toBeVisible();await expect(dialog.getByText('Fan replacement warning')).toBeVisible();const noteCopy=dialog.locator('.dashboard-tech-note-copy').filter({hasText:'Fan replacement warning'});const metadata=noteCopy.locator('.dashboard-tech-note-meta-line');await expect(metadata).toHaveCount(3);await expect(metadata.nth(0)).toContainText('Date');await expect(metadata.nth(1)).toContainText('Date age');await expect(metadata.nth(1)).toContainText('1 day old');await expect(metadata.nth(1)).toHaveCSS('color','rgb(196, 181, 253)');await expect(metadata.nth(1).locator('span').last()).toHaveCSS('color','rgb(255, 224, 154)');await expect(metadata.nth(2)).toContainText('Technician');await expect(metadata.nth(2)).toContainText('Dashboard Technician');const metadataTops=await metadata.evaluateAll(items=>items.map(item=>item.getBoundingClientRect().top));expect(metadataTops[0]).toBeLessThan(metadataTops[1]);expect(metadataTops[1]).toBeLessThan(metadataTops[2]);const titleBox=await noteCopy.locator('strong').boundingBox();const expandBox=await noteCopy.locator('xpath=following-sibling::*[1]').boundingBox();expect(titleBox).not.toBeNull();expect(expandBox).not.toBeNull();expect(Math.abs((titleBox!.y+titleBox!.height/2)-(expandBox!.y+expandBox!.height/2))).toBeLessThanOrEqual(1);
+  await activate(machinePill,mobile);const dialog=page.getByRole('dialog',{name:/Tech Open for Press 900/});await expect(dialog).toBeVisible();await expect(dialog.getByText('Fan replacement warning')).toBeVisible();const noteCopy=dialog.locator('.dashboard-tech-note-copy').filter({hasText:'Fan replacement warning'});const metadata=noteCopy.locator('.dashboard-tech-note-meta-line');await expect(metadata).toHaveCount(3);await expect(metadata.nth(0)).toContainText('Date');await expect(metadata.nth(1)).toContainText('Date age');await expect(metadata.nth(1)).toContainText('1 day old');await expect(metadata.nth(1)).toHaveCSS('color','rgb(196, 181, 253)');await expect(metadata.nth(1).locator('span').last()).toHaveCSS('color','rgb(255, 224, 154)');await expect(metadata.nth(2)).toContainText('Technician');await expect(metadata.nth(2)).toContainText('Dashboard Technician');const metadataTops=await metadata.evaluateAll(items=>items.map(item=>item.getBoundingClientRect().top));expect(metadataTops[0]).toBeLessThan(metadataTops[1]);expect(metadataTops[1]).toBeLessThan(metadataTops[2]);const titleBox=await noteCopy.locator('strong').boundingBox();const expandBox=await noteCopy.locator('xpath=following-sibling::*[1]').boundingBox();expect(titleBox).not.toBeNull();expect(expandBox).not.toBeNull();expect(Math.abs((titleBox!.y+titleBox!.height/2)-(expandBox!.y+expandBox!.height/2))).toBeLessThanOrEqual(1);
   const noteToggle=dialog.getByRole('button',{name:/Fan replacement warning/});await expect(noteToggle).toHaveAttribute('aria-expanded','false');await noteToggle.press('Enter');await expect(noteToggle).toHaveAttribute('aria-expanded','true');await expect(dialog.getByText('Fans are going bad and will need to be replaced soon.')).toBeVisible();await expect(dialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href','/machine-library?asset=900&note=9601');
   await activate(dialog.getByRole('button',{name:'Print / PDF'}),mobile);expect(await page.evaluate(()=>(window as unknown as {__openedUrls:string[]}).__openedUrls)).toContain('/api/machine-library/asset-notes/9601/pdf');
-  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(machinePill).toBeFocused();await activate(equipmentPill,mobile);const equipmentDialog=page.getByRole('dialog',{name:/Tech Notes for EQ-901/});await expect(equipmentDialog.getByText('In 3 days')).toBeVisible();await expect(equipmentDialog.getByText('In 3 days')).toHaveCSS('color','rgb(255, 224, 154)');await expect(equipmentDialog.locator('time[datetime="2026-08-22"]')).toBeVisible();await equipmentDialog.getByRole('button',{name:/Dryer airflow warning/}).click();await expect(equipmentDialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href','/equipment-library?asset=901&note=9701');await page.keyboard.press('Escape');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(machinePill).toBeFocused();await activate(equipmentPill,mobile);const equipmentDialog=page.getByRole('dialog',{name:/Tech Open for EQ-901/});await expect(equipmentDialog.getByText('In 3 days')).toBeVisible();await expect(equipmentDialog.getByText('In 3 days')).toHaveCSS('color','rgb(255, 224, 154)');await expect(equipmentDialog.locator('time[datetime="2026-08-22"]')).toBeVisible();await equipmentDialog.getByRole('button',{name:/Dryer airflow warning/}).click();await expect(equipmentDialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href','/equipment-library?asset=901&note=9701');await page.keyboard.press('Escape');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test('switches Machine and Equipment accordions above or below in one interaction',async({page},testInfo)=>{
@@ -351,7 +351,7 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
       const section=document.querySelector<HTMLElement>('.dashboard-pm-section--machine')!;
       const list=document.querySelector<HTMLElement>('.dashboard-pm-section--machine .dashboard-pm-asset-list')!;
       const groups=[...document.querySelectorAll<HTMLElement>('.dashboard-pm-section--machine .dashboard-pm-asset-group')];
-      const tokens=[...document.querySelectorAll<HTMLElement>('.dashboard-pm-section--machine .dashboard-pm-section-counts .mcc-summary-token')];
+      const summaryCount=section.querySelectorAll('.dashboard-pm-section-counts').length;
       return {
         panelWidth:panel.getBoundingClientRect().width,
         sectionLeft:section.getBoundingClientRect().left,
@@ -361,13 +361,13 @@ test('keeps 1, 2, 3, 5, and 10 asset groups compact, wrapping, and mobile-safe',
         listRight:list.getBoundingClientRect().right,
         documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
         groups:groups.map(group=>({left:group.getBoundingClientRect().left,width:group.getBoundingClientRect().width,scrollWidth:group.scrollWidth,clientWidth:group.clientWidth})),
-        tokenWidths:tokens.map(token=>token.getBoundingClientRect().width),
+        summaryCount,
       };
     });
     expect(layout.documentOverflow).toBeLessThanOrEqual(0);
     expect(layout.groups.every(group=>group.width<=layout.listWidth+1&&group.scrollWidth<=group.clientWidth+1)).toBeTruthy();
     expect(Math.abs(layout.groups[0].left-layout.listLeft)).toBeLessThanOrEqual(2);
-    expect(layout.tokenWidths.every(width=>width<150)).toBeTruthy();
+    expect(layout.summaryCount).toBe(0);
     expect(layout.groups.every(group=>group.width<=400)).toBeTruthy();
     expect(layout.listWidth).toBeLessThanOrEqual(layout.panelWidth);
     expect(Math.abs((layout.listLeft-layout.sectionLeft)-(layout.sectionRight-layout.listRight))).toBeLessThanOrEqual(2);
@@ -457,3 +457,24 @@ test('keeps Dashboard scrolling on the document without snap, nested traps, or s
   await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(0);const first=await page.evaluate(()=>window.scrollY);
   await page.mouse.wheel(0,280);await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(first);
 });
+
+for(const library of ['machine','equipment'] as const){
+  test(`${library} combines WO Open and Hold counts, preserves filters, deep links and responsive layout`,async({page},testInfo)=>{
+    const identity={assetLibrary:library,assetId:900,assetNumber:'Press 900'};
+    await mockDashboard(page,[],[warningNote(9601,{...identity,title:'Open issue',hold:false}),warningNote(9602,{...identity,title:'Waiting for parts',hold:true}),warningNote(9603,{...identity,title:'Resolved held issue',hold:true,status:'resolved'}),warningNote(9604,{...identity,title:'Ordinary held input',hold:true,warning:false})]);
+    await page.goto('/');const section=page.locator(`.dashboard-pm-section--${library}`);const open=section.getByRole('button',{name:'Open 1 Open work orders for Press 900'});const hold=section.getByRole('button',{name:'Open 1 Hold work orders for Press 900'});
+    await expect(open).toBeVisible();await expect(hold).toBeVisible();await expect(hold).toHaveCSS('color','rgb(255, 224, 163)');await expect(section.locator('.dashboard-pm-section-counts')).toHaveCount(0);
+    const badge=section.getByRole('group',{name:'Work order counts for Press 900'});await expect(badge).toHaveCount(1);await expect(badge).toHaveText('WO(Open 1/Hold 1)');
+    for(const width of [390,768,1440]){
+      await page.setViewportSize({width,height:900});await expect(badge).toBeVisible();
+      const openBox=await open.boundingBox();const holdBox=await hold.boundingBox();expect(Math.abs(holdBox!.y-openBox!.y)).toBeLessThan(2);
+      expect(await badge.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    await page.screenshot({path:testInfo.outputPath('hold-dashboard.png'),fullPage:true});
+    for(const [control,label,title,id] of [[open,'Tech Open','Open issue',9601],[hold,'Hold','Waiting for parts',9602]] as const){
+      await control.click();const dialog=page.getByRole('dialog',{name:`${label} for Press 900`});await expect(dialog.locator('.dashboard-tech-note-row')).toHaveCount(1);await dialog.getByRole('button',{name:new RegExp(title)}).click();await expect(dialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href',`/${library}-library?asset=900&note=${id}`);await page.keyboard.press('Escape');await expect(control).toBeFocused();
+    }
+    await page.emulateMedia({reducedMotion:'reduce'});await expect(hold).toHaveCSS('animation-name','none');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  });
+}

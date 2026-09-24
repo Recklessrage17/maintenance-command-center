@@ -47,6 +47,8 @@ export type WorkOrderRecordSource = {
     warning: boolean;
     workOrder: string;
     status: string;
+    hold?: boolean;
+    statusLabel?: string;
     createdByUserId: number | null;
     createdBy: string;
     createdAt: string;

@@ -161,6 +161,7 @@ async function mockIndustrialSuite(page: Page) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+    if (path === '/api/dashboard/inventory-attention') return fulfillJson(route, { items: [], outOfStockCount: 0, lowStockCount: 0 });
     if (path === '/api/auth/status') return fulfillJson(route, { setupRequired: false, user: owner });
     if (path === '/api/auth/logout') return fulfillJson(route, { ok: true });
     if (path === '/api/settings/branding') return fulfillJson(route, { ok: true, branding });
@@ -393,8 +394,8 @@ test('captures deterministic visual evidence for every representative MCC worksp
   await expect(press51Toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(press52Toggle).toContainText('Due Soon 1');
   await expect(equipment301Toggle).toContainText('Due Soon 1');
-  const techNote = machineAttention.getByRole('button', { name: 'Open 1 warning Tech Note for Press 51' });
-  await expect(techNote).toContainText('Tech Note 1');
+  const techNote = machineAttention.getByRole('button', { name: 'Open 1 Open work orders for Press 51' });
+  await expect(techNote).toContainText('Open 1');
   await press51Toggle.click();
   await expect(press51Toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(machineAttention.getByRole('button', { name: 'Open Machine Greasing preventive maintenance details for Press 51' })).toBeVisible();
@@ -518,7 +519,7 @@ test('390px mobile keeps tables local, the document contained, and focus visible
   await goTo(page, '/', 'Dashboard');
   await expect(page.locator('.dashboard-pm-section--machine .dashboard-pm-asset-group')).toHaveCount(2);
   await expect(page.locator('.dashboard-pm-section--equipment .dashboard-pm-asset-group')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Open 1 warning Tech Note for Press 51' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open 1 Open work orders for Press 51' })).toBeVisible();
   await expectNoDocumentOverflow(page);
   await capture(page, 'responsive-mobile-390-dashboard.png');
 
