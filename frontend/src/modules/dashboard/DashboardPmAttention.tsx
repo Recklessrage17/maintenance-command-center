@@ -1,10 +1,8 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { MccStatusPill } from '../../components/MccPills';
-import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
-import { groupPmAlerts, pmStatusCounts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus, type WarningNote } from './dashboardPm';
+import { groupPmAlerts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus, type WarningNote } from './dashboardPm';
 
 function statusClass(status:PmStatus){return status.toLowerCase().replace(/\s+/g,'-');}
-function statusTone(status:PmStatus){return status==='Due Soon'?'warning':status==='Due Now'?'urgent':'danger';}
 
 function formatDate(value:string|null) {
   if(!value)return 'Not set';
@@ -23,11 +21,6 @@ export function dueInformation(alert:PmAlert) {
   if(alert.nextDueDate)return `Due ${formatDate(alert.nextDueDate)}`;
   if(alert.nextDueMeter!==null)return `Due at ${formatNumber(alert.nextDueMeter)} ${alert.intervalType==='hourly'?'hours':'cycles'}`;
   return 'Next due information unavailable';
-}
-
-function PmStatusSummary({alerts,warningCount=0,className=''}:{alerts:PmAlert[];warningCount?:number;className?:string}) {
-  const counts=pmStatusCounts(alerts);
-  return <MccSummaryTokenGroup className={className}>{(['Due Soon','Due Now','Past Due'] as PmStatus[]).map(status=>counts[status]>0&&<MccSummaryToken key={status} tone={statusTone(status)}>{counts[status]} {status}</MccSummaryToken>)}{warningCount>0&&<MccSummaryToken className="dashboard-tech-note-summary">{warningCount} Tech Note{warningCount===1?'':'s'}</MccSummaryToken>}</MccSummaryTokenGroup>;
 }
 
 function AssetStatusPills({group}:{group:PmAssetGroup}) {
@@ -66,7 +59,7 @@ function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{gro
       <AssetStatusPills group={group}/>
       <span className="dashboard-pm-chevron" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5.5 7.5 4.5 4.5 4.5-4.5"/></svg></span>
     </button>
-    {group.warningNotes.length>0&&<button className="dashboard-tech-note-pill" type="button" onClick={()=>onOpenWarnings(group)} aria-label={`Open ${group.warningNotes.length} warning Tech ${group.warningNotes.length===1?'Note':'Notes'} for ${group.assetNumber}`}>Tech Note <strong>{group.warningNotes.length}</strong></button>}
+    {group.warningNotes.length>0&&<div className="dashboard-wo-badge" role="group" aria-label={`Work order counts for ${group.assetNumber}`}><span className="dashboard-wo-label">WO</span><span aria-hidden="true">(</span>{(['open','hold'] as const).map(filter=>{const notes=group.warningNotes.filter(note=>Boolean(note.hold)===(filter==='hold'));const label=filter==='hold'?'Hold':'Open';return <span className="dashboard-wo-segment" key={filter}>{filter==='hold'&&<span aria-hidden="true">/</span>}<button className={`dashboard-wo-count${filter==='hold'?' is-hold':''}`} type="button" disabled={!notes.length} onClick={()=>onOpenWarnings({...group,warningNotes:notes,warningFilter:filter})} aria-label={`Open ${notes.length} ${label} work orders for ${group.assetNumber}`}>{label} <strong>{notes.length}</strong></button></span>;})}<span aria-hidden="true">)</span></div>}
     <div id={contentId} className="dashboard-pm-accordion-body" aria-hidden={!isOpen} {...inactiveContentProps}>
       <div className="dashboard-pm-accordion-inner">
         {pmStatusOrder.map(status=>{
@@ -84,8 +77,6 @@ function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{gro
 export function PmAttentionSection({library,title,description,alerts,warningNotes,onOpenTask,onOpenWarnings}:{library:PmLibrary;title:string;description:string;alerts:PmAlert[];warningNotes:WarningNote[];onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
   const groups=useMemo(()=>groupPmAlerts(alerts,library,warningNotes),[alerts,library,warningNotes]);
   const columns=useMemo(()=>Array.from({length:Math.ceil(groups.length/4)},(_,column)=>groups.slice(column*4,column*4+4)),[groups]);
-  const sectionAlerts=useMemo(()=>groups.flatMap(group=>group.alerts),[groups]);
-  const sectionWarningCount=useMemo(()=>groups.reduce((count,group)=>count+group.warningNotes.length,0),[groups]);
   const [openGroup,setOpenGroup]=useState<string|null>(null);
   const sectionRef=useRef<HTMLElement>(null);
   useEffect(()=>{if(openGroup&&!groups.some(group=>group.key===openGroup))setOpenGroup(null);},[groups,openGroup]);
@@ -118,7 +109,6 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
   return <section ref={sectionRef} className={`dashboard-pm-section dashboard-pm-section--${library}`} aria-labelledby={`dashboard-${library}-pm-title`}>
     <header className="dashboard-pm-section-heading">
       <div><p className="dashboard-pm-library-label">{library==='machine'?'Machine Library':'Equipment Library'}</p><h3 id={`dashboard-${library}-pm-title`}>{title}</h3><p>{description}</p></div>
-      {(sectionAlerts.length>0||sectionWarningCount>0)&&<PmStatusSummary alerts={sectionAlerts} warningCount={sectionWarningCount} className="dashboard-pm-section-counts"/>}
     </header>
     {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div className={`dashboard-pm-asset-list${openGroup?' has-open-group':''}`}>{columns.map((columnGroups,column)=><div className={`dashboard-pm-column${columnGroups.some(group=>group.key===openGroup)?' is-expanded-column':''}`} key={column}>{columnGroups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
   </section>;

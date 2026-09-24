@@ -38,7 +38,7 @@ async function openNotes(page:Page,library:'machine'|'equipment',withNote=true,r
 for(const library of ['machine','equipment'] as const){
   test(`${library} Asset Notes uses compact accessible attention status and preserves photo PDF entry`,async({page})=>{
     await openNotes(page,library,false);await page.getByRole('button',{name:'Add Note'}).click();
-    const status=page.locator('.asset-note-warning-field');const toggle=page.getByRole('checkbox',{name:/Needs Attention/});
+    const status=page.locator('.asset-note-warning-field:not(.asset-note-hold-field)');const toggle=page.getByRole('checkbox',{name:/Needs Attention/});
     await expect(status.locator('.asset-note-warning-mark')).toHaveCount(0);await expect(status).not.toContainText('!');
     await expect(status).toHaveAttribute('data-state','off');await expect(status).toContainText('Dashboard alert: off');await expect(status.getByText('Off',{exact:true})).toBeVisible();await expect(toggle).not.toBeChecked();
     const offStyle=await status.evaluate(element=>({border:getComputedStyle(element).borderColor,background:getComputedStyle(element).backgroundImage,color:getComputedStyle(element.querySelector('.asset-note-warning-copy strong')!).color}));
@@ -114,3 +114,70 @@ for(const library of ['machine','equipment'] as const){
 test('maintenance records remain overflow-free in mobile landscape',async({page})=>{
   await page.setViewportSize({width:844,height:390});await openNotes(page,'equipment',true,[maintenanceIssue('equipment')]);const summary=page.locator('.asset-note-issue-toggle');await expect(summary).toBeVisible();await summary.click();const sections=page.locator('.asset-note-record-section');await expect(sections).toHaveCount(5);const geometry=await sections.evaluateAll(elements=>elements.map(element=>{const box=element.getBoundingClientRect();return{left:box.left,right:box.right};}));for(const box of geometry){expect(box.left).toBeGreaterThanOrEqual(0);expect(box.right).toBeLessThanOrEqual(844);}expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
+
+for(const library of ['machine','equipment'] as const){
+  test(`${library} Hold create/edit controls, persisted draft, filters and amber badges`,async({page},testInfo)=>{
+    const record={...maintenanceIssue(library),hold:true};
+    await openNotes(page,library,true,[record]);
+    const card=page.locator('.asset-note-active-issue-card').filter({hasText:record.title});await expect(card).toContainText('On Hold');await expect(card.locator('.asset-note-issue-toggle .asset-note-status-badge.is-hold')).toHaveCSS('color','rgb(255, 240, 154)');await expect(card.locator('.asset-note-issue-toggle .asset-note-status-badge.is-hold')).toHaveCSS('border-color','rgb(245, 213, 71)');
+    await page.getByLabel('Note status',{exact:true}).selectOption('active');await expect(card).toHaveCount(0);
+    await page.getByLabel('Note status',{exact:true}).selectOption('hold');await expect(card).toHaveCount(1);
+    await page.getByLabel('Note status',{exact:true}).selectOption('all');
+    await card.scrollIntoViewIfNeeded();
+    const summary=card.locator('.asset-note-issue-toggle');
+    await summary.click();await expect(summary).toHaveAttribute('aria-expanded','true');
+    const actions=card.getByRole('button',{name:`More actions for ${record.title}`,exact:true});
+    // Center the actual trigger after expansion, before opening its portaled menu.
+    // This follows the card at any scroll position without fixed viewport coordinates.
+    await actions.scrollIntoViewIfNeeded();
+    await actions.evaluate(element=>element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}));
+    await expect(actions).toBeInViewport();await actions.click();
+    await expect(actions).toHaveAttribute('aria-expanded','true');
+    const menu=page.getByRole('menu',{name:`More actions for ${record.title}`,exact:true});
+    await expect(menu).toBeVisible();
+    const edit=menu.getByRole('menuitem',{name:'Edit Note',exact:true});
+    await expect(edit).toBeVisible();await expect(edit).toBeEnabled();await expect(edit).toBeInViewport();
+    await edit.click({trial:true});await edit.click();
+    await expect(page.locator('.asset-note-form.is-editing')).toBeVisible();
+    const locked=page.getByRole('status',{name:'Needs Attention active and lifecycle locked'});
+    await expect(locked).toContainText('Active \u00b7 Locked');await expect(locked.locator('svg')).toBeVisible();
+    const lockedSize=await locked.evaluate(element=>{const box=element.getBoundingClientRect();const label=element.querySelector('strong')!;return {height:box.height,width:box.width,fontSize:parseFloat(getComputedStyle(label).fontSize),overflow:element.scrollWidth-element.clientWidth};});
+    expect(lockedSize.height).toBeLessThanOrEqual(20);expect(lockedSize.width).toBeLessThan(120);expect(lockedSize.fontSize).toBeLessThanOrEqual(10);expect(lockedSize.overflow).toBeLessThanOrEqual(1);
+    await page.locator('.asset-note-state-controls').screenshot({path:testInfo.outputPath('compact-locked-hold.png')});
+    const hold=page.getByRole('checkbox',{name:/Put on Hold/});await expect(hold).toBeChecked();await hold.uncheck();
+    let submitted='';await page.route(`**/api/${library}-library/asset-notes/${record.id}`,route=>{submitted=route.request().postData()??'';return route.fulfill({json:{ok:true,note:{...record,hold:false}}});});
+    await page.getByRole('button',{name:'Save Note',exact:true}).click();await expect.poll(()=>submitted).toMatch(/name="hold"\r?\n\r?\nfalse/);await expect(page.locator('.asset-note-form')).toHaveCount(0);
+    await page.getByRole('button',{name:'Add Note',exact:true}).click();await expect(hold).not.toBeChecked();await expect(hold).toBeDisabled();
+    const holdField=page.locator('.asset-note-hold-field');const offBorder=await holdField.evaluate(element=>getComputedStyle(element).borderColor);
+    const attention=page.getByRole('checkbox',{name:/Needs Attention/});await attention.check();await hold.check();await expect(holdField).toHaveAttribute('data-state','on');
+    await expect(holdField).toHaveCSS('border-color','rgb(245, 213, 71)');await expect(holdField.locator('.asset-note-warning-toggle')).toHaveCSS('color','rgb(255, 240, 154)');await expect(holdField.locator('.asset-note-warning-track > span')).toHaveCSS('background-color','rgb(255, 240, 154)');
+    await hold.uncheck();await expect(holdField).toHaveAttribute('data-state','off');await expect(holdField).toHaveCSS('border-color',offBorder);await hold.check();await attention.uncheck();await expect(hold).not.toBeChecked();await expect(hold).toBeDisabled();
+    await attention.check();await hold.check();await page.screenshot({path:testInfo.outputPath('hold-editor.png'),fullPage:true});await page.getByLabel('Note Title *',{exact:true}).fill('Held creation');await page.getByLabel('Original Issue Body *',{exact:true}).fill('Waiting for parts.');
+    await page.route(`**/api/${library}-library/assets/${record.assetId}/notes`,route=>{if(route.request().method()==='POST')submitted=route.request().postData()??'';return route.fulfill({json:{ok:true,notes:[record]}});});
+    await page.getByRole('button',{name:'Save Note',exact:true}).click();await expect.poll(()=>submitted).toMatch(/name="hold"\r?\n\r?\ntrue/);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  });
+}
+
+for(const library of ['machine','equipment'] as const){
+  test(`${library} labor replaces zero on focus and tap, preserves decimals, totals and saved technician`,async({page},testInfo)=>{
+    await openNotes(page,library,false);await page.getByRole('button',{name:'Add Note',exact:true}).click();
+    const hours=page.getByRole('spinbutton',{name:'Hours for Issue 129 Tester'});
+    const total=page.locator('.asset-note-labor-total output');
+    await expect(hours).toHaveValue('0');await hours.focus();await hours.pressSequentially('1');await expect(hours).toHaveValue('1');await expect(total).toHaveText('1.00');
+    await hours.fill('0');await page.getByLabel('Note Title *',{exact:true}).click();
+    if(testInfo.project.name==='mobile-chromium')await hours.tap();else await hours.click();
+    await hours.pressSequentially('1');await expect(hours).toHaveValue('1');
+    await hours.fill('0');await page.getByLabel('Note Title *',{exact:true}).click();await hours.click();await hours.pressSequentially('0.5');await expect(hours).toHaveValue('0.5');await expect(total).toHaveText('0.50');
+    await page.getByLabel('Note Title *',{exact:true}).click();await hours.focus();await expect(hours).toHaveValue('0.5');
+    await hours.fill('1.5');await expect(total).toHaveText('1.50');expect(await hours.evaluate(element=>(element as HTMLInputElement).checkValidity())).toBe(true);
+    await page.getByRole('checkbox',{name:/Needs Attention/}).check();await page.getByLabel('Note Title *',{exact:true}).fill('Decimal labor');await page.getByLabel('Original Issue Body *',{exact:true}).fill('Recorded fractional maintenance hours.');
+    let savedLabor:unknown;const asset=library==='machine'?machine:equipment;
+    await page.route(`**/api/${library}-library/assets/${asset.id}/notes`,route=>{
+      if(route.request().method()==='POST'){const body=route.request().postData()??'';savedLabor=JSON.parse(body.match(/name="laborEntries"\r?\n\r?\n([^\r\n]+)/)![1]);return route.fulfill({json:{ok:true,note:note(library)}});}
+      return route.fulfill({json:{ok:true,notes:[]}});
+    });
+    await page.getByRole('button',{name:'Save Note',exact:true}).click();
+    await expect.poll(()=>savedLabor).toEqual([{userId:1,hours:1.5,isPrimary:true}]);await expect(page.locator('.asset-note-form')).toHaveCount(0);
+  });
+}
