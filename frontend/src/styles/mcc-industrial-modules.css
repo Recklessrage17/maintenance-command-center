@@ -5139,21 +5139,11 @@ body {
     padding: 9px 10px;
     border: 1px solid rgba(var(--mcc-module-accent-rgb), .3);
     border-radius: 12px;
-    background:
-      linear-gradient(
-        145deg,
-        rgba(11, 28, 40, .97),
-        rgba(4, 13, 23, .98)
-      ),
-      radial-gradient(
-        circle at 12% 0%,
-        rgba(var(--mcc-module-accent-rgb), .15),
-        transparent 38%
-      );
+    /* An opaque surface avoids Safari repainting a blurred sticky layer during scroll. */
+    background: #091b29;
     box-shadow:
       0 14px 30px rgba(0, 0, 0, .3),
       inset 0 1px 0 rgba(255, 255, 255, .08);
-    backdrop-filter: blur(14px);
   }
 
   .mcc-shell .library-mobile-search {

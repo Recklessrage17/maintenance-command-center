@@ -240,6 +240,13 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
           await controls.evaluate(element => Math.round(parseFloat(getComputedStyle(element).top))),
         );
         await expectUncoveredControls(page);
+        await expect(controls).toHaveCSS('backdrop-filter', 'none');
+        const stickyTop = await controls.evaluate(element => element.getBoundingClientRect().top);
+        for (const scrollY of [1050, 500, 900, 700]) {
+          await page.evaluate(y => window.scrollTo(0, y), scrollY);
+          await expect.poll(() => controls.evaluate(element => element.getBoundingClientRect().top)).toBe(stickyTop);
+          await expectUncoveredControls(page);
+        }
         await search.click();
         await search.fill('no matching asset');
         await expect(page.locator(library.card)).toHaveCount(0);
