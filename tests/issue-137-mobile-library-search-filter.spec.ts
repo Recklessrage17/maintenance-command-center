@@ -223,6 +223,13 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
         await expect(controls).toBeVisible();
         await expect(page.locator(library.card)).toHaveCount(2);
         await expectUncoveredControls(page, true);
+        for (const control of [search, filter]) {
+          await expect(control).toHaveCSS('height', '44px');
+          await expect(control).toHaveCSS('line-height', '20px');
+          await expect(control).toHaveCSS('transform', 'none');
+          await control.hover();
+          await expect(control).toHaveCSS('transform', 'none');
+        }
         await search.click();
         await search.fill(library.query);
         await expect(page.locator(library.card)).toHaveCount(1);
@@ -240,6 +247,8 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
           await controls.evaluate(element => Math.round(parseFloat(getComputedStyle(element).top))),
         );
         await expectUncoveredControls(page);
+        await expect(search).toHaveCSS('transform', 'none');
+        await expect(filter).toHaveCSS('transform', 'none');
         await expect(controls).toHaveCSS('backdrop-filter', 'none');
         const stickyTop = await controls.evaluate(element => element.getBoundingClientRect().top);
         for (const scrollY of [1050, 500, 900, 700]) {

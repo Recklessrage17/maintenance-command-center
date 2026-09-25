@@ -5166,13 +5166,25 @@ body {
   .mcc-shell .library-mobile-search .glass-input {
     width: 100%;
     min-width: 0;
+    height: 44px;
     min-height: 44px;
+    padding-block: 0;
+    line-height: 20px;
   }
 
   .mcc-shell .library-mobile-filter-toggle {
     min-width: 88px;
+    height: 44px;
     min-height: 44px;
+    padding-block: 0;
+    line-height: 20px;
     white-space: nowrap;
+    transition-property: border-color, box-shadow, background, color;
+    transform: none;
+  }
+
+  .mcc-shell .library-mobile-search-filter .library-mobile-filter-toggle:is(:hover, :focus-visible, :active) {
+    transform: none;
   }
 
   /*
