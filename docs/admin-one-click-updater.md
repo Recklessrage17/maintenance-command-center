@@ -113,6 +113,11 @@ sudo mcc-update
 
 The manual command uses the same fixed repository, clean-tree check, backup, build, health check, and rollback sequence.
 
+For a manual production release, create the full deployment rollback archive with
+[`create-deployment-rollback`](../deployment/raspberry-pi/create-deployment-rollback)
+as described below. The updater's runtime-only safety snapshot is a separate,
+smaller backup used by its automatic Git rollback.
+
 The health check deliberately remains direct loopback HTTP and does not depend
 on LAN DNS, Caddy, or certificate state. The supported browser path terminates
 trusted HTTPS separately; see [Trusted HTTPS for Raspberry Pi and LAN deployments](raspberry-pi-https.md).
@@ -137,6 +142,58 @@ After any post-change failure, the runner stops MCC, moves the `main` ref back t
 `Critical rollback failure` is the explicit operator-visible status when the previous healthy build cannot be restored.
 
 Tracked or untracked production changes block the workflow. Nothing is automatically stashed, cleaned, discarded, or overwritten.
+
+## Full deployment rollback snapshot for Pi releases
+
+Before changing a production release, install the helper from the approved checkout and
+create a snapshot while MCC is stopped so SQLite and uploads are captured consistently:
+
+```bash
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/create-deployment-rollback /usr/local/sbin/create-deployment-rollback
+sudo systemctl stop mcc.service
+snapshot_status=0
+sudo create-deployment-rollback --app-dir /opt/maintenance-command-center --backup-dir /var/backups/mcc-deployments || snapshot_status=$?
+sudo systemctl start mcc.service
+test "$snapshot_status" -eq 0
+```
+
+The helper derives the release version from `package.json`; `--version X.Y.Z` can
+override it for a specifically named release. It prints available disk space, source,
+`backend/backups`, `backend/data`, and `backend/uploads` sizes, then the verified archive
+path, size, SHA256, and inclusion/exclusion checks. Keep the archive outside the MCC
+checkout. It contains application source and local configuration, `backend/data`
+(including `mcc.sqlite`), `backend/uploads`, and other runtime files under the checkout.
+It excludes `backend/backups`, all `node_modules` directories, and root/frontend/backend
+`.npm` and `.cache` directories. The excluded `backend/backups` directory contains MCC's
+daily/master/portable backup history and is never changed by this helper.
+
+Only when replacing an older oversized **deployment rollback** archive, explicitly pass
+its path as `--replace-old /var/backups/mcc-deployments/OLD-ARCHIVE.tar.gz`. The old file
+must be a direct regular file in `--backup-dir`. The helper creates the new archive
+first, checks gzip and tar readability, verifies the database and uploads entries,
+checks exclusions, calculates SHA256, and publishes the archive before removing the old
+one. Any failure leaves the old archive in place. To recheck an existing archive without
+creating or deleting anything, use `sudo create-deployment-rollback --verify-only PATH`.
+
+To restore a selected deployment archive during a release rollback, verify it first,
+stop MCC, extract it into the original application directory, reinstall exact locked
+dependencies, rebuild, restore service ownership, then restart and check health:
+
+```bash
+sudo create-deployment-rollback --verify-only /var/backups/mcc-deployments/SELECTED-ARCHIVE.tar.gz
+sudo systemctl stop mcc.service
+sudo tar -xzf /var/backups/mcc-deployments/SELECTED-ARCHIVE.tar.gz -C /opt/maintenance-command-center
+sudo npm ci --prefix /opt/maintenance-command-center/frontend
+sudo npm ci --prefix /opt/maintenance-command-center/backend
+sudo npm run build --prefix /opt/maintenance-command-center
+sudo chown -R mcc:mcc /opt/maintenance-command-center
+sudo systemctl start mcc.service
+sudo systemctl status mcc.service --no-pager
+curl --fail http://127.0.0.1:4273/
+```
+
+Review locally managed files outside the checkout separately. `backend/backups` is not
+part of this deployment snapshot and extraction leaves that backup history untouched.
 
 ## Legacy Windows Z: manual test harness
 

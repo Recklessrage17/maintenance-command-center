@@ -19,6 +19,7 @@
     "test:system-update-service": "npm run build --prefix backend && node tests/system-update-service.mjs",
     "test:system-update-api": "npm run build --prefix backend && node tests/system-update-api.mjs",
     "test:system-update-runner": "node tests/system-update-runner-validation.mjs",
+    "test:deployment-rollback": "node --test tests/deployment-rollback.test.mjs",
     "test:system-update-ui": "playwright test tests/settings-system-update.spec.ts",
     "test:windows-updater": "node tests/windows-updater-installer-validation.mjs",
     "test:https-deployment": "node tests/https-deployment-validation.mjs",
