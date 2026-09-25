@@ -55,7 +55,9 @@ async function expectPhoneLayout(page: Page, route: 'machine-library' | 'equipme
   await page.locator('.page-stack').evaluate(element=>{ (element as HTMLElement).style.minHeight = '1800px'; });
   await page.evaluate(()=>window.scrollTo(0, 700));
   await expect(mobileControls).toBeInViewport();
-  await expect.poll(()=>mobileControls.evaluate(element=>Math.round(element.getBoundingClientRect().top))).toBe(0);
+  await expect.poll(()=>mobileControls.evaluate(element=>Math.round(element.getBoundingClientRect().top))).toBe(
+    await mobileControls.evaluate(element=>Math.round(parseFloat(getComputedStyle(element).top))),
+  );
   await page.evaluate(()=>window.scrollTo(0, 0));
 }
 
@@ -161,5 +163,95 @@ test.describe('Issue #137 responsive library controls', () => {
       await expect(page.getByRole('button', { name: 'Add Equipment' })).toBeVisible();
       await expect(page.getByRole('link', { name: 'Export CSV' })).toBeVisible();
     });
+  }
+});
+
+async function expectUncoveredControls(page: Page, expectContentBelow = false) {
+  const result = await page.evaluate(() => {
+    const controls = document.querySelector('.library-mobile-search-filter')!;
+    const input = controls.querySelector('input[type="search"]')!;
+    const filter = controls.querySelector('button')!;
+    const header = document.querySelector('.mcc-page-topbar')!;
+    const command = document.querySelector('.command-launcher')!;
+    const toolbar = document.querySelector('.machine-toolbar-card, .equipment-library-toolbar')!;
+    const box = (element: Element) => element.getBoundingClientRect();
+    const controlBox = box(controls);
+    const headerBottom = Math.max(box(header).bottom, box(command).bottom);
+    const hits = [input, filter].flatMap(target => {
+      const rect = box(target);
+      return [0.15, 0.5, 0.85].map(fraction => {
+        const hit = document.elementFromPoint(rect.left + rect.width * fraction, rect.top + rect.height / 2);
+        return hit === target || target.contains(hit);
+      });
+    });
+    return {
+      top: controlBox.top,
+      offset: parseFloat(getComputedStyle(controls).top),
+      headerBottom,
+      toolbarTop: box(toolbar).top,
+      controlsBottom: controlBox.bottom,
+      hits,
+    };
+  });
+  expect(result.top).toBeGreaterThanOrEqual(result.headerBottom + 3);
+  expect(result.top).toBeGreaterThanOrEqual(result.offset - 1);
+  expect(result.hits).toEqual([true, true, true, true, true, true]);
+  if (expectContentBelow) expect(result.toolbarTop - result.controlsBottom).toBeGreaterThanOrEqual(8);
+}
+
+test.describe('Issue #150 mobile sticky header hit targets', () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'Touch interactions run in mobile Chromium.');
+  });
+
+  for (const viewport of [
+    { name: 'iPhone portrait', width: 390, height: 844 },
+    { name: 'narrow landscape', width: 844, height: 390 },
+  ]) {
+    for (const library of [
+      { name: 'Machine', path: '/machine-library', query: 'Press 138', card: '.machine-asset-card', mock: mockMachineLibrary },
+      { name: 'Equipment', path: '/equipment-library', query: 'South Chiller', card: '.equipment-asset-card', mock: mockEquipmentLibrary },
+    ]) {
+      test(`${viewport.name} ${library.name} Library keeps Search, Filter, and Menu tappable before and after scrolling`, async ({ page }) => {
+        await page.setViewportSize(viewport);
+        await library.mock(page);
+        await page.goto(library.path);
+        const controls = page.locator('.library-mobile-search-filter');
+        const search = controls.getByRole('searchbox');
+        const filter = controls.getByRole('button', { name: 'Filter' });
+        const menu = page.getByRole('button', { name: 'Open command menu' });
+        await expect(controls).toBeVisible();
+        await expect(page.locator(library.card)).toHaveCount(2);
+        await expectUncoveredControls(page, true);
+        await search.click();
+        await search.fill(library.query);
+        await expect(page.locator(library.card)).toHaveCount(1);
+        await filter.click();
+        await expect(filter).toHaveAttribute('aria-expanded', 'true');
+        await filter.click();
+        await expect(filter).toHaveAttribute('aria-expanded', 'false');
+        await menu.click();
+        await expect(page.getByRole('button', { name: 'Close command menu' })).toBeVisible();
+        await page.getByRole('button', { name: 'Close command menu' }).click();
+
+        await page.locator('.page-stack').evaluate(element => { (element as HTMLElement).style.minHeight = '2200px'; });
+        await page.evaluate(() => window.scrollTo(0, 700));
+        await expect.poll(() => controls.evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(
+          await controls.evaluate(element => Math.round(parseFloat(getComputedStyle(element).top))),
+        );
+        await expectUncoveredControls(page);
+        await search.click();
+        await search.fill('no matching asset');
+        await expect(page.locator(library.card)).toHaveCount(0);
+        await search.fill(library.query);
+        await expect(page.locator(library.card)).toHaveCount(1);
+        await filter.click();
+        await expect(filter).toHaveAttribute('aria-expanded', 'true');
+        await filter.click();
+        await expect(filter).toHaveAttribute('aria-expanded', 'false');
+        await menu.click();
+        await expect(page.getByRole('button', { name: 'Close command menu' })).toBeVisible();
+      });
+    }
   }
 });
