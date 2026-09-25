@@ -65,6 +65,7 @@ async function expectWideLayout(page: Page, route: 'machine-library' | 'equipmen
   const mobileControls = page.locator('.library-mobile-search-filter');
   const toolbar = page.locator(route === 'machine-library' ? '.machine-toolbar-card' : '.equipment-library-toolbar');
   await expect(mobileControls).toBeHidden();
+  await expect(mobileControls).toHaveCSS('will-change', 'auto');
   await expect(toolbar.locator('input:not([type="file"])').first()).toBeVisible();
   await expect(toolbar.getByLabel(route === 'machine-library' ? 'Brand' : 'Category')).toBeVisible();
   await expect(toolbar.getByLabel('Status')).toBeVisible();
@@ -221,6 +222,8 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
         const filter = controls.getByRole('button', { name: 'Filter' });
         const menu = page.getByRole('button', { name: 'Open command menu' });
         await expect(controls).toBeVisible();
+        await expect(controls).toHaveCSS('will-change', 'transform');
+        await expect(controls).toHaveCSS('transform', 'none');
         await expect(page.locator(library.card)).toHaveCount(2);
         await expectUncoveredControls(page, true);
         for (const control of [search, filter]) {
