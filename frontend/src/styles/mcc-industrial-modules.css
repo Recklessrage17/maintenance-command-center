@@ -5066,6 +5066,27 @@ body {
    ISSUE #137 - MOBILE LIBRARY SEARCH + FILTER
    ========================================================= */
 
+/* Keep the fixed shell and sticky controls on the same safe-area-aware offset. */
+@media (max-width: 900px) {
+  :root {
+    --mcc-topbar-safe-offset: calc(136px + env(safe-area-inset-top, 0px));
+  }
+
+  .command-launcher { top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .mcc-page-topbar { top: calc(78px + env(safe-area-inset-top, 0px)); }
+  .mcc-shell .mcc-main { padding-top: calc(var(--mcc-topbar-safe-offset) + 4px); }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --mcc-topbar-safe-offset: calc(132px + env(safe-area-inset-top, 0px));
+  }
+
+  .command-launcher { top: calc(8px + env(safe-area-inset-top, 0px)); }
+  .mcc-page-topbar { top: calc(72px + env(safe-area-inset-top, 0px)); }
+  .mcc-shell .mcc-main { padding-top: var(--mcc-topbar-safe-offset); }
+}
+
 .library-mobile-search-filter {
   display: none;
 }
@@ -5108,8 +5129,8 @@ body {
 
   .mcc-shell .library-mobile-search-filter {
     position: sticky;
-    top: 0;
-    z-index: calc(var(--mcc-layer-sticky, 10) + 1);
+    top: var(--mcc-topbar-safe-offset);
+    z-index: var(--mcc-layer-sticky);
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
