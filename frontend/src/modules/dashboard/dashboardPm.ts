@@ -12,14 +12,14 @@ export type PmAlert = {
 
 export type WarningNote = {
   id:number;assetId:number;assetLibrary:PmLibrary;assetNumber:string;assetName:string;brand:string;model:string;serialNumber:string;location:string;
-  assetAccentColor?:string;assetCategory?:string;title:string;noteDate:string;body:string;warning:true;workOrder?:string;status?:'active';createdBy:string;createdAt:string;updatedAt:string;
+  assetAccentColor?:string;assetCategory?:string;title:string;noteDate:string;body:string;warning:boolean;hold?:boolean;workOrder?:string;status?:'active'|'resolved'|'ordinary';createdBy:string;createdAt:string;updatedAt:string;
   pdfFilename:string;pdfUrl:string;pdfDownloadUrl:string;
 };
 
 export type PmStatusCounts = Record<PmStatus,number>;
 export type PmAssetGroup = {
   key:string;library:PmLibrary;assetId:number;assetNumber:string;assetName:string;brand:string;accentColor:string;
-  alerts:PmAlert[];warningNotes:WarningNote[];counts:PmStatusCounts;
+  alerts:PmAlert[];warningNotes:WarningNote[];warningFilter?:'open'|'hold';counts:PmStatusCounts;
 };
 
 export const pmStatusOrder:PmStatus[]=['Past Due','Due Now','Due Soon'];
@@ -96,7 +96,7 @@ export function groupPmAlerts(alerts:PmAlert[],library:PmLibrary,warningNotes:Wa
     if(existing){existing.alerts.push(alert);continue;}
     groups.set(key,{key,library,assetId:alert.assetId,assetNumber:alert.assetNumber,assetName:alert.assetName,brand:alert.brand,accentColor:assetAccent(alert,library),alerts:[alert],warningNotes:[],counts:pmStatusCounts([])});
   }
-  for(const note of warningNotes.filter(note=>note.assetLibrary===library)){
+  for(const note of warningNotes.filter(note=>note.assetLibrary===library&&note.warning&&note.status!=='resolved'&&note.status!=='ordinary')){
     const key=`${library}:${note.assetId}`;const existing=groups.get(key);
     if(existing){existing.warningNotes.push(note);continue;}
     groups.set(key,{key,library,assetId:note.assetId,assetNumber:note.assetNumber,assetName:note.assetName,brand:note.brand,accentColor:assetAccent(note,library),alerts:[],warningNotes:[note],counts:pmStatusCounts([])});
