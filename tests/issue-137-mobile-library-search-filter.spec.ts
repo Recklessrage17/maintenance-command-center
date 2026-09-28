@@ -222,17 +222,38 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
         const filter = controls.getByRole('button', { name: 'Filter' });
         const menu = page.getByRole('button', { name: 'Open command menu' });
         await expect(controls).toBeVisible();
-        await expect(controls).toHaveCSS('will-change', 'transform');
+        await expect(controls).toHaveCSS('position', 'sticky');
+        await expect(controls).toHaveCSS('will-change', 'auto');
         await expect(controls).toHaveCSS('transform', 'none');
+        await expect(controls).toHaveCSS('box-shadow', 'none');
+        await expect(controls).toHaveCSS('filter', 'none');
+        await expect(controls).toHaveCSS('backdrop-filter', 'none');
+        await expect(controls).toHaveCSS('animation-name', 'none');
+        await expect(controls).toHaveCSS('transition-duration', '0s');
         await expect(page.locator(library.card)).toHaveCount(2);
         await expectUncoveredControls(page, true);
         for (const control of [search, filter]) {
           await expect(control).toHaveCSS('height', '44px');
           await expect(control).toHaveCSS('line-height', '20px');
           await expect(control).toHaveCSS('transform', 'none');
+          await expect(control).toHaveCSS('filter', 'none');
+          await expect(control).toHaveCSS('backdrop-filter', 'none');
+          await expect(control).toHaveCSS('box-shadow', 'none');
+          await expect(control).toHaveCSS('animation-name', 'none');
+          await expect(control).toHaveCSS('transition-duration', '0s');
           await control.hover();
           await expect(control).toHaveCSS('transform', 'none');
+          await expect(control).toHaveCSS('box-shadow', 'none');
+          await control.focus();
+          await expect(control).toHaveCSS('box-shadow', 'none');
         }
+        await search.focus();
+        await page.keyboard.press('Tab');
+        await expect(filter).toBeFocused();
+        await expect(filter).toHaveCSS('outline-style', 'solid');
+        await page.keyboard.press('Shift+Tab');
+        await expect(search).toBeFocused();
+        await expect(search).toHaveCSS('outline-style', 'solid');
         await search.click();
         await search.fill(library.query);
         await expect(page.locator(library.card)).toHaveCount(1);
@@ -252,6 +273,8 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
         await expectUncoveredControls(page);
         await expect(search).toHaveCSS('transform', 'none');
         await expect(filter).toHaveCSS('transform', 'none');
+        await expect(search).toHaveCSS('box-shadow', 'none');
+        await expect(filter).toHaveCSS('box-shadow', 'none');
         await expect(controls).toHaveCSS('backdrop-filter', 'none');
         const stickyTop = await controls.evaluate(element => element.getBoundingClientRect().top);
         for (const scrollY of [1050, 500, 900, 700]) {
