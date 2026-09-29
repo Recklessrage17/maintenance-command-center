@@ -5066,7 +5066,7 @@ body {
    ISSUE #137 - MOBILE LIBRARY SEARCH + FILTER
    ========================================================= */
 
-/* Keep the fixed shell and sticky controls on the same safe-area-aware offset. */
+/* Keep the fixed shell controls on the same safe-area-aware offset. */
 @media (max-width: 900px) {
   :root {
     --mcc-topbar-safe-offset: calc(136px + env(safe-area-inset-top, 0px));
@@ -5091,22 +5091,12 @@ body {
   display: none;
 }
 
-.library-mobile-filter-panel {
-  display: contents;
+.library-mobile-fixed-shell {
+  display: none;
 }
 
-.library-mobile-filter-toggle.has-active-filters {
-  border-color: rgba(var(--mcc-module-accent-rgb), .72);
-  color: #efffff;
-  background:
-    linear-gradient(
-      180deg,
-      rgba(var(--mcc-module-accent-rgb), .22),
-      rgba(5, 21, 31, .9)
-    );
-  box-shadow:
-    0 0 0 1px rgba(var(--mcc-module-accent-rgb), .08),
-    0 0 18px rgba(var(--mcc-module-accent-rgb), .18);
+.library-mobile-filter-panel {
+  display: contents;
 }
 
 /*
@@ -5116,10 +5106,6 @@ body {
 @media (max-width: 600px),
        (max-width: 960px) and (max-height: 500px) {
 
-  /*
-    Machine previously made the complete toolbar sticky.
-    On phones only the compact Search + Filter bar remains sticky.
-  */
   .mcc-shell .machine-toolbar-card {
     position: relative;
     top: auto;
@@ -5127,41 +5113,78 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .mcc-shell .library-mobile-search-filter {
-    position: sticky;
+  .library-mobile-fixed-shell {
+    position: fixed;
     top: var(--mcc-topbar-safe-offset);
-    z-index: var(--mcc-layer-sticky);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: end;
-    min-width: 0;
-    padding: 9px 10px;
-    border: 1px solid rgba(var(--mcc-module-accent-rgb), .3);
-    border-radius: 12px;
-    background:
-      linear-gradient(
-        145deg,
-        rgba(11, 28, 40, .97),
-        rgba(4, 13, 23, .98)
-      ),
-      radial-gradient(
-        circle at 12% 0%,
-        rgba(var(--mcc-module-accent-rgb), .15),
-        transparent 38%
-      );
-    box-shadow:
-      0 14px 30px rgba(0, 0, 0, .3),
-      inset 0 1px 0 rgba(255, 255, 255, .08);
-    backdrop-filter: blur(14px);
+    left: max(8px, env(safe-area-inset-left, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    z-index: 21;
+    display: block;
+    pointer-events: none;
   }
 
-  .mcc-shell .library-mobile-search {
+  .library-mobile-fixed-shell[data-library="Machine Library"] {
+    --mcc-module-accent-rgb: var(--mcc-accent-module-machine-library-rgb);
+  }
+
+  .library-mobile-fixed-shell[data-library="Equipment Library"] {
+    --mcc-module-accent-rgb: var(--mcc-accent-module-equipment-library-rgb);
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search-filter {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+    padding: 5px;
+    border: 1px solid rgba(var(--mcc-module-accent-rgb), .3);
+    border-radius: 12px;
+    background: #091b29;
+    box-sizing: border-box;
+    pointer-events: auto;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search-filter.is-expanded {
+    width: 100%;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search-bar {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search-toggle {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    color: #efffff;
+    background: transparent;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search-toggle.has-active-filters {
+    color: var(--mcc-focus-color);
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search-toggle:focus-visible,
+  .library-mobile-fixed-shell .library-mobile-filter-toggle:focus-visible,
+  .library-mobile-fixed-shell .library-mobile-search .glass-input:focus-visible {
+    outline: 2px solid var(--mcc-focus-color);
+    outline-offset: -2px;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-search {
+    flex: 1 1 auto;
     min-width: 0;
     margin: 0;
   }
 
-  .mcc-shell .library-mobile-search > span {
+  .library-mobile-fixed-shell .library-mobile-search > span {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -5173,21 +5196,71 @@ body {
     border: 0;
   }
 
-  .mcc-shell .library-mobile-search .glass-input {
+  .library-mobile-fixed-shell .library-mobile-search .glass-input {
     width: 100%;
     min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    line-height: 20px;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-filter-toggle {
+    flex: 0 0 auto;
+    min-width: 66px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    color: #efffff;
+    background: transparent;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-filter-toggle.has-active-filters {
+    color: var(--mcc-focus-color);
+  }
+
+  .library-mobile-fixed-shell .library-mobile-filter-popover {
+    display: none;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    width: 100%;
+    max-height: max(100px, calc(100dvh - var(--mcc-topbar-safe-offset) - 72px));
+    margin-top: 8px;
+    padding: 12px;
+    overflow-y: auto;
+    border: 1px solid rgba(var(--mcc-module-accent-rgb), .3);
+    border-radius: 12px;
+    background: #091b29;
+    box-sizing: border-box;
+    pointer-events: auto;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-filter-popover.is-open {
+    display: grid;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-filter-popover > .form-field {
+    min-width: 0;
+  }
+
+  .library-mobile-fixed-shell .library-mobile-filter-popover .glass-input {
     min-height: 44px;
   }
 
-  .mcc-shell .library-mobile-filter-toggle {
-    min-width: 88px;
-    min-height: 44px;
-    white-space: nowrap;
+  .mcc-shell .machine-library-page.is-list-view,
+  .mcc-shell .equipment-library-page {
+    padding-top: 64px;
   }
 
   /*
     Hide the duplicate desktop search fields on phones.
-    Search remains available in the sticky compact bar.
+    Search remains available in the fixed bar.
   */
   .mcc-shell .machine-toolbar-card > .machine-search,
   .mcc-shell .equipment-library-search-row > .form-field:first-child {
@@ -5199,17 +5272,6 @@ body {
   */
   .mcc-shell .library-mobile-filter-panel {
     display: none;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .mcc-shell .library-mobile-filter-panel.is-open {
-    display: grid;
-  }
-
-  .mcc-shell .library-mobile-filter-panel > .form-field {
-    min-width: 0;
   }
 
   .mcc-shell .equipment-library-search-row {
@@ -5218,6 +5280,10 @@ body {
 }
 
 @media (min-width: 601px) and (min-height: 501px) {
+  .library-mobile-fixed-shell {
+    display: none !important;
+  }
+
   .library-mobile-search-filter {
     display: none !important;
   }

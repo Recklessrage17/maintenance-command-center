@@ -307,6 +307,7 @@
 .dashboard-wo-badge .dashboard-wo-segment { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .dashboard-wo-count { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 32px; padding: 3px 4px; border: 0; border-radius: 7px; background: transparent; color: #eee9ff; font: inherit; font-weight: 800; white-space: nowrap; cursor: pointer; }
 .dashboard-wo-count strong { margin: 0; color: inherit; font-size: .73rem; }
+.dashboard-wo-count.is-open { color: #63efb8; }
 .dashboard-wo-count.is-hold { color: #ffe0a3; background: linear-gradient(135deg,rgba(153,98,22,.24),rgba(104,67,15,.12)); }
 .dashboard-wo-count:hover:not(:disabled) { background-color: rgba(167,139,250,.18); }
 .dashboard-wo-count.is-hold:hover:not(:disabled) { background-color: rgba(238,173,73,.2); }
