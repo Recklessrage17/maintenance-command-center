@@ -1,0 +1,9 @@
+/* Safari zooms the page when a focused text control computes below 16px. */
+@media (max-width: 520px) {
+  input:not([type]),
+  input:is([type="text"], [type="search"], [type="email"], [type="password"], [type="tel"], [type="url"], [type="number"], [type="date"], [type="time"], [type="datetime-local"], [type="month"], [type="week"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
