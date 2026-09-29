@@ -8,6 +8,7 @@ import './styles/mcc-industrial-primitives.css';
 import './styles/mcc-industrial-modules.css';
 import './styles/dashboard.css';
 import './styles/mcc-login.css';
+import './styles/mobile-safari-inputs.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

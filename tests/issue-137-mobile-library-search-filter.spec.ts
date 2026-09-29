@@ -292,6 +292,10 @@ test.describe('Issue #155 fixed mobile search and #150 header hit targets', () =
         const search = controls.getByRole('searchbox');
         const filter = controls.getByRole('button', { name: 'Filter' });
         await expect(search).toBeFocused();
+        if (viewport.width <= 520) {
+          expect(await search.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+          expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+        }
         await expectUncoveredControls(page, true);
         await search.fill(library.query);
         await expect(page.locator(library.card)).toHaveCount(1);
