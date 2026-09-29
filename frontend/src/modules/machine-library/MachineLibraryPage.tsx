@@ -1,4 +1,5 @@
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import { LibraryMobileSearchFilter } from '../../components/LibraryMobileSearchFilter';
 import { createPortal } from 'react-dom';
 import { withJsonRequestDefaults } from '../../apiRequest';
 import { ActionButtonProgress, type ActionProgressPhase, useActionProgress } from '../../components/ActionProgress';
@@ -478,22 +479,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'}`}>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
       {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} canManagePm={canManagePm} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
-        <div className="library-mobile-search-filter" role="search" aria-label="Machine Library search and filters">
-          <label className="form-field library-mobile-search">
-            <span>Search assets</span>
-            <input className="glass-input" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." />
-          </label>
-          <button
-            className={`secondary-button compact-button glass-button glass-button--secondary library-mobile-filter-toggle${activeFilterCount ? ' has-active-filters' : ''}`}
-            type="button"
-            aria-label={activeFilterCount ? `Filter, ${activeFilterCount} active` : 'Filter'}
-            aria-expanded={filtersOpen}
-            aria-controls="machine-library-mobile-filters"
-            onClick={()=>setFiltersOpen(current=>!current)}
-          >
-            Filter{activeFilterCount ? ` (${activeFilterCount})` : ''}
-          </button>
-        </div>
+        <LibraryMobileSearchFilter library="Machine Library" label="Search assets" placeholder="Press 14, Toyo, model, serial number..." query={search} onQueryChange={setSearch} activeFilterCount={activeFilterCount} filtersOpen={filtersOpen} onFiltersOpenChange={setFiltersOpen} filtersId="machine-library-mobile-filters" />
         <section className="mcc-card machine-toolbar-card glass-panel glass-panel--highlight">
         <label className="form-field machine-search"><span>Search assets</span><input className="glass-input" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>
         <div id="machine-library-mobile-filters" className={`library-mobile-filter-panel${filtersOpen ? ' is-open' : ''}`}>

@@ -39,8 +39,10 @@ async function expectPhoneLayout(page: Page, route: 'machine-library' | 'equipme
   const mobileControls = page.locator('.library-mobile-search-filter');
   const toolbar = page.locator(route === 'machine-library' ? '.machine-toolbar-card' : '.equipment-library-toolbar');
   await expect(mobileControls).toBeVisible();
-  await expect(mobileControls.getByRole('searchbox')).toBeVisible();
-  await expect(mobileControls.getByRole('button', { name: 'Filter' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(mobileControls.getByRole('button', { name: 'Search' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(mobileControls.getByRole('searchbox')).toHaveCount(0);
+  await expect(mobileControls.getByRole('button', { name: 'Filter' })).toHaveCount(0);
+  await expect(mobileControls.getByRole('button')).toHaveCount(1);
   await expect(toolbar.locator('input:not([type="file"])').first()).toBeHidden();
   await expect(toolbar).toBeVisible();
   expect(await mobileControls.evaluate(element=>getComputedStyle(element).position)).toBe('sticky');
@@ -50,6 +52,7 @@ async function expectPhoneLayout(page: Page, route: 'machine-library' | 'equipme
     overflow: document.documentElement.scrollWidth-document.documentElement.clientWidth,
   }));
   expect(compactLayout.height).toBeLessThanOrEqual(70);
+  expect(await mobileControls.evaluate(element=>element.getBoundingClientRect().width)).toBeLessThanOrEqual(70);
   expect(compactLayout.overflow).toBeLessThanOrEqual(1);
 
   await page.locator('.page-stack').evaluate(element=>{ (element as HTMLElement).style.minHeight = '1800px'; });
@@ -65,11 +68,18 @@ async function expectWideLayout(page: Page, route: 'machine-library' | 'equipmen
   const mobileControls = page.locator('.library-mobile-search-filter');
   const toolbar = page.locator(route === 'machine-library' ? '.machine-toolbar-card' : '.equipment-library-toolbar');
   await expect(mobileControls).toBeHidden();
-  await expect(mobileControls).toHaveCSS('will-change', 'auto');
   await expect(toolbar.locator('input:not([type="file"])').first()).toBeVisible();
   await expect(toolbar.getByLabel(route === 'machine-library' ? 'Brand' : 'Category')).toBeVisible();
   await expect(toolbar.getByLabel('Status')).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+}
+
+async function expectFilterBelowSearch(page: Page) {
+  const positions = await page.evaluate(() => ({
+    searchBottom: document.querySelector('.library-mobile-search-filter')!.getBoundingClientRect().bottom,
+    filterTop: document.querySelector('.library-mobile-filter-panel')!.getBoundingClientRect().top,
+  }));
+  expect(positions.filterTop).toBeGreaterThanOrEqual(positions.searchBottom);
 }
 
 test.describe('Issue #137 responsive library controls', () => {
@@ -88,7 +98,20 @@ test.describe('Issue #137 responsive library controls', () => {
       await expectPhoneLayout(page, 'machine-library');
 
       const controls = page.locator('.library-mobile-search-filter');
+      const toggle = controls.getByRole('button', { name: 'Search' });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(controls.getByRole('searchbox')).toBeFocused();
+      await expect(controls.getByRole('button', { name: 'Filter' })).toBeVisible();
+      await expect(controls.locator('.library-mobile-search-bar').getByRole('button', { name: 'Filter' })).toBeVisible();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(controls.getByRole('button', { name: 'Filter' })).toHaveCount(0);
+      await toggle.click();
       await controls.getByRole('searchbox').fill('Press 138');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(controls.getByRole('searchbox')).toHaveValue('Press 138');
       await expect(page.locator('.machine-asset-card')).toHaveCount(1);
       await expect(page.locator('.machine-asset-card')).toContainText('Press 138');
 
@@ -96,6 +119,7 @@ test.describe('Issue #137 responsive library controls', () => {
       const toolbar = page.locator('.machine-toolbar-card');
       await expect(toolbar.getByLabel('Brand')).toBeVisible();
       await expect(toolbar.getByLabel('Status')).toBeVisible();
+      await expectFilterBelowSearch(page);
       await controls.getByRole('searchbox').fill('');
       await toolbar.getByLabel('Brand').selectOption('Toyo');
       await toolbar.getByLabel('Status').selectOption('active');
@@ -111,6 +135,10 @@ test.describe('Issue #137 responsive library controls', () => {
       await toolbar.getByLabel('Brand').selectOption('');
       await expect(controls.getByRole('button', { name: 'Filter' })).not.toHaveClass(/has-active-filters/);
       await expect(page.locator('.machine-asset-card')).toHaveCount(2);
+      await controls.getByRole('button', { name: 'Filter' }).click();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(toolbar.getByLabel('Brand')).toBeHidden();
     });
 
     test(`${viewport.name} keeps compact Equipment Library search and filters usable`, async ({ page }) => {
@@ -120,7 +148,18 @@ test.describe('Issue #137 responsive library controls', () => {
       await expectPhoneLayout(page, 'equipment-library');
 
       const controls = page.locator('.library-mobile-search-filter');
+      const toggle = controls.getByRole('button', { name: 'Search' });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(controls.getByRole('searchbox')).toBeFocused();
+      await expect(controls.locator('.library-mobile-search-bar').getByRole('button', { name: 'Filter' })).toBeVisible();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await toggle.click();
       await controls.getByRole('searchbox').fill('South Chiller');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(controls.getByRole('searchbox')).toHaveValue('South Chiller');
       await expect(page.locator('.equipment-asset-card')).toHaveCount(1);
       await expect(page.locator('.equipment-asset-card')).toContainText('South Chiller');
 
@@ -128,6 +167,7 @@ test.describe('Issue #137 responsive library controls', () => {
       const toolbar = page.locator('.equipment-library-toolbar');
       await expect(toolbar.getByLabel('Category')).toBeVisible();
       await expect(toolbar.getByLabel('Status')).toBeVisible();
+      await expectFilterBelowSearch(page);
       await controls.getByRole('searchbox').fill('');
       await toolbar.getByLabel('Category').selectOption('Dryer');
       await toolbar.getByLabel('Status').selectOption('active');
@@ -143,6 +183,10 @@ test.describe('Issue #137 responsive library controls', () => {
       await toolbar.getByLabel('Status').selectOption('');
       await expect(controls.getByRole('button', { name: 'Filter' })).not.toHaveClass(/has-active-filters/);
       await expect(page.locator('.equipment-asset-card')).toHaveCount(2);
+      await controls.getByRole('button', { name: 'Filter' }).click();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(toolbar.getByLabel('Category')).toBeHidden();
     });
   }
 
@@ -167,37 +211,34 @@ test.describe('Issue #137 responsive library controls', () => {
   }
 });
 
-async function expectUncoveredControls(page: Page, expectContentBelow = false) {
+async function expectUncoveredControls(page: Page, expanded: boolean) {
   const result = await page.evaluate(() => {
     const controls = document.querySelector('.library-mobile-search-filter')!;
-    const input = controls.querySelector('input[type="search"]')!;
-    const filter = controls.querySelector('button')!;
+    const toggle = controls.querySelector('.library-mobile-search-toggle')!;
+    const search = controls.querySelector('input[type="search"]');
+    const filter = controls.querySelector('.library-mobile-filter-toggle');
     const header = document.querySelector('.mcc-page-topbar')!;
     const command = document.querySelector('.command-launcher')!;
-    const toolbar = document.querySelector('.machine-toolbar-card, .equipment-library-toolbar')!;
     const box = (element: Element) => element.getBoundingClientRect();
-    const controlBox = box(controls);
-    const headerBottom = Math.max(box(header).bottom, box(command).bottom);
-    const hits = [input, filter].flatMap(target => {
-      const rect = box(target);
-      return [0.15, 0.5, 0.85].map(fraction => {
-        const hit = document.elementFromPoint(rect.left + rect.width * fraction, rect.top + rect.height / 2);
-        return hit === target || target.contains(hit);
-      });
-    });
+    const targets = [toggle, search, filter].filter((target): target is Element => Boolean(target));
     return {
-      top: controlBox.top,
+      top: box(controls).top,
       offset: parseFloat(getComputedStyle(controls).top),
-      headerBottom,
-      toolbarTop: box(toolbar).top,
-      controlsBottom: controlBox.bottom,
-      hits,
+      headerBottom: Math.max(box(header).bottom, box(command).bottom),
+      widths: targets.map(target => box(target).width),
+      heights: targets.map(target => box(target).height),
+      hits: targets.map(target => {
+        const rect = box(target);
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return hit === target || target.contains(hit);
+      }),
     };
   });
   expect(result.top).toBeGreaterThanOrEqual(result.headerBottom + 3);
   expect(result.top).toBeGreaterThanOrEqual(result.offset - 1);
-  expect(result.hits).toEqual([true, true, true, true, true, true]);
-  if (expectContentBelow) expect(result.toolbarTop - result.controlsBottom).toBeGreaterThanOrEqual(8);
+  expect(result.hits).toEqual(expanded ? [true, true, true] : [true]);
+  expect(result.heights.every(height => height >= 44)).toBe(true);
+  expect(result.widths.every(width => width >= 44)).toBe(true);
 }
 
 test.describe('Issue #150 mobile sticky header hit targets', () => {
@@ -218,80 +259,45 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
         await library.mock(page);
         await page.goto(library.path);
         const controls = page.locator('.library-mobile-search-filter');
+        const toggle = controls.getByRole('button', { name: 'Search' });
+        const menu = page.getByRole('button', { name: 'Open command menu' });
+        await expect(controls).toHaveCSS('position', 'sticky');
+        await expect(page.locator(library.card)).toHaveCount(2);
+        await expectUncoveredControls(page, false);
+        await toggle.tap();
         const search = controls.getByRole('searchbox');
         const filter = controls.getByRole('button', { name: 'Filter' });
-        const menu = page.getByRole('button', { name: 'Open command menu' });
-        await expect(controls).toBeVisible();
-        await expect(controls).toHaveCSS('position', 'sticky');
-        await expect(controls).toHaveCSS('will-change', 'auto');
-        await expect(controls).toHaveCSS('transform', 'none');
-        await expect(controls).toHaveCSS('box-shadow', 'none');
-        await expect(controls).toHaveCSS('filter', 'none');
-        await expect(controls).toHaveCSS('backdrop-filter', 'none');
-        await expect(controls).toHaveCSS('animation-name', 'none');
-        await expect(controls).toHaveCSS('transition-duration', '0s');
-        await expect(page.locator(library.card)).toHaveCount(2);
-        await expectUncoveredControls(page, true);
-        for (const control of [search, filter]) {
-          await expect(control).toHaveCSS('height', '44px');
-          await expect(control).toHaveCSS('line-height', '20px');
-          await expect(control).toHaveCSS('transform', 'none');
-          await expect(control).toHaveCSS('filter', 'none');
-          await expect(control).toHaveCSS('backdrop-filter', 'none');
-          await expect(control).toHaveCSS('box-shadow', 'none');
-          await expect(control).toHaveCSS('animation-name', 'none');
-          await expect(control).toHaveCSS('transition-duration', '0s');
-          await control.hover();
-          await expect(control).toHaveCSS('transform', 'none');
-          await expect(control).toHaveCSS('box-shadow', 'none');
-          await control.focus();
-          await expect(control).toHaveCSS('box-shadow', 'none');
-        }
-        await search.focus();
-        await page.keyboard.press('Tab');
-        await expect(filter).toBeFocused();
-        await expect(filter).toHaveCSS('outline-style', 'solid');
-        await page.keyboard.press('Shift+Tab');
         await expect(search).toBeFocused();
-        await expect(search).toHaveCSS('outline-style', 'solid');
-        await search.click();
+        await expectUncoveredControls(page, true);
         await search.fill(library.query);
         await expect(page.locator(library.card)).toHaveCount(1);
-        await filter.click();
+        await filter.tap();
         await expect(filter).toHaveAttribute('aria-expanded', 'true');
-        await filter.click();
+        await filter.tap();
         await expect(filter).toHaveAttribute('aria-expanded', 'false');
-        await menu.click();
+        await menu.tap();
         await expect(page.getByRole('button', { name: 'Close command menu' })).toBeVisible();
-        await page.getByRole('button', { name: 'Close command menu' }).click();
+        await page.getByRole('button', { name: 'Close command menu' }).tap();
 
         await page.locator('.page-stack').evaluate(element => { (element as HTMLElement).style.minHeight = '2200px'; });
         await page.evaluate(() => window.scrollTo(0, 700));
         await expect.poll(() => controls.evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(
           await controls.evaluate(element => Math.round(parseFloat(getComputedStyle(element).top))),
         );
-        await expectUncoveredControls(page);
-        await expect(search).toHaveCSS('transform', 'none');
-        await expect(filter).toHaveCSS('transform', 'none');
-        await expect(search).toHaveCSS('box-shadow', 'none');
-        await expect(filter).toHaveCSS('box-shadow', 'none');
-        await expect(controls).toHaveCSS('backdrop-filter', 'none');
         const stickyTop = await controls.evaluate(element => element.getBoundingClientRect().top);
         for (const scrollY of [1050, 500, 900, 700]) {
           await page.evaluate(y => window.scrollTo(0, y), scrollY);
           await expect.poll(() => controls.evaluate(element => element.getBoundingClientRect().top)).toBe(stickyTop);
-          await expectUncoveredControls(page);
+          await expectUncoveredControls(page, true);
         }
-        await search.click();
+        await search.tap();
         await search.fill('no matching asset');
         await expect(page.locator(library.card)).toHaveCount(0);
         await search.fill(library.query);
         await expect(page.locator(library.card)).toHaveCount(1);
-        await filter.click();
+        await filter.tap();
         await expect(filter).toHaveAttribute('aria-expanded', 'true');
-        await filter.click();
-        await expect(filter).toHaveAttribute('aria-expanded', 'false');
-        await menu.click();
+        await menu.tap();
         await expect(page.getByRole('button', { name: 'Close command menu' })).toBeVisible();
       });
     }

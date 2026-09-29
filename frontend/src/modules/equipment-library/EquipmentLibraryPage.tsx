@@ -6,6 +6,7 @@ import { MccAccordionHeader, MccCategoryAccordion, type MccCategoryAccent } from
 import { MccPillCard, MccStatusPill } from '../../components/MccPills';
 import { MccSearchableCombobox } from '../../components/MccSearchableCombobox';
 import { MccSummaryToken, MccSummaryTokenGroup } from '../../components/MccSummaryToken';
+import { LibraryMobileSearchFilter } from '../../components/LibraryMobileSearchFilter';
 import { AssetDocumentLibrary } from '../machine-library/AssetDocumentLibrary';
 import { AssetNotesAttachments } from '../machine-library/AssetNotesAttachments';
 import { PreventiveMaintenanceTracking } from '../machine-library/PreventiveMaintenanceTracking';
@@ -87,22 +88,7 @@ export function EquipmentLibraryPage({userFullName=''}:{userFullName?:string}){
 
   if(detailAsset)return <EquipmentDetail asset={detailAsset} canEdit={permissions.canEdit} canDelete={permissions.canDelete} canManagePm={permissions.canManagePm} performedBy={userFullName} onBack={()=>{setDetailAsset(null);setNotice('');}} onUpdated={asset=>{setDetailAsset(asset);setAssets(current=>current.map(item=>item.id===asset.id?asset:item));}} onRemoved={async()=>{setDetailAsset(null);await load();}} />;
   return <div className="page-stack equipment-library-page mcc-glass-page">
-    <div className="library-mobile-search-filter" role="search" aria-label="Equipment Library search and filters">
-      <label className="form-field library-mobile-search">
-        <span>Search Equipment Library</span>
-        <input className="glass-input" type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Asset #, name, category, brand, model, serial, location" />
-      </label>
-      <button
-        className={`secondary-button compact-button glass-button glass-button--secondary library-mobile-filter-toggle${activeFilterCount ? ' has-active-filters' : ''}`}
-        type="button"
-        aria-label={activeFilterCount ? `Filter, ${activeFilterCount} active` : 'Filter'}
-        aria-expanded={filtersOpen}
-        aria-controls="equipment-library-mobile-filters"
-        onClick={()=>setFiltersOpen(current=>!current)}
-      >
-        Filter{activeFilterCount ? ` (${activeFilterCount})` : ''}
-      </button>
-    </div>
+    <LibraryMobileSearchFilter library="Equipment Library" label="Search Equipment Library" placeholder="Asset #, name, category, brand, model, serial, location" query={search} onQueryChange={setSearch} activeFilterCount={activeFilterCount} filtersOpen={filtersOpen} onFiltersOpenChange={setFiltersOpen} filtersId="equipment-library-mobile-filters" />
     <section className="mcc-card glass-panel equipment-library-toolbar">
       <div className="equipment-library-search-row">
         <label className="form-field"><span>Search Equipment Library</span><input className="glass-input" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Asset #, name, category, brand, model, serial, location" /></label>
