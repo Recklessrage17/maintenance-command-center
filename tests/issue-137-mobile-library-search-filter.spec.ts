@@ -45,7 +45,10 @@ async function expectPhoneLayout(page: Page, route: 'machine-library' | 'equipme
   await expect(mobileControls.getByRole('button')).toHaveCount(1);
   await expect(toolbar.locator('input:not([type="file"])').first()).toBeHidden();
   await expect(toolbar).toBeVisible();
-  expect(await mobileControls.evaluate(element=>getComputedStyle(element).position)).toBe('sticky');
+  const shell = page.locator('.library-mobile-fixed-shell');
+  await expect(shell).toHaveCSS('position', 'fixed');
+  expect(await mobileControls.evaluate(element=>getComputedStyle(element).position)).not.toBe('sticky');
+  expect(await shell.evaluate(element=>element.parentElement === document.body)).toBe(true);
   expect(await toolbar.evaluate(element=>getComputedStyle(element).position)).not.toBe('sticky');
   const compactLayout = await mobileControls.evaluate(element=>({
     height: element.getBoundingClientRect().height,
@@ -54,12 +57,17 @@ async function expectPhoneLayout(page: Page, route: 'machine-library' | 'equipme
   expect(compactLayout.height).toBeLessThanOrEqual(70);
   expect(await mobileControls.evaluate(element=>element.getBoundingClientRect().width)).toBeLessThanOrEqual(70);
   expect(compactLayout.overflow).toBeLessThanOrEqual(1);
+  const initialGeometry = await page.evaluate(() => ({
+    searchBottom: document.querySelector('.library-mobile-search-filter')!.getBoundingClientRect().bottom,
+    contentTop: document.querySelector('.machine-toolbar-card, .equipment-library-toolbar')!.getBoundingClientRect().top,
+  }));
+  expect(initialGeometry.contentTop).toBeGreaterThanOrEqual(initialGeometry.searchBottom + 4);
 
   await page.locator('.page-stack').evaluate(element=>{ (element as HTMLElement).style.minHeight = '1800px'; });
   await page.evaluate(()=>window.scrollTo(0, 700));
   await expect(mobileControls).toBeInViewport();
-  await expect.poll(()=>mobileControls.evaluate(element=>Math.round(element.getBoundingClientRect().top))).toBe(
-    await mobileControls.evaluate(element=>Math.round(parseFloat(getComputedStyle(element).top))),
+  await expect.poll(()=>shell.evaluate(element=>Math.round(element.getBoundingClientRect().top))).toBe(
+    await shell.evaluate(element=>Math.round(parseFloat(getComputedStyle(element).top))),
   );
   await page.evaluate(()=>window.scrollTo(0, 0));
 }
@@ -77,9 +85,18 @@ async function expectWideLayout(page: Page, route: 'machine-library' | 'equipmen
 async function expectFilterBelowSearch(page: Page) {
   const positions = await page.evaluate(() => ({
     searchBottom: document.querySelector('.library-mobile-search-filter')!.getBoundingClientRect().bottom,
-    filterTop: document.querySelector('.library-mobile-filter-panel')!.getBoundingClientRect().top,
+    filterTop: document.querySelector('.library-mobile-filter-popover')!.getBoundingClientRect().top,
+    filterBottom: document.querySelector('.library-mobile-filter-popover')!.getBoundingClientRect().bottom,
+    viewportHeight: window.innerHeight,
+    filterLeft: document.querySelector('.library-mobile-filter-popover')!.getBoundingClientRect().left,
+    filterRight: document.querySelector('.library-mobile-filter-popover')!.getBoundingClientRect().right,
+    viewportWidth: window.innerWidth,
   }));
   expect(positions.filterTop).toBeGreaterThanOrEqual(positions.searchBottom);
+  expect(positions.filterBottom).toBeLessThanOrEqual(positions.viewportHeight);
+  expect(positions.filterLeft).toBeGreaterThanOrEqual(0);
+  expect(positions.filterRight).toBeLessThanOrEqual(positions.viewportWidth);
+  expect(await page.locator('.library-mobile-filter-popover select').evaluateAll(elements=>elements.every(element=>element.getBoundingClientRect().height>=44))).toBe(true);
 }
 
 test.describe('Issue #137 responsive library controls', () => {
@@ -117,28 +134,30 @@ test.describe('Issue #137 responsive library controls', () => {
 
       await controls.getByRole('button', { name: 'Filter' }).click();
       const toolbar = page.locator('.machine-toolbar-card');
-      await expect(toolbar.getByLabel('Brand')).toBeVisible();
-      await expect(toolbar.getByLabel('Status')).toBeVisible();
+      const panel = page.locator('#machine-library-mobile-filters');
+      await expect(panel.getByLabel('Brand')).toBeVisible();
+      await expect(panel.getByLabel('Status')).toBeVisible();
+      await expect(toolbar.getByLabel('Brand')).toBeHidden();
       await expectFilterBelowSearch(page);
       await controls.getByRole('searchbox').fill('');
-      await toolbar.getByLabel('Brand').selectOption('Toyo');
-      await toolbar.getByLabel('Status').selectOption('active');
+      await panel.getByLabel('Brand').selectOption('Toyo');
+      await panel.getByLabel('Status').selectOption('active');
       await expect(controls.getByRole('button', { name: 'Filter, 2 active' })).toHaveAttribute('aria-expanded', 'true');
       await expect(page.locator('.machine-asset-card')).toHaveCount(1);
       await expect(page.getByRole('button', { name: 'Add Machine Asset' })).toBeVisible();
       await expect(page.getByRole('button', { name: /tools/i })).toBeVisible();
       await controls.getByRole('button', { name: 'Filter, 2 active' }).click();
-      await expect(toolbar.getByLabel('Brand')).toBeHidden();
+      await expect(panel.getByLabel('Brand')).toBeHidden();
       await expect(controls.getByRole('button', { name: 'Filter, 2 active' })).toHaveAttribute('aria-expanded', 'false');
       await controls.getByRole('button', { name: 'Filter, 2 active' }).click();
-      await toolbar.getByLabel('Status').selectOption('');
-      await toolbar.getByLabel('Brand').selectOption('');
+      await panel.getByLabel('Status').selectOption('');
+      await panel.getByLabel('Brand').selectOption('');
       await expect(controls.getByRole('button', { name: 'Filter' })).not.toHaveClass(/has-active-filters/);
       await expect(page.locator('.machine-asset-card')).toHaveCount(2);
       await controls.getByRole('button', { name: 'Filter' }).click();
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(toolbar.getByLabel('Brand')).toBeHidden();
+      await expect(panel.getByLabel('Brand')).toBeHidden();
     });
 
     test(`${viewport.name} keeps compact Equipment Library search and filters usable`, async ({ page }) => {
@@ -165,28 +184,30 @@ test.describe('Issue #137 responsive library controls', () => {
 
       await controls.getByRole('button', { name: 'Filter' }).click();
       const toolbar = page.locator('.equipment-library-toolbar');
-      await expect(toolbar.getByLabel('Category')).toBeVisible();
-      await expect(toolbar.getByLabel('Status')).toBeVisible();
+      const panel = page.locator('#equipment-library-mobile-filters');
+      await expect(panel.getByLabel('Category')).toBeVisible();
+      await expect(panel.getByLabel('Status')).toBeVisible();
+      await expect(toolbar.getByLabel('Category')).toBeHidden();
       await expectFilterBelowSearch(page);
       await controls.getByRole('searchbox').fill('');
-      await toolbar.getByLabel('Category').selectOption('Dryer');
-      await toolbar.getByLabel('Status').selectOption('active');
+      await panel.getByLabel('Category').selectOption('Dryer');
+      await panel.getByLabel('Status').selectOption('active');
       await expect(controls.getByRole('button', { name: 'Filter, 2 active' })).toHaveAttribute('aria-expanded', 'true');
       await expect(page.locator('.equipment-asset-card')).toHaveCount(1);
       await expect(page.getByRole('button', { name: 'Add Equipment' })).toBeVisible();
       await expect(page.getByRole('link', { name: 'Export CSV' })).toBeVisible();
       await controls.getByRole('button', { name: 'Filter, 2 active' }).click();
-      await expect(toolbar.getByLabel('Category')).toBeHidden();
+      await expect(panel.getByLabel('Category')).toBeHidden();
       await expect(controls.getByRole('button', { name: 'Filter, 2 active' })).toHaveAttribute('aria-expanded', 'false');
       await controls.getByRole('button', { name: 'Filter, 2 active' }).click();
-      await toolbar.getByLabel('Category').selectOption('');
-      await toolbar.getByLabel('Status').selectOption('');
+      await panel.getByLabel('Category').selectOption('');
+      await panel.getByLabel('Status').selectOption('');
       await expect(controls.getByRole('button', { name: 'Filter' })).not.toHaveClass(/has-active-filters/);
       await expect(page.locator('.equipment-asset-card')).toHaveCount(2);
       await controls.getByRole('button', { name: 'Filter' }).click();
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(toolbar.getByLabel('Category')).toBeHidden();
+      await expect(panel.getByLabel('Category')).toBeHidden();
     });
   }
 
@@ -213,6 +234,7 @@ test.describe('Issue #137 responsive library controls', () => {
 
 async function expectUncoveredControls(page: Page, expanded: boolean) {
   const result = await page.evaluate(() => {
+    const shell = document.querySelector('.library-mobile-fixed-shell')!;
     const controls = document.querySelector('.library-mobile-search-filter')!;
     const toggle = controls.querySelector('.library-mobile-search-toggle')!;
     const search = controls.querySelector('input[type="search"]');
@@ -223,7 +245,7 @@ async function expectUncoveredControls(page: Page, expanded: boolean) {
     const targets = [toggle, search, filter].filter((target): target is Element => Boolean(target));
     return {
       top: box(controls).top,
-      offset: parseFloat(getComputedStyle(controls).top),
+      offset: parseFloat(getComputedStyle(shell).top),
       headerBottom: Math.max(box(header).bottom, box(command).bottom),
       widths: targets.map(target => box(target).width),
       heights: targets.map(target => box(target).height),
@@ -241,7 +263,7 @@ async function expectUncoveredControls(page: Page, expanded: boolean) {
   expect(result.widths.every(width => width >= 44)).toBe(true);
 }
 
-test.describe('Issue #150 mobile sticky header hit targets', () => {
+test.describe('Issue #155 fixed mobile search and #150 header hit targets', () => {
   test.beforeEach(async ({}, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'Touch interactions run in mobile Chromium.');
   });
@@ -261,7 +283,9 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
         const controls = page.locator('.library-mobile-search-filter');
         const toggle = controls.getByRole('button', { name: 'Search' });
         const menu = page.getByRole('button', { name: 'Open command menu' });
-        await expect(controls).toHaveCSS('position', 'sticky');
+        const shell = page.locator('.library-mobile-fixed-shell');
+        await expect(shell).toHaveCSS('position', 'fixed');
+        await expect(controls).not.toHaveCSS('position', 'sticky');
         await expect(page.locator(library.card)).toHaveCount(2);
         await expectUncoveredControls(page, false);
         await toggle.tap();
@@ -281,15 +305,21 @@ test.describe('Issue #150 mobile sticky header hit targets', () => {
 
         await page.locator('.page-stack').evaluate(element => { (element as HTMLElement).style.minHeight = '2200px'; });
         await page.evaluate(() => window.scrollTo(0, 700));
-        await expect.poll(() => controls.evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(
-          await controls.evaluate(element => Math.round(parseFloat(getComputedStyle(element).top))),
+        await expect.poll(() => shell.evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(
+          await shell.evaluate(element => Math.round(parseFloat(getComputedStyle(element).top))),
         );
-        const stickyTop = await controls.evaluate(element => element.getBoundingClientRect().top);
+        await filter.tap();
+        await expect(filter).toHaveAttribute('aria-expanded', 'true');
+        await expectFilterBelowSearch(page);
+        const fixedTop = await controls.evaluate(element => element.getBoundingClientRect().top);
+        const panelTop = await page.locator('.library-mobile-filter-popover').evaluate(element => element.getBoundingClientRect().top);
         for (const scrollY of [1050, 500, 900, 700]) {
           await page.evaluate(y => window.scrollTo(0, y), scrollY);
-          await expect.poll(() => controls.evaluate(element => element.getBoundingClientRect().top)).toBe(stickyTop);
+          await expect.poll(() => controls.evaluate(element => element.getBoundingClientRect().top)).toBe(fixedTop);
+          await expect.poll(() => page.locator('.library-mobile-filter-popover').evaluate(element => element.getBoundingClientRect().top)).toBe(panelTop);
           await expectUncoveredControls(page, true);
         }
+        await filter.tap();
         await search.tap();
         await search.fill('no matching asset');
         await expect(page.locator(library.card)).toHaveCount(0);
