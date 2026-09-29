@@ -111,6 +111,9 @@ button:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .mcc-page-topbar { position: fixed; top: 14px; left: 166px; right: 18px; z-index: 22; min-height: 62px; display: flex; align-items: center; min-width: 0; padding: 10px 16px; border: 1px solid rgba(68, 215, 255, 0.28); border-radius: 18px; background: rgba(4, 18, 34, 0.74); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(68, 215, 255, 0.08) inset; backdrop-filter: blur(14px); }
 .mcc-current-page { position: relative; display: inline-flex; align-items: center; gap: 9px; min-width: 0; max-width: 100%; }
 .mcc-current-page h1 { min-width: 0; max-width: 100%; margin: 0; color: #f3fbff; font-size: 1.22rem; font-weight: 950; line-height: 1.12; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcc-page-title-back { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; margin: -8px 0; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.mcc-page-title-back:hover { background: rgba(68, 215, 255, .12); }
+.mcc-page-title-back:focus-visible { outline: 2px solid #44d7ff; outline-offset: 2px; }
 .mcc-page-help-wrap { position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; }
 .mcc-page-help { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid rgba(68, 215, 255, 0.66); border-radius: 50%; color: #dff7ff; background: rgba(5, 61, 86, 0.82); box-shadow: 0 0 16px rgba(68, 215, 255, 0.16); cursor: pointer; font-size: .78rem; font-weight: 950; line-height: 1; }
 .mcc-page-help:hover, .mcc-page-help:focus-visible { color: #001523; border-color: rgba(54, 229, 170, 0.82); background: #44d7ff; outline: none; }

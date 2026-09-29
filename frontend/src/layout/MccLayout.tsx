@@ -5,6 +5,7 @@ import {
   MccLegacyDialogManager,
 } from '../components/MccIndustrialPrimitives';
 import { mccPageMetadata, type MccSection } from './pageMetadata';
+import { LibraryHeaderBackContext } from './LibraryHeaderBack';
 
 export type { MccSection };
 export type MccPageLiveStatus = {
@@ -51,6 +52,7 @@ export function MccLayout({activeSection,children,pageLiveStatus,onSectionChange
  const [pageEntering,setPageEntering]=useState(false);
  const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
  const [teamsOpen,setTeamsOpen]=useState(false);
+ const [libraryHeaderBack,setLibraryHeaderBack]=useState<(() => void) | null>(null);
  const routeAccentStyle={
    '--mcc-module-accent':`var(--mcc-accent-module-${activeSection})`,
    '--mcc-module-accent-rgb':`var(--mcc-accent-module-${activeSection}-rgb)`,
@@ -197,7 +199,7 @@ export function MccLayout({activeSection,children,pageLiveStatus,onSectionChange
      </div>
      <header className="mcc-page-topbar" aria-label="Current page">
        <div className="mcc-current-page">
-         <h1>{currentPage.title}</h1>
+         <h1>{libraryHeaderBack && (activeSection==='machine-library'||activeSection==='equipment-library')?<button className="mcc-page-title-back" type="button" aria-label={`Back to ${currentPage.title}`} onClick={libraryHeaderBack}>{currentPage.title}</button>:currentPage.title}</h1>
          {pageLiveStatus&&<span className={`inventory-live-indicator inventory-live-indicator--${pageLiveStatus.state}`} data-inventory-live-state={pageLiveStatus.state} role="status" aria-live="polite" aria-label={pageLiveStatus.label} title={pageLiveStatus.label} tabIndex={0}><span className="inventory-live-indicator__visual" aria-hidden="true" /></span>}
          <span className="mcc-page-help-wrap">
            <button className="mcc-page-help" type="button" aria-label={`About ${currentPage.title}`} aria-describedby={pageTooltipId}>i</button>
@@ -206,7 +208,7 @@ export function MccLayout({activeSection,children,pageLiveStatus,onSectionChange
        </div>
      </header>
      <main className="mcc-main mcc-workspace-frame">
-       <section className={pageEntering?'mcc-content mcc-workspace mcc-page-enter':'mcc-content mcc-workspace'}>{children}</section>
+       <section className={pageEntering?'mcc-content mcc-workspace mcc-page-enter':'mcc-content mcc-workspace'}><LibraryHeaderBackContext.Provider value={setLibraryHeaderBack}>{children}</LibraryHeaderBackContext.Provider></section>
      </main>
    </MccIndustrialSurfaceBoundary>
  );
