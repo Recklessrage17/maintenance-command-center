@@ -67,6 +67,12 @@ The browser/operating system controls the Save As/download destination. Cancelin
 
 ## Runtime and Raspberry Pi paths
 
+For a full pre-release deployment rollback archive on Raspberry Pi, use the
+[`create-deployment-rollback` helper](admin-one-click-updater.md#full-deployment-rollback-snapshot-for-pi-releases).
+This archive includes the live database and uploads but excludes MCC's own
+`backend/backups` history and reinstallable dependencies. The MCC daily/master/portable
+backup workflow described here is separate and remains untouched.
+
 Use persistent paths for production. MCC resolves restore destinations from the current installation's environment:
 
 ```text

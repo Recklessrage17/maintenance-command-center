@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: create-deployment-rollback --app-dir DIR --backup-dir DIR [--version VERSION] [--replace-old ARCHIVE]
+       create-deployment-rollback --verify-only ARCHIVE
+
+Create a full deployment rollback snapshot. --replace-old removes only the named
+archive in --backup-dir, and only after the new snapshot passes every check.
+EOF
+}
+
+fail() { echo "Rollback snapshot failed: $*" >&2; exit 1; }
+
+app_dir=/opt/maintenance-command-center
+backup_dir=/var/backups/mcc-deployments
+version=
+old_archive=
+verify_only=
+while (($#)); do
+  case "$1" in
+    --app-dir|--backup-dir|--version|--replace-old|--verify-only)
+      (($# >= 2)) || fail "Missing value for $1"
+      case "$1" in
+        --app-dir) app_dir=$2 ;;
+        --backup-dir) backup_dir=$2 ;;
+        --version) version=$2 ;;
+        --replace-old) old_archive=$2 ;;
+        --verify-only) verify_only=$2 ;;
+      esac
+      shift 2 ;;
+    --help) usage; exit 0 ;;
+    *) usage >&2; fail "Unknown option: $1" ;;
+  esac
+done
+
+verify_archive() {
+  local archive=$1 listing=$2
+  [[ -s "$archive" && -f "$archive" && ! -L "$archive" ]] || fail "Archive is missing, empty, or not a regular file: $archive"
+  gzip -t -- "$archive" || fail "Archive gzip integrity check failed: $archive"
+  tar -tzf "$archive" > "$listing" || fail "Archive listing/read failed: $archive"
+  grep -Fxq './backend/data/mcc.sqlite' "$listing" || fail "backend/data/mcc.sqlite is missing from $archive"
+  grep -Eq '^\./backend/uploads(/|$)' "$listing" || fail "backend/uploads is missing from $archive"
+  if grep -Eq '^\./backend/backups(/|$)' "$listing"; then fail "backend/backups was included in $archive"; fi
+  if grep -Eq '(^|/)node_modules(/|$)' "$listing"; then fail "node_modules was included in $archive"; fi
+  tar -xOzf "$archive" -- ./backend/data/mcc.sqlite > /dev/null || fail "Database entry cannot be read from $archive"
+}
+
+if [[ -n "$verify_only" ]]; then
+  listing=$(mktemp)
+  trap 'rm -f -- "$listing"' EXIT
+  verify_archive "$verify_only" "$listing"
+  echo "Rollback snapshot verified: $verify_only"
+  exit 0
+fi
+
+app_dir=$(readlink -f -- "$app_dir") || fail "Application directory cannot be resolved"
+[[ -d "$app_dir" && -f "$app_dir/package.json" ]] || fail "Invalid MCC application directory: $app_dir"
+[[ -f "$app_dir/backend/data/mcc.sqlite" && ! -L "$app_dir/backend/data/mcc.sqlite" ]] || fail "Missing regular backend/data/mcc.sqlite"
+[[ -d "$app_dir/backend/uploads" && ! -L "$app_dir/backend/uploads" ]] || fail "Missing backend/uploads directory"
+backup_dir=$(readlink -m -- "$backup_dir") || fail "Backup directory cannot be resolved"
+case "$backup_dir/" in "$app_dir/"*) fail "Backup directory must be outside the application directory" ;; esac
+case "$app_dir/" in "$backup_dir/"*) fail "Application directory must be outside the backup directory" ;; esac
+mkdir -p -- "$backup_dir"
+backup_dir=$(readlink -f -- "$backup_dir") || fail "Backup directory cannot be resolved"
+
+if [[ -z "$version" ]]; then
+  version=$(node -e 'const v=require(process.argv[1]).version;if(!/^\d+\.\d+\.\d+$/.test(v))process.exit(1);process.stdout.write(v)' "$app_dir/package.json") || fail "Cannot derive release version from package.json"
+fi
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Version must be a numeric semantic version"
+
+if [[ -n "$old_archive" ]]; then
+  [[ -f "$old_archive" && ! -L "$old_archive" ]] || fail "Old archive must be an existing regular file"
+  old_archive=$(readlink -f -- "$old_archive") || fail "Old archive cannot be resolved"
+  [[ "$(dirname -- "$old_archive")" == "$backup_dir" && "$old_archive" == *.tar.gz ]] || fail "Old archive must be a direct .tar.gz file in $backup_dir"
+fi
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+archive="$backup_dir/mcc-deployment-rollback-v${version}-${timestamp}.tar.gz"
+[[ ! -e "$archive" && ! -L "$archive" ]] || fail "New archive already exists: $archive"
+[[ "$archive" != "$old_archive" ]] || fail "New and old archive paths must differ"
+
+echo "Available disk space at backup location:"
+df -h -- "$backup_dir"
+echo "MCC source directory size: $(du -sh -- "$app_dir" | cut -f1)"
+for relative in backend/backups backend/data backend/uploads; do
+  if [[ -e "$app_dir/$relative" ]]; then
+    echo "$relative size: $(du -sh -- "$app_dir/$relative" | cut -f1)"
+  else
+    echo "$relative size: absent"
+  fi
+done
+
+temporary=$(mktemp -- "$backup_dir/.mcc-rollback.XXXXXXXX.tar.gz") || fail "Cannot create temporary archive"
+listing=$(mktemp) || fail "Cannot create temporary listing"
+trap 'rm -f -- "$temporary" "$listing"' EXIT
+chmod 0600 -- "$temporary"
+tar -czf "$temporary" -C "$app_dir" \
+  --exclude='./backend/backups' \
+  --exclude='./node_modules' --exclude='./frontend/node_modules' --exclude='./backend/node_modules' \
+  --exclude='*/node_modules' \
+  --exclude='./.npm' --exclude='./frontend/.npm' --exclude='./backend/.npm' \
+  --exclude='./.cache' --exclude='./frontend/.cache' --exclude='./backend/.cache' \
+  . || fail "Archive creation failed"
+
+verify_archive "$temporary" "$listing"
+sha256=$(sha256sum -- "$temporary" | cut -d ' ' -f1) || fail "SHA256 calculation failed"
+[[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || fail "Invalid SHA256 output"
+ln -- "$temporary" "$archive" || fail "Could not publish verified archive"
+[[ -f "$archive" ]] || fail "Verified archive was not published"
+[[ "$(sha256sum -- "$archive" | cut -d ' ' -f1)" == "$sha256" ]] || fail "Published archive SHA256 differs from verified archive"
+
+echo "Rollback snapshot verified"
+echo "Path: $archive"
+echo "Size: $(du -h -- "$archive" | cut -f1) ($(wc -c < "$archive" | tr -d ' ') bytes)"
+echo "SHA256: $sha256"
+echo "DB included: yes"
+echo "Uploads included: yes"
+echo "Excluded backup history: yes"
+echo "Excluded dependencies: yes"
+
+if [[ -n "$old_archive" ]]; then
+  rm -- "$old_archive" || fail "New archive is verified, but old archive removal failed: $old_archive"
+  echo "Removed old deployment archive: $old_archive"
+fi
