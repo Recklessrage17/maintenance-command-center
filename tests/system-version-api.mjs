@@ -31,6 +31,7 @@ async function freePort() {
 }
 
 async function start(port, environment = {}) {
+  let startupOutput = '';
   const child = spawn(process.execPath, ['backend/dist/server/index.js'], {
     cwd: root,
     env: {
@@ -45,17 +46,30 @@ async function start(port, environment = {}) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  child.stdout.on('data', chunk => serverOutput += chunk);
-  child.stderr.on('data', chunk => serverOutput += chunk);
+  const captureOutput = chunk => {
+    startupOutput += chunk;
+    serverOutput += chunk;
+  };
+  child.stdout.on('data', captureOutput);
+  child.stderr.on('data', captureOutput);
   const base = `http://127.0.0.1:${port}`;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Backend exited.\n${serverOutput}`);
+  const startedAt = Date.now();
+  const startupTimeoutMs = 60_000;
+  const elapsed = () => ((Date.now() - startedAt) / 1000).toFixed(1);
+  while (Date.now() - startedAt < startupTimeoutMs) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`Backend exited after ${elapsed()}s.\n${startupOutput}`);
+    }
     try {
       if ((await fetch(`${base}/api/health`)).ok) return { child, base };
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error(`Backend did not start.\n${serverOutput}`);
+  if (child.exitCode !== null || child.signalCode !== null) {
+    throw new Error(`Backend exited after ${elapsed()}s.\n${startupOutput}`);
+  }
+  child.kill();
+  throw new Error(`Backend did not start after ${elapsed()}s.\n${startupOutput}`);
 }
 
 async function stopServer() {
