@@ -762,6 +762,8 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
  CREATE INDEX IF NOT EXISTS idx_asset_note_update_attachments_update ON asset_note_update_attachments (update_id,created_at,id);
  CREATE INDEX IF NOT EXISTS idx_asset_note_lifecycle_events_note ON asset_note_lifecycle_events (asset_library,note_id,created_at,id);
  CREATE INDEX IF NOT EXISTS idx_asset_note_labor_note ON asset_note_labor (asset_library,note_id,technician_order,id);`);
+  const updateColumns=new Set(all<{name:string}>('PRAGMA table_info(asset_note_updates)').map(column=>column.name));
+  for(const column of [{name:'updated_at',definition:'TEXT'},{name:'updated_by_user_id',definition:'INTEGER'},{name:'updated_by_name',definition:'TEXT'}])if(!updateColumns.has(column.name))run(`ALTER TABLE asset_note_updates ADD COLUMN ${column.name} ${column.definition}`);
   if (!pmTaskColumns.has('asset_library')) run("ALTER TABLE pm_tasks ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
   db.exec('DROP INDEX IF EXISTS idx_pm_tasks_asset; CREATE INDEX idx_pm_tasks_asset ON pm_tasks (asset_library,asset_id,active,updated_at DESC);');
   const pmHistoryColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_history)').map(column => column.name));
@@ -7533,7 +7535,7 @@ type MachineComponentImageRow = { id:number; asset_id:number; component_type:Mac
 type MachineInspectionRecordRow = { id:number; asset_id:number; original_filename:string; mime_type:string; file_size:number; record_date:string; stored_file_reference:string; uploaded_at:string; uploaded_by_user_id:number|null; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string };
 type MachineAssetNoteRow = { id:number; asset_id:number; title:string; note_date:string; body:string; is_warning:number; is_on_hold:number; work_order_reference:string; issue_status:string; resolved_at:string|null; resolved_by_user_id:number|null; resolved_by_name:string; resolution_summary:string; reopened_at:string|null; reopened_by_user_id:number|null; reopened_by_name:string; deleted:number; deleted_at:string|null; deleted_by_user_id:number|null; deleted_by_name:string; delete_reason:string; pdf_filename:string; pdf_stored_reference:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; asset_number?:string; asset_name?:string; brand?:string; model?:string; serial_number?:string; location?:string; category?:string; asset_library?:AssetLibrary; accent_color?:string; created_by_name?:string };
 type MachineAssetNoteAttachmentRow = { id:number; note_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; created_at:string; source_type:string; sha256:string };
-type AssetNoteUpdateRow = { id:number; asset_library:AssetLibrary; note_id:number; body:string; created_by_user_id:number|null; created_by_name:string; created_at:string };
+type AssetNoteUpdateRow = { id:number; asset_library:AssetLibrary; note_id:number; body:string; created_by_user_id:number|null; created_by_name:string; created_at:string; updated_at:string|null; updated_by_user_id:number|null; updated_by_name:string|null };
 type AssetNoteUpdateAttachmentRow = { id:number; update_id:number; original_filename:string; mime_type:string; file_size:number; stored_file_reference:string; uploaded_by_user_id:number|null; uploaded_by_name:string; created_at:string };
 type AssetNoteLifecycleEventRow = { id:number; asset_library:AssetLibrary; note_id:number; event_type:string; actor_user_id:number|null; actor_name:string; reason:string; old_value_json:string; new_value_json:string; created_at:string };
 type AssetNoteLaborRow = { id:number; asset_library:AssetLibrary; note_id:number; user_id:number|null; display_name:string; labor_hours:number; is_primary:number; technician_order:number; created_at:string; updated_at:string };
@@ -7987,8 +7989,8 @@ function publicAssetNoteUpdateAttachment(library:AssetLibrary,row:AssetNoteUpdat
   const version=encodeURIComponent(row.created_at);
   return {id:row.id,updateId:row.update_id,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),uploadedBy:row.uploaded_by_name,createdAt:row.created_at,contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}`};
 }
-function publicAssetNoteUpdate(library:AssetLibrary,row:AssetNoteUpdateRow) {
-  return {id:row.id,noteId:row.note_id,body:row.body,createdByUserId:row.created_by_user_id,createdBy:row.created_by_name,createdAt:row.created_at,attachments:assetNoteUpdateAttachments(row.id).map(item=>publicAssetNoteUpdateAttachment(library,item))};
+function publicAssetNoteUpdate(library:AssetLibrary,row:AssetNoteUpdateRow,actor?:User,note?:MachineAssetNoteRow) {
+  return {id:row.id,noteId:row.note_id,body:row.body,createdByUserId:row.created_by_user_id,createdBy:row.created_by_name,createdAt:row.created_at,updatedAt:row.updated_at,updatedByUserId:row.updated_by_user_id,updatedBy:row.updated_by_name,canEdit:Boolean(actor&&note&&note.is_warning&&note.issue_status!=='resolved'&&hasPermission(actor,assetNoteViewPermission(library))&&(isWarningIssueManager(actor)||row.created_by_user_id===actor.id)),attachments:assetNoteUpdateAttachments(row.id).map(item=>publicAssetNoteUpdateAttachment(library,item))};
 }
 function safeJsonRecord(value:string) { try { const parsed=JSON.parse(value);return isRecord(parsed)?parsed:{}; } catch { return {}; } }
 function publicAssetNoteLifecycleEvent(row:AssetNoteLifecycleEventRow) {
@@ -8013,7 +8015,7 @@ function publicAssetNote(row:MachineAssetNoteRow,library:AssetLibrary,actor?:Use
   const version=encodeURIComponent(row.updated_at);
   const resolved=Boolean(row.is_warning)&&row.issue_status==='resolved';
   const originalAttachments=assetNoteOriginalAttachments(library,row.id);const labor=publicAssetNoteLabor(library,row.id);
-  return {id:row.id,assetId:row.asset_id,assetLibrary:library,assetNumber:row.asset_number??'',assetName:row.asset_name??'',title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),hold:Boolean(row.is_warning&&row.is_on_hold),workOrder:row.work_order_reference??'',status:row.is_warning?(resolved?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??'',resolvedYear:row.resolved_at?String(row.resolved_at).slice(0,4):'',pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`,attachments:originalAttachments.filter(item=>item.sourceType==='supporting'),workOrderPages:originalAttachments.filter(item=>item.sourceType==='work_order_photo'),labor:labor.technicians,totalLaborHours:labor.totalHours,updates:row.is_warning?assetNoteUpdates(library,row.id).map(item=>publicAssetNoteUpdate(library,item)):[],lifecycle:row.is_warning?assetNoteLifecycleEvents(library,row.id).map(publicAssetNoteLifecycleEvent):[],permissions:assetNoteIssuePermissions(actor,library,row)};
+  return {id:row.id,assetId:row.asset_id,assetLibrary:library,assetNumber:row.asset_number??'',assetName:row.asset_name??'',title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),hold:Boolean(row.is_warning&&row.is_on_hold),workOrder:row.work_order_reference??'',status:row.is_warning?(resolved?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??'',resolvedYear:row.resolved_at?String(row.resolved_at).slice(0,4):'',pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`,attachments:originalAttachments.filter(item=>item.sourceType==='supporting'),workOrderPages:originalAttachments.filter(item=>item.sourceType==='work_order_photo'),labor:labor.technicians,totalLaborHours:labor.totalHours,updates:row.is_warning?assetNoteUpdates(library,row.id).map(item=>publicAssetNoteUpdate(library,item,actor,row)):[],lifecycle:row.is_warning?assetNoteLifecycleEvents(library,row.id).map(publicAssetNoteLifecycleEvent):[],permissions:assetNoteIssuePermissions(actor,library,row)};
 }
 function publicMachineAssetNote(row:MachineAssetNoteRow,actor?:User) {
   return publicAssetNote(row,'machine',actor);
@@ -11304,8 +11306,38 @@ for(const library of ['machine','equipment'] as const){
       }catch(error){db.exec('ROLLBACK');throw error;}
       await regenerateAssetNotePdf(library,note.id);
       scheduleAutoBackup(`${library} warning issue update added`,req.user!);
-      res.status(201).json({ok:true,update:publicAssetNoteUpdate(library,one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[updateId])!),note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
+      res.status(201).json({ok:true,update:publicAssetNoteUpdate(library,one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[updateId])!,req.user!,assetNoteByLibraryId(library,note.id)!),note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
     }catch(error){if(updateId){run('DELETE FROM asset_note_update_attachments WHERE update_id=?',[updateId]);run('DELETE FROM asset_note_updates WHERE id=?',[updateId]);run("DELETE FROM asset_note_lifecycle_events WHERE asset_library=? AND note_id=? AND event_type='update_added' AND new_value_json LIKE ?",[library,Number(req.params.noteId),`%\"updateId\":${updateId}%`]);}for(const filePath of written)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Maintenance update could not be added.')});}
+  });
+  app.patch(`${base}/asset-notes/:noteId/updates/:updateId`,requireAuth,requirePermission(viewPermission),receiveMachineAssetNote,async(req:AuthRequest,res)=>{
+    const noteId=Number(req.params.noteId),updateId=Number(req.params.updateId);
+    const note=assetNoteByLibraryId(library,noteId);
+    const update=one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=? AND note_id=? AND asset_library=?',[updateId,noteId,library]);
+    if(!note||!update)return res.status(404).json({ok:false,error:'Maintenance update not found.'});
+    if(!note.is_warning)return res.status(400).json({ok:false,error:'Updates are available only for Warning / Needs Attention issues.'});
+    if(note.issue_status==='resolved')return res.status(409).json({ok:false,error:'Reopen the resolved issue before editing an update.',code:'ISSUE_RESOLVED'});
+    if(!isWarningIssueManager(req.user!)&&update.created_by_user_id!==req.user!.id)return res.status(403).json({ok:false,error:'Only the update creator, a Manager, or an Admin may edit this update.',code:'UPDATE_OWNER_REQUIRED'});
+    const written:string[]=[];let committed=false;
+    try{
+      const body=requiredAssetNoteReason(req.body?.body??req.body?.update,'Update',20000);
+      const files=(req.files as Express.Multer.File[]|undefined)??[];
+      const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));
+      const timestamp=now(),storage=assetNoteStorage(library);
+      const prepared=validated.map(({file,detected})=>{const storedName=`issue-update-${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(storage.directory,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});written.push(storedPath);return{file,detected,storedReference:`${storage.prefix}${storedName}`};});
+      const additions:Array<{id:number;filename:string}>=[];
+      db.exec('BEGIN IMMEDIATE');
+      try{
+        run('UPDATE asset_note_updates SET body=?,updated_at=?,updated_by_user_id=?,updated_by_name=? WHERE id=?',[body,timestamp,req.user!.id,req.user!.full_name,update.id]);
+        for(const item of prepared){const filename=safeMachineAssetNoteOriginalName(item.file.originalname,item.detected.extension);const result=run('INSERT INTO asset_note_update_attachments (update_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,uploaded_by_name,created_at) VALUES (?,?,?,?,?,?,?,?)',[update.id,filename,item.detected.mimeType,item.file.size,item.storedReference,req.user!.id,req.user!.full_name,timestamp]);additions.push({id:Number(result.lastInsertRowid),filename});}
+        run(`UPDATE ${library==='machine'?'machine_asset_notes':'equipment_asset_notes'} SET updated_by_user_id=?,updated_at=? WHERE id=?`,[req.user!.id,timestamp,note.id]);
+        recordAssetNoteLifecycleEvent({library,noteId:note.id,type:'update_edited',actor:req.user!,oldValue:{updateId:update.id,body:update.body},newValue:{updateId:update.id,body,attachmentsAdded:additions},createdAt:timestamp});
+        db.exec('COMMIT');committed=true;
+      }catch(error){db.exec('ROLLBACK');throw error;}
+      await regenerateAssetNotePdf(library,note.id);
+      audit(req,'warning issue update edited',`${library}_asset_note`,note.id,{updateId:update.id,before:update.body,after:body,attachmentsAdded:additions});
+      scheduleAutoBackup(`${library} warning issue update edited`,req.user!);
+      res.json({ok:true,update:publicAssetNoteUpdate(library,one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[update.id])!,req.user!,assetNoteByLibraryId(library,note.id)!),note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
+    }catch(error){if(!committed)for(const filePath of written)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Maintenance update could not be edited.')});}
   });
   app.post(`${base}/asset-notes/:noteId/resolve`,requireAuth,requirePermission(viewPermission),async(req:AuthRequest,res)=>{
     try{

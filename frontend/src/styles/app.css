@@ -2554,6 +2554,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-issue-title { overflow: hidden; font-size: .8rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .asset-note-status-badge,.asset-note-work-order { min-height: 19px; padding: 1px 6px; font-size: .58rem; line-height: 1.1; }
 .asset-note-status-badge.is-active i { width: 6px; height: 6px; border-radius: 50%; background: #ffc766; box-shadow: 0 0 7px rgba(255,199,102,.64); }
+
+/* Warning issue summary: compact status stack, centered title, visible date. */
+.asset-note-issue-toggle { grid-template-columns: max-content minmax(0,1fr) max-content 27px; grid-template-areas: "badges title date chevron"; min-height: 68px; column-gap: 12px; }
+.asset-note-issue-toggle > .asset-note-issue-badges { grid-area: badges; display: flex; flex-direction: column; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 3px; min-width: 0; }
+.asset-note-issue-toggle > .asset-note-issue-badges > * { width: max-content; max-width: 100%; justify-content: center; text-align: center; }
+.asset-note-issue-toggle > .asset-note-issue-title { grid-area: title; min-width: 0; max-width: 100%; text-align: center; white-space: normal; overflow-wrap: anywhere; font-size: .88rem; }
+.asset-note-issue-toggle > .asset-note-date-pill { grid-area: date; display: inline-flex; white-space: nowrap; }
+.asset-note-issue-toggle > .asset-note-issue-chevron { grid-area: chevron; }
+.asset-note-update-edited { display: block; margin: 4px 0; color: #a8dce8; font-size: .72rem; }
 .asset-note-date-pill { min-height: 20px; padding-inline: 6px; font-size: .59rem; }
 .asset-note-issue-chevron { width: 25px; height: 25px; }
 .asset-note-issue-chevron svg { width: 15px; height: 15px; }
@@ -5486,3 +5495,10 @@ tr:hover td {
 .asset-note-hold-field.is-on .asset-note-warning-toggle { border-color: #f5d547; background: #494315; }
 .asset-note-hold-field.is-on .asset-note-warning-track { border-color: #f5d547; background: #8a791c; }
 .asset-note-hold-field.is-on .asset-note-warning-track > span { background: #fff09a; }
+
+@media (max-width: 560px) {
+  .asset-note-issue-toggle { grid-template-columns: minmax(0,1fr) max-content 25px; grid-template-areas: "badges date chevron" "title title title"; min-height: 90px; gap: 6px 8px; }
+  .asset-note-issue-toggle > .asset-note-issue-badges { flex-direction: column; align-items: flex-start; overflow: visible; }
+  .asset-note-issue-toggle > .asset-note-issue-title { grid-area: title; text-align: left; white-space: normal; }
+  .asset-note-issue-toggle > .asset-note-date-pill { display: inline-flex; grid-area: date; align-self: start; }
+}

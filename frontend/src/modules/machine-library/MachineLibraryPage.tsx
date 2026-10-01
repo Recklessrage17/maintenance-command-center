@@ -539,7 +539,8 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
 function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit,onLogs,onRecordLogs,onAssetUpdated}:{asset:MachineAsset;canEdit:boolean;canManagePm:boolean;performedBy:string;onClose:()=>void;onEdit:()=>void;onLogs:()=>void;onRecordLogs:(asset:MachineAsset)=>void;onAssetUpdated:(asset:MachineAsset)=>void}) {
   const [currentAsset,setCurrentAsset]=useState(asset);
   const [draft,setDraft]=useState<AssetForm>(()=>assetToForm(asset));
-  const [openSection,setOpenSection]=useState<MachineDetailSectionKey|null>(null);
+  const [openSection,setOpenSection]=useState<MachineDetailSectionKey|'pm'|'documents'|'notes'|null>(()=>Number(new URLSearchParams(window.location.search).get('note'))?'notes':null);
+  const [notesDirty,setNotesDirty]=useState(false);
   const [editingSection,setEditingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const [savingSection,setSavingSection]=useState<MachineDetailEditableSectionKey|null>(null);
   const sectionAction=useActionProgress();
@@ -563,7 +564,7 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
   useEffect(()=>{
     setCurrentAsset(asset);
     setDraft(assetToForm(asset));
-    setOpenSection(null);
+    setOpenSection(Number(new URLSearchParams(window.location.search).get('note'))?'notes':null);
     setEditingSection(null);
     setSectionErrors({});
     setShowAssetSpec(false);
@@ -582,12 +583,14 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
   function setDraftField<K extends keyof AssetForm>(key: K, value: AssetForm[K]) {
     setDraft(current=>({...current,[key]:value}));
   }
-  function toggleOpenSection(key: MachineDetailSectionKey) {
+  function toggleOpenSection(key: MachineDetailSectionKey|'pm'|'documents'|'notes') {
     if (editingSection) return;
+    if(openSection==='notes'&&key!=='notes'&&notesDirty&&!window.confirm('Leave unsaved Asset Notes changes in place and switch sections?'))return;
     setOpenSection(current=>current === key ? null : key);
   }
   function beginSectionEdit(key: MachineDetailEditableSectionKey) {
     if (!canEdit) return;
+    if(openSection==='notes'&&notesDirty&&!window.confirm('Leave unsaved Asset Notes changes in place and edit another section?'))return;
     sectionAction.reset();
     setDraft(assetToForm(currentAsset));
     setOpenSection(key);
@@ -772,9 +775,9 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
         const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
         return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} accent={machineDetailAccents[section.key]} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} actionPhase={editableKey&&editingSection===editableKey?sectionAction.phase:'idle'} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
       })}
-      <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canManagePm} performedBy={performedBy} />
-      <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} />
-      <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} />
+      <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canManagePm} performedBy={performedBy} expanded={openSection==='pm'} onToggle={()=>toggleOpenSection('pm')} />
+      <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} controlledExpanded={openSection==='documents'} controlledToggle={()=>toggleOpenSection('documents')} />
+      <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} controlledExpanded={openSection==='notes'} controlledToggle={()=>toggleOpenSection('notes')} onDirtyChange={setNotesDirty} />
     </div>
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={closeDetail}>Close</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section>{showAssetSpec&&<MachineAssetSpecPreview asset={currentAsset} onClose={()=>setShowAssetSpec(false)} />}</>;

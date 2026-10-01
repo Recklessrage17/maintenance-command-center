@@ -1105,6 +1105,11 @@ function validateAssetNoteIssueLifecycleIntegrity(database:DatabaseSync,tables:S
       if(!noteWarnings.get(noteId))throw new Error(`Portable package ${label} warning issue update ${id} has an invalid note relationship.`);
       if(!String(row.body??'').trim()||!String(row.created_by_name??'').trim()||row.created_by_user_id===null||row.created_by_user_id===undefined||!String(row.created_at??'').trim())throw new Error(`Portable package ${label} warning issue update ${id} has incomplete audit metadata.`);
       assertAssetNoteUserRelationship(userIds,row.created_by_user_id,`${label} warning issue update ${id} creator`);
+      if('updated_at' in row){
+        const edited=Boolean(row.updated_at);
+        if(edited!==Boolean(row.updated_by_user_id)||edited!==Boolean(String(row.updated_by_name??'').trim()))throw new Error(`Portable package ${label} warning issue update ${id} has incomplete edit metadata.`);
+        if(edited)assertAssetNoteUserRelationship(userIds,row.updated_by_user_id,`${label} warning issue update ${id} editor`);
+      }
       updateIds.add(id);
     }
   }
@@ -1128,6 +1133,12 @@ function validateAssetNoteIssueLifecycleIntegrity(database:DatabaseSync,tables:S
       if(['issue_resolved','issue_reopened','issue_deleted'].includes(type)&&!String(row.reason??'').trim())throw new Error(`Portable package ${label} warning issue lifecycle event ${id} is missing its required reason.`);
       assertAssetNoteUserRelationship(userIds,row.actor_user_id,`${label} warning issue lifecycle event ${id} actor`);
       for(const column of ['old_value_json','new_value_json']){try{JSON.parse(String(row[column]??'{}'));}catch{throw new Error(`Portable package ${label} warning issue lifecycle event ${id} has invalid audit JSON.`);}}
+      if(type==='update_edited'){
+        const before=JSON.parse(String(row.old_value_json)) as Record<string,unknown>;
+        const after=JSON.parse(String(row.new_value_json)) as Record<string,unknown>;
+        if(!updateIds.has(Number(after.updateId))||Number(before.updateId)!==Number(after.updateId)||typeof before.body!=='string'||typeof after.body!=='string'||!Array.isArray(after.attachmentsAdded))throw new Error(`Portable package ${label} warning issue edit event ${id} has invalid revision evidence.`);
+        for(const addition of after.attachmentsAdded){const entry=addition as Record<string,unknown>;const attachment=database.prepare('SELECT update_id,original_filename FROM asset_note_update_attachments WHERE id=?').get(Number(entry?.id)) as {update_id:number;original_filename:string}|undefined;if(!attachment||attachment.update_id!==Number(after.updateId)||attachment.original_filename!==entry.filename)throw new Error(`Portable package ${label} warning issue edit event ${id} has an invalid attachment addition.`);}
+      }
     }
   }
 }

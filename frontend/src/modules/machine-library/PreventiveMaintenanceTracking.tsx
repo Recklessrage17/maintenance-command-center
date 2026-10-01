@@ -199,14 +199,16 @@ class PmPanelErrorBoundary extends Component<{children:ReactNode},{failed:boolea
   render(){return this.state.failed?<PmUnavailablePanel />:this.props.children;}
 }
 
-export function PreventiveMaintenanceTracking({asset,canEdit,library='machine',performedBy='Signed-in maintenance user'}:{asset:AssetIdentity|null|undefined;canEdit:boolean|undefined;library?:AssetLibraryScope;performedBy?:string}) {
+export function PreventiveMaintenanceTracking({asset,canEdit,library='machine',performedBy='Signed-in maintenance user',expanded,onToggle}:{asset:AssetIdentity|null|undefined;canEdit:boolean|undefined;library?:AssetLibraryScope;performedBy?:string;expanded?:boolean;onToggle?:()=>void}) {
   if(!asset||!Number.isFinite(asset.id))return <PmUnavailablePanel message="This asset is missing the information needed to load PM tracking." />;
-  return <PmPanelErrorBoundary key={`${library}-${asset.id}`}><PreventiveMaintenanceTrackingContent asset={asset} canEdit={Boolean(canEdit)} library={library} performedBy={performedBy} /></PmPanelErrorBoundary>;
+  return <PmPanelErrorBoundary key={`${library}-${asset.id}`}><PreventiveMaintenanceTrackingContent asset={asset} canEdit={Boolean(canEdit)} library={library} performedBy={performedBy} controlledExpanded={expanded} controlledToggle={onToggle} /></PmPanelErrorBoundary>;
 }
 
-function PreventiveMaintenanceTrackingContent({asset,canEdit,library,performedBy}:{asset:AssetIdentity;canEdit:boolean;library:AssetLibraryScope;performedBy:string}) {
+function PreventiveMaintenanceTrackingContent({asset,canEdit,library,performedBy,controlledExpanded,controlledToggle}:{asset:AssetIdentity;canEdit:boolean;library:AssetLibraryScope;performedBy:string;controlledExpanded?:boolean;controlledToggle?:()=>void}) {
   const apiBase=`/api/${library}-library`;
   const [expanded,setExpanded]=useState(false);
+  const panelExpanded=controlledExpanded??expanded;
+  const togglePanel=controlledToggle??(()=>setExpanded(current=>!current));
   const [tasks,setTasks]=useState<PmTask[]>([]);
   const [summary,setSummary]=useState<PmSummary>(emptySummary);
   const [loading,setLoading]=useState(true);
@@ -241,9 +243,9 @@ function PreventiveMaintenanceTrackingContent({asset,canEdit,library,performedBy
     catch(value){setError((value as Error).message||'PM tracking could not be deactivated.');}
   }
   return <>
-    <MccCategoryAccordion accent="pm" expanded={expanded} className="pm-tracking-card glass-panel glass-panel--nested">
-      <MccAccordionHeader title="Preventive Maintenance Tracking" summary={summaryContent} expanded={expanded} controls={`pm-tracking-panel-${asset.id}`} onToggle={()=>setExpanded(current=>!current)} />
-      <div className="machine-detail-accordion-panel" id={`pm-tracking-panel-${asset.id}`} aria-hidden={!expanded}>
+    <MccCategoryAccordion accent="pm" expanded={panelExpanded} className="pm-tracking-card glass-panel glass-panel--nested">
+      <MccAccordionHeader title="Preventive Maintenance Tracking" summary={summaryContent} expanded={panelExpanded} controls={`pm-tracking-panel-${asset.id}`} onToggle={togglePanel} />
+      <div className="machine-detail-accordion-panel" id={`pm-tracking-panel-${asset.id}`} aria-hidden={!panelExpanded}>
         <div className="pm-panel-toolbar glass-toolbar"><div><strong>PM schedules</strong><small>Track calendar, hour-meter, and cycle-based maintenance.</small></div><div className="glass-button-group"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={()=>setAssetHistoryOpen(true)}>All PM History</button>{canEdit&&<button className="primary-button glass-button glass-button--primary" type="button" onClick={()=>setFormTask(null)}>Add Preventive Maintenance Tracking</button>}</div></div>
         <PmActionProgress pending={scheduleAction.pending||refreshing} checkCount={scheduleAction.checkCount} label={scheduleAction.pending?scheduleAction.label:'Refreshing PM schedules'} />
         <PmMachineMeterPanel asset={asset} library={library} canEdit={canEdit} onUpdated={()=>load(true)}/>
