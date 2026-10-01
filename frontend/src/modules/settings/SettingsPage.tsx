@@ -144,6 +144,7 @@ type BackupGroupStatus = {
   folderLabel: string;
   folderPath: string;
   autoBackupPending: boolean;
+  nextAutoBackupAt: string | null;
   nextScheduledBackupAt: string | null;
 };
 type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
@@ -173,6 +174,7 @@ type BackupStatus = {
   backupCountsByType: Record<BackupType, number>;
   lastBackupResult: { ok: boolean; message: string; backupId?: string; createdAt?: string };
   autoBackupPending: boolean;
+  nextAutoBackupAt: string | null;
   protectedAreas: ProtectedArea[];
   nextScheduledBackupAt: string | null;
   nextWeeklyBackupAt: string | null;
@@ -549,6 +551,7 @@ function emptyBackupGroup(category: Exclude<BackupCategory, 'legacy'>): BackupGr
     folderLabel: '',
     folderPath: '',
     autoBackupPending: false,
+    nextAutoBackupAt: null,
     nextScheduledBackupAt: null,
   };
 }
@@ -566,6 +569,7 @@ function normalizeBackupGroup(value: unknown, category: Exclude<BackupCategory, 
     folderLabel: String(data.folderLabel ?? ''),
     folderPath: String(data.folderPath ?? data.folderLabel ?? ''),
     autoBackupPending: Boolean(data.autoBackupPending),
+    nextAutoBackupAt: data.nextAutoBackupAt ? String(data.nextAutoBackupAt) : null,
     nextScheduledBackupAt: data.nextScheduledBackupAt ? String(data.nextScheduledBackupAt) : null,
   };
 }
@@ -629,6 +633,7 @@ function normalizeBackupStatus(value: unknown): BackupStatus {
       createdAt: lastResult.createdAt ? String(lastResult.createdAt) : undefined,
     },
     autoBackupPending: Boolean(data.autoBackupPending),
+    nextAutoBackupAt: data.nextAutoBackupAt ? String(data.nextAutoBackupAt) : null,
     protectedAreas: Array.isArray(data.protectedAreas) ? data.protectedAreas.map(normalizeProtectedArea).filter((area): area is ProtectedArea => Boolean(area)) : [],
     nextScheduledBackupAt: data.nextScheduledBackupAt ? String(data.nextScheduledBackupAt) : null,
     nextWeeklyBackupAt: data.nextWeeklyBackupAt ? String(data.nextWeeklyBackupAt) : null,
@@ -846,6 +851,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [mobileQrOpen,setMobileQrOpen]=useState(false);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
+  const [backupClock,setBackupClock]=useState(()=>Date.now());
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
   const [visibleBackupList,setVisibleBackupList]=useState<Exclude<BackupCategory, 'legacy'>|null>(null);
   const [restoreTarget,setRestoreTarget]=useState<BackupSummary|null>(null);
@@ -1326,6 +1332,16 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     if (isOwnerAdmin) void loadResetStatus();
   },[isOwnerAdmin,canViewSystemVersion]);
   useEffect(()=>{
+    const timer=window.setInterval(()=>setBackupClock(Date.now()),1000);
+    return()=>window.clearInterval(timer);
+  },[]);
+  useEffect(()=>{
+    const timer=window.setInterval(()=>{
+      if(!document.hidden)void api('/api/backup/status').then(data=>setBackupStatus(normalizeBackupStatus(data))).catch(()=>undefined);
+    },backupStatus?.daily.autoBackupPending?5000:15000);
+    return()=>window.clearInterval(timer);
+  },[backupStatus?.daily.autoBackupPending]);
+  useEffect(()=>{
     if(!canViewSystemVersion||window.location.hash!=='#system-update')return;
     const timer=window.setTimeout(()=>{
       systemUpdatePanelRef.current?.scrollIntoView({behavior:'smooth',block:'center'});
@@ -1735,8 +1751,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
 
                   <div className="backup-tier-meta">
                     <p><strong>Last backup</strong><span>{formatDateTime(latest?.createdAt)}</span></p>
-                    <p><strong>{card.category === 'daily' ? 'Auto backup' : 'Next backup'}</strong><span>{card.category === 'daily' ? (card.status.autoBackupPending ? 'Pending after recent change' : 'No pending change backup') : formatDateTime(card.status.nextScheduledBackupAt)}</span></p>
-                    <p><strong>Backup count</strong><span>{card.status.count}</span></p>
+                    <p><strong>{card.category === 'daily' ? 'Auto backup' : 'Next backup'}</strong><span>{card.category === 'daily' ? <span className={`backup-timing-state ${card.status.autoBackupPending ? 'pending' : 'healthy'}`}>{card.status.autoBackupPending ? `Pending · ${formatBackupCountdown(card.status.nextAutoBackupAt ?? backupStatus?.nextAutoBackupAt,backupClock,true)}` : 'Waiting for changes'}</span> : formatDateTime(card.status.nextScheduledBackupAt ?? (card.category === 'weekly' ? backupStatus?.nextWeeklyBackupAt : backupStatus?.nextMasterBackupAt))}</span></p>
+                    <p><strong>{card.category === 'daily' ? 'Next backup' : 'Time remaining'}</strong><span>{card.category === 'daily' ? (card.status.autoBackupPending ? formatDateTime(card.status.nextAutoBackupAt ?? backupStatus?.nextAutoBackupAt) : 'No backup pending') : formatBackupCountdown(card.status.nextScheduledBackupAt ?? (card.category === 'weekly' ? backupStatus?.nextWeeklyBackupAt : backupStatus?.nextMasterBackupAt),backupClock)}</span></p>
                     <p><strong>Folder</strong><span>{card.status.folderLabel || '-'}</span></p>
                   </div>
 
@@ -2061,6 +2077,14 @@ function futureCountLabel(counts: ResetCounts, section: string) {
   const existing = Object.values(tableCounts).filter(value=>typeof value === 'number') as number[];
   if (!existing.length) return 'No data table exists yet';
   return `${existing.reduce((sum,value)=>sum + value, 0)} records`;
+}
+
+function formatBackupCountdown(value: string | null | undefined, clock: number, short = false) {
+  if (!value || !Number.isFinite(Date.parse(value))) return short ? 'Starting...' : 'Not scheduled';
+  const seconds = Math.max(0, Math.ceil((Date.parse(value) - clock) / 1000));
+  if (short) return `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`;
+  const minutes = Math.floor(seconds / 60);
+  return `${Math.floor(minutes / 1440)}d ${String(Math.floor((minutes % 1440) / 60)).padStart(2,'0')}h ${String(minutes % 60).padStart(2,'0')}m`;
 }
 
 function formatDateTime(value?: string | null) {
