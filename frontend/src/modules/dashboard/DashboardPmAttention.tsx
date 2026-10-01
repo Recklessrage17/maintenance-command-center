@@ -36,12 +36,31 @@ function PmTaskRow({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   </button>;
 }
 
-function PmAssetAccordion({group,isOpen,isWide,onToggle,onOpenTask,onOpenWarnings}:{group:PmAssetGroup;isOpen:boolean;isWide:boolean;onToggle:()=>void;onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
+function PmAssetAccordion({group,isOpen,isWide,summaryTrack,onToggle,onOpenTask,onOpenWarnings}:{group:PmAssetGroup;isOpen:boolean;isWide:boolean;summaryTrack:number;onToggle:()=>void;onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
   const contentId=`dashboard-pm-group-${group.library}-${group.assetId}`;
   const label=`${group.assetNumber}${group.brand?` (${group.brand})`:''}`;
   const inactiveContentProps=isOpen?{}:{inert:''};
   const groupRef=useRef<HTMLElement>(null);
   const wasOpen=useRef(false);
+  useLayoutEffect(()=>{
+    const card=groupRef.current;const summary=card?.querySelector<HTMLElement>('.dashboard-pm-summary');
+    if(!card||!summary)return;
+    const measure=()=>{
+      const style=getComputedStyle(card);
+      const tracks=style.gridTemplateColumns.split(' ').length;
+      // Subgrid applies the card border only to its outer tracks. Restore compact-card insets
+      // on interior tracks so identity/status/WO and the control's starting X do not shift.
+      card.style.setProperty('--dashboard-pm-summary-inset-start',isWide&&summaryTrack>1?style.borderLeftWidth:'0px');
+      card.style.setProperty('--dashboard-pm-summary-inset-end',isWide&&summaryTrack<tracks?style.borderRightWidth:'0px');
+      const innerRight=card.getBoundingClientRect().right-Number.parseFloat(style.borderRightWidth);
+      const travel=Math.max(0,innerRight-summary.getBoundingClientRect().right);
+      card.style.setProperty('--dashboard-pm-expander-travel',`${travel}px`);
+    };
+    // Set the responsive endpoint before paint; only the control transforms, not the summary.
+    measure();
+    const observer=new ResizeObserver(measure);observer.observe(card);observer.observe(summary);
+    return()=>observer.disconnect();
+  },[isOpen,isWide,summaryTrack]);
   useEffect(()=>{
     const justOpened=isOpen&&!wasOpen.current;
     wasOpen.current=isOpen;
@@ -54,7 +73,7 @@ function PmAssetAccordion({group,isOpen,isWide,onToggle,onOpenTask,onOpenWarning
     });
     return()=>window.cancelAnimationFrame(frame);
   },[isOpen]);
-  return <article ref={groupRef} className={`dashboard-pm-asset-group${isOpen?' is-open':''}${isWide?' is-wide':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
+  return <article ref={groupRef} data-pm-group-key={group.key} className={`dashboard-pm-asset-group${isOpen?' is-open':''}${isWide?' is-wide':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
     <div className="dashboard-pm-summary">
       <button className="dashboard-pm-asset-toggle" type="button" aria-expanded={isOpen} aria-controls={contentId} onClick={onToggle}>
         <span className="dashboard-pm-asset-identity"><strong>{label}</strong>{group.assetName&&<span>{group.assetName}</span>}</span>
@@ -84,7 +103,7 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
   const sectionRef=useRef<HTMLElement>(null);
   const listRef=useRef<HTMLDivElement>(null);
   const [trackCount,setTrackCount]=useState(1);
-  const [wideGroup,setWideGroup]=useState<string|null>(null);
+  const [wideGroups,setWideGroups]=useState<string[]>([]);
   // Use the actual grid tracks, including responsive changes, to retain the summary's slot.
   useLayoutEffect(()=>{
     const list=listRef.current;if(!list)return;
@@ -92,14 +111,19 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
     observer.observe(list);return()=>observer.disconnect();
   },[groups.length]);
   useEffect(()=>{
-    if(openGroup){setWideGroup(openGroup);return;}
-    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){setWideGroup(null);return;}
-    // Wait for the actual collapse animations, including rapid reversals and offscreen cards.
-    // finished also handles browsers that omit DOM transitionend events.
+    if(openGroup)setWideGroups(current=>current.includes(openGroup)?current:[...current,openGroup]);
     let cancelled=false;
-    const body=sectionRef.current?.querySelector('.is-wide .dashboard-accordion-body');
-    const animations=body?.getAnimations()??[];
-    void Promise.allSettled(animations.map(animation=>animation.finished)).then(()=>{if(!cancelled)setWideGroup(null);});
+    // Retain each closing card independently during A -> B switches. Ignore perpetual WO pulses.
+    sectionRef.current?.querySelectorAll<HTMLElement>('.is-wide:not(.is-open)').forEach(card=>{
+      const key=card.dataset.pmGroupKey!;
+      const body=card.querySelector('.dashboard-accordion-body');
+      const circle=card.querySelector('.dashboard-pm-chevron');
+      const icon=circle?.querySelector('svg');
+      const animations=[body,circle,icon].flatMap(element=>element?.getAnimations()??[]);
+      void Promise.allSettled(animations.map(animation=>animation.finished)).then(()=>{
+        if(!cancelled)setWideGroups(current=>current.filter(groupKey=>groupKey!==key));
+      });
+    });
     return()=>{cancelled=true;};
   },[openGroup]);
   useEffect(()=>{if(openGroup&&!groups.some(group=>group.key===openGroup))setOpenGroup(null);},[groups,openGroup]);
@@ -133,6 +157,6 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
     <header className="dashboard-pm-section-heading">
       <div><p className="dashboard-pm-library-label">{library==='machine'?'Machine Library':'Equipment Library'}</p><h3 id={`dashboard-${library}-pm-title`}>{title}</h3><p>{description}</p></div>
     </header>
-    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div ref={listRef} className={`dashboard-pm-asset-list${openGroup?' has-open-group':''}`}>{columns.map((columnGroups,column)=><div className={`dashboard-pm-column${columnGroups.some(group=>group.key===(openGroup??wideGroup))?' is-expanded-column':''}`} key={column} style={{'--dashboard-pm-summary-track':column%trackCount+1} as CSSProperties}>{columnGroups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} isWide={(openGroup??wideGroup)===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
+    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div ref={listRef} className={`dashboard-pm-asset-list${openGroup?' has-open-group':''}`}>{columns.map((columnGroups,column)=><div className={`dashboard-pm-column${columnGroups.some(group=>group.key===openGroup||wideGroups.includes(group.key))?' is-expanded-column':''}`} key={column} style={{'--dashboard-pm-summary-track':column%trackCount+1} as CSSProperties}>{columnGroups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} isWide={openGroup===group.key||wideGroups.includes(group.key)} summaryTrack={column%trackCount+1} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
   </section>;
 }

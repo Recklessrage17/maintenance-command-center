@@ -506,45 +506,94 @@ for(const library of ['machine','equipment'] as const){
 }
 
 
-test('anchors every PM summary track and animates both directions for 300ms',async({page})=>{
-  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});
-  await page.emulateMedia({reducedMotion:'no-preference'});
+// Inspect native CSS transitions at reproducible frames without depending on headless paint cadence.
+async function seekPmMotion(group:Locator,time:number){
+  await group.evaluate((card,time)=>{
+    for(const selector of ['.dashboard-accordion-body','.dashboard-pm-chevron','.dashboard-pm-chevron svg']){
+      card.querySelector(selector)?.getAnimations().forEach(animation=>{animation.pause();animation.currentTime=time;});
+    }
+  },time);
+}
+async function finishPmMotion(group:Locator){
+  await group.evaluate(card=>{
+    for(const selector of ['.dashboard-accordion-body','.dashboard-pm-chevron','.dashboard-pm-chevron svg'])card.querySelector(selector)?.getAnimations().forEach(animation=>animation.finish());
+  });
+}
+async function pmGeometry(group:Locator){
+  return group.evaluate(card=>{
+    const rect=(selector:string)=>card.querySelector(selector)!.getBoundingClientRect();const circle=rect('.dashboard-pm-chevron');
+    return {x:circle.x,right:circle.right,cardRight:card.getBoundingClientRect().right,left:[...card.querySelectorAll('.dashboard-pm-asset-identity,.dashboard-pm-asset-identity > span,.dashboard-pm-asset-statuses,.dashboard-wo-badge')].map(el=>({x:el.getBoundingClientRect().x,width:el.getBoundingClientRect().width})),transform:getComputedStyle(card.querySelector('.dashboard-pm-chevron')!).transform};
+  });
+}
+
+test('travels between compact and full-width PM edges with synchronized 300ms motion at responsive widths',async({page})=>{
+  test.setTimeout(60000);
+  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});await page.emulateMedia({reducedMotion:'no-preference'});
   const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:12},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:library+' '+(i+1)})));
-  await mockDashboard(page,alerts);await page.goto('/');
-  for(const library of ['machine','equipment']){
-    const section=page.locator('.dashboard-pm-section--'+library);
-    for(const index of [0,4,8]){
-      const group=section.locator('.dashboard-pm-asset-group').nth(index);
-      const toggle=group.locator('.dashboard-pm-asset-toggle');const circle=toggle.locator('.dashboard-round-expander');
-      const body=group.locator('.dashboard-accordion-body');await toggle.scrollIntoViewIfNeeded();const closed=await circle.boundingBox();
-      await expect(circle.locator('path')).toHaveAttribute('d','m5.5 7.5 4.5 4.5 4.5-4.5');
-      const sample=await toggle.evaluate(async element=>{
-        (element as HTMLButtonElement).click();await new Promise(requestAnimationFrame);
-        const body=element.closest('article')!.querySelector('.dashboard-accordion-body')!;
-        const animations=body.getAnimations();animations.forEach(a=>{a.pause();a.currentTime=100;});const opacity=Number(getComputedStyle(body).opacity);animations.forEach(a=>a.play());return {opacity,duration:getComputedStyle(body).transitionDuration,easing:getComputedStyle(body).transitionTimingFunction};
-      });
-      expect(sample.opacity).toBeGreaterThan(0);expect(sample.opacity).toBeLessThan(1);
-      expect(sample.duration).toBe('0.3s, 0.3s, 0s');expect(sample.easing).toContain('cubic-bezier(0.2, 0, 0, 1)');
-      expect(Math.abs((await circle.boundingBox())!.x-closed!.x)).toBeLessThanOrEqual(4);
-      await expect(body).toHaveCSS('opacity','1');
-      expect(Math.abs((await circle.boundingBox())!.x-closed!.x)).toBeLessThanOrEqual(4);
-      await expect(toggle.locator('button')).toHaveCount(0);
-      await expect(group.locator('.dashboard-pm-task-open path').first()).toHaveAttribute('d','M5 10h9m-3.5-3.5L14 10l-3.5 3.5');
-      await expect(group.locator('.dashboard-pm-task-open .dashboard-round-expander')).toHaveCount(0);
-      const closing=await toggle.evaluate(async element=>{
-        (element as HTMLButtonElement).click();await new Promise(requestAnimationFrame);
-        const body=element.closest('article')!.querySelector('.dashboard-accordion-body')!;
-        const animations=body.getAnimations();animations.forEach(a=>{a.pause();a.currentTime=100;});const opacity=Number(getComputedStyle(body).opacity);animations.forEach(a=>a.play());return {opacity,duration:getComputedStyle(body).transitionDuration,wide:element.closest('article')!.classList.contains('is-wide')};
-      });
-      expect(closing.opacity).toBeGreaterThan(0);expect(closing.opacity).toBeLessThan(1);expect(closing.wide).toBe(true);
-      expect(closing.duration).toBe('0.3s, 0.3s, 0s');await expect(body).toHaveAttribute('inert','');await toggle.focus();await group.locator('.dashboard-pm-task-row').first().evaluate(element=>(element as HTMLButtonElement).focus());await expect(toggle).toBeFocused();
-      await expect(group).not.toHaveClass(/is-wide/);await expect(body).toHaveCSS('visibility','hidden');
-      expect(Math.abs((await circle.boundingBox())!.x-closed!.x)).toBeLessThanOrEqual(1);
+  const warnings=['machine','equipment'].map((library,index)=>warningNote(9900+index,{assetLibrary:library,assetId:1,assetNumber:library+' 1'}));
+  await mockDashboard(page,alerts,warnings);await page.goto('/');
+  for(const width of [390,820,1440]){
+    await page.setViewportSize({width,height:900});
+    for(const library of ['machine','equipment']){
+      const section=page.locator('.dashboard-pm-section--'+library);
+      for(const index of [0,4,8]){
+        const group=section.locator('.dashboard-pm-asset-group').nth(index);const toggle=group.locator('.dashboard-pm-asset-toggle');const body=group.locator('.dashboard-accordion-body');const circle=toggle.locator('.dashboard-pm-chevron');const before=await pmGeometry(group);
+        expect(before.cardRight-before.right).toBeCloseTo(10,0);
+        await toggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(group,0);
+        expect(Math.abs((await pmGeometry(group)).x-before.x)).toBeLessThanOrEqual(1);
+        await expect(toggle).toHaveAttribute('aria-expanded','true');await expect(body).not.toHaveAttribute('inert');
+        await expect(circle).toHaveCSS('transition-duration','0.3s, 0.3s, 0.3s, 0.3s, 0.3s');await expect(circle).toHaveCSS('transition-timing-function','cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1)');await expect(body).toHaveCSS('transition-duration','0.3s, 0.3s, 0s');
+        await seekPmMotion(group,100);const opening=await pmGeometry(group);
+        const opacity=Number(await body.evaluate(el=>getComputedStyle(el).opacity));expect(opacity).toBeGreaterThan(0);expect(opacity).toBeLessThan(1);
+        await finishPmMotion(group);await expect(body).toHaveCSS('opacity','1');const expanded=await pmGeometry(group);
+        expect(expanded.cardRight-expanded.right).toBeCloseTo(10,0);
+        if(expanded.x-before.x>5){expect(opening.x).toBeGreaterThan(before.x+1);expect(opening.x).toBeLessThan(expanded.x-1);}
+        for(const geometry of [opening,expanded])geometry.left.forEach((item,i)=>{expect(Math.abs(item.x-before.left[i].x)).toBeLessThanOrEqual(1);expect(Math.abs(item.width-before.left[i].width)).toBeLessThanOrEqual(1);});
+        await expect(circle.locator('svg')).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');await expect(toggle.locator('button')).toHaveCount(0);
+        await toggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(group,0);
+        expect(Math.abs((await pmGeometry(group)).x-expanded.x)).toBeLessThanOrEqual(1);
+        await seekPmMotion(group,100);const closing=await pmGeometry(group);if(expanded.x-before.x>5){expect(closing.x).toBeGreaterThan(before.x+1);expect(closing.x).toBeLessThan(expanded.x-1);}
+        await expect(body).toHaveAttribute('inert','');await toggle.focus();await group.locator('.dashboard-pm-task-row').first().evaluate(el=>(el as HTMLButtonElement).focus());await expect(toggle).toBeFocused();
+        await finishPmMotion(group);await expect(group).not.toHaveClass(/is-wide/);const collapsed=await pmGeometry(group);expect(Math.abs(collapsed.x-before.x)).toBeLessThanOrEqual(1);expect(collapsed.transform).toBe('matrix(1, 0, 0, 1, 0, -15)');
+        await expect(circle.locator('svg')).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+      }
     }
   }
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
+test('direct PM switches return A and move B without flashes, stale transforms or overflow',async({page})=>{
+  test.setTimeout(60000);
+  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});
+  const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:12},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:library+' '+(i+1)})));
+  await mockDashboard(page,alerts);await page.goto('/');
+  for(const width of [390,820,1440]){
+    await page.setViewportSize({width,height:900});
+    for(const library of ['machine','equipment']){
+      const section=page.locator('.dashboard-pm-section--'+library);const a=section.locator('.dashboard-pm-asset-group').nth(0);const b=section.locator('.dashboard-pm-asset-group').nth(4);const aToggle=a.locator('.dashboard-pm-asset-toggle');const bToggle=b.locator('.dashboard-pm-asset-toggle');
+      const aClosed=await pmGeometry(a);const bClosed=await pmGeometry(b);await aToggle.click();await expect(a.locator('.dashboard-pm-chevron svg')).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');const aOpen=await pmGeometry(a);
+      await bToggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(a,0);await seekPmMotion(b,0);
+      expect(Math.abs((await pmGeometry(a)).x-aOpen.x)).toBeLessThanOrEqual(1);expect(Math.abs((await pmGeometry(b)).x-bClosed.x)).toBeLessThanOrEqual(1);
+      await expect(aToggle).toHaveAttribute('aria-expanded','false');await expect(bToggle).toHaveAttribute('aria-expanded','true');await expect(section.locator('.dashboard-pm-asset-toggle[aria-expanded="true"]')).toHaveCount(1);
+      await seekPmMotion(a,100);await seekPmMotion(b,100);const aMid=await pmGeometry(a);const bMid=await pmGeometry(b);
+      if(aOpen.x-aClosed.x>5){expect(aMid.x).toBeGreaterThan(aClosed.x+1);expect(aMid.x).toBeLessThan(aOpen.x-1);}
+      await finishPmMotion(a);await finishPmMotion(b);await expect(a).not.toHaveClass(/is-wide/);const bOpen=await pmGeometry(b);
+      expect(Math.abs((await pmGeometry(a)).x-aClosed.x)).toBeLessThanOrEqual(1);expect((await pmGeometry(a)).transform).toBe('matrix(1, 0, 0, 1, 0, -15)');expect(bOpen.cardRight-bOpen.right).toBeCloseTo(10,0);
+      if(bOpen.x-bClosed.x>5){expect(bMid.x).toBeGreaterThan(bClosed.x+1);expect(bMid.x).toBeLessThan(bOpen.x-1);}
+      // Resize an already expanded card: its endpoint must follow the actual new geometry.
+      await page.setViewportSize({width:width+37,height:900});await expect.poll(async()=>{const g=await pmGeometry(b);return Math.abs(g.cardRight-g.right-10);}).toBeLessThanOrEqual(1);
+      await page.setViewportSize({width,height:900});await expect.poll(async()=>{const g=await pmGeometry(b);return Math.abs(g.cardRight-g.right-10);}).toBeLessThanOrEqual(1);
+      // Reverse the switch while the later-column card is open; its compact slot must stay stable.
+      const bBeforeReverse=await pmGeometry(b);
+      await aToggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(b,0);await seekPmMotion(a,0);
+      expect(Math.abs((await pmGeometry(b)).x-bBeforeReverse.x)).toBeLessThanOrEqual(1);expect(Math.abs((await pmGeometry(a)).x-aClosed.x)).toBeLessThanOrEqual(1);
+      await seekPmMotion(b,100);const bReturning=await pmGeometry(b);if(bBeforeReverse.x-bClosed.x>5){expect(bReturning.x).toBeGreaterThan(bClosed.x+1);expect(bReturning.x).toBeLessThan(bBeforeReverse.x-1);}
+      await finishPmMotion(b);await finishPmMotion(a);await expect(b).not.toHaveClass(/is-wide/);expect(Math.abs((await pmGeometry(b)).x-bClosed.x)).toBeLessThanOrEqual(1);
+      await page.emulateMedia({reducedMotion:'reduce'});await bToggle.click();await expect(a).not.toHaveClass(/is-wide/);await aToggle.click();await expect(b).not.toHaveClass(/is-wide/);const reduced=await pmGeometry(a);expect(reduced.cardRight-reduced.right).toBeCloseTo(10,0);await expect(a.locator('.dashboard-pm-chevron')).toHaveCSS('transition-duration','0s');
+      await a.locator('.dashboard-pm-chevron').click();await expect(a).not.toHaveClass(/is-wide/);expect(Math.abs((await pmGeometry(a)).x-aClosed.x)).toBeLessThanOrEqual(1);await page.emulateMedia({reducedMotion:'no-preference'});
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+  }
+});
 
 test('keeps polished task action circles centered in their rows throughout accordion motion',async({page})=>{
   await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});
