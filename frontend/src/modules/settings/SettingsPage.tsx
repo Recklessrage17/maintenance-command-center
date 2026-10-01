@@ -866,6 +866,9 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [branding,setBranding]=useState<BrandingSettings>(defaultBranding);
   const [brandingMsg,setBrandingMsg]=useState('');
   const [brandingLoading,setBrandingLoading]=useState(false);
+  const [pendingLogoPreview,setPendingLogoPreview]=useState<{url:string;name:string}|null>(null);
+  const [logoFileName,setLogoFileName]=useState('');
+  useEffect(()=>()=>{if(pendingLogoPreview)URL.revokeObjectURL(pendingLogoPreview.url);},[pendingLogoPreview]);
   const brandingAction=useActionProgress();
   const externalLocationAction=useActionProgress();
   const libraryExport=useLibraryExport();
@@ -996,7 +999,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   function loadBranding() {
     setBrandingLoading(true);
     return api('/api/settings/branding')
-      .then(data=>{ setBranding(normalizeBranding(data.branding)); setBrandingMsg(''); })
+      .then(data=>{ setBranding(normalizeBranding(data.branding)); setLogoFileName(''); setBrandingMsg(''); })
       .catch(e=>setBrandingMsg(e.message))
       .finally(()=>setBrandingLoading(false));
   }
@@ -1013,6 +1016,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     if(result.status==='error'){setBrandingMsg((result.error as Error).message);return;}
     const saved = normalizeBranding(result.value.branding);
     setBranding(saved);
+    if(resetToDefault)setLogoFileName('');
     window.dispatchEvent(new CustomEvent('mcc-branding-updated',{detail:saved}));
     setBrandingMsg(String(result.value.message ?? 'Company branding saved.'));
   }
@@ -1021,6 +1025,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    const previewUrl=URL.createObjectURL(file);
+    setPendingLogoPreview({url:previewUrl,name:file.name});
     setBrandingLoading(true);
     setBrandingMsg('');
     try {
@@ -1031,11 +1037,13 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
       if (!res.ok) throw new Error(data.error || 'Logo upload failed.');
       const saved = normalizeBranding(data.branding);
       setBranding(saved);
+      setLogoFileName(file.name);
       window.dispatchEvent(new CustomEvent('mcc-branding-updated',{detail:saved}));
       setBrandingMsg(String(data.message ?? 'Company logo/icon uploaded.'));
     } catch (e) {
       setBrandingMsg((e as Error).message);
     } finally {
+      setPendingLogoPreview(null);
       setBrandingLoading(false);
     }
   }
@@ -1535,16 +1543,19 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
         </div>
       )}
       <article className="mcc-card wide-card branding-card">
-        <div className="share-card-heading">
+        <div className="share-card-heading branding-heading">
           <div>
             <span>Company Branding</span>
             <strong>Launcher logo and company name</strong>
             <p>Keep MCC as the default, or switch the launcher to another company name and safe uploaded icon.</p>
           </div>
-          <div className="branding-preview">
+        </div>
+        <div className="branding-preview" aria-label="Launcher branding preview">
+          <span className="branding-preview-label">Launcher preview</span>
+          <div className="branding-preview-stage">
             <div className={`mcc-brand command-brand brand-animation-${branding.iconAnimation} ${branding.logoMode==='image'?'image-brand':'text-brand'}`} aria-label={`${branding.companyName} ${branding.companyAccentText}`.trim()}>
               <div className="mcc-brand-mark">
-                {branding.logoMode==='image'&&branding.logoUrl ? <img className="mcc-brand-image" src={branding.logoUrl} alt="" /> : <strong><span className="mcc-brand-name">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-accent">{branding.companyAccentText}</span>}</strong>}
+                {branding.logoMode==='image'&&(pendingLogoPreview?.url || branding.logoUrl) ? <img className="mcc-brand-image" src={pendingLogoPreview?.url || branding.logoUrl} alt="" /> : <strong><span className="mcc-brand-name">{branding.companyName}</span>{branding.companyAccentText&&<span className="mcc-brand-accent">{branding.companyAccentText}</span>}</strong>}
                 <span>{branding.companySubtitle}</span>
               </div>
             </div>
@@ -1580,13 +1591,24 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
               <option value="pulse">Pulse</option>
             </select>
           </label>
-          <label className="form-field">
+          <div className="form-field branding-upload-field">
             <span>Upload Logo/Icon</span>
-            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={!isOwnerAdmin || brandingLoading} onChange={uploadLogo} />
-          </label>
+            <div className="branding-upload-content">
+              <div className="branding-logo-preview" aria-live="polite">
+                {(pendingLogoPreview?.url || branding.logoUrl) ? <img src={pendingLogoPreview?.url || branding.logoUrl} alt="Company logo preview" /> : <span>No logo uploaded</span>}
+              </div>
+              <div className="branding-upload-controls">
+                <label className="branding-file-button">
+                  <span>{branding.logoUrl ? 'Replace file' : 'Choose file'}</span>
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={!isOwnerAdmin || brandingLoading} onChange={uploadLogo} aria-label={branding.logoUrl ? 'Replace logo or icon file' : 'Choose logo or icon file'} />
+                </label>
+                <small className="branding-file-name">{pendingLogoPreview?.name || logoFileName || (branding.logoUrl ? decodeURIComponent(branding.logoUrl.split('/').pop() || '') : 'PNG, JPEG, WebP, or GIF')}</small>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="backup-action-row">
+        <div className="backup-action-row branding-actions">
           <button className="primary-button compact-button" type="button" onClick={()=>void saveBranding()} disabled={!isOwnerAdmin || brandingLoading || !branding.companyName.trim()} aria-busy={brandingActionKind==='save'&&brandingAction.pending}><ActionButtonProgress phase={brandingActionKind==='save'?brandingAction.phase:'idle'} idleLabel="Save Branding" pendingLabel="Saving Branding..." successLabel="Branding Saved" errorLabel="Try Branding Save" /></button>
           <button className="secondary-button compact-button" type="button" onClick={()=>void saveBranding(defaultBranding,true)} disabled={!isOwnerAdmin || brandingLoading} aria-busy={brandingActionKind==='reset'&&brandingAction.pending}><ActionButtonProgress phase={brandingActionKind==='reset'?brandingAction.phase:'idle'} idleLabel="Reset to Default MCC" pendingLabel="Resetting Branding..." successLabel="Branding Reset" errorLabel="Try Branding Reset" /></button>
         </div>
