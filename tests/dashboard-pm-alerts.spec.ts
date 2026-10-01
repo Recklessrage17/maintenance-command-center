@@ -466,11 +466,18 @@ for(const library of ['machine','equipment'] as const){
     await expect(open).toBeVisible();await expect(hold).toBeVisible();await expect(open).toHaveClass(/\bis-open\b/);await expect(open).toHaveCSS('color','rgb(99, 239, 184)');await expect(hold).toHaveCSS('color','rgb(255, 224, 163)');await expect(section.locator('.dashboard-pm-section-counts')).toHaveCount(0);
     const badge=section.getByRole('group',{name:'Work order counts for Press 900'});await expect(badge).toHaveCount(1);await expect(badge).toHaveText('WO(Open 1/Hold 1)');
     for(const width of [390,768,1440]){
-      await page.setViewportSize({width,height:900});await expect(badge).toBeVisible();
+      await page.setViewportSize({width,height:900});await page.mouse.move(0,0);await expect(badge).toBeVisible();
+      for(const control of [open,hold]){
+        await expect(control).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+        await expect(control).toHaveCSS('background-image','none');
+        await expect(control).toHaveCSS('border-top-width','0px');
+      }
       const openBox=await open.boundingBox();const holdBox=await hold.boundingBox();expect(Math.abs(holdBox!.y-openBox!.y)).toBeLessThan(2);
       expect(await badge.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
       expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     }
+    await open.focus();await page.keyboard.press('Tab');await expect(hold).toBeFocused();await expect(hold).toHaveCSS('outline-style','solid');await expect(hold).toHaveCSS('outline-width','2px');
+    await page.keyboard.press('Shift+Tab');await expect(open).toBeFocused();await expect(open).toHaveCSS('outline-style','solid');await expect(open).toHaveCSS('outline-width','2px');
     await page.screenshot({path:testInfo.outputPath('hold-dashboard.png'),fullPage:true});
     for(const [control,label,title,id] of [[open,'Tech Open','Open issue',9601],[hold,'Hold','Waiting for parts',9602]] as const){
       await control.click();const dialog=page.getByRole('dialog',{name:`${label} for Press 900`});await expect(dialog.locator('.dashboard-tech-note-row')).toHaveCount(1);await dialog.getByRole('button',{name:new RegExp(title)}).click();await expect(dialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href',`/${library}-library?asset=900&note=${id}`);await page.keyboard.press('Escape');await expect(control).toBeFocused();
