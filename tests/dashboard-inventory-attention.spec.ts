@@ -78,6 +78,7 @@ test('inventory attention is compact with centered counts beside the requisition
   }));
   expect(counterGeometry).toHaveLength(2);
   expect(counterGeometry.every(metric=>metric.centerOffset<=1&&metric.height>=44)).toBeTruthy();
+  for(const arrow of await inventory.locator('.dashboard-stock-counter-arrow').all())await expect(arrow).toHaveCSS('border-radius','50%');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 

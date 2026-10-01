@@ -272,6 +272,9 @@ test('centers and highlights smoothly rotating PM chevrons in both libraries',as
     const toggle=section.getByRole('button',{name:new RegExp(assetName)});
     const chevron=toggle.locator('.dashboard-pm-chevron');
     const icon=chevron.locator('svg');
+    const toggleBox=await toggle.boundingBox();expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+    const chevronBox=await chevron.boundingBox();expect(Math.abs(chevronBox!.width-chevronBox!.height)).toBeLessThan(1);
+    await expect(chevron).toHaveCSS('border-radius','50%');
     const closedStyle=await chevron.evaluate(element=>{
       const style=getComputedStyle(element);
       const identityBox=element.parentElement!.querySelector('.dashboard-pm-asset-identity')!.getBoundingClientRect();
@@ -289,6 +292,7 @@ test('centers and highlights smoothly rotating PM chevrons in both libraries',as
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded','true');
+    await expect(chevron).toHaveCSS('border-radius','50%');
     await expect(icon).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');
     const openStyle=await chevron.evaluate(element=>({background:getComputedStyle(element).backgroundColor,boxShadow:getComputedStyle(element).boxShadow}));
     expect(openStyle.background).not.toBe(closedStyle.background);
