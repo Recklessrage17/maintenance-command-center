@@ -128,7 +128,12 @@ async function run(){
   fs.mkdirSync(source.pmExcel,{recursive:true});const pmWorkbook=new ExcelJS.Workbook();pmWorkbook.addWorksheet('PMHistory').addRow(['Date','Work Order']);await pmWorkbook.xlsx.writeFile(path.join(source.pmExcel,'PM_report_latest.xlsx'));
   let runtime=await start(source);server=runtime.child;const sourceBase=runtime.base;const ownerCookie=await setupOwner(sourceBase,'Source');
   await addUser(sourceBase,ownerCookie,{name:'Portable Manager',email:'manager@example.com',role:'Manager'});
+  const firstDailyStatus=(await request(sourceBase,'/api/backup/status',{cookie:ownerCookie})).data;
+  assert.equal(firstDailyStatus.daily.autoBackupPending,true);assert.equal(firstDailyStatus.daily.nextAutoBackupAt,firstDailyStatus.nextAutoBackupAt);
+  assert.ok(Date.parse(firstDailyStatus.nextAutoBackupAt)-Date.now()>30000,'Daily deadline must come from the server debounce timer.');
   await addUser(sourceBase,ownerCookie,{name:'Portable Tech',email:'tech@example.com',role:'Maintenance Tech 3'});
+  const resetDailyStatus=(await request(sourceBase,'/api/backup/status',{cookie:ownerCookie})).data;
+  assert.ok(Date.parse(resetDailyStatus.nextAutoBackupAt)>=Date.parse(firstDailyStatus.nextAutoBackupAt),'A qualifying change must reset the Daily deadline.');
   const machineFixture=seedInsuranceAndMachineFixture(source);
   const equipmentFixture=await createEquipmentNoteFixture(source,sourceBase,ownerCookie);
   const issue111Fixture=await createIssue111LibraryFixtures(source,sourceBase,ownerCookie,equipmentFixture.assetId);
@@ -136,7 +141,7 @@ async function run(){
   const managerCookie=await login(sourceBase,'manager@example.com');const techCookie=await login(sourceBase,'tech@example.com');
 
   let result=await request(sourceBase,'/api/backup/status',{cookie:managerCookie});assert.equal(result.response.status,200);assert.equal(result.data.permissions.canUsePortableRecovery,true);assert.equal(result.data.permissions.canViewMaster,false);assert.equal(result.data.permissions.canRestoreMaster,false);assert.equal(result.data.recoveryStorage.maxPackages,1);assert.equal(result.data.recoveryStorage.quotaBytes,128*1024*1024);
-  result=await request(sourceBase,'/api/backup/status',{cookie:techCookie});assert.equal(result.data.permissions.canUsePortableRecovery,false);
+  result=await request(sourceBase,'/api/backup/status',{cookie:techCookie});assert.equal(result.data.permissions.canUsePortableRecovery,false);assert.equal(result.data.nextAutoBackupAt,result.data.daily.nextAutoBackupAt);
   result=await request(sourceBase,'/api/backup/create',{method:'POST',cookie:ownerCookie,body:{category:'daily'}});assert.equal(result.response.status,201);assert.equal(result.data.backup.type,'daily_manual');
   result=await request(sourceBase,'/api/backup/create',{method:'POST',cookie:ownerCookie,body:{category:'weekly'}});assert.equal(result.response.status,201,`${JSON.stringify(result.data)}\n${runtime.output()}`);assert.equal(result.data.backup.type,'weekly_manual');
 

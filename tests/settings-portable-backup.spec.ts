@@ -11,7 +11,7 @@ function restoreStatus(overrides:Partial<RestoreStatus>={}):RestoreStatus{
 
 function group(category:string,visible:boolean){return{category,categoryLabel:category,visible,latestBackup:null,lastAutoBackup:null,count:0,health:{ok:visible,label:visible?'Healthy':'Hidden',message:visible?'Ready':'Not available for this role.'},folderLabel:visible?category:'',folderPath:visible?category:'',autoBackupPending:false,nextScheduledBackupAt:null};}
 
-async function mockSettings(page:Page,role:FixtureRole){
+async function mockSettings(page:Page,role:FixtureRole,backupOverride:()=>Record<string,unknown>=()=>({})){
   const admin=role==='admin';const manager=role==='manager';const userRole=admin?'Admin':manager?'Manager':'Maintenance Tech 3';
   await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:`${role} Fixture`,email:`${role}@example.com`,role:userRole,isOwnerAdmin:false,canViewSystemVersion:admin,forcePasswordChange:false,effectivePermissions:[]}}}));
   await page.route('**/api/version',route=>route.fulfill({json:{version:'1.5.7',displayVersion:'v1.5.7',commit:'abc1234',buildDate:null}}));
@@ -24,6 +24,7 @@ async function mockSettings(page:Page,role:FixtureRole){
     importedRecoveryBackups:[{id:'MCC_Master_Backup_2026-08-17_12-00-00',name:'MCC_Master_Backup_2026-08-17_12-00-00',createdAt:'2026-08-17T12:00:00.000Z',appVersion:'1.5.7',backupType:'master_manual',archiveFilename:'MCC_Master_Backup_2026-08-17_12-00-00.zip',archiveSizeBytes:2048,importedAt:'2026-08-17T12:05:00.000Z',checkedFileCount:9,safeToDisconnect:true}],
     recoveryLocation:'/var/lib/mcc-recovery',recoveryStorage:{usedBytes:4096,remainingBytes:8192-4096,quotaBytes:8192,packageCount:1,maxPackages:3,atCapacity:false},externalBackup:{destination:'/media/usb/MCC_Backups',enabled:true,lastTestAt:'2026-08-17T12:00:00.000Z',lastTestOk:true,lastTestMessage:'Writable.',lastCopyAt:'2026-08-17T12:01:00.000Z',lastCopyOk:true,lastCopyMessage:'Verified external copy completed.',lastCopyBackupId:'fixture',lastCopyFilename:'MCC_Master_Backup_2026-08-17_12-00-00.zip'},
     permissions:{canViewDaily:true,canCreateDaily:true,canRestoreDaily:manager||admin,canViewWeekly:manager||admin,canCreateWeekly:manager||admin,canRestoreWeekly:manager||admin,canViewMaster:admin,canCreateMaster:admin,canRestoreMaster:admin,canUsePortableRecovery:manager||admin,canConfigureExternalBackup:admin,canViewBackups:true,canCreateBackup:admin,canRestoreBackup:admin},
+    ...backupOverride(),
   }}));
   await page.route('**/api/admin/reset/status',route=>route.fulfill({status:403,json:{error:'Owner Admin only.'}}));
 }
@@ -42,6 +43,42 @@ async function installDirectoryPicker(page:Page){
 test('Manager sees portable import/download but not destructive restore or external configuration',async({page})=>{
   await mockSettings(page,'manager');await page.goto('/settings');
   const panel=page.getByRole('region',{name:'Portable Master Backup and Recovery'});await expect(panel).toBeVisible();await expect(panel.getByText('Download Portable Backup')).toBeVisible();await expect(panel.getByText('Pull Master Backup into MCC')).toBeVisible();await expect(panel.getByText(/1 of 3 packages\. MCC never auto-deletes recovery packages/)).toBeVisible();await expect(panel.getByText(/External backup drive may now be disconnected/)).toBeVisible();await expect(panel.getByRole('button',{name:'Restore Verified Backup'})).toHaveCount(0);await expect(panel.getByLabel('Server-side external backup destination')).toHaveCount(0);
+});
+
+test('Backup Center shows live deadlines, resets Daily debounce, and returns to idle',async({page})=>{
+  let deadline:string|null=null;
+  const weekly=new Date(Date.now()+26*60*60*1000).toISOString();
+  const master=new Date(Date.now()+6*24*60*60*1000).toISOString();
+  await mockSettings(page,'admin',()=>({
+    daily:{...group('daily',true),autoBackupPending:Boolean(deadline),nextAutoBackupAt:deadline},
+    weekly:{...group('weekly',true),nextScheduledBackupAt:weekly},
+    master:{...group('master',true),nextScheduledBackupAt:master},
+    autoBackupPending:Boolean(deadline),nextAutoBackupAt:deadline,nextWeeklyBackupAt:weekly,nextMasterBackupAt:master,
+  }));
+  await page.goto('/settings');
+  const cards=page.locator('.backup-tier-card');
+  const daily=cards.nth(0);const weeklyCard=cards.nth(1);const masterCard=cards.nth(2);
+  await expect(daily.getByText('Waiting for changes')).toBeVisible();
+  await expect(daily.getByText('No backup pending')).toBeVisible();
+  await expect(cards.getByText('Backup count')).toHaveCount(0);
+  await expect(weeklyCard.getByText(/1d \d{2}h \d{2}m/)).toBeVisible();
+  await expect(masterCard.getByText(/5d \d{2}h \d{2}m|6d \d{2}h \d{2}m/)).toBeVisible();
+  deadline=new Date(Date.now()+45000).toISOString();
+  await page.getByRole('button',{name:'Refresh status'}).click();
+  await expect(daily.getByText(/Pending · 00:4[0-5]/)).toBeVisible();
+  await expect(daily.locator('.backup-timing-state')).toHaveClass(/pending/);
+  await page.waitForTimeout(1200);
+  await expect(daily.getByText(/Pending · 00:4[0-4]/)).toBeVisible();
+  deadline=new Date(Date.now()+45000).toISOString();
+  await page.getByRole('button',{name:'Refresh status'}).click();
+  await expect(daily.getByText(/Pending · 00:4[4-5]/)).toBeVisible();
+  deadline=null;
+  await page.getByRole('button',{name:'Refresh status'}).click();
+  await expect(daily.getByText('Waiting for changes')).toBeVisible();
+  await expect(daily.locator('.backup-timing-state')).toHaveClass(/healthy/);
+  await expect(daily.getByRole('button',{name:'Create Daily Backup Now'})).toBeVisible();
+  await expect(daily.getByRole('button',{name:'Verify'})).toBeVisible();
+  await expect(daily.getByRole('button',{name:'Restore'})).toBeVisible();
 });
 
 test('Admin sees external controls and protected portable restore confirmation',async({page})=>{
