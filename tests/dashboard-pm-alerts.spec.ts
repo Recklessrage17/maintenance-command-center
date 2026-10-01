@@ -529,7 +529,7 @@ test('anchors every PM summary track and animates both directions for 300ms',asy
       await expect(body).toHaveCSS('opacity','1');
       expect(Math.abs((await circle.boundingBox())!.x-closed!.x)).toBeLessThanOrEqual(4);
       await expect(toggle.locator('button')).toHaveCount(0);
-      await expect(group.locator('.dashboard-pm-task-open').first()).toHaveText('→');
+      await expect(group.locator('.dashboard-pm-task-open path').first()).toHaveAttribute('d','M5 10h9m-3.5-3.5L14 10l-3.5 3.5');
       await expect(group.locator('.dashboard-pm-task-open .dashboard-round-expander')).toHaveCount(0);
       const closing=await toggle.evaluate(async element=>{
         (element as HTMLButtonElement).click();await new Promise(requestAnimationFrame);
@@ -543,4 +543,39 @@ test('anchors every PM summary track and animates both directions for 300ms',asy
     }
   }
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+
+test('keeps polished task action circles centered in their rows throughout accordion motion',async({page})=>{
+  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});
+  await mockDashboard(page);await page.goto('/');
+  for(const library of ['machine','equipment']){
+    const group=page.locator('.dashboard-pm-section--'+library+' .dashboard-pm-asset-group').first();
+    const toggle=group.locator('.dashboard-pm-asset-toggle');const body=group.locator('.dashboard-accordion-body');
+    await toggle.click();await expect(body).toHaveCSS('opacity','1');
+    const checkAlignment=async()=>{
+      const layout=await group.locator('.dashboard-pm-task-row').evaluateAll(rows=>rows.map(row=>{
+        const circle=row.querySelector<HTMLElement>('.dashboard-pm-task-open')!;const icon=circle.querySelector('svg')!;
+        const r=row.getBoundingClientRect();const c=circle.getBoundingClientRect();const i=icon.getBoundingClientRect();
+        return {width:c.width,height:c.height,rowCenter:Math.abs(c.y+c.height/2-r.y-r.height/2),iconX:Math.abs(i.x+i.width/2-c.x-c.width/2),iconY:Math.abs(i.y+i.height/2-c.y-c.height/2),rightInset:r.right-c.right,position:getComputedStyle(circle).position,margin:getComputedStyle(circle).margin,padding:getComputedStyle(circle).padding,overflow:row.scrollWidth-row.clientWidth};
+      }));
+      expect(layout.length).toBeGreaterThan(0);
+      for(const item of layout){expect(item.width).toBe(30);expect(item.height).toBe(30);expect(item.rowCenter).toBeLessThanOrEqual(1);expect(item.iconX).toBeLessThanOrEqual(1);expect(item.iconY).toBeLessThanOrEqual(1);expect(item.rightInset).toBeCloseTo(11,0);expect(item.position).toBe('relative');expect(item.margin).toBe('0px');expect(item.padding).toBe('0px');expect(item.overflow).toBeLessThanOrEqual(1);}
+    };
+    for(const width of [390,768,1440]){
+      await page.setViewportSize({width,height:900});await checkAlignment();
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    // Seek native CSS transitions to a reproducible intermediate frame, avoiding headless paint throttling.
+    for(const expanded of [false,true]){
+      await toggle.evaluate(async element=>{(element as HTMLButtonElement).click();await new Promise(requestAnimationFrame);const body=element.closest('article')!.querySelector('.dashboard-accordion-body')!;body.getAnimations().forEach(animation=>{animation.pause();animation.currentTime=100;});});
+      await expect(toggle).toHaveAttribute('aria-expanded',String(expanded));await checkAlignment();
+      await body.evaluate(element=>element.getAnimations().forEach(animation=>animation.play()));
+      await expect(body).toHaveCSS('opacity',expanded?'1':'0');
+    }
+    const row=group.locator('.dashboard-pm-task-row').first();await expect(row.locator('button')).toHaveCount(0);
+    await expect(row.locator('.dashboard-pm-task-open')).toHaveAttribute('aria-hidden','true');
+    await row.focus();await row.press('Enter');await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
+    await page.emulateMedia({reducedMotion:'reduce'});await expect(body).toHaveCSS('transition-duration','0s');await expect(group.locator('.dashboard-pm-task-open svg').first()).toHaveCSS('transition-duration','0s');await toggle.click();await expect(body).toHaveAttribute('inert','');await page.emulateMedia({reducedMotion:'no-preference'});
+  }
 });

@@ -1,7 +1,7 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MccStatusPill } from '../../components/MccPills';
 import { groupPmAlerts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus, type WarningNote } from './dashboardPm';
-import { DashboardExpander } from './DashboardExpander';
+import { DashboardExpander, DashboardTaskArrow } from './DashboardExpander';
 
 function statusClass(status:PmStatus){return status.toLowerCase().replace(/\s+/g,'-');}
 
@@ -32,7 +32,7 @@ function PmTaskRow({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   return <button className={`dashboard-pm-task-row status-${statusClass(alert.status)}`} type="button" onClick={onOpen} aria-label={`Open ${alert.title} preventive maintenance details for ${alert.assetNumber}`}>
     <span className="dashboard-pm-task-main"><strong>{alert.title}</strong><span className={`dashboard-pm-interval${alert.intervalType==='hourly'?' dashboard-pm-interval--hourly':''}`}>{intervalSummary(alert)}</span></span>
     <span className="dashboard-pm-task-due"><span>{dueInformation(alert)}</span><strong>{alert.relativeMessage||alert.countdown}</strong></span>
-    <span className="dashboard-pm-task-open" aria-hidden="true">&rarr;</span>
+    <DashboardTaskArrow/>
   </button>;
 }
 
