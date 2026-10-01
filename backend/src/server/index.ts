@@ -2870,6 +2870,7 @@ const backupDataAreaDefinitions = [
   { key: 'settingsBranding', label: 'Settings/Branding', tables: ['app_settings'] },
 ] as const;
 let autoBackupTimer: NodeJS.Timeout | undefined;
+let nextAutoBackupAt: string | null = null;
 let autoBackupReason = '';
 let autoBackupActor: User | null = null;
 let weeklyBackupTimer: NodeJS.Timeout | undefined;
@@ -3407,8 +3408,10 @@ function scheduleAutoBackup(reason: string, actor?: User | null) {
   autoBackupReason = reason;
   if (actor) autoBackupActor = actor;
   if (autoBackupTimer) clearTimeout(autoBackupTimer);
+  nextAutoBackupAt = new Date(Date.now() + autoBackupDelayMs).toISOString();
   autoBackupTimer = setTimeout(async()=>{
     autoBackupTimer = undefined;
+    nextAutoBackupAt = null;
     try {
       await createBackup({ category: 'daily', type: 'daily_auto', actor: autoBackupActor, notes: autoBackupReason || 'Automatic backup after MCC data changes.' });
     } catch (error) {
@@ -3615,6 +3618,7 @@ function hiddenBackupGroup(category: BackupCategory) {
     folderLabel: '',
     folderPath: '',
     autoBackupPending: false,
+    nextAutoBackupAt: null,
     nextScheduledBackupAt: null,
   };
 }
@@ -3632,6 +3636,7 @@ function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, actor: U
     folderLabel: backupFolderLabel(category),
     folderPath: backupFolderLabel(category),
     autoBackupPending: category === 'daily' ? Boolean(autoBackupTimer) : false,
+    nextAutoBackupAt: category === 'daily' ? nextAutoBackupAt : null,
     nextScheduledBackupAt: category === 'weekly' ? nextWeeklyBackupAt : category === 'master' ? nextMasterBackupAt : null,
   };
 }
@@ -3704,6 +3709,7 @@ function masterBackupStatus(actor?: User) {
     backupCountsByType: backupCountsByType(backups),
     lastBackupResult,
     autoBackupPending: Boolean(autoBackupTimer),
+    nextAutoBackupAt: actor && canViewBackupCategory(actor, 'daily') ? nextAutoBackupAt : null,
     protectedAreas: masterBackupProtectedAreas(),
     nextScheduledBackupAt: nextWeeklyBackupAt,
     nextWeeklyBackupAt,
