@@ -33,6 +33,16 @@ export function MccFileTypeIcon({type,open=false,className=''}:{type:MccFileType
   const shadeId = `mcc-file-shade-${useId().replace(/:/g,'')}`;
   if(type==='folder')return <MccFolderIcon open={open} className={className}/>;
 
+  // Original MCC glyphs: open ribbon and spreadsheet strokes, without branded assets.
+  if(type==='pdf'||type==='excel')return <span className={`mcc-file-type-icon mcc-file-type-icon--${type}${className?` ${className}`:''}`} data-file-type={type} aria-hidden="true">
+    <svg viewBox="0 0 30 30" focusable="false">
+      {type==='pdf'?<path className="mcc-file-type-icon__pdf-ribbon" d="M8.2 23.8c4-4.7 7.6-12.6 7.1-17.1-.3-2.8-2.8-3.1-3.1-.3-.5 5.2 5 13.1 10.1 13.5 3.8.3 4.6-2.4 1.3-3.2-5.2-1.3-14.7 1.4-18.2 5.4-2.1 2.4.5 4.4 2.8 1.7Z"/>:<>
+        <path className="mcc-file-type-icon__sheet" d="M14 5.5h10.5a1.5 1.5 0 0 1 1.5 1.5v16a1.5 1.5 0 0 1-1.5 1.5H14M15 11.8h11M15 18.2h11M20.5 5.5v19"/>
+        <path className="mcc-file-type-icon__excel-mark" d="m4.5 9 8 12m0-12-8 12"/>
+      </>}
+    </svg>
+  </span>;
+
   const label=iconLabel(type);
   return <span className={`mcc-file-type-icon mcc-file-type-icon--${type}${className?` ${className}`:''}`} data-file-type={type} aria-hidden="true">
     <svg viewBox="0 0 30 36" focusable="false">
@@ -51,9 +61,7 @@ export function MccFileTypeIcon({type,open=false,className=''}:{type:MccFileType
       <path className="mcc-file-type-icon__page-highlight" d="M5.9 3.7h10.3"/>
       <path className="mcc-file-type-icon__fold" d="M17.85 1.75v6.9h6.9Z"/>
       {type==='word'&&<><path className="mcc-file-type-icon__word-panel" d="M7.3 10.3h7.5v8.8H7.3z"/><text className="mcc-file-type-icon__word-mark" x="11.05" y="16.7" textAnchor="middle">W</text><path className="mcc-file-type-icon__lines" d="M16.6 12h3.4m-3.4 3h3.4m-3.4 3H19"/></>}
-      {type==='excel'&&<><path className="mcc-file-type-icon__excel-panel" d="M7.2 10.3h6.7v8.8H7.2z"/><text className="mcc-file-type-icon__excel-mark" x="10.55" y="16.7" textAnchor="middle">X</text><path className="mcc-file-type-icon__grid" d="M15.4 10.8h5.1v7.8h-5.1zm0 2.6h5.1m-5.1 2.6h5.1m-2.55-5.2v7.8"/></>}
       {type==='text'&&<path className="mcc-file-type-icon__lines" d="M7.6 10.9h12.2M7.6 13.8h9.8M7.6 16.7h12.2M7.6 19.6h7.2"/>}
-      {type==='pdf'&&<path className="mcc-file-type-icon__pdf-detail" d="M8.1 18.6c2.1-2.25 3.5-4.9 4.2-7.9.35 3.2 1.65 5.75 3.9 7.65-2.9-.95-5.45-.9-8.1.25Zm7.9-1.5c1.7-.25 3.05-.05 4.05.55"/>}
       {type==='powerpoint'&&<><circle className="mcc-file-type-icon__presentation-disc" cx="11.2" cy="14.75" r="4.45"/><path className="mcc-file-type-icon__presentation" d="M11.2 10.3v4.45h4.45M17.2 11h3.2v7.5h-3.2"/><text className="mcc-file-type-icon__powerpoint-mark" x="10.8" y="16.5" textAnchor="middle">P</text></>}
       {type==='image'&&<><rect className="mcc-file-type-icon__image-frame" x="7.3" y="10.1" width="13.4" height="9.2" rx="1"/><path className="mcc-file-type-icon__image" d="M8.5 18.1l3.15-3.5 2.25 2.05 2.7-3.45 2.9 4.9h-11Zm2.15-5.25a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Z"/></>}
       {type==='video'&&<><rect className="mcc-file-type-icon__video-frame" x="7.1" y="10.2" width="13.8" height="9" rx="1.2"/><path className="mcc-file-type-icon__video" d="m12.25 12.25 5 2.45-5 2.55Z"/></>}

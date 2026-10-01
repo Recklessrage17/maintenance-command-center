@@ -1,3 +1,4 @@
+import { MccFileTypeIcon } from '../../components/MccFileTypeIcon';
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 import { withJsonRequestDefaults } from '../../apiRequest';
 import { MccDateInput } from '../../components/MccDateInput';
@@ -294,10 +295,9 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
     const pdfUrl = historyPdfUrl(record);
     const className = `history-action-chip action-${tone}${pdfUrl ? ' clickable' : ''}`;
     if (pdfUrl) {
-      const showPdfMark = !label.toUpperCase().startsWith('PDF ');
       return (
         <button className={className} type="button" onClick={event=>openHistoryPdf(record,event)} title="Open PDF preview">
-          {showPdfMark&&<span className="history-action-icon" aria-hidden="true">PDF</span>}
+          <MccFileTypeIcon type="pdf" className="history-action-icon"/>
           <span>{label}</span>
         </button>
       );
