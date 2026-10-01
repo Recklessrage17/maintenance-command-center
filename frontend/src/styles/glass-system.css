@@ -1134,11 +1134,22 @@ button.glass-attachment:focus-visible {
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-.asset-attachment-chip .glass-file-icon.glass-file-icon--pdf {
-  border-color: rgba(255, 117, 138, 0.48);
-  color: #fff1f3;
-  background: linear-gradient(145deg, #c84d61, #671b2c);
+/* Asset Notes PDFs use a page silhouette inside the unchanged file-icon footprint. */
+.asset-attachment-chip .glass-file-icon.asset-pdf-document-icon {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
 }
+.asset-pdf-document-icon::after { content: none; }
+.asset-pdf-document-icon svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0,0,0,.28)); }
+.asset-pdf-document-page { fill: #eaf0f4; stroke: #b9c6cf; stroke-width: 1; stroke-linejoin: round; }
+.asset-pdf-document-fold { fill: #d3dee6; stroke: #b9c6cf; stroke-width: 1; stroke-linejoin: round; }
+.asset-pdf-document-lines { fill: none; stroke: #b2c1ce; stroke-width: 1.3; stroke-linecap: round; }
+.asset-pdf-document-badge { fill: #fbe2e6; }
+.asset-pdf-document-label { fill: #ac3345; font-family: Arial,sans-serif; font-size: 7px; font-weight: 700; letter-spacing: .35px; }
 
 .asset-attachment-chip .glass-file-icon.glass-file-icon--docx {
   border-color: rgba(83, 151, 255, 0.54);
