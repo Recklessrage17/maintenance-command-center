@@ -277,16 +277,19 @@ test('centers and highlights smoothly rotating PM chevrons in both libraries',as
     await expect(chevron).toHaveCSS('border-radius','50%');
     const closedStyle=await chevron.evaluate(element=>{
       const style=getComputedStyle(element);
-      const identityBox=element.parentElement!.querySelector('.dashboard-pm-asset-identity')!.getBoundingClientRect();
+      const summaryBox=element.closest('.dashboard-pm-summary')!.getBoundingClientRect();
       const chevronBox=element.getBoundingClientRect();
+      const iconBox=element.querySelector('svg')!.getBoundingClientRect();
       return {
-        centerOffset:Math.abs((chevronBox.top+chevronBox.height/2)-(identityBox.top+identityBox.height/2)),
+        centerOffset:Math.abs((chevronBox.top+chevronBox.height/2)-(summaryBox.top+summaryBox.height/2)),
+        iconOffset:Math.max(Math.abs((iconBox.top+iconBox.height/2)-(chevronBox.top+chevronBox.height/2)),Math.abs((iconBox.left+iconBox.width/2)-(chevronBox.left+chevronBox.width/2))),
         background:style.backgroundColor,
         boxShadow:style.boxShadow,
         transitionProperties:style.transitionProperty,
       };
     });
     expect(closedStyle.centerOffset).toBeLessThanOrEqual(1);
+    expect(closedStyle.iconOffset).toBeLessThanOrEqual(1);
     expect(closedStyle.transitionProperties).toContain('box-shadow');
     await expect(icon).toHaveCSS('transition-property','transform');
 
@@ -465,10 +468,18 @@ test('keeps Dashboard scrolling on the document without snap, nested traps, or s
 for(const library of ['machine','equipment'] as const){
   test(`${library} combines WO Open and Hold counts, preserves filters, deep links and responsive layout`,async({page},testInfo)=>{
     const identity={assetLibrary:library,assetId:900,assetNumber:'Press 900'};
-    await mockDashboard(page,[],[warningNote(9601,{...identity,title:'Open issue',hold:false}),warningNote(9602,{...identity,title:'Waiting for parts',hold:true}),warningNote(9603,{...identity,title:'Resolved held issue',hold:true,status:'resolved'}),warningNote(9604,{...identity,title:'Ordinary held input',hold:true,warning:false})]);
+    await mockDashboard(page,[alert(9001,'Due Now',{...identity,assetName:'Line Press'})],[warningNote(9601,{...identity,title:'Open issue',hold:false}),warningNote(9602,{...identity,title:'Waiting for parts',hold:true}),warningNote(9603,{...identity,title:'Resolved held issue',hold:true,status:'resolved'}),warningNote(9604,{...identity,title:'Ordinary held input',hold:true,warning:false})]);
     await page.goto('/');const section=page.locator(`.dashboard-pm-section--${library}`);const open=section.getByRole('button',{name:'Open 1 Open work orders for Press 900'});const hold=section.getByRole('button',{name:'Open 1 Hold work orders for Press 900'});
     await expect(open).toBeVisible();await expect(hold).toBeVisible();await expect(open).toHaveClass(/\bis-open\b/);await expect(open).toHaveCSS('color','rgb(99, 239, 184)');await expect(hold).toHaveCSS('color','rgb(255, 224, 163)');await expect(section.locator('.dashboard-pm-section-counts')).toHaveCount(0);
     const badge=section.getByRole('group',{name:'Work order counts for Press 900'});await expect(badge).toHaveCount(1);await expect(badge).toHaveText('WO(Open 1/Hold 1)');
+    const summary=section.locator('.dashboard-pm-summary');const toggle=summary.locator('.dashboard-pm-asset-toggle');const chevron=toggle.locator('.dashboard-pm-chevron');
+    await expect(toggle.locator('button')).toHaveCount(0);expect(await badge.evaluate(element=>element.closest('button')===null)).toBe(true);
+    const expectCentered=async()=>{
+      const summaryBox=await summary.boundingBox();const circleBox=await chevron.boundingBox();const iconBox=await chevron.locator('svg').boundingBox();
+      expect(Math.abs((circleBox!.y+circleBox!.height/2)-(summaryBox!.y+summaryBox!.height/2))).toBeLessThanOrEqual(1);
+      expect(Math.abs((iconBox!.y+iconBox!.height/2)-(circleBox!.y+circleBox!.height/2))).toBeLessThanOrEqual(1);
+      expect(Math.abs((iconBox!.x+iconBox!.width/2)-(circleBox!.x+circleBox!.width/2))).toBeLessThanOrEqual(1);
+    };
     for(const width of [390,768,1440]){
       await page.setViewportSize({width,height:900});await page.mouse.move(0,0);await expect(badge).toBeVisible();
       for(const control of [open,hold]){
@@ -477,9 +488,13 @@ for(const library of ['machine','equipment'] as const){
         await expect(control).toHaveCSS('border-top-width','0px');
       }
       const openBox=await open.boundingBox();const holdBox=await hold.boundingBox();expect(Math.abs(holdBox!.y-openBox!.y)).toBeLessThan(2);
+      await expectCentered();
       expect(await badge.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
       expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     }
+    await chevron.click();await expect(toggle).toHaveAttribute('aria-expanded','true');await expect(chevron.locator('svg')).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');await expectCentered();
+    const expandedBody=await section.locator('.dashboard-pm-accordion-body').boundingBox();const summaryBox=await summary.boundingBox();expect(expandedBody!.y).toBeGreaterThanOrEqual(summaryBox!.y+summaryBox!.height-1);
+    await toggle.press('Enter');await expect(toggle).toHaveAttribute('aria-expanded','false');await expect(toggle).toHaveCSS('outline-style','solid');
     await open.focus();await page.keyboard.press('Tab');await expect(hold).toBeFocused();await expect(hold).toHaveCSS('outline-style','solid');await expect(hold).toHaveCSS('outline-width','2px');
     await page.keyboard.press('Shift+Tab');await expect(open).toBeFocused();await expect(open).toHaveCSS('outline-style','solid');await expect(open).toHaveCSS('outline-width','2px');
     await page.screenshot({path:testInfo.outputPath('hold-dashboard.png'),fullPage:true});

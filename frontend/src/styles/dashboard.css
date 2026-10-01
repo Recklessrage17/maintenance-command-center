@@ -80,6 +80,7 @@
   overflow-anchor: none;
 }
 .dashboard-pm-asset-group.is-open { border-color: color-mix(in srgb,var(--dashboard-asset-accent) 48%,var(--mcc-border-default)); border-left-color: var(--dashboard-asset-accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.06),0 9px 22px rgba(0,0,0,.2),0 0 14px color-mix(in srgb,var(--dashboard-asset-accent) 7%,transparent); }
+.dashboard-pm-summary { position: relative; min-width: 0; }
 .dashboard-pm-asset-toggle {
   width: 100%;
   min-width: 0;
@@ -115,8 +116,8 @@
 .dashboard-tech-note-pill:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; }
 @keyframes dashboard-tech-note-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,.12); } 50% { box-shadow: 0 0 0 3px rgba(139,92,246,.08),0 0 12px rgba(139,92,246,.14); } }
 @keyframes dashboard-tech-note-shine { 0%,58% { transform: translateX(-140%); } 78%,100% { transform: translateX(140%); } }
-.dashboard-pm-chevron { grid-column: 2; grid-row: 1; width: 30px; height: 30px; display: grid; place-items: center; align-self: center; justify-self: center; border: 1px solid color-mix(in srgb,var(--dashboard-asset-accent) 46%,var(--mcc-border-default)); border-radius: 50%; color: color-mix(in srgb,var(--dashboard-asset-accent) 76%,white); background-color: color-mix(in srgb,var(--dashboard-asset-accent) 11%,rgba(18,32,44,.92)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1),0 0 13px color-mix(in srgb,var(--dashboard-asset-accent) 15%,transparent); line-height: 0; transition: border-color 200ms ease,background-color 200ms ease,color 200ms ease,box-shadow 200ms ease,transform 160ms ease; }
-.dashboard-pm-chevron svg { width: 17px; height: 17px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); transform-origin: 50% 50%; transition: transform 220ms cubic-bezier(.4,0,.2,1); }
+.dashboard-pm-chevron { position: absolute; z-index: 1; top: 50%; right: 9px; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid color-mix(in srgb,var(--dashboard-asset-accent) 46%,var(--mcc-border-default)); border-radius: 50%; color: color-mix(in srgb,var(--dashboard-asset-accent) 76%,white); background-color: color-mix(in srgb,var(--dashboard-asset-accent) 11%,rgba(18,32,44,.92)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1),0 0 13px color-mix(in srgb,var(--dashboard-asset-accent) 15%,transparent); line-height: 0; transform: translateY(-50%); transition: border-color 200ms ease,background-color 200ms ease,color 200ms ease,box-shadow 200ms ease,transform 160ms ease; }
+.dashboard-pm-chevron svg { position: absolute; top: 50%; left: 50%; width: 17px; height: 17px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; translate: -50% -50%; transform: rotate(0deg); transform-origin: 50% 50%; transition: transform 220ms cubic-bezier(.4,0,.2,1); }
 .dashboard-pm-asset-group.is-open .dashboard-pm-chevron { border-color: color-mix(in srgb,var(--dashboard-asset-accent) 72%,white); color: color-mix(in srgb,var(--dashboard-asset-accent) 82%,white); background-color: color-mix(in srgb,var(--dashboard-asset-accent) 18%,rgba(18,32,44,.92)); box-shadow: inset 0 1px 0 rgba(255,255,255,.12),0 0 13px color-mix(in srgb,var(--dashboard-asset-accent) 24%,transparent); }
 .dashboard-pm-asset-group.is-open .dashboard-pm-chevron svg { transform: rotate(180deg); }
 
@@ -187,7 +188,6 @@
   .dashboard-pm-asset-group.has-tech-notes .dashboard-pm-asset-identity { padding-right: 108px; }
   .dashboard-pm-asset-group.has-tech-notes .dashboard-pm-asset-statuses { padding-right: 0; }
   .dashboard-tech-note-pill { top: 13px; right: 43px; }
-  .dashboard-pm-chevron { grid-column: 2; grid-row: 1; }
   .dashboard-pm-task-row { grid-template-columns: minmax(0,1fr) 28px; gap: 7px 10px; }
   .dashboard-pm-task-due { grid-column: 1; }
   .dashboard-pm-task-open { grid-column: 2; grid-row: 1 / span 2; }
@@ -235,7 +235,7 @@
 .dashboard-requisition-summary .dashboard-metric-arrow { transition: border-color 150ms ease,color 150ms ease,transform 150ms ease; }
 .dashboard-pm-task-due { grid-column: 1; }
 .dashboard-pm-task-open { grid-column: 2; grid-row: 1 / span 2; }
-.dashboard-pm-asset-toggle:active .dashboard-pm-chevron { transform: scale(.94); }
+.dashboard-pm-asset-toggle:active .dashboard-pm-chevron { transform: translateY(-50%) scale(.94); }
 .dashboard-pm-asset-toggle:is(:hover,:focus-visible) .dashboard-pm-chevron { border-color: var(--dashboard-asset-accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.13),0 0 0 3px color-mix(in srgb,var(--dashboard-asset-accent) 9%,transparent),0 0 16px color-mix(in srgb,var(--dashboard-asset-accent) 24%,transparent); }
 @media (max-width:1000px) {
   .dashboard-command-row.has-inventory-attention { grid-template-columns: minmax(0,620px); }
@@ -301,7 +301,7 @@
 .dashboard-stock-dialog .modal-heading > button { flex: 0 0 auto; width: auto; min-width: 64px; }
 
 /* One work-order badge with independently accessible Open / Hold filters. */
-.dashboard-wo-badge { display: flex; align-items: center; gap: 4px; width: fit-content; max-width: calc(100% - 20px); margin: 0 10px 7px; padding: 0 7px; border: 1px solid rgba(167,139,250,.5); border-radius: 12px; color: #b9b4ce; background: linear-gradient(135deg,rgba(84,60,153,.35),rgba(12,25,40,.85)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1),0 3px 10px rgba(0,0,0,.15); font-size: .68rem; }
+.dashboard-wo-badge { display: flex; align-items: center; gap: 4px; width: fit-content; max-width: calc(100% - 52px); margin: 0 10px 7px; padding: 0 7px; border: 1px solid rgba(167,139,250,.5); border-radius: 12px; color: #b9b4ce; background: linear-gradient(135deg,rgba(84,60,153,.35),rgba(12,25,40,.85)); box-shadow: inset 0 1px 0 rgba(255,255,255,.1),0 3px 10px rgba(0,0,0,.15); font-size: .68rem; }
 .dashboard-wo-badge span { margin: 0; color: inherit; font-size: inherit; }
 .dashboard-wo-badge .dashboard-wo-label { color: #eee9ff; font-weight: 950; letter-spacing: .06em; }
 .dashboard-wo-badge .dashboard-wo-segment { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
