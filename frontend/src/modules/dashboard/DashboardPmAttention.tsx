@@ -1,6 +1,7 @@
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MccStatusPill } from '../../components/MccPills';
 import { groupPmAlerts, pmStatusOrder, type PmAlert, type PmAssetGroup, type PmLibrary, type PmStatus, type WarningNote } from './dashboardPm';
+import { DashboardExpander } from './DashboardExpander';
 
 function statusClass(status:PmStatus){return status.toLowerCase().replace(/\s+/g,'-');}
 
@@ -35,7 +36,7 @@ function PmTaskRow({alert,onOpen}:{alert:PmAlert;onOpen:()=>void}) {
   </button>;
 }
 
-function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{group:PmAssetGroup;isOpen:boolean;onToggle:()=>void;onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
+function PmAssetAccordion({group,isOpen,isWide,onToggle,onOpenTask,onOpenWarnings}:{group:PmAssetGroup;isOpen:boolean;isWide:boolean;onToggle:()=>void;onOpenTask:(alert:PmAlert)=>void;onOpenWarnings:(group:PmAssetGroup)=>void}) {
   const contentId=`dashboard-pm-group-${group.library}-${group.assetId}`;
   const label=`${group.assetNumber}${group.brand?` (${group.brand})`:''}`;
   const inactiveContentProps=isOpen?{}:{inert:''};
@@ -53,17 +54,17 @@ function PmAssetAccordion({group,isOpen,onToggle,onOpenTask,onOpenWarnings}:{gro
     });
     return()=>window.cancelAnimationFrame(frame);
   },[isOpen]);
-  return <article ref={groupRef} className={`dashboard-pm-asset-group${isOpen?' is-open':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
+  return <article ref={groupRef} className={`dashboard-pm-asset-group${isOpen?' is-open':''}${isWide?' is-wide':''}${group.warningNotes.length?' has-tech-notes':''}`} style={{'--dashboard-asset-accent':group.accentColor} as CSSProperties}>
     <div className="dashboard-pm-summary">
       <button className="dashboard-pm-asset-toggle" type="button" aria-expanded={isOpen} aria-controls={contentId} onClick={onToggle}>
         <span className="dashboard-pm-asset-identity"><strong>{label}</strong>{group.assetName&&<span>{group.assetName}</span>}</span>
         <AssetStatusPills group={group}/>
-        <span className="dashboard-pm-chevron" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m5.5 7.5 4.5 4.5 4.5-4.5"/></svg></span>
+        <DashboardExpander className="dashboard-pm-chevron"/>
       </button>
       {group.warningNotes.length>0&&<div className="dashboard-wo-badge" role="group" aria-label={`Work order counts for ${group.assetNumber}`}><span className="dashboard-wo-label">WO</span><span aria-hidden="true">(</span>{(['open','hold'] as const).map(filter=>{const notes=group.warningNotes.filter(note=>Boolean(note.hold)===(filter==='hold'));const label=filter==='hold'?'Hold':'Open';return <span className="dashboard-wo-segment" key={filter}>{filter==='hold'&&<span aria-hidden="true">/</span>}<button className={`dashboard-wo-count is-${filter}`} type="button" disabled={!notes.length} onClick={()=>onOpenWarnings({...group,warningNotes:notes,warningFilter:filter})} aria-label={`Open ${notes.length} ${label} work orders for ${group.assetNumber}`}>{label} <strong>{notes.length}</strong></button></span>;})}<span aria-hidden="true">)</span></div>}
     </div>
-    <div id={contentId} className="dashboard-pm-accordion-body" aria-hidden={!isOpen} {...inactiveContentProps}>
-      <div className="dashboard-pm-accordion-inner">
+    <div id={contentId} className="dashboard-pm-accordion-body dashboard-accordion-body" aria-hidden={!isOpen} {...inactiveContentProps}>
+      <div className="dashboard-pm-accordion-inner dashboard-accordion-inner">
         {pmStatusOrder.map(status=>{
           const tasks=group.alerts.filter(alert=>alert.status===status);
           return tasks.length>0&&<section className={`dashboard-pm-status-section status-${statusClass(status)}`} key={status} aria-labelledby={`${contentId}-${statusClass(status)}`}>
@@ -81,6 +82,26 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
   const columns=useMemo(()=>Array.from({length:Math.ceil(groups.length/4)},(_,column)=>groups.slice(column*4,column*4+4)),[groups]);
   const [openGroup,setOpenGroup]=useState<string|null>(null);
   const sectionRef=useRef<HTMLElement>(null);
+  const listRef=useRef<HTMLDivElement>(null);
+  const [trackCount,setTrackCount]=useState(1);
+  const [wideGroup,setWideGroup]=useState<string|null>(null);
+  // Use the actual grid tracks, including responsive changes, to retain the summary's slot.
+  useLayoutEffect(()=>{
+    const list=listRef.current;if(!list)return;
+    const observer=new ResizeObserver(()=>setTrackCount(getComputedStyle(list).gridTemplateColumns.split(' ').length));
+    observer.observe(list);return()=>observer.disconnect();
+  },[groups.length]);
+  useEffect(()=>{
+    if(openGroup){setWideGroup(openGroup);return;}
+    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){setWideGroup(null);return;}
+    // Wait for the actual collapse animations, including rapid reversals and offscreen cards.
+    // finished also handles browsers that omit DOM transitionend events.
+    let cancelled=false;
+    const body=sectionRef.current?.querySelector('.is-wide .dashboard-accordion-body');
+    const animations=body?.getAnimations()??[];
+    void Promise.allSettled(animations.map(animation=>animation.finished)).then(()=>{if(!cancelled)setWideGroup(null);});
+    return()=>{cancelled=true;};
+  },[openGroup]);
   useEffect(()=>{if(openGroup&&!groups.some(group=>group.key===openGroup))setOpenGroup(null);},[groups,openGroup]);
   useEffect(()=>{
     if(!openGroup)return;
@@ -112,6 +133,6 @@ export function PmAttentionSection({library,title,description,alerts,warningNote
     <header className="dashboard-pm-section-heading">
       <div><p className="dashboard-pm-library-label">{library==='machine'?'Machine Library':'Equipment Library'}</p><h3 id={`dashboard-${library}-pm-title`}>{title}</h3><p>{description}</p></div>
     </header>
-    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div className={`dashboard-pm-asset-list${openGroup?' has-open-group':''}`}>{columns.map((columnGroups,column)=><div className={`dashboard-pm-column${columnGroups.some(group=>group.key===openGroup)?' is-expanded-column':''}`} key={column}>{columnGroups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
+    {groups.length===0?<div className="dashboard-pm-section-empty"><strong>No {library} PM tasks need attention.</strong><span>Due Soon, Due Now, Past Due, and warning Tech Notes will appear here.</span></div>:<div ref={listRef} className={`dashboard-pm-asset-list${openGroup?' has-open-group':''}`}>{columns.map((columnGroups,column)=><div className={`dashboard-pm-column${columnGroups.some(group=>group.key===(openGroup??wideGroup))?' is-expanded-column':''}`} key={column} style={{'--dashboard-pm-summary-track':column%trackCount+1} as CSSProperties}>{columnGroups.map(group=><PmAssetAccordion key={group.key} group={group} isOpen={openGroup===group.key} isWide={(openGroup??wideGroup)===group.key} onToggle={()=>setOpenGroup(current=>current===group.key?null:group.key)} onOpenTask={onOpenTask} onOpenWarnings={onOpenWarnings}/>)}</div>)}</div>}
   </section>;
 }
