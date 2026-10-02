@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assetNoteUpdateWindowOpen,assetNoteUpdateLockAt} from '../backend/dist/server/assetNoteUpdateWindow.js';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -65,15 +66,50 @@ async function exerciseLibrary({base,library,assetId,creatorCookie,otherCookie,u
   result=await request(base,`/api/${library}-library/asset-notes/${note.id}/resolve`,{method:'POST',cookie:creatorCookie,body:{resolutionSummary:'Repair verified under normal production load.'}});assert.equal(result.response.status,200,JSON.stringify(result.data));note=result.data.note;assert.equal(note.hold,true);assert.equal(note.status,'resolved');assert.equal(note.workOrder,workOrder);assert.equal(note.body,originalBody);assert.equal(note.resolutionSummary,'Repair verified under normal production load.');assert.equal((await dashboardIssues(base,creatorCookie,library,assetId)).length,0,'Resolved warning issues must leave Dashboard attention immediately.');
   result=await request(base,`/api/${library}-library/asset-note-attachments/${note.attachments[0].id}`,{method:'DELETE',cookie:creatorCookie});assert.equal(result.response.status,409,'Resolved issue attachments must remain preserved until an authorized reopen.');
   const preservedAttachment=await fetch(`${base}${note.attachments[0].downloadUrl}`,{headers:{Cookie:creatorCookie}});assert.equal(preservedAttachment.status,200,'Resolved issue attachment file must remain reviewable.');
-  result=await request(base,`/api/${library}-library/asset-notes/${note.id}/updates`,{method:'POST',cookie:updaterCookie,body:updateForm('This update must be rejected while resolved.')});assert.equal(result.response.status,409);
+  const updateId=note.updates[1].id;const originalCreatedAt=note.updates[1].createdAt;
+  const updatePath=`/api/${library}-library/asset-notes/${note.id}/updates`;
+  // Control stored server resolution timestamps; exact millisecond boundaries are tested above.
+  const clockDb=new DatabaseSync(path.join(dataDir,'mcc.sqlite'));
+  try{
+  clockDb.prepare(`UPDATE ${library}_asset_notes SET resolved_at=? WHERE id=?`).run(new Date(Date.now()-48*3600000+1000).toISOString(),note.id);
+  result=await request(base,updatePath,{method:'POST',cookie:updaterCookie,body:updateForm('Correction during the final second.')});assert.equal(result.response.status,201,JSON.stringify(result.data));
+  clockDb.prepare(`UPDATE ${library}_asset_notes SET resolved_at=? WHERE id=?`).run(new Date(Date.now()-47*3600000).toISOString(),note.id);
+  result=await request(base,`${updatePath}/${updateId}`,{method:'PATCH',cookie:otherCookie,body:updateForm('Unauthorized correction')});assert.equal(result.response.status,403);assert.equal(result.data.code,'UPDATE_OWNER_REQUIRED');
+  for(const cookie of [updaterCookie,managerCookie,adminCookie]){
+    result=await request(base,`${updatePath}/${updateId}`,{method:'PATCH',cookie,body:updateForm('Corrected final readings.',cookie===updaterCookie)});assert.equal(result.response.status,200,JSON.stringify(result.data));assert.equal(result.data.update.createdAt,originalCreatedAt);assert.equal(result.data.update.createdBy,'Lifecycle Updater');assert.ok(result.data.update.updatedAt);assert.equal(result.data.update.attachments.length,3,JSON.stringify({actor:result.data.update.updatedBy,attachments:result.data.update.attachments.map(a=>a.id)}));
+  }
+  assert.equal(result.data.note.technicianUpdateWindowOpen,true);assert.ok(result.data.note.technicianUpdateLockAt);assert.ok(result.data.note.technicianUpdateServerTime);
+  for(const elapsed of [48*3600000,48*3600000+1000]){
+    clockDb.prepare(`UPDATE ${library}_asset_notes SET resolved_at=? WHERE id=?`).run(new Date(Date.now()-elapsed).toISOString(),note.id);
+    for(const [method,url] of [['POST',updatePath],['PATCH',`${updatePath}/${updateId}`]]){
+      result=await request(base,url,{method,cookie:updaterCookie,body:updateForm('Stale browser write',true)});assert.equal(result.response.status,409);assert.equal(result.data.code,'ISSUE_UPDATE_WINDOW_EXPIRED');
+    }
+  }
+  for(const invalid of [null,'not-a-timestamp']){
+    clockDb.prepare(`UPDATE ${library}_asset_notes SET resolved_at=? WHERE id=?`).run(invalid,note.id);
+    for(const [method,url] of [['POST',updatePath],['PATCH',`${updatePath}/${updateId}`]])assert.equal((await request(base,url,{method,cookie:updaterCookie,body:updateForm('Invalid metadata write')})).response.status,409);
+  }
+  clockDb.prepare(`UPDATE ${library}_asset_notes SET resolved_at=? WHERE id=?`).run('2026-01-01T00:00:00Z',note.id);
+  }finally{clockDb.close();}
   result=await request(base,editUrl,{method:'PATCH',cookie:updaterCookie,body:updateForm('Resolved rewrite.')});assert.equal(result.response.status,409);
-  result=await request(base,`/api/${library}-library/warning-issues?q=${encodeURIComponent(workOrder)}&status=resolved&year=2026`,{cookie:creatorCookie});assert.equal(result.response.status,200);assert.equal(result.data.issues.length,1,'Work Order must remain searchable after resolution.');assert.deepEqual(result.data.years,['2026']);assert.equal(result.data.issues[0].updates.length,2);
+  result=await request(base,`/api/${library}-library/warning-issues?q=${encodeURIComponent(workOrder)}&status=resolved&year=2026`,{cookie:creatorCookie});assert.equal(result.response.status,200);assert.equal(result.data.issues.length,1,'Work Order must remain searchable after resolution.');assert.deepEqual(result.data.years,['2026']);assert.equal(result.data.issues[0].updates.length,3);assert.equal(result.data.issues[0].technicianUpdateWindowOpen,false);assert.equal(result.data.issues[0].permissions.canAddUpdate,false);assert.ok(result.data.issues[0].updates.every(update=>!update.canEdit));
   result=await request(base,`/api/${library}-library/asset-notes/${note.id}/reopen`,{method:'POST',cookie:otherCookie,body:{reopenReason:'Unauthorized reopen'}});assert.equal(result.response.status,403,'A standard non-creator must not reopen another user\'s issue.');assert.equal((await dashboardIssues(base,creatorCookie,library,assetId)).length,0,'Unauthorized reopen must not restore Dashboard attention.');
-  result=await request(base,`/api/${library}-library/asset-notes/${note.id}/reopen`,{method:'POST',cookie:creatorCookie,body:{reopenReason:'Verification reading moved outside tolerance.'}});assert.equal(result.response.status,200);note=result.data.note;assert.equal(note.hold,true,'Reopen restores Hold');assert.equal(note.status,'active');assert.equal((await dashboardIssues(base,creatorCookie,library,assetId)).length,1,'Authorized reopening must restore Dashboard attention.');
+  const rollbackDb=new DatabaseSync(path.join(dataDir,'mcc.sqlite'));
+  try{
+    rollbackDb.exec(`CREATE TRIGGER fixture_reopen_failure BEFORE INSERT ON asset_note_updates WHEN NEW.asset_library='${library}' AND NEW.note_id=${note.id} BEGIN SELECT RAISE(ABORT,'Fixture rejects reopen update'); END`);
+    result=await request(base,`/api/${library}-library/asset-notes/${note.id}/reopen`,{method:'POST',cookie:creatorCookie,body:{reopenReason:'Rollback check'}});assert.equal(result.response.status,400);
+    assert.equal(rollbackDb.prepare(`SELECT issue_status FROM ${library}_asset_notes WHERE id=?`).get(note.id).issue_status,'resolved');
+    assert.equal(rollbackDb.prepare('SELECT COUNT(*) AS count FROM asset_note_updates WHERE asset_library=? AND note_id=?').get(library,note.id).count,3);
+    assert.equal(rollbackDb.prepare("SELECT COUNT(*) AS count FROM asset_note_lifecycle_events WHERE asset_library=? AND note_id=? AND event_type='issue_reopened'").get(library,note.id).count,0);
+  }finally{rollbackDb.exec('DROP TRIGGER IF EXISTS fixture_reopen_failure');rollbackDb.close();}
+  result=await request(base,`/api/${library}-library/asset-notes/${note.id}/reopen`,{method:'POST',cookie:creatorCookie,body:{reopenReason:'Verification reading moved outside tolerance.'}});assert.equal(result.response.status,200);note=result.data.note;assert.equal(note.updates.length,4);const reopenedUpdate=note.updates.at(-1);assert.equal(reopenedUpdate.body,'Verification reading moved outside tolerance.');assert.equal(reopenedUpdate.createdAt,note.reopenedAt);assert.equal(reopenedUpdate.createdBy,'Issue Creator');const reopenEvent=note.lifecycle.findLast(event=>event.type==='issue_reopened');const reopenAdded=note.lifecycle.findLast(event=>event.type==='update_added');assert.equal(reopenEvent.reason,reopenedUpdate.body);assert.equal(reopenEvent.createdAt,reopenedUpdate.createdAt);assert.equal(reopenAdded.newValue.updateId,reopenedUpdate.id);assert.equal(reopenAdded.newValue.body,reopenedUpdate.body);assert.equal(reopenAdded.createdAt,reopenedUpdate.createdAt);assert.equal(note.technicianUpdateWindowOpen,true);assert.equal(note.technicianUpdateLockAt,null);assert.equal(note.permissions.canAddUpdate,true);
+  result=await request(base,`/api/${library}-library/asset-notes/${note.id}/reopen`,{method:'POST',cookie:creatorCookie,body:{reopenReason:'Verification reading moved outside tolerance.'}});assert.equal(result.response.status,409,'Retry must not duplicate reopen comment');
+  result=await request(base,`${updatePath}/${reopenedUpdate.id}`,{method:'PATCH',cookie:creatorCookie,body:updateForm(reopenedUpdate.body)});assert.equal(result.response.status,200,'Reopened comments editable');
+  assert.equal(note.hold,true,'Reopen restores Hold');assert.equal(note.status,'active');assert.equal((await dashboardIssues(base,creatorCookie,library,assetId)).length,1,'Authorized reopening must restore Dashboard attention.');
 
   result=await editIssue(base,managerCookie,library,note,{title:`${label} manager-edited warning`,hold:false});assert.equal(result.response.status,200,'Manager must edit any warning issue.');note=result.data.note;
   result=await editIssue(base,adminCookie,library,note,{title:`${label} admin-edited warning`});assert.equal(result.response.status,200,'Admin must edit any warning issue.');note=result.data.note;
-  result=await request(base,`/api/${library}-library/asset-notes/${note.id}/resolve`,{method:'POST',cookie:managerCookie,body:{resolutionSummary:'Manager confirmed the follow-up verification.'}});assert.equal(result.response.status,200);note=result.data.note;
+  result=await request(base,`/api/${library}-library/asset-notes/${note.id}/resolve`,{method:'POST',cookie:managerCookie,body:{resolutionSummary:'Manager confirmed the follow-up verification.'}});assert.equal(result.response.status,200);note=result.data.note;assert.ok(Date.parse(note.resolvedAt)>Date.parse('2026-01-01T00:00:00Z'));assert.equal(note.technicianUpdateWindowOpen,true);assert.equal(Date.parse(note.technicianUpdateLockAt)-Date.parse(note.resolvedAt),48*3600000);
   result=await request(base,`/api/${library}-library/asset-notes/${note.id}`,{method:'DELETE',cookie:deleteCookie,body:{}});assert.equal(result.response.status,400,'Delete Reason is mandatory for warning issues.');
   result=await request(base,`/api/${library}-library/asset-notes/${note.id}`,{method:'DELETE',cookie:deleteCookie,body:{deleteReason:`${label} duplicate record retired after audit review.`}});assert.equal(result.response.status,200,JSON.stringify(result.data));assert.equal(result.data.historyPreserved,true);assert.equal((await dashboardIssues(base,creatorCookie,library,assetId)).length,0);
 
@@ -81,7 +117,16 @@ async function exerciseLibrary({base,library,assetId,creatorCookie,otherCookie,u
   return{noteId:note.id,workOrder,originalBody,initialAttachmentReference:note.attachments[0].downloadUrl};
 }
 
+function testWindowBoundaries(){
+  const resolved={issue_status:'resolved',resolved_at:'2026-10-01T10:00:00.000Z'};
+  assert.equal(assetNoteUpdateLockAt(resolved),'2026-10-03T10:00:00.000Z');
+  for(const [time,open] of [['2026-10-03T09:59:59.000Z',true],['2026-10-03T10:00:00.000Z',false],['2026-10-03T10:00:01.000Z',false],['2026-10-01T09:59:59.000Z',false],['2026-10-01T10:00:00.000Z',true]])assert.equal(assetNoteUpdateWindowOpen(resolved,time),open,time);
+  for(const resolved_at of [null,'invalid'])assert.equal(assetNoteUpdateWindowOpen({...resolved,resolved_at},'2026-10-01T11:00:00Z'),false);
+  assert.equal(assetNoteUpdateWindowOpen({issue_status:'active',resolved_at:null},'2026-10-20T10:00:00Z'),true);
+}
+
 async function run(){
+  testWindowBoundaries();
   fs.mkdirSync(fixture,{recursive:true});const runtime=await start(await freePort());server=runtime.child;const{base}=runtime;
   let result=await request(base,'/api/auth/setup-first-admin',{method:'POST',body:{fullName:'Lifecycle Admin',email:'admin@example.com',password,confirmPassword:password}});assert.equal(result.response.status,200);const adminCookie=await login(base,'admin@example.com');
   for(const user of [{fullName:'Issue Creator',email:'creator@example.com',role:'Maintenance Tech 3'},{fullName:'Other Standard Tech',email:'other@example.com',role:'Maintenance Tech 3'},{fullName:'Lifecycle Updater',email:'updater@example.com',role:'Maintenance Tech 2'},{fullName:'Lifecycle Manager',email:'manager@example.com',role:'Manager'}]){result=await request(base,'/api/users',{method:'POST',cookie:adminCookie,body:{...user,temporaryPassword:password}});assert.equal(result.response.status,201,JSON.stringify(result.data));}
@@ -96,7 +141,7 @@ async function run(){
   for(const table of ['machine_asset_notes','equipment_asset_notes']){const columns=new Set(database.prepare(`PRAGMA table_info(${table})`).all().map(column=>column.name));for(const column of ['is_on_hold','work_order_reference','issue_status','resolved_at','resolved_by_user_id','resolution_summary','reopened_at','reopened_by_user_id','deleted','deleted_at','deleted_by_user_id','delete_reason'])assert.ok(columns.has(column),`${table} migration missing ${column}`);}
   for(const table of ['asset_note_updates','asset_note_update_attachments','asset_note_lifecycle_events'])assert.ok(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table),`Missing lifecycle table ${table}`);
   for(const column of ['updated_at','updated_by_user_id','updated_by_name'])assert.ok(database.prepare('PRAGMA table_info(asset_note_updates)').all().some(item=>item.name===column),`Missing update metadata ${column}`);
-  for(const [library,fixtureData] of [['machine',machine],['equipment',equipment]]){const table=`${library}_asset_notes`;const row=database.prepare(`SELECT * FROM ${table} WHERE id=?`).get(fixtureData.noteId);assert.equal(row.deleted,1);assert.match(row.delete_reason,/audit review/i);assert.equal(row.work_order_reference,fixtureData.workOrder);assert.equal(row.body,fixtureData.originalBody);assert.equal(database.prepare('SELECT COUNT(*) AS count FROM asset_note_updates WHERE asset_library=? AND note_id=?').get(library,fixtureData.noteId).count,2);const events=database.prepare('SELECT event_type,reason FROM asset_note_lifecycle_events WHERE asset_library=? AND note_id=? ORDER BY id').all(library,fixtureData.noteId);for(const type of ['issue_created','update_added','issue_resolved','issue_reopened','issue_edited','issue_deleted'])assert.ok(events.some(event=>event.event_type===type),`${library} missing ${type} audit event`);assert.ok(events.some(event=>event.event_type==='issue_deleted'&&/audit review/i.test(event.reason)));}
+  for(const [library,fixtureData] of [['machine',machine],['equipment',equipment]]){const table=`${library}_asset_notes`;const row=database.prepare(`SELECT * FROM ${table} WHERE id=?`).get(fixtureData.noteId);assert.equal(row.deleted,1);assert.match(row.delete_reason,/audit review/i);assert.equal(row.work_order_reference,fixtureData.workOrder);assert.equal(row.body,fixtureData.originalBody);assert.equal(database.prepare('SELECT COUNT(*) AS count FROM asset_note_updates WHERE asset_library=? AND note_id=?').get(library,fixtureData.noteId).count,4);const events=database.prepare('SELECT event_type,reason FROM asset_note_lifecycle_events WHERE asset_library=? AND note_id=? ORDER BY id').all(library,fixtureData.noteId);for(const type of ['issue_created','update_added','issue_resolved','issue_reopened','issue_edited','issue_deleted'])assert.ok(events.some(event=>event.event_type===type),`${library} missing ${type} audit event`);assert.ok(events.some(event=>event.event_type==='issue_deleted'&&/audit review/i.test(event.reason)));}
   const deletionAudits=database.prepare("SELECT target_type,details_json FROM audit_log WHERE action='warning issue delete' ORDER BY id").all();assert.equal(deletionAudits.length,2);assert.deepEqual(deletionAudits.map(row=>row.target_type).sort(),['equipment_asset_note','machine_asset_note']);for(const row of deletionAudits){const details=JSON.parse(row.details_json);assert.equal(details.historyPreserved,true);assert.equal(details.attachmentsPreserved,true);assert.match(details.reason,/audit review/i);}
   database.close();
   server.kill();await new Promise(resolve=>server.once('exit',resolve));
@@ -110,7 +155,7 @@ async function run(){
   for(const column of ['updated_at','updated_by_user_id','updated_by_name'])assert.ok(check.prepare('PRAGMA table_info(asset_note_updates)').all().some(item=>item.name===column));
   check.close();
 
-  console.log('Warning issue lifecycle API tests passed for Machine + Equipment ownership/elevation, append-only updates, attachments, Work Order search, resolve/reopen Dashboard state, delete reasons, soft-delete audit evidence, ordinary-note behavior, and schema migrations.');
+  console.log('Warning issue lifecycle API tests passed for Machine + Equipment exact 48-hour boundaries, correction attachments, stale-client/invalid-metadata rejection, ownership/elevation, transactional reopen rollback/retry, fresh re-resolution windows, audited updates, attachments, Work Order search, resolve/reopen Dashboard state, delete reasons, soft-delete audit evidence, ordinary-note behavior, and schema migrations.');
 }
 
-try{await run();}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
+try{await run();}catch(error){console.error(error);throw error;}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}

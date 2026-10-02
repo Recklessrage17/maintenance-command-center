@@ -1737,7 +1737,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-resolved-asset strong { color: #edfff8; }
 .asset-note-original-label { margin-bottom: -5px; color: #ffcfb5; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
 .asset-note-entry.is-warning-issue .asset-note-body-preview { display: block; overflow: visible; -webkit-line-clamp: initial; }
-.asset-note-update-section { display: grid; gap: 9px; padding: 11px; border: 1px solid rgba(68,215,255,.18); border-radius: 10px; background: rgba(2,16,29,.48); }
+.asset-note-update-section { display: grid; gap: 9px; padding: 11px; border: 1px solid var(--mcc-border-default); border-radius: 10px; background: rgba(2,16,29,.48); }
 .asset-note-update-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .asset-note-update-heading > div { display: grid; gap: 2px; }
 .asset-note-update-heading strong { color: #effbff; font-size: .82rem; }
@@ -1752,7 +1752,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-update-meta-actions > .asset-note-edit-update { flex: 0 0 auto; width: max-content; max-width: 100%; min-height: 36px; white-space: nowrap; }
 .asset-note-update-timeline strong { color: #eafaff; font-size: .76rem; }
 .asset-note-update-timeline time { color: #91afbf; font-size: .66rem; }
-.asset-note-update-timeline p { margin: 0; color: #c4dbe6; font-size: .76rem; line-height: 1.5; white-space: pre-wrap; }
+.asset-note-update-timeline > li > p { margin: 0; color: var(--mcc-status-warning); font-size: .76rem; line-height: 1.5; white-space: pre-wrap; }
 .asset-note-update-form,.asset-note-lifecycle-form { display: grid; gap: 10px; padding: 11px; border: 1px solid rgba(68,215,255,.25); border-radius: 10px; background: rgba(6,26,43,.74); }
 .asset-note-update-form textarea,.asset-note-lifecycle-form textarea { resize: vertical; }
 .asset-note-update-attachment-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
