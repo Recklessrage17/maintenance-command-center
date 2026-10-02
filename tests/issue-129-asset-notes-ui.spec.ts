@@ -235,6 +235,9 @@ for(const library of ['machine','equipment'] as const){
       await expect(info.getByText(record.title,{exact:true})).toBeVisible();await expect(info.getByText(record.workOrder,{exact:true})).toBeVisible();
       await expect(files).toContainText('1 photographed page PDF · 2 supporting files');
       const more=info.getByRole('button',{name:`More actions for ${record.title}`,exact:true});
+      const moreSize=await more.evaluate(element=>{const box=element.getBoundingClientRect();const arrow=element.querySelector('span')!.getBoundingClientRect();const style=getComputedStyle(element);return{height:box.height,width:box.width,radius:parseFloat(style.borderTopLeftRadius),fontSize:parseFloat(style.fontSize),centerDelta:Math.abs(box.top+box.height/2-arrow.top-arrow.height/2),touch:matchMedia('(pointer:coarse), (max-width:700px)').matches};});
+      expect(moreSize.radius).toBeGreaterThanOrEqual(moreSize.height/2);expect(moreSize.width).toBeLessThan(90);expect(moreSize.centerDelta).toBeLessThanOrEqual(2);
+      if(moreSize.touch)expect(moreSize.height).toBeGreaterThanOrEqual(44);else{expect(moreSize.height).toBeLessThanOrEqual(28);expect(moreSize.fontSize).toBeLessThanOrEqual(12);}
       await more.scrollIntoViewIfNeeded();await more.click();
       const menu=page.getByRole('menu',{name:`More actions for ${record.title}`,exact:true});await expect(menu.getByRole('menuitem',{name:'Edit Note',exact:true})).toBeVisible();
       await page.keyboard.press('Escape');await expect(menu).not.toBeVisible();
@@ -242,8 +245,8 @@ for(const library of ['machine','equipment'] as const){
       await expect(generated).toContainText('Updated');await expect(generated.locator('.asset-note-file-type-icon')).toBeVisible();
       for(const action of ['Preview','Download']){
         const button=generated.getByRole('button',{name:action,exact:true});
-        const size=await button.evaluate(element=>({height:element.getBoundingClientRect().height,width:element.getBoundingClientRect().width,touch:matchMedia('(pointer:coarse), (max-width:700px)').matches}));
-        expect(size.width).toBeLessThan(120);if(size.touch)expect(size.height).toBeGreaterThanOrEqual(44);
+        const size=await button.evaluate(element=>({radius:parseFloat(getComputedStyle(element).borderTopLeftRadius),height:element.getBoundingClientRect().height,width:element.getBoundingClientRect().width,touch:matchMedia('(pointer:coarse), (max-width:700px)').matches}));
+        expect(size.radius).toBeGreaterThanOrEqual(size.height/2);expect(size.width).toBeLessThan(120);if(size.touch)expect(size.height).toBeGreaterThanOrEqual(44);
       }
       await generated.getByRole('button',{name:'Preview',exact:true}).click();
       const viewer=page.getByRole('dialog',{name:`${record.pdfFilename} viewer`});await expect(viewer).toBeVisible();await viewer.getByRole('button',{name:'Close',exact:true}).first().click();
