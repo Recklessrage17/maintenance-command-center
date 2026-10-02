@@ -200,3 +200,40 @@ for(const library of ['machine','equipment'] as const){
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);expect(overflow).toBeLessThanOrEqual(1);
   });
 }
+
+for(const library of ['machine','equipment'] as const){
+  test(`${library} Update Entry glow and focus fit inside accordion clipping bounds`,async({page},testInfo)=>{
+    const {assetId}=await mockLibrary(page,library,'active',true);
+    await page.goto(`/${library}-library?asset=${assetId}`);
+    await page.getByRole('button',{name:/Asset Notes & Attachments/}).click();
+    const card=page.locator('.asset-note-active-issue-card',{hasText:`${library} active warning`});
+    await card.locator('.asset-note-issue-toggle').click();
+    const technician=card.locator('.asset-technician-card').first();
+    const toggle=technician.locator('.asset-technician-toggle');
+    await toggle.click();
+    const button=technician.getByRole('button',{name:'Update Entry'});
+    await button.hover();
+    await expect.poll(()=>button.evaluate(element=>getComputedStyle(element).transform)).toBe('matrix(1, 0, 0, 1, 0, -1)');
+    const metrics=await button.evaluate(element=>{
+      const box=element.getBoundingClientRect();const bounds=[];
+      for(let ancestor=element.parentElement;ancestor;ancestor=ancestor.parentElement){
+        const style=getComputedStyle(ancestor);
+        if(/hidden|clip|auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)){
+          const clip=ancestor.getBoundingClientRect();
+          bounds.push({top:box.top-clip.top,right:clip.right-box.right,bottom:clip.bottom-box.bottom,left:box.left-clip.left});
+        }
+      }
+      return {height:box.height,width:box.width,cardWidth:element.closest('.asset-technician-card')!.getBoundingClientRect().width,shadow:getComputedStyle(element).boxShadow,bounds,touch:matchMedia('(pointer:coarse), (max-width:700px)').matches};
+    });
+    expect(metrics.shadow).toContain('10px');expect(metrics.width).toBeLessThan(metrics.cardWidth*.6);
+    if(metrics.touch)expect(metrics.height).toBeGreaterThanOrEqual(44);else expect(metrics.height).toBeLessThanOrEqual(32);
+    expect(metrics.bounds.length).toBeGreaterThan(0);
+    for(const clip of metrics.bounds)for(const space of Object.values(clip))expect(space).toBeGreaterThanOrEqual(10);
+    await technician.screenshot({path:testInfo.outputPath('update-entry-hover.png')});
+    await page.mouse.move(0,0);await toggle.focus();await page.keyboard.press('Tab');
+    await expect(button).toBeFocused();expect(await button.evaluate(element=>element.matches(':focus-visible'))).toBe(true);
+    await expect(button).toHaveCSS('outline-style','solid');await expect(button).toHaveCSS('outline-width','2px');
+    await page.emulateMedia({reducedMotion:'reduce'});await button.hover();await expect(button).toHaveCSS('transform','none');
+    await toggle.click();await expect(button).not.toBeVisible();
+  });
+}

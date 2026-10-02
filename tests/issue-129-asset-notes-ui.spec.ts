@@ -211,3 +211,49 @@ for(const library of ['machine','equipment'] as const){
     await checkPdf(generated);await checkPdf(uploaded);await card.screenshot({path:testInfo.outputPath('pdf-attachment-icons.png')});
   });
 }
+
+for(const library of ['machine','equipment'] as const){
+  test(`${library} compact work information and resource cards preserve actions across viewports`,async({page},testInfo)=>{
+    const record=maintenanceIssue(library);record.attachments=note(library).attachments;
+    record.title='Long maintenance record title '+ 'wrap safely '.repeat(8);
+    record.pdfFilename='Long_generated_maintenance_record_'+ 'filename_'.repeat(12)+'.pdf';
+    await openNotes(page,library,true,[record]);
+    const card=page.locator('.asset-note-active-issue-card');await card.locator('.asset-note-issue-toggle').click();
+    const info=card.locator('.asset-note-work-info-section');const files=card.locator('.asset-note-files-section');
+    for(const viewport of [{width:1440,height:900},{width:820,height:1180},{width:390,height:844}]){
+      await page.setViewportSize(viewport);
+      const geometry=await card.evaluate(element=>{
+        const info=element.querySelector('.asset-note-work-info-section')!;const files=element.querySelector('.asset-note-files-section')!;
+        return {infoWidth:info.getBoundingClientRect().width,filesWidth:files.getBoundingClientRect().width,
+          rows:Array.from(files.querySelectorAll('.asset-attachment-chip')).map(row=>({width:row.getBoundingClientRect().width,overflow:row.scrollWidth-row.clientWidth})),
+          overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,infoOverflow:info.scrollWidth-info.clientWidth};
+      });
+      if(viewport.width>700){expect(geometry.infoWidth).toBeLessThanOrEqual(480);expect(geometry.filesWidth).toBeLessThanOrEqual(620);}
+      expect(geometry.infoOverflow).toBeLessThanOrEqual(1);expect(geometry.overflow).toBeLessThanOrEqual(1);
+      expect(geometry.rows).toHaveLength(4);for(const row of geometry.rows){expect(row.width).toBeLessThanOrEqual(604);expect(row.overflow).toBeLessThanOrEqual(1);}
+      for(const label of ['Work Order #','Record title','Asset'])await expect(info.getByText(label,{exact:true})).toBeVisible();
+      await expect(info.getByText(record.title,{exact:true})).toBeVisible();await expect(info.getByText(record.workOrder,{exact:true})).toBeVisible();
+      await expect(files).toContainText('1 photographed page PDF · 2 supporting files');
+      const more=info.getByRole('button',{name:`More actions for ${record.title}`,exact:true});
+      await more.scrollIntoViewIfNeeded();await more.click();
+      const menu=page.getByRole('menu',{name:`More actions for ${record.title}`,exact:true});await expect(menu.getByRole('menuitem',{name:'Edit Note',exact:true})).toBeVisible();
+      await page.keyboard.press('Escape');await expect(menu).not.toBeVisible();
+      const generated=files.getByLabel(`Generated note PDF ${record.pdfFilename}`);
+      await expect(generated).toContainText('Updated');await expect(generated.locator('.asset-note-file-type-icon')).toBeVisible();
+      for(const action of ['Preview','Download']){
+        const button=generated.getByRole('button',{name:action,exact:true});
+        const size=await button.evaluate(element=>({height:element.getBoundingClientRect().height,width:element.getBoundingClientRect().width,touch:matchMedia('(pointer:coarse), (max-width:700px)').matches}));
+        expect(size.width).toBeLessThan(120);if(size.touch)expect(size.height).toBeGreaterThanOrEqual(44);
+      }
+      await generated.getByRole('button',{name:'Preview',exact:true}).click();
+      const viewer=page.getByRole('dialog',{name:`${record.pdfFilename} viewer`});await expect(viewer).toBeVisible();await viewer.getByRole('button',{name:'Close',exact:true}).first().click();
+      await info.screenshot({path:testInfo.outputPath(`compact-work-info-${viewport.width}.png`)});
+      await files.screenshot({path:testInfo.outputPath(`compact-files-${viewport.width}.png`)});
+    }
+    for(const [label,filename] of [[`Generated note PDF ${record.pdfFilename}`,record.pdfFilename],['Attachment electrical-inspection.pdf','electrical-inspection.pdf']]){
+      const download=page.waitForEvent('download');await files.getByLabel(label,{exact:true}).getByRole('button',{name:'Download',exact:true}).click();expect((await download).suggestedFilename()).toBe(filename);
+    }
+    await files.getByLabel('Attachment electrical-inspection.pdf',{exact:true}).getByRole('button',{name:'Preview',exact:true}).click();
+    await expect(page.getByRole('dialog',{name:'electrical-inspection.pdf viewer'})).toBeVisible();
+  });
+}

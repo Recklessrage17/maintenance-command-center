@@ -5561,3 +5561,31 @@ tr:hover td {
 .asset-note-update-form .mcc-date-icon::before,.asset-note-update-form .mcc-date-icon::after { content:none; }
 @media (pointer:coarse), (max-width:700px) { :is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update { min-height:44px; padding:6px 9px; } .asset-note-update-form .mcc-date-trigger { width:44px; height:44px; } .asset-note-update-form .mcc-date-input { min-height:48px; padding-right:58px; } }
 @media (prefers-reduced-motion:reduce) { :is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update:hover:not(:disabled) { transform:none; } .asset-note-update-form .mcc-date-trigger,.asset-note-update-form .mcc-date-icon { transition:none; } }
+
+/* Compact record resources, shared by Machine and Equipment Asset Notes. */
+.asset-note-work-info-section { width:100%; max-width:480px; justify-self:start; padding:8px; gap:6px; }
+.asset-note-work-info-section > header { flex-wrap:wrap; }
+.asset-note-work-info-grid { grid-template-columns:minmax(0,1fr); gap:5px; }
+.asset-note-work-info-grid > div { grid-template-columns:100px minmax(0,1fr); align-items:baseline; gap:8px; padding:5px 7px; }
+.asset-note-work-info-grid > div:last-child { grid-column:auto; }
+.asset-note-work-info-section .asset-note-actions { flex:none; }
+.asset-note-work-info-section .mcc-overflow-menu__trigger { width:max-content; min-height:30px; padding:3px 8px; }
+.asset-note-files-section { width:100%; max-width:620px; justify-self:start; padding:8px; gap:6px; }
+.asset-note-files-section > header { flex-wrap:wrap; gap:5px 9px; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-grid.glass-attachments { grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),520px)); }
+.asset-note-files-section .asset-attachment-grid.glass-attachments { grid-template-columns:minmax(0,1fr); }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-chip.glass-attachment { grid-template-columns:auto minmax(0,1fr); align-items:start; padding:8px; gap:6px 9px; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-chip .asset-attachment-actions { grid-column:1 / -1; justify-content:flex-end; padding-top:6px; border-top:1px solid rgba(143,205,233,.12); }
+/* Reserve the hover shadow and focus ring inside the accordion's clipping box. */
+.asset-technician-card.is-open .asset-technician-details-inner { padding-top:12px; }
+@media (pointer:coarse), (max-width:700px) {
+  .asset-note-work-info-section .mcc-overflow-menu__trigger { min-width:44px; min-height:44px; }
+  :is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-actions button { min-height:44px; }
+}
+@media (max-width:700px) {
+  .asset-note-work-info-section,.asset-note-files-section { max-width:100%; }
+  :is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-grid.glass-attachments { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:380px) {
+  .asset-note-work-info-grid > div { grid-template-columns:minmax(0,1fr); gap:3px; }
+}
