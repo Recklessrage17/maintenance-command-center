@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {migrateAssetNoteWorkLogs,insertWorkLogEntry,workLogEntries,workLogCompletionEntry,workLogInput,localWorkDate} from '../backend/dist/server/assetNoteWorkLogs.js';
+process.env.TZ='America/Chicago';
+const db=new DatabaseSync(':memory:');
+try{
+  db.exec(`PRAGMA foreign_keys=ON;CREATE TABLE users(id INTEGER PRIMARY KEY);INSERT INTO users VALUES(1),(2);
+    CREATE TABLE asset_note_updates(id INTEGER PRIMARY KEY,asset_library TEXT,note_id INTEGER,body TEXT,created_by_user_id INTEGER,created_by_name TEXT,created_at TEXT,updated_at TEXT,updated_by_user_id INTEGER);
+    CREATE TABLE asset_note_update_attachments(id INTEGER PRIMARY KEY,update_id INTEGER);
+    INSERT INTO asset_note_updates VALUES(17,'machine',1,'Historic edit retained',1,'Technician A','2026-10-01T02:00:00Z','2026-10-01T03:00:00Z',2);
+    INSERT INTO asset_note_update_attachments VALUES(9,17);`);
+  migrateAssetNoteWorkLogs(db);const initial=workLogEntries(db,17)[0];
+  assert.equal(initial.work_date,'2026-09-30');assert.equal(initial.created_at,'2026-10-01T02:00:00Z');assert.equal(initial.updated_by_user_id,2);assert.equal(initial.body,'Historic edit retained');assert.equal(initial.labor_hours,0);assert.equal(initial.update_id,17);
+  migrateAssetNoteWorkLogs(db);assert.equal(workLogEntries(db,17).length,1);assert.equal(workLogEntries(db,17)[0].id,initial.id);assert.equal(db.prepare('SELECT update_id FROM asset_note_update_attachments WHERE id=9').get().update_id,17);
+  db.prepare('UPDATE asset_note_update_entries SET work_date=?,labor_hours=? WHERE id=?').run('2026-10-01',.5,initial.id);
+  const day3=insertWorkLogEntry(db,17,{workDate:'2026-10-03',body:'Day C',laborHours:.25},1,'2026-10-03T18:00:00Z');
+  const day2=insertWorkLogEntry(db,17,{workDate:'2026-10-02',body:'Day B',laborHours:.75},1,'2026-10-02T18:00:00Z');
+  assert.deepEqual(workLogEntries(db,17).map(row=>row.work_date),['2026-10-01','2026-10-02','2026-10-03']);assert.equal(workLogEntries(db,17).reduce((sum,row)=>sum+row.labor_hours,0),1.5);
+  db.prepare('UPDATE asset_note_update_entries SET body=?,labor_hours=? WHERE id=?').run('Day B correction',.5,day2);assert.equal(workLogEntries(db,17).find(row=>row.id===day3).body,'Day C');assert.equal(workLogEntries(db,17).find(row=>row.id===initial.id).body,'Historic edit retained');
+  let note={id:1,issue_status:'active',resolved_at:null,reopened_at:null};assert.equal(workLogCompletionEntry(db,'machine',note),null);
+  assert.equal(workLogCompletionEntry(db,'machine',{...note,issue_status:'resolved',resolved_at:'invalid'}),null);
+  note={...note,issue_status:'resolved',resolved_at:'2026-10-04T18:00:00Z'};assert.equal(workLogCompletionEntry(db,'machine',note),day3);
+  db.exec("INSERT INTO asset_note_updates(id,asset_library,note_id,body,created_by_user_id,created_by_name,created_at,daily_entries_version) VALUES(18,'machine',1,'B work',2,'Technician B','2026-10-03T19:00:00Z',1)");
+  const b=insertWorkLogEntry(db,18,{workDate:'2026-10-03',body:'B work',laborHours:.75},2,'2026-10-03T19:00:00Z',true);assert.equal(workLogCompletionEntry(db,'machine',note),b);
+  insertWorkLogEntry(db,18,{workDate:'2026-10-04',body:'After-resolution correction',laborHours:0},2,'2026-10-04T19:00:00Z');assert.equal(workLogCompletionEntry(db,'machine',note),b);
+  const future=insertWorkLogEntry(db,18,{workDate:'2026-10-10',body:'Future work date',laborHours:0},2,'2026-10-03T20:00:00Z');assert.notEqual(workLogCompletionEntry(db,'machine',note),future);
+  assert.equal(workLogCompletionEntry(db,'machine',{...note,issue_status:'active',resolved_at:null,reopened_at:'2026-10-05T12:00:00Z'}),null);
+  const newCycle=insertWorkLogEntry(db,17,{workDate:'2026-10-05',body:'New cycle',laborHours:.25},1,'2026-10-05T18:00:00Z');assert.equal(workLogCompletionEntry(db,'machine',{...note,resolved_at:'2026-10-06T18:00:00Z',reopened_at:'2026-10-05T12:00:00Z'}),newCycle);
+  for(const laborHours of [0,.29,1.5,24])assert.equal(workLogInput({workDate:'2026-10-01',body:'Labor',laborHours}).laborHours,laborHours);
+  for(const input of [{workDate:'2026-02-30',body:'Invalid'},{workDate:'2026-10-01',body:'Invalid',laborHours:-1},{workDate:'2026-10-01',body:'Invalid',laborHours:24.01}])assert.throws(()=>workLogInput(input));
+  assert.equal(localWorkDate('2026-11-01T05:30:00Z'),'2026-11-01');
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+  console.log('Technician work log tests passed: idempotent local-date legacy backfill, preserved IDs/creator/editor/attachments, independent entries/labor, multiple-technician completion ordering and resolution cycles, post-resolution/future-date exclusion, validation, integrity_check=ok and foreign_key_check=0 rows.');
+}finally{db.close();}

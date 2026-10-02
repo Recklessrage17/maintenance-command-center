@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { validWorkDate } from './assetNoteWorkLogs.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Transform } from 'node:stream';
@@ -269,6 +270,11 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
           ],
         },
         {
+          table: 'asset_note_update_entries', name: 'Daily Work Entries',
+          query: "SELECT e.*,u.note_id AS note_id,u.created_by_name AS technician,n.work_order_reference AS work_order_reference,a.asset_number AS asset_number FROM asset_note_update_entries e JOIN asset_note_updates u ON u.id=e.update_id JOIN machine_asset_notes n ON n.id=u.note_id JOIN machine_assets a ON a.id=n.asset_id WHERE u.asset_library='machine' ORDER BY e.work_date,e.created_at,e.id",
+          derivedColumns: [{name:'note_id',value:row=>row.note_id},{name:'technician',value:row=>row.technician},{name:'work_order_reference',value:row=>row.work_order_reference},{name:'asset_number',value:row=>row.asset_number}],
+        },
+        {
           table: 'asset_note_update_attachments',
           name: 'Update Attachments',
           query: "SELECT x.*,u.note_id AS note_id,n.asset_id AS asset_id,n.title AS note_title,a.asset_number AS asset_number FROM asset_note_update_attachments x LEFT JOIN asset_note_updates u ON u.id=x.update_id LEFT JOIN machine_asset_notes n ON n.id=u.note_id LEFT JOIN machine_assets a ON a.id=n.asset_id WHERE u.asset_library='machine' ORDER BY x.rowid",
@@ -363,6 +369,11 @@ export async function writeExcelInsuranceExports(snapshotDatabasePath: string, e
             { name: 'note_title', value: row => row.note_title },
             { name: 'work_order_reference', value: row => row.work_order_reference },
           ],
+        },
+        {
+          table: 'asset_note_update_entries', name: 'Daily Work Entries',
+          query: "SELECT e.*,u.note_id AS note_id,u.created_by_name AS technician,n.work_order_reference AS work_order_reference,a.asset_number AS asset_number FROM asset_note_update_entries e JOIN asset_note_updates u ON u.id=e.update_id JOIN equipment_asset_notes n ON n.id=u.note_id JOIN equipment_assets a ON a.id=n.asset_id WHERE u.asset_library='equipment' ORDER BY e.work_date,e.created_at,e.id",
+          derivedColumns: [{name:'note_id',value:row=>row.note_id},{name:'technician',value:row=>row.technician},{name:'work_order_reference',value:row=>row.work_order_reference},{name:'asset_number',value:row=>row.asset_number}],
         },
         {
           table: 'asset_note_update_attachments',
@@ -1102,6 +1113,7 @@ function validateAssetNoteIssueLifecycleIntegrity(database:DatabaseSync,tables:S
   if(tables.has('asset_note_updates')){
     for(const row of database.prepare('SELECT * FROM asset_note_updates WHERE asset_library=?').all(library) as Array<Record<string,unknown>>){
       const id=Number(row.id);const noteId=Number(row.note_id);
+      if(![0,1].includes(Number(row.daily_entries_version??0)))throw new Error('Portable package has an invalid daily work entry version.');
       if(!noteWarnings.get(noteId))throw new Error(`Portable package ${label} warning issue update ${id} has an invalid note relationship.`);
       if(!String(row.body??'').trim()||!String(row.created_by_name??'').trim()||row.created_by_user_id===null||row.created_by_user_id===undefined||!String(row.created_at??'').trim())throw new Error(`Portable package ${label} warning issue update ${id} has incomplete audit metadata.`);
       assertAssetNoteUserRelationship(userIds,row.created_by_user_id,`${label} warning issue update ${id} creator`);
@@ -1113,12 +1125,40 @@ function validateAssetNoteIssueLifecycleIntegrity(database:DatabaseSync,tables:S
       updateIds.add(id);
     }
   }
+  if(tables.has('asset_note_update_entries')){
+    for(const row of database.prepare('SELECT * FROM asset_note_update_entries').all() as Array<Record<string,unknown>>){
+      const parent=database.prepare('SELECT * FROM asset_note_updates WHERE id=?').get(Number(row.update_id)) as Record<string,unknown>|undefined;
+      if(!parent)throw new Error('Portable package daily entry has an invalid thread relationship.');
+      if(parent.asset_library!==library)continue;
+      if(!validWorkDate(row.work_date)||!String(row.body??'').trim()||typeof row.labor_hours!=='number'||!Number.isFinite(row.labor_hours)||row.labor_hours<0||row.labor_hours>24||Math.abs(Math.round(row.labor_hours*100)-row.labor_hours*100)>1e-8||!Number.isFinite(Date.parse(String(row.created_at??'')))||![0,1].includes(Number(row.is_initial)))throw new Error('Portable package daily entry has invalid date, body, labor, or creation metadata.');
+      if(row.created_by_user_id!==parent.created_by_user_id)throw new Error('Portable package daily entry has an invalid owner.');
+      assertAssetNoteUserRelationship(userIds,row.created_by_user_id,'daily entry creator');
+      if(Boolean(row.updated_at)!==Boolean(row.updated_by_user_id))throw new Error('Portable package daily entry has incomplete edit metadata.');
+      if(row.updated_by_user_id!==null)assertAssetNoteUserRelationship(userIds,row.updated_by_user_id,'daily entry editor');
+      // Historic initial-entry edits may predate strict ownership. Preserve that evidence.
+      if(!Number(row.is_initial)&&row.updated_by_user_id!==null&&row.updated_by_user_id!==parent.created_by_user_id)throw new Error('Portable package daily entry has an invalid editor.');
+      if(Number(row.is_initial)&&row.body!==parent.body)throw new Error('Portable package work log compatibility body does not match its initial entry.');
+    }
+  }
+  for(const updateId of updateIds){
+    const parent=database.prepare('SELECT * FROM asset_note_updates WHERE id=?').get(updateId) as Record<string,unknown>;
+    if(Number(parent.daily_entries_version??0)===1){
+      if(!tables.has('asset_note_update_entries'))throw new Error('Portable package is missing daily work entries.');
+      const initial=database.prepare('SELECT COUNT(*) AS count FROM asset_note_update_entries WHERE update_id=? AND is_initial=1').get(updateId) as {count:number};
+      if(initial.count!==1)throw new Error('Portable package work log must contain one initial daily entry.');
+    }
+  }
   if(tables.has('asset_note_update_attachments')){
     const allUpdateIds=new Set((database.prepare('SELECT id FROM asset_note_updates').all() as Array<{id:number}>).map(row=>Number(row.id)));
     for(const row of database.prepare('SELECT * FROM asset_note_update_attachments').all() as Array<Record<string,unknown>>){
       const id=Number(row.id);const updateId=Number(row.update_id);
       if(!allUpdateIds.has(updateId))throw new Error(`Portable package warning issue update attachment ${id} has an invalid update relationship.`);
       if(!updateIds.has(updateId))continue;
+      if(row.entry_id!==null&&row.entry_id!==undefined){
+        if(!tables.has('asset_note_update_entries'))throw new Error('Portable package attachment is missing its daily entry.');
+        const entry=database.prepare('SELECT update_id FROM asset_note_update_entries WHERE id=?').get(Number(row.entry_id)) as {update_id:number}|undefined;
+        if(!entry||entry.update_id!==updateId)throw new Error('Portable package attachment has an invalid daily entry relationship.');
+      }
       if(!String(row.uploaded_by_name??'').trim()||row.uploaded_by_user_id===null||row.uploaded_by_user_id===undefined)throw new Error(`Portable package ${label} warning issue update attachment ${id} has incomplete uploader metadata.`);
       assertAssetNoteUserRelationship(userIds,row.uploaded_by_user_id,`${label} warning issue update attachment ${id} uploader`);
       if(library==='machine')assertMachineStoredReference(packagePath,row.stored_file_reference,'uploads/machine-asset-notes/',row.file_size,`warning issue update attachment ${id}`);
@@ -1133,6 +1173,11 @@ function validateAssetNoteIssueLifecycleIntegrity(database:DatabaseSync,tables:S
       if(['issue_resolved','issue_reopened','issue_deleted'].includes(type)&&!String(row.reason??'').trim())throw new Error(`Portable package ${label} warning issue lifecycle event ${id} is missing its required reason.`);
       assertAssetNoteUserRelationship(userIds,row.actor_user_id,`${label} warning issue lifecycle event ${id} actor`);
       for(const column of ['old_value_json','new_value_json']){try{JSON.parse(String(row[column]??'{}'));}catch{throw new Error(`Portable package ${label} warning issue lifecycle event ${id} has invalid audit JSON.`);}}
+      if(type==='daily_entry_added'){
+        const after=JSON.parse(String(row.new_value_json)) as Record<string,unknown>;
+        const entry=tables.has('asset_note_update_entries')?database.prepare('SELECT update_id FROM asset_note_update_entries WHERE id=?').get(Number(after.entryId)) as {update_id:number}|undefined:undefined;
+        if(!entry||entry.update_id!==Number(after.updateId)||!updateIds.has(entry.update_id)||!validWorkDate(after.workDate)||typeof after.body!=='string'||typeof after.laborHours!=='number')throw new Error('Portable package daily entry audit has invalid revision evidence.');
+      }
       if(type==='update_edited'){
         const before=JSON.parse(String(row.old_value_json)) as Record<string,unknown>;
         const after=JSON.parse(String(row.new_value_json)) as Record<string,unknown>;

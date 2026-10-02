@@ -5497,3 +5497,25 @@ tr:hover td {
   .asset-note-issue-toggle > .asset-note-issue-title { grid-area: title; text-align: left; white-space: normal; }
   .asset-note-issue-toggle > .asset-note-date-pill { display: inline-flex; grid-area: date; align-self: start; }
 }
+
+/* Technician-owned daily work logs. */
+.asset-work-log-entries { display:grid; gap:12px; min-width:0; }
+.asset-work-log-entry { min-width:0; border-top:1px solid var(--mcc-border-default); padding-top:9px; }
+.asset-work-log-entry > header { display:flex; flex-wrap:wrap; align-items:center; gap:8px; color:var(--mcc-text-secondary); font-size:.72rem; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-work-log-entry > header button.compact-button { margin-left:auto; min-height:44px; }
+.asset-work-log-entry > p { margin:8px 0 0; color:var(--mcc-status-warning); white-space:pre-wrap; overflow-wrap:anywhere; font-size:.76rem; line-height:1.5; }
+.asset-work-log-labor { color:var(--mcc-text-secondary); font-size:.69rem; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-work-log-add-entry.compact-button { width:fit-content; max-width:100%; min-height:44px; }
+.asset-work-log-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(100px,.7fr); gap:10px; }
+.asset-work-log-entry > header > .asset-work-log-completion { color:var(--mcc-status-success); font-size:1rem; font-weight:900; }
+.asset-work-log-completion.is-completing { animation:work-log-complete .4s ease-out both; }
+@keyframes work-log-complete { from { opacity:0; transform:scale(.5); } 65% { opacity:1; transform:scale(1.15); } to { opacity:1; transform:scale(1); } }
+.asset-note-labor-section { width:fit-content; max-width:min(100%,440px); justify-self:start; }
+.asset-note-labor-section > header { gap:16px; }
+.asset-note-labor-view > div { justify-content:flex-start; flex-wrap:wrap; }
+.asset-note-labor-view strong { white-space:normal; overflow-wrap:anywhere; }
+.asset-note-labor-view output { white-space:normal; }
+@media(max-width:700px) { .asset-note-labor-section { box-sizing:border-box; width:100%; max-width:100%; } .asset-work-log-fields { grid-template-columns:minmax(0,1fr); } }
+@media(prefers-reduced-motion:reduce) { .asset-work-log-completion.is-completing { animation:none; } }
+
+.asset-work-log-entry > header > span:not(.asset-work-log-completion) { color:var(--mcc-text-secondary); font-size:.72rem; font-weight:650; letter-spacing:normal; text-transform:none; }

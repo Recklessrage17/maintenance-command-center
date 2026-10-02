@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { migrateAssetNoteWorkLogs, workLogEntries, publicWorkLogEntry, workLogInput, insertWorkLogEntry, localWorkDate, workLogCompletionEntry, type WorkLogEntry } from './assetNoteWorkLogs.js';
 import { assetNoteUpdateLockAt, assetNoteUpdateWindowOpen, ISSUE_UPDATE_WINDOW_EXPIRED, IssueUpdateWindowExpiredError } from './assetNoteUpdateWindow.js';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -765,6 +766,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
  CREATE INDEX IF NOT EXISTS idx_asset_note_labor_note ON asset_note_labor (asset_library,note_id,technician_order,id);`);
   const updateColumns=new Set(all<{name:string}>('PRAGMA table_info(asset_note_updates)').map(column=>column.name));
   for(const column of [{name:'updated_at',definition:'TEXT'},{name:'updated_by_user_id',definition:'INTEGER'},{name:'updated_by_name',definition:'TEXT'}])if(!updateColumns.has(column.name))run(`ALTER TABLE asset_note_updates ADD COLUMN ${column.name} ${column.definition}`);
+  migrateAssetNoteWorkLogs(db);
   if (!pmTaskColumns.has('asset_library')) run("ALTER TABLE pm_tasks ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
   db.exec('DROP INDEX IF EXISTS idx_pm_tasks_asset; CREATE INDEX idx_pm_tasks_asset ON pm_tasks (asset_library,asset_id,active,updated_at DESC);');
   const pmHistoryColumns = new Set(all<{ name: string }>('PRAGMA table_info(pm_history)').map(column => column.name));
@@ -7951,9 +7953,12 @@ function assetNoteLabor(library:AssetLibrary,noteId:number) {
   return all<AssetNoteLaborRow>('SELECT * FROM asset_note_labor WHERE asset_library=? AND note_id=? ORDER BY technician_order,id',[library,noteId]);
 }
 function publicAssetNoteLabor(library:AssetLibrary,noteId:number) {
-  const technicians=assetNoteLabor(library,noteId).map(row=>({id:row.id,userId:row.user_id,displayName:row.display_name,hours:Number(row.labor_hours),isPrimary:Boolean(row.is_primary),order:Number(row.technician_order)}));
+  const technicians=assetNoteLabor(library,noteId).map(row=>({id:row.id,userId:row.user_id,displayName:row.display_name,hours:Number(row.labor_hours),manualHours:Number(row.labor_hours),dailyHours:0,isPrimary:Boolean(row.is_primary),order:Number(row.technician_order)}));
+  const daily=all<{user_id:number|null;display_name:string;hours:number}>(`SELECT u.created_by_user_id AS user_id,u.created_by_name AS display_name,SUM(e.labor_hours) AS hours FROM asset_note_updates u JOIN asset_note_update_entries e ON e.update_id=u.id WHERE u.asset_library=? AND u.note_id=? GROUP BY u.created_by_user_id,u.created_by_name`,[library,noteId]);
+  for(const row of daily){let technician=technicians.find(item=>item.userId===row.user_id);if(!technician){technician={id:0,userId:row.user_id,displayName:row.display_name,hours:0,manualHours:0,dailyHours:0,isPrimary:false,order:technicians.length};technicians.push(technician);}technician.dailyHours=Math.round((technician.dailyHours+Number(row.hours))*100)/100;technician.hours=Math.round((technician.manualHours+technician.dailyHours)*100)/100;}
   return {technicians,totalHours:Math.round(technicians.reduce((total,item)=>total+item.hours,0)*100)/100};
 }
+
 type AssetNoteLaborInput={userId:number;displayName:string;hours:number;isPrimary:boolean;order:number};
 function parseAssetNoteLabor(value:unknown,actor:User,required:boolean):AssetNoteLaborInput[]|null {
   if(value===undefined||value===null||value==='')return required?[{userId:actor.id,displayName:actor.full_name,hours:0,isPrimary:true,order:0}]:null;
@@ -7988,10 +7993,10 @@ function assetNoteAttachmentExists(library:AssetLibrary,noteId:number,sha256:str
 function publicAssetNoteUpdateAttachment(library:AssetLibrary,row:AssetNoteUpdateAttachmentRow) {
   const baseUrl=`/api/${library}-library/asset-note-update-attachments/${row.id}/file`;
   const version=encodeURIComponent(row.created_at);
-  return {id:row.id,updateId:row.update_id,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),uploadedBy:row.uploaded_by_name,createdAt:row.created_at,contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}`};
+  return {id:row.id,updateId:row.update_id,entryId:(row as AssetNoteUpdateAttachmentRow&{entry_id?:number|null}).entry_id??null,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),uploadedBy:row.uploaded_by_name,createdAt:row.created_at,contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}`};
 }
 function publicAssetNoteUpdate(library:AssetLibrary,row:AssetNoteUpdateRow,actor?:User,note?:MachineAssetNoteRow,currentTime=now()) {
-  return {id:row.id,noteId:row.note_id,body:row.body,createdByUserId:row.created_by_user_id,createdBy:row.created_by_name,createdAt:row.created_at,updatedAt:row.updated_at,updatedByUserId:row.updated_by_user_id,updatedBy:row.updated_by_name,canEdit:Boolean(actor&&note&&note.is_warning&&assetNoteUpdateWindowOpen(note,currentTime)&&hasPermission(actor,assetNoteViewPermission(library))&&(isWarningIssueManager(actor)||row.created_by_user_id===actor.id)),attachments:assetNoteUpdateAttachments(row.id).map(item=>publicAssetNoteUpdateAttachment(library,item))};
+  return {id:row.id,noteId:row.note_id,body:row.body,createdByUserId:row.created_by_user_id,createdBy:row.created_by_name,createdAt:row.created_at,updatedAt:row.updated_at,updatedByUserId:row.updated_by_user_id,updatedBy:row.updated_by_name,canEdit:Boolean(actor&&note&&note.is_warning&&assetNoteUpdateWindowOpen(note,currentTime)&&hasPermission(actor,assetNoteViewPermission(library))&&row.created_by_user_id===actor.id),entries:workLogEntries(db,row.id).map(publicWorkLogEntry),laborHours:Math.round(workLogEntries(db,row.id).reduce((sum,entry)=>sum+entry.labor_hours,0)*100)/100,attachments:assetNoteUpdateAttachments(row.id).map(item=>publicAssetNoteUpdateAttachment(library,item))};
 }
 function safeJsonRecord(value:string) { try { const parsed=JSON.parse(value);return isRecord(parsed)?parsed:{}; } catch { return {}; } }
 function publicAssetNoteLifecycleEvent(row:AssetNoteLifecycleEventRow) {
@@ -8017,7 +8022,7 @@ function publicAssetNote(row:MachineAssetNoteRow,library:AssetLibrary,actor?:Use
   const version=encodeURIComponent(row.updated_at);
   const resolved=Boolean(row.is_warning)&&row.issue_status==='resolved';
   const originalAttachments=assetNoteOriginalAttachments(library,row.id);const labor=publicAssetNoteLabor(library,row.id);
-  return {id:row.id,assetId:row.asset_id,assetLibrary:library,assetNumber:row.asset_number??'',assetName:row.asset_name??'',title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),hold:Boolean(row.is_warning&&row.is_on_hold),workOrder:row.work_order_reference??'',status:row.is_warning?(resolved?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??'',technicianUpdateWindowOpen:assetNoteUpdateWindowOpen(row,currentTime),technicianUpdateLockAt:assetNoteUpdateLockAt(row),technicianUpdateServerTime:currentTime,resolvedYear:row.resolved_at?String(row.resolved_at).slice(0,4):'',pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`,attachments:originalAttachments.filter(item=>item.sourceType==='supporting'),workOrderPages:originalAttachments.filter(item=>item.sourceType==='work_order_photo'),labor:labor.technicians,totalLaborHours:labor.totalHours,updates:row.is_warning?assetNoteUpdates(library,row.id).map(item=>publicAssetNoteUpdate(library,item,actor,row,currentTime)):[],lifecycle:row.is_warning?assetNoteLifecycleEvents(library,row.id).map(publicAssetNoteLifecycleEvent):[],permissions:assetNoteIssuePermissions(actor,library,row,currentTime)};
+  return {id:row.id,assetId:row.asset_id,assetLibrary:library,assetNumber:row.asset_number??'',assetName:row.asset_name??'',title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),hold:Boolean(row.is_warning&&row.is_on_hold),workOrder:row.work_order_reference??'',status:row.is_warning?(resolved?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??'',technicianCompletionEntryId:workLogCompletionEntry(db,library,row),technicianUpdateWindowOpen:assetNoteUpdateWindowOpen(row,currentTime),technicianUpdateLockAt:assetNoteUpdateLockAt(row),technicianUpdateServerTime:currentTime,resolvedYear:row.resolved_at?String(row.resolved_at).slice(0,4):'',pdfFilename:row.pdf_filename,pdfUrl:`${pdfBaseUrl}?v=${version}`,pdfDownloadUrl:`${pdfBaseUrl}?download=true&v=${version}`,attachments:originalAttachments.filter(item=>item.sourceType==='supporting'),workOrderPages:originalAttachments.filter(item=>item.sourceType==='work_order_photo'),labor:labor.technicians,totalLaborHours:labor.totalHours,updates:row.is_warning?assetNoteUpdates(library,row.id).map(item=>publicAssetNoteUpdate(library,item,actor,row,currentTime)):[],lifecycle:row.is_warning?assetNoteLifecycleEvents(library,row.id).map(publicAssetNoteLifecycleEvent):[],permissions:assetNoteIssuePermissions(actor,library,row,currentTime)};
 }
 function publicMachineAssetNote(row:MachineAssetNoteRow,actor?:User) {
   return publicAssetNote(row,'machine',actor);
@@ -8142,11 +8147,17 @@ async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: 
   if(note.is_warning){
     const library=note.asset_library==='equipment'?'equipment':'machine';
     const updates=assetNoteUpdates(library,note.id);
-    y-=12;ensureSpace(54);page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});page.drawText('MAINTENANCE UPDATES',{x:margin,y:y-12,size:9,font:bold,color:blue});y-=34;
+    y-=12;ensureSpace(54);page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});page.drawText('TECHNICIAN COMMENTS / DAILY WORK LOGS',{x:margin,y:y-12,size:9,font:bold,color:blue});y-=34;
     if(!updates.length){page.drawText('No maintenance updates recorded.',{x:margin+4,y,size:9.5,font:regular,color:muted});y-=16;}
     for(const update of updates){
       ensureSpace(46);page.drawText(truncateToFit(`${new Date(update.created_at).toLocaleString('en-US')} - ${safeMachineAssetNotePdfText(update.created_by_name)}`,bold,9.5,width-margin*2),{x:margin+4,y,size:9.5,font:bold,color:blueDark});y-=16;
-      for(const line of notePdfLines(update.body,regular,9.5,width-margin*2-8)){ensureSpace(14);if(line)page.drawText(line,{x:margin+8,y,size:9.5,font:regular,color:ink});y-=14;}
+      const entries=workLogEntries(db,update.id);
+      for(const entry of entries){
+        ensureSpace(42);page.drawText(`Date: ${new Date(`${entry.work_date}T12:00:00`).toLocaleDateString('en-US')} / ${entry.labor_hours.toFixed(2)} Hrs`,{x:margin+8,y,size:9,font:bold,color:blueDark});y-=15;
+        for(const line of notePdfLines(entry.body,regular,9.5,width-margin*2-8)){ensureSpace(14);if(line)page.drawText(line,{x:margin+8,y,size:9.5,font:regular,color:ink});y-=14;}
+        y-=5;
+      }
+      ensureSpace(18);page.drawText(`Work log labor: ${entries.reduce((sum,entry)=>sum+entry.labor_hours,0).toFixed(2)} Hrs`,{x:margin+8,y,size:9,font:bold,color:blueDark});y-=16;
       const updateFiles=assetNoteUpdateAttachments(update.id);for(const attachment of updateFiles){for(const line of notePdfLines(`Attachment: ${attachment.original_filename}`,regular,8.5,width-margin*2-16)){ensureSpace(13);page.drawText(line,{x:margin+12,y,size:8.5,font:regular,color:muted});y-=13;}}
       y-=8;
     }
@@ -11233,7 +11244,7 @@ function assetNoteStorage(library:AssetLibrary) {
 }
 function workOrderRecordAttachmentSource(library:WorkOrderRecordLibrary,row:MachineAssetNoteAttachmentRow|AssetNoteUpdateAttachmentRow,update=false):WorkOrderRecordAttachmentSource {
   const base=`/api/${library}-library/${update?'asset-note-update-attachments':'asset-note-attachments'}/${row.id}/file`;let sourcePath='';let sourceError='';try{sourcePath=assetNoteStoredFilePath(library,row.stored_file_reference);}catch(error){sourceError=safeErrorMessage(error,[],'Stored attachment reference is invalid.');}
-  const original=row as MachineAssetNoteAttachmentRow;return {id:row.id,filename:row.original_filename,mimeType:row.mime_type,sizeBytes:Number(row.file_size),sourcePath,downloadUrl:`${base}?download=true&v=${encodeURIComponent(row.created_at)}`,...(update?{}:{sourceType:assetNoteAttachmentSource(original),sha256:ensureAssetNoteAttachmentHash(library,original)}),...(sourceError?{sourceError}:{})};
+  const original=row as MachineAssetNoteAttachmentRow;return {id:row.id,filename:row.original_filename,mimeType:row.mime_type,sizeBytes:Number(row.file_size),sourcePath,downloadUrl:`${base}?download=true&v=${encodeURIComponent(row.created_at)}`,...(update?{entryId:(row as AssetNoteUpdateAttachmentRow&{entry_id?:number|null}).entry_id??null}:{sourceType:assetNoteAttachmentSource(original),sha256:ensureAssetNoteAttachmentHash(library,original)}),...(sourceError?{sourceError}:{})};
 }
 function workOrderRecordRows(library:WorkOrderRecordLibrary,year:number) {
   if(library==='machine')return all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.deleted=0 AND a.deleted=0 AND n.note_date LIKE ? ORDER BY a.id,n.note_date,n.id`,[`${year}-%`]);
@@ -11244,10 +11255,10 @@ function workOrderRecordSource(library:WorkOrderRecordLibrary,row:MachineAssetNo
   return {
     library,
     asset:{id:row.asset_id,assetNumber:row.asset_number??'',assetName:row.asset_name??'',brand:row.brand??'',model:row.model??'',serialNumber:row.serial_number??'',location:row.location??'',category:row.category??''},
-    note:{statusLabel:!row.is_warning?'Standard Record':row.issue_status==='resolved'?'Resolved':row.is_on_hold?'On Hold':'Tech Open',id:row.id,title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),hold:Boolean(row.is_warning&&row.is_on_hold),workOrder:row.work_order_reference??'',status:row.is_warning?(row.issue_status==='resolved'?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??'',labor:labor.technicians.map(item=>({userId:item.userId,displayName:item.displayName,hours:item.hours,isPrimary:item.isPrimary,order:item.order})),totalLaborHours:labor.totalHours},
+    note:{statusLabel:!row.is_warning?'Standard Record':row.issue_status==='resolved'?'Resolved':row.is_on_hold?'On Hold':'Tech Open',id:row.id,title:row.title,noteDate:row.note_date,body:row.body,warning:Boolean(row.is_warning),hold:Boolean(row.is_warning&&row.is_on_hold),workOrder:row.work_order_reference??'',status:row.is_warning?(row.issue_status==='resolved'?'resolved':'active'):'ordinary',createdByUserId:row.created_by_user_id,createdBy:row.created_by_name??'Unknown user',createdAt:row.created_at,updatedAt:row.updated_at,resolvedAt:row.resolved_at,resolvedByUserId:row.resolved_by_user_id,resolvedBy:row.resolved_by_name??'',resolutionSummary:row.resolution_summary??'',reopenedAt:row.reopened_at,reopenedByUserId:row.reopened_by_user_id,reopenedBy:row.reopened_by_name??'',labor:labor.technicians.map(item=>({userId:item.userId,displayName:item.displayName,hours:item.hours,manualHours:item.manualHours,dailyHours:item.dailyHours,isPrimary:item.isPrimary,order:item.order})),totalLaborHours:labor.totalHours},
     generatedPdf:row.pdf_stored_reference?{id:row.id,filename:row.pdf_filename||`Asset_Note_${row.id}.pdf`,mimeType:'application/pdf',sizeBytes:pdfSize,sourcePath:pdfPath,downloadUrl:`/api/${library}-library/asset-notes/${row.id}/pdf?download=true&v=${encodeURIComponent(row.updated_at)}`,...(pdfError?{sourceError:pdfError}:{})}:null,
     attachments:assetNoteAttachments(library,row.id).filter(item=>assetNoteAttachmentSource(item)==='supporting').map(item=>workOrderRecordAttachmentSource(library,item)),
-    updates:updates.map(update=>({id:update.id,body:update.body,createdByUserId:update.created_by_user_id,createdBy:update.created_by_name,createdAt:update.created_at,attachments:assetNoteUpdateAttachments(update.id).map(item=>workOrderRecordAttachmentSource(library,item,true))})),
+    updates:updates.map(update=>({id:update.id,body:update.body,entries:workLogEntries(db,update.id).map(publicWorkLogEntry),laborHours:workLogEntries(db,update.id).reduce((sum,entry)=>sum+entry.labor_hours,0),createdByUserId:update.created_by_user_id,createdBy:update.created_by_name,createdAt:update.created_at,attachments:assetNoteUpdateAttachments(update.id).map(item=>workOrderRecordAttachmentSource(library,item,true))})),
     lifecycle:assetNoteLifecycleEvents(library,row.id).map(item=>publicAssetNoteLifecycleEvent(item) as Record<string,unknown>),
   };
 }
@@ -11271,7 +11282,7 @@ function warningIssueRows(library:AssetLibrary) {
   return all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,COALESCE(u.full_name,'Unknown user') AS created_by_name FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.is_warning=1 AND n.deleted=0 AND a.deleted=0 ORDER BY n.note_date DESC,n.created_at DESC,n.id DESC`);
 }
 function assetNoteSearchText(note:ReturnType<typeof publicAssetNote>) {
-  return [note.title,note.body,note.assetNumber,note.assetName,note.workOrder,note.createdBy,note.noteDate,note.resolvedAt,note.resolvedBy,note.resolutionSummary,note.reopenedBy,...note.updates.flatMap(update=>[update.body,update.createdBy,update.createdAt,...update.attachments.map(item=>item.filename)]),...note.lifecycle.flatMap(event=>[event.type,event.actor,event.reason,event.createdAt])].join('\n').toLocaleLowerCase();
+  return [note.title,note.body,note.assetNumber,note.assetName,note.workOrder,note.createdBy,note.noteDate,note.resolvedAt,note.resolvedBy,note.resolutionSummary,note.reopenedBy,...note.updates.flatMap(update=>[update.body,...update.entries.flatMap(entry=>[entry.workDate,entry.body,entry.laborHours]),update.createdBy,update.createdAt,...update.attachments.map(item=>item.filename)]),...note.lifecycle.flatMap(event=>[event.type,event.actor,event.reason,event.createdAt])].join('\n').toLocaleLowerCase();
 }
 for(const library of ['machine','equipment'] as const){
   const base=`/api/${library}-library`;
@@ -11289,60 +11300,49 @@ for(const library of ['machine','equipment'] as const){
     const years=[...new Set(warningIssueRows(library).filter(row=>row.issue_status==='resolved'&&row.resolved_at).map(row=>String(row.resolved_at).slice(0,4)))].sort((left,right)=>right.localeCompare(left));
     res.json({ok:true,issues,years,summary:{active:issues.filter(issue=>issue.status==='active'&&!issue.hold).length,hold:issues.filter(issue=>issue.status==='active'&&issue.hold).length,resolved:issues.filter(issue=>issue.status==='resolved').length,total:issues.length}});
   });
-  app.post(`${base}/asset-notes/:noteId/updates`,requireAuth,requirePermission(viewPermission),receiveMachineAssetNote,async(req:AuthRequest,res)=>{
-    const written:string[]=[];let updateId=0;
-    try{
-      const note=assetNoteByLibraryId(library,Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Warning issue not found.'});
-      if(!note.is_warning)return res.status(400).json({ok:false,error:'Updates are available only for Warning / Needs Attention issues.'});
-      if(!assetNoteUpdateWindowOpen(note,now()))return res.status(409).json(ISSUE_UPDATE_WINDOW_EXPIRED);
-      const body=requiredAssetNoteReason(req.body?.body??req.body?.update,'Update',20000);
-      const files=(req.files as Express.Multer.File[]|undefined)??[];const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));const timestamp=now();const storage=assetNoteStorage(library);
-      const prepared=validated.map(({file,detected})=>{const storedName=`issue-update-${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(storage.directory,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});written.push(storedPath);return{file,detected,storedReference:`${storage.prefix}${storedName}`};});
-      db.exec('BEGIN IMMEDIATE');
-      try{
-        if(!assetNoteUpdateWindowOpen(note,now()))throw new IssueUpdateWindowExpiredError();
-        const result=run('INSERT INTO asset_note_updates (asset_library,note_id,body,created_by_user_id,created_by_name,created_at) VALUES (?,?,?,?,?,?)',[library,note.id,body,req.user!.id,req.user!.full_name,timestamp]);updateId=Number(result.lastInsertRowid);
-        for(const item of prepared)run('INSERT INTO asset_note_update_attachments (update_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,uploaded_by_name,created_at) VALUES (?,?,?,?,?,?,?,?)',[updateId,safeMachineAssetNoteOriginalName(item.file.originalname,item.detected.extension),item.detected.mimeType,item.file.size,item.storedReference,req.user!.id,req.user!.full_name,timestamp]);
-        run(`${library==='machine'?'UPDATE machine_asset_notes':'UPDATE equipment_asset_notes'} SET updated_by_user_id=?,updated_at=? WHERE id=?`,[req.user!.id,timestamp,note.id]);
-        recordAssetNoteLifecycleEvent({library,noteId:note.id,type:'update_added',actor:req.user!,newValue:{updateId,body,attachmentCount:prepared.length},createdAt:timestamp});
-        db.exec('COMMIT');
-      }catch(error){db.exec('ROLLBACK');throw error;}
-      await regenerateAssetNotePdf(library,note.id);
-      scheduleAutoBackup(`${library} warning issue update added`,req.user!);
-      res.status(201).json({ok:true,update:publicAssetNoteUpdate(library,one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[updateId])!,req.user!,assetNoteByLibraryId(library,note.id)!),note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
-    }catch(error){if(updateId){run('DELETE FROM asset_note_update_attachments WHERE update_id=?',[updateId]);run('DELETE FROM asset_note_updates WHERE id=?',[updateId]);run("DELETE FROM asset_note_lifecycle_events WHERE asset_library=? AND note_id=? AND event_type='update_added' AND new_value_json LIKE ?",[library,Number(req.params.noteId),`%\"updateId\":${updateId}%`]);}for(const filePath of written)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(error instanceof IssueUpdateWindowExpiredError?409:400).json(error instanceof IssueUpdateWindowExpiredError?ISSUE_UPDATE_WINDOW_EXPIRED:{ok:false,error:safeErrorMessage(error,[],'Maintenance update could not be added.')});}
-  });
-  app.patch(`${base}/asset-notes/:noteId/updates/:updateId`,requireAuth,requirePermission(viewPermission),receiveMachineAssetNote,async(req:AuthRequest,res)=>{
-    const noteId=Number(req.params.noteId),updateId=Number(req.params.updateId);
-    const note=assetNoteByLibraryId(library,noteId);
-    const update=one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=? AND note_id=? AND asset_library=?',[updateId,noteId,library]);
-    if(!note||!update)return res.status(404).json({ok:false,error:'Maintenance update not found.'});
-    if(!note.is_warning)return res.status(400).json({ok:false,error:'Updates are available only for Warning / Needs Attention issues.'});
+  const saveWorkLog=(mode:'create'|'append'|'edit')=>async(req:AuthRequest,res:Response)=>{
+    const note=assetNoteByLibraryId(library,Number(req.params.noteId));
+    if(!note||!note.is_warning)return res.status(404).json({ok:false,error:'Warning issue not found.'});
+    let update=mode==='create'?null:one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=? AND note_id=? AND asset_library=?',[Number(req.params.updateId),note.id,library]);
+    if(mode!=='create'&&!update)return res.status(404).json({ok:false,error:'Work log not found.'});
+    if(update&&update.created_by_user_id!==req.user!.id)return res.status(403).json({ok:false,code:'TECHNICIAN_UPDATE_OWNER_REQUIRED',error:'Only the technician who created this work log may modify it.'});
     if(!assetNoteUpdateWindowOpen(note,now()))return res.status(409).json(ISSUE_UPDATE_WINDOW_EXPIRED);
-    if(!isWarningIssueManager(req.user!)&&update.created_by_user_id!==req.user!.id)return res.status(403).json({ok:false,error:'Only the update creator, a Manager, or an Admin may edit this update.',code:'UPDATE_OWNER_REQUIRED'});
+    const entry=mode==='edit'?(req.params.entryId?workLogEntries(db,update!.id).find(item=>item.id===Number(req.params.entryId)):workLogEntries(db,update!.id).find(item=>item.is_initial===1)):undefined;
+    if(mode==='edit'&&!entry)return res.status(404).json({ok:false,error:'Daily entry not found.'});
     const written:string[]=[];let committed=false;
     try{
-      const body=requiredAssetNoteReason(req.body?.body??req.body?.update,'Update',20000);
-      const files=(req.files as Express.Multer.File[]|undefined)??[];
-      const validated=files.map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}));
-      const timestamp=now(),storage=assetNoteStorage(library);
-      const prepared=validated.map(({file,detected})=>{const storedName=`issue-update-${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(storage.directory,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});written.push(storedPath);return{file,detected,storedReference:`${storage.prefix}${storedName}`};});
-      const additions:Array<{id:number;filename:string}>=[];
+      const input=workLogInput(req.body??{},entry);const timestamp=now();const storage=assetNoteStorage(library);
+      const prepared=(((req.files as Express.Multer.File[]|undefined)??[]).map(file=>({file,detected:validatedMachineAssetNoteAttachment(file)}))).map(({file,detected})=>{const storedName=`issue-update-${crypto.randomUUID()}${detected.extension}`;const storedPath=path.join(storage.directory,storedName);fs.writeFileSync(storedPath,file.buffer,{flag:'wx'});written.push(storedPath);return{file,detected,storedReference:`${storage.prefix}${storedName}`};});
+      const additions:Array<{id:number;filename:string;entryId:number}>=[];let entryId=entry?.id??0;
       db.exec('BEGIN IMMEDIATE');
       try{
         if(!assetNoteUpdateWindowOpen(note,now()))throw new IssueUpdateWindowExpiredError();
-        run('UPDATE asset_note_updates SET body=?,updated_at=?,updated_by_user_id=?,updated_by_name=? WHERE id=?',[body,timestamp,req.user!.id,req.user!.full_name,update.id]);
-        for(const item of prepared){const filename=safeMachineAssetNoteOriginalName(item.file.originalname,item.detected.extension);const result=run('INSERT INTO asset_note_update_attachments (update_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,uploaded_by_name,created_at) VALUES (?,?,?,?,?,?,?,?)',[update.id,filename,item.detected.mimeType,item.file.size,item.storedReference,req.user!.id,req.user!.full_name,timestamp]);additions.push({id:Number(result.lastInsertRowid),filename});}
+        if(mode==='create'){
+          const id=Number(run('INSERT INTO asset_note_updates (asset_library,note_id,body,created_by_user_id,created_by_name,created_at,daily_entries_version) VALUES (?,?,?,?,?,?,1)',[library,note.id,input.body,req.user!.id,req.user!.full_name,timestamp]).lastInsertRowid);
+          update=one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[id])!;
+        }
+        if(mode==='edit'){
+          run('UPDATE asset_note_update_entries SET work_date=?,body=?,labor_hours=?,updated_at=?,updated_by_user_id=? WHERE id=?',[input.workDate,input.body,input.laborHours,timestamp,req.user!.id,entryId]);
+          // Compatibility body mirrors only the initial entry, never later daily work.
+          if(entry!.is_initial)run('UPDATE asset_note_updates SET body=? WHERE id=?',[input.body,update!.id]);
+        }else entryId=insertWorkLogEntry(db,update!.id,input,req.user!.id,timestamp,mode==='create');
+        if(mode!=='create')run('UPDATE asset_note_updates SET updated_at=?,updated_by_user_id=?,updated_by_name=? WHERE id=?',[timestamp,req.user!.id,req.user!.full_name,update!.id]);
+        for(const item of prepared){const filename=safeMachineAssetNoteOriginalName(item.file.originalname,item.detected.extension);const result=run('INSERT INTO asset_note_update_attachments (update_id,entry_id,original_filename,mime_type,file_size,stored_file_reference,uploaded_by_user_id,uploaded_by_name,created_at) VALUES (?,?,?,?,?,?,?,?,?)',[update!.id,entryId,filename,item.detected.mimeType,item.file.size,item.storedReference,req.user!.id,req.user!.full_name,timestamp]);additions.push({id:Number(result.lastInsertRowid),filename,entryId});}
         run(`UPDATE ${library==='machine'?'machine_asset_notes':'equipment_asset_notes'} SET updated_by_user_id=?,updated_at=? WHERE id=?`,[req.user!.id,timestamp,note.id]);
-        recordAssetNoteLifecycleEvent({library,noteId:note.id,type:'update_edited',actor:req.user!,oldValue:{updateId:update.id,body:update.body},newValue:{updateId:update.id,body,attachmentsAdded:additions},createdAt:timestamp});
+        const before=entry?{...publicWorkLogEntry(entry),entryId:entry.id}:undefined;
+        const after={updateId:update!.id,entryId,ownerUserId:update!.created_by_user_id,...input,attachmentsAdded:additions};
+        recordAssetNoteLifecycleEvent({library,noteId:note.id,type:mode==='create'?'update_added':mode==='append'?'daily_entry_added':'update_edited',actor:req.user!,oldValue:before,newValue:after,createdAt:timestamp});
+        audit(req,mode==='edit'?'warning issue update edited':'warning issue daily entry added',`${library}_asset_note`,note.id,{before,after});
         db.exec('COMMIT');committed=true;
       }catch(error){db.exec('ROLLBACK');throw error;}
+      scheduleAutoBackup(`${library} warning issue work log saved`,req.user!);
       await regenerateAssetNotePdf(library,note.id);
-      audit(req,'warning issue update edited',`${library}_asset_note`,note.id,{updateId:update.id,before:update.body,after:body,attachmentsAdded:additions});
-      scheduleAutoBackup(`${library} warning issue update edited`,req.user!);
-      res.json({ok:true,update:publicAssetNoteUpdate(library,one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[update.id])!,req.user!,assetNoteByLibraryId(library,note.id)!),note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
-    }catch(error){if(!committed)for(const filePath of written)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(error instanceof IssueUpdateWindowExpiredError?409:400).json(error instanceof IssueUpdateWindowExpiredError?ISSUE_UPDATE_WINDOW_EXPIRED:{ok:false,error:safeErrorMessage(error,[],'Maintenance update could not be edited.')});}
-  });
+      res.status(mode==='edit'?200:201).json({ok:true,entry:publicWorkLogEntry(workLogEntries(db,update!.id).find(item=>item.id===entryId)!),update:publicAssetNoteUpdate(library,one<AssetNoteUpdateRow>('SELECT * FROM asset_note_updates WHERE id=?',[update!.id])!,req.user!,assetNoteByLibraryId(library,note.id)!),note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
+    }catch(error){if(!committed)for(const filePath of written)if(fs.existsSync(filePath))fs.rmSync(filePath,{force:true});res.status(error instanceof IssueUpdateWindowExpiredError?409:400).json(error instanceof IssueUpdateWindowExpiredError?ISSUE_UPDATE_WINDOW_EXPIRED:{ok:false,error:safeErrorMessage(error,[],'Work log could not be saved.')});}
+  };
+  app.post(`${base}/asset-notes/:noteId/updates`,requireAuth,requirePermission(viewPermission),receiveMachineAssetNote,saveWorkLog('create'));
+  app.post(`${base}/asset-notes/:noteId/updates/:updateId/entries`,requireAuth,requirePermission(viewPermission),receiveMachineAssetNote,saveWorkLog('append'));
+  app.patch([`${base}/asset-notes/:noteId/updates/:updateId`,`${base}/asset-notes/:noteId/updates/:updateId/entries/:entryId`],requireAuth,requirePermission(viewPermission),receiveMachineAssetNote,saveWorkLog('edit'));
   app.post(`${base}/asset-notes/:noteId/resolve`,requireAuth,requirePermission(viewPermission),async(req:AuthRequest,res)=>{
     try{
       const note=assetNoteByLibraryId(library,Number(req.params.noteId));if(!note)return res.status(404).json({ok:false,error:'Warning issue not found.'});if(!note.is_warning)return res.status(400).json({ok:false,error:'Only warning issues can be resolved.'});if(note.issue_status==='resolved')return res.status(409).json({ok:false,error:'This issue is already resolved.'});if(!canTransitionAssetNoteIssue(req.user!,library,note))return res.status(403).json({ok:false,error:'Only the issue creator, a Manager, or an Admin may resolve this issue.',code:'ISSUE_TRANSITION_FORBIDDEN'});
@@ -11357,7 +11357,8 @@ for(const library of ['machine','equipment'] as const){
       const reason=requiredAssetNoteReason(isRecord(req.body)?req.body.reopenReason??req.body.reason:'','Reopen Reason',2000);let reopenUpdateId=0;const timestamp=now();const table=library==='machine'?'machine_asset_notes':'equipment_asset_notes';
       db.exec('BEGIN IMMEDIATE');try{run(`UPDATE ${table} SET issue_status='active',resolved_at=NULL,resolved_by_user_id=NULL,resolved_by_name='',resolution_summary='',reopened_at=?,reopened_by_user_id=?,reopened_by_name=?,updated_by_user_id=?,updated_at=? WHERE id=? AND deleted=0`,[timestamp,req.user!.id,req.user!.full_name,req.user!.id,timestamp,note.id]);const updated=assetNoteByLibraryId(library,note.id)!;recordAssetNoteLifecycleEvent({library,noteId:note.id,type:'issue_reopened',actor:req.user!,reason,oldValue:assetNoteHistorySnapshot(note),newValue:assetNoteHistorySnapshot(updated),createdAt:timestamp});
         reopenUpdateId=Number(run('INSERT INTO asset_note_updates (asset_library,note_id,body,created_by_user_id,created_by_name,created_at) VALUES (?,?,?,?,?,?)',[library,note.id,reason,req.user!.id,req.user!.full_name,timestamp]).lastInsertRowid);
-        recordAssetNoteLifecycleEvent({library,noteId:note.id,type:'update_added',actor:req.user!,newValue:{updateId:reopenUpdateId,body:reason,attachmentCount:0},createdAt:timestamp});
+        const reopenEntryId=insertWorkLogEntry(db,reopenUpdateId,{workDate:localWorkDate(timestamp),body:reason,laborHours:0},req.user!.id,timestamp,true);run('UPDATE asset_note_updates SET daily_entries_version=1 WHERE id=?',[reopenUpdateId]);
+        recordAssetNoteLifecycleEvent({library,noteId:note.id,type:'update_added',actor:req.user!,newValue:{entryId:reopenEntryId,workDate:localWorkDate(timestamp),laborHours:0,updateId:reopenUpdateId,body:reason,attachmentCount:0},createdAt:timestamp});
         db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
       await regenerateAssetNotePdf(library,note.id);audit(req,'warning issue reopen',`${library}_asset_note`,note.id,{reason,updateId:reopenUpdateId});scheduleAutoBackup(`${library} warning issue reopened`,req.user!);res.json({ok:true,note:publicAssetNote(assetNoteByLibraryId(library,note.id)!,library,req.user)});
     }catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Warning issue could not be reopened.')});}
