@@ -47,10 +47,14 @@ test('shared category accents and searchable Setup Type remain responsive and pe
 
   await expect(sectionByTitle(detail,'Basic Info')).toHaveAttribute('data-category-accent','basic');
   await expect(sectionByTitle(detail,'Electrical / Dimensions')).toHaveAttribute('data-category-accent','electrical');
-  await expect(sectionByTitle(detail,'Screw')).toHaveAttribute('data-category-accent','screw');
-  await expect(sectionByTitle(detail,'Screw Tip')).toHaveAttribute('data-category-accent','screw');
-  await expect(sectionByTitle(detail,'Barrel')).toHaveAttribute('data-category-accent','barrel');
-  await expect(sectionByTitle(detail,'Barrel End Cap')).toHaveAttribute('data-category-accent','barrel');
+  await expect(sectionByTitle(detail,'Screw')).toHaveCount(0);
+  await expect(detail.getByRole('button',{name:'Edit Screw component',exact:true})).toBeVisible();
+  await expect(sectionByTitle(detail,'Screw Tip')).toHaveCount(0);
+  await expect(detail.getByRole('button',{name:'Edit Screw Tip component',exact:true})).toBeVisible();
+  await expect(sectionByTitle(detail,'Barrel')).toHaveCount(0);
+  await expect(detail.getByRole('button',{name:'Edit Barrel component',exact:true})).toBeVisible();
+  await expect(sectionByTitle(detail,'Barrel End Cap')).toHaveCount(0);
+  await expect(detail.getByRole('button',{name:'Edit Barrel End Cap component',exact:true})).toBeVisible();
   await expect(sectionByTitle(detail,'Injection Unit 2 Screw')).toHaveAttribute('data-category-accent','screw-secondary');
   await expect(sectionByTitle(detail,'Injection Unit 2 Barrel')).toHaveAttribute('data-category-accent','barrel-secondary');
   await expect(sectionByTitle(detail,'Plunger')).toHaveAttribute('data-category-accent','plunger');

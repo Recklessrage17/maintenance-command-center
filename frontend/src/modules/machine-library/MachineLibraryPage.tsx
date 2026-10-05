@@ -5,7 +5,7 @@ import { useLibraryHeaderBack } from '../../layout/LibraryHeaderBack';
 import { createPortal } from 'react-dom';
 import { withJsonRequestDefaults } from '../../apiRequest';
 import { ActionButtonProgress, type ActionProgressPhase, useActionProgress } from '../../components/ActionProgress';
-import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
+import { MccDateInput, isoDateValue, isValidMccDateValue, localIsoDate, parseIsoDate } from '../../components/MccDateInput';
 import { MccAccordionHeader, MccCategoryAccordion, mccCategoryAccentClass, type MccCategoryAccent } from '../../components/MccCategoryAccordion';
 import { MccMetricPill, MccPillCard, MccStatusPill, type MccSemanticVariant } from '../../components/MccPills';
 import { MccSearchableCombobox } from '../../components/MccSearchableCombobox';
@@ -94,6 +94,9 @@ const machineDetailSectionFields: Record<MachineDetailEditableSectionKey, readon
   plungerBarrel: ['plungerBarrelType','plungerBarrelInstalledDate','plungerBarrelLength','plungerBarrelDiameter','plungerBarrelRebuildRepaired','plungerBarrelConditionStatus'],
   plungerBarrelEndCap: ['plungerBarrelEndCapInstalledDate'],
 };
+type PrimaryComponentKey = 'screw'|'screwTip'|'barrel'|'barrelEndCap';
+const primaryComponentKeys = new Set<MachineDetailSectionKey>(['screw','screwTip','barrel','barrelEndCap']);
+const primaryComponentDates = {screw:'screwInstalledDate',screwTip:'screwTipInstalledDate',barrel:'barrelInstalledDate',barrelEndCap:'barrelEndCapInstalledDate'} as const;
 const machineDateFieldLabels: Partial<Record<keyof AssetForm, string>> = {
   screwInstalledDate: 'Screw Installed Date',
   screwTipInstalledDate: 'Screw Tip Installed Date',
@@ -142,10 +145,16 @@ function formatDateTime(value?: string) {
 function actionLabel(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, letter=>letter.toUpperCase());
 }
+function installedDate(value: string) {
+  const iso = isoDateValue(value);
+  const date = iso ? parseIsoDate(iso) : null;
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return date && date<=today ? date : null;
+}
 function ageYears(value: string) {
-  if (!value.trim()) return 'Unknown';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Unknown';
+  const date = installedDate(value);
+  if (!date) return 'Unknown';
   const years = (Date.now() - date.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
   return years < 0 ? 'Unknown' : `${years.toFixed(1)} years`;
 }
@@ -590,7 +599,7 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
     setOpenSection(current=>current === key ? null : key);
   }
   function beginSectionEdit(key: MachineDetailEditableSectionKey) {
-    if (!canEdit) return;
+    if (!canEdit || editingSection) return;
     if(openSection==='notes'&&notesDirty&&!window.confirm('Leave unsaved Asset Notes changes in place and edit another section?'))return;
     sectionAction.reset();
     setDraft(assetToForm(currentAsset));
@@ -766,22 +775,44 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
       <SummaryBadge label="Year / Age" value={<MachineYearAge year={currentAsset.machineYear} />} tone={machineSummaryKnownClass(currentAsset.machineYear,'year-age')} />
       <SummaryBadge label="Location" value={detailValue(currentAsset.location)} tone={machineSummaryKnownClass(currentAsset.location,'location')} />
     </div>
-    <MachineRecordLogsLaunchPanel asset={currentAsset} onOpen={()=>onRecordLogs(currentAsset)} />
-    <div className="machine-detail-accordion-list">
-      {sections.map(section=>{
-        const editableKey = section.editableKey;
-        const isEditing = Boolean(editableKey && editingSection === editableKey);
-        const isOpen = isEditing || openSection === section.key;
-        const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
-        const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
-        return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} accent={machineDetailAccents[section.key]} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} actionPhase={editableKey&&editingSection===editableKey?sectionAction.phase:'idle'} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+    <MachineRecordLogsLaunchPanel asset={currentAsset} onOpen={()=>onRecordLogs(currentAsset)} components={<>
+      <div className="machine-inspection-component-summary-grid" aria-label="Primary machine components">
+        {sections.filter(section=>primaryComponentKeys.has(section.key)).map(section=>{
+          const key = section.key as PrimaryComponentKey;
+          const value = currentAsset[primaryComponentDates[key]];
+          const date = installedDate(value);
+          const summary = key==='screw' ? detailSummary(currentAsset.screwType,conditionLabels[screwCondition]) : key==='screwTip' ? currentAsset.screwTipType : key==='barrel' ? conditionLabels[barrelCondition] : '';
+          return <button key={key} type="button" className={`machine-inspection-component-summary-card machine-inspection-component-summary-card--${machineDetailAccents[key]}`} aria-label={`${canEdit?'Edit':'View'} ${section.title} component`} aria-expanded={openSection===key} aria-controls={`machine-component-detail-${key}`} disabled={Boolean(editingSection)} onClick={()=>canEdit?beginSectionEdit(key):toggleOpenSection(key)}>
+            <strong>{section.title}</strong>
+            {summary&&<span className="machine-inspection-component-summary-state">{summary}</span>}
+            <span className="machine-inspection-component-summary-age">Age: {ageYears(value)}</span>
+            <span>{date ? `Installed: ${new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(date)}` : 'Installed date unknown'}</span>
+            {key==='barrel'&&<span className="machine-inspection-component-summary-size">Size: {currentAsset.barrelDiameter || 'Unknown'}</span>}
+          </button>;
+        })}
+      </div>
+      {sections.filter(section=>primaryComponentKeys.has(section.key)).map(section=>{
+        const active = openSection===section.key || editingSection===section.key;
+        return <div key={section.key} id={`machine-component-detail-${section.key}`} hidden={!active}>{active&&renderSection(section)}</div>;
       })}
+    </>} />
+    <div className="machine-detail-accordion-list">
+      {sections.filter(section=>!primaryComponentKeys.has(section.key)).map(renderSection)}
       <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canManagePm} performedBy={performedBy} expanded={openSection==='pm'} onToggle={()=>toggleOpenSection('pm')} />
       <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} controlledExpanded={openSection==='documents'} controlledToggle={()=>toggleOpenSection('documents')} />
       <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} controlledExpanded={openSection==='notes'} controlledToggle={()=>toggleOpenSection('notes')} onDirtyChange={setNotesDirty} />
     </div>
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={closeDetail}>Close</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section>{showAssetSpec&&<MachineAssetSpecPreview asset={currentAsset} onClose={()=>setShowAssetSpec(false)} />}</>;
+
+  function renderSection(section: typeof sections[number]) {
+    const editableKey = section.editableKey;
+    const isEditing = Boolean(editableKey && editingSection === editableKey);
+    const isOpen = isEditing || openSection === section.key;
+    const actionLabel = section.actionLabel ?? (editableKey && canEdit ? 'Edit' : undefined);
+    const onAction = section.onAction ?? (editableKey ? ()=>beginSectionEdit(editableKey) : undefined);
+    return <MachineDetailAccordionSection key={section.key} sectionKey={section.key} accent={machineDetailAccents[section.key]} title={section.title} summary={section.summary} status={section.status} expanded={isOpen} editing={isEditing} actionLabel={actionLabel} onAction={onAction} onToggle={()=>toggleOpenSection(section.key)} onSave={editableKey ? ()=>void saveSection(editableKey) : undefined} onCancel={editableKey ? cancelSectionEdit : undefined} saving={Boolean(editableKey && savingSection === editableKey)} actionPhase={editableKey&&editingSection===editableKey?sectionAction.phase:'idle'} error={editableKey ? sectionErrors[editableKey] : undefined} aside={section.image}>{isEditing ? section.edit : section.view}</MachineDetailAccordionSection>;
+  }
 }
 function MachineDetailAccordionSection({sectionKey,accent,title,summary,status,expanded,editing,actionLabel,onAction,onToggle,onSave,onCancel,saving,actionPhase='idle',error,aside,children}:{sectionKey:MachineDetailSectionKey;accent:MccCategoryAccent;title:string;summary:string;status?:ReactNode;expanded:boolean;editing:boolean;actionLabel?:string;onAction?:()=>void;onToggle:()=>void;onSave?:()=>void;onCancel?:()=>void;saving:boolean;actionPhase?:ActionProgressPhase;error?:string;aside?:ReactNode;children:ReactNode}) {
   const panelId = `machine-detail-panel-${sectionKey}`;
@@ -846,7 +877,7 @@ function MachineRecordLogActions({asset,onOpen,onUploaded}:{asset:MachineAsset;o
     {pendingPhoto&&<MaintenancePhotoReview file={pendingPhoto} title={`Save photo to ${asset.assetNumber}?`} detail="Review the maintenance photo before adding it to Inspection Records." saving={uploading} onRetake={()=>{setPendingPhoto(null);cameraInputRef.current?.click();}} onCancel={()=>setPendingPhoto(null)} onSave={()=>void uploadFiles([pendingPhoto]).then(()=>setPendingPhoto(null))} />}
   </div>;
 }
-function MachineRecordLogsLaunchPanel({asset,onOpen}:{asset:MachineAsset;onOpen:()=>void}) {
+function MachineRecordLogsLaunchPanel({asset,onOpen,components}:{asset:MachineAsset;onOpen:()=>void;components:ReactNode}) {
   const [expanded,setExpanded]=useState(false);
   const [records,setRecords]=useState<MeasurementLogEntry[]>([]);
   const [loading,setLoading]=useState(false);
@@ -869,6 +900,7 @@ function MachineRecordLogsLaunchPanel({asset,onOpen}:{asset:MachineAsset;onOpen:
     <button className="machine-measurement-panel-heading machine-record-accordion-header" type="button" onClick={()=>setExpanded(current=>!current)} aria-expanded={expanded} aria-controls={`machine-record-panel-${asset.id}`}>
       <div><p className="eyebrow">Inspection Records</p><h4>Screw & Barrel Inspection Records</h4></div><span className="machine-record-accordion-header-meta"><span className="machine-measurement-setup-pill glass-pill glass-pill--success">{asset.assetNumber}</span><span className="machine-accordion-chevron" aria-hidden="true">v</span></span>
     </button>
+    <div className="machine-inspection-component-summary-area">{components}</div>
     {expanded&&<div className="machine-record-accordion-body" id={`machine-record-panel-${asset.id}`}>
       <div className="machine-record-launch-card glass-card glass-card--nested">
         <div className="machine-record-launch-copy"><span className="measurement-asset-pill glass-pill glass-pill--cyan">{asset.assetNumber}</span><strong>Asset-specific barrel &amp; screw logs</strong><small>Upload completed screw and barrel inspection files, edit record dates, and print combined record PDFs for this asset.</small></div>
