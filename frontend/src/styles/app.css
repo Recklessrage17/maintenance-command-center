@@ -1361,6 +1361,19 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-record-upload-message { color: #9fbdcc; font-size: .74rem; font-weight: 850; text-align: right; }
 .machine-record-upload-message.error { color: #ffb4aa; }
 .machine-record-logs-section { border-color: rgba(54,229,170,.2); }
+.machine-inspection-component-summary-area { display: grid; gap: 12px; min-width: 0; padding: 12px; }
+.machine-inspection-component-summary-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; min-width: 0; }
+.machine-inspection-component-summary-card { --component-accent: #c4a5ff; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; min-height: 120px; padding: 14px; border: 1px solid color-mix(in srgb,var(--component-accent) 45%,transparent); border-radius: 10px; background: linear-gradient(145deg,rgba(19,29,44,.85),rgba(6,13,24,.85)); color: #d5e3eb; text-align: left; font: inherit; font-size: .8rem; overflow-wrap: anywhere; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.machine-inspection-component-summary-card--barrel { --component-accent: #ffc17a; }
+.machine-inspection-component-summary-card strong { margin: 0; color: var(--component-accent); font-size: .95rem; }
+.machine-inspection-component-summary-card > span { margin: 0; color: #d5e3eb; font-size: .8rem; line-height: 1.35; }
+.machine-inspection-component-summary-card .machine-inspection-component-summary-age, .machine-inspection-component-summary-card .machine-inspection-component-summary-size { color: var(--component-accent); }
+.machine-inspection-component-summary-size { border: 1px solid color-mix(in srgb,var(--component-accent) 35%,transparent); border-radius: 999px; padding: 3px 8px; }
+.machine-inspection-component-summary-card:hover { border-color: var(--component-accent); }
+.machine-inspection-component-summary-card:focus-visible { outline: 3px solid var(--component-accent); outline-offset: 3px; box-shadow: 0 0 14px color-mix(in srgb,var(--component-accent) 20%,transparent); }
+.machine-inspection-component-summary-card:disabled { cursor: default; opacity: .7; }
+@media (max-width: 1000px) { .machine-inspection-component-summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 360px) { .machine-inspection-component-summary-grid { grid-template-columns: minmax(0,1fr); } }
 .machine-record-accordion { padding: 0; overflow: hidden; }
 .machine-record-accordion-header { appearance: none; width: 100%; padding: 13px; border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; text-align: left; }
 .machine-record-accordion-header:hover,.machine-record-accordion-header:focus-visible { background: rgba(68,215,255,.055); outline: none; }
