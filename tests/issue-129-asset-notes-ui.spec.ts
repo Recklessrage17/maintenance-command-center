@@ -84,20 +84,21 @@ for(const library of ['machine','equipment'] as const){
   test(`${library} maintenance record is compact when collapsed and structured when expanded`,async({page},testInfo)=>{
     await openNotes(page,library,true,[maintenanceIssue(library)]);const card=page.locator('.asset-note-active-issue-card');const summary=card.locator('.asset-note-issue-toggle');
     await expect(summary).toHaveAttribute('aria-expanded','false');await expect(summary).toContainText(`WO-${library.toUpperCase()}-129`);await expect(summary).toContainText(`${library} drive repair`);await expect(summary).toContainText('Active Issue');await expect(summary).toContainText('Warning / Needs Attention');await expect(summary).not.toContainText('Original bearing vibration');await expect(card.locator('.asset-note-body-preview')).not.toBeVisible();
-    const collapsed=await summary.evaluate(element=>{const box=element.getBoundingClientRect();return{height:box.height,right:box.right,viewport:innerWidth,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};});expect(collapsed.height).toBeLessThanOrEqual(testInfo.project.name==='mobile-chromium'?82:70);expect(collapsed.right).toBeLessThanOrEqual(collapsed.viewport);expect(collapsed.overflow).toBeLessThanOrEqual(1);
+    const collapsed=await summary.evaluate(element=>{const box=element.getBoundingClientRect();return{height:box.height,right:box.right,viewport:innerWidth,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};});expect(collapsed.height).toBeLessThanOrEqual(testInfo.project.name==='mobile-chromium'?110:85);expect(collapsed.right).toBeLessThanOrEqual(collapsed.viewport);expect(collapsed.overflow).toBeLessThanOrEqual(1);
     const warningBadge=summary.locator('.asset-note-warning-badge');const warningMetrics=await warningBadge.evaluate(element=>{const box=element.getBoundingClientRect();const icon=getComputedStyle(element,'::before');return{height:box.height,align:getComputedStyle(element).alignItems,lineHeight:getComputedStyle(element).lineHeight,iconWidth:Number.parseFloat(icon.width),iconHeight:Number.parseFloat(icon.height),iconFontSize:Number.parseFloat(icon.fontSize)};});expect(warningMetrics.height).toBeLessThanOrEqual(19);expect(warningMetrics.align).toBe('center');expect(warningMetrics.iconWidth).toBeLessThanOrEqual(10);expect(warningMetrics.iconHeight).toBeLessThanOrEqual(10);expect(warningMetrics.iconFontSize).toBeLessThan(8);
     await summary.click();await expect(summary).toHaveAttribute('aria-expanded','true');for(const section of ['Status / Lifecycle','Work Order Information','Issue / Technician Comments','Labor / Technicians','PDF Reports / Supporting Attachments'])await expect(card.getByText(section,{exact:true})).toBeVisible();await expect(card.locator('.asset-note-body-preview')).toHaveText('Original bearing vibration and drive noise must remain hidden while collapsed.');await expect(card.getByText('Issue 129 Tester',{exact:true})).toBeVisible();await expect(card.getByText('Second Technician',{exact:true})).toBeVisible();await expect(card.getByText('3.75 total hours')).toBeVisible();const photos=card.getByLabel('1 photographed work-order PDF included in maintenance record');await expect(photos).toContainText('appended after the record summary');await expect(card.getByText('camera-source-name.pdf')).toHaveCount(0);await expect(card.getByLabel('Attachment supporting-service-report.pdf')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   });
 }
 
-test('collapsed maintenance summary uses one deliberate row when wide and two rows on mobile',async({page})=>{
+test('collapsed maintenance summary stacks badges and keeps title and date visible',async({page})=>{
   await openNotes(page,'machine',true,[maintenanceIssue('machine')]);const summary=page.locator('.asset-note-issue-toggle');
   for(const viewport of [{name:'desktop',width:1440,height:900},{name:'tablet',width:820,height:1180},{name:'mobile landscape',width:844,height:390},{name:'mobile portrait',width:390,height:844}]){
     await page.setViewportSize({width:viewport.width,height:viewport.height});await expect(summary).toBeVisible();
-    const layout=await summary.evaluate(element=>{const values=(box:DOMRect)=>({left:box.left,right:box.right,top:box.top,bottom:box.bottom,width:box.width,height:box.height,centerY:box.top+box.height/2});const rect=(selector:string)=>values(element.querySelector(selector)!.getBoundingClientRect());return{summary:values(element.getBoundingClientRect()),badges:rect('.asset-note-issue-badges'),identity:rect('.asset-note-summary-identity'),chevron:rect('.asset-note-issue-chevron'),title:rect('.asset-note-issue-title'),overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};});
+    const layout=await summary.evaluate(element=>{const values=(box:DOMRect)=>({left:box.left,right:box.right,top:box.top,bottom:box.bottom,width:box.width,height:box.height,centerY:box.top+box.height/2});const rect=(selector:string)=>values(element.querySelector(selector)!.getBoundingClientRect());return{summary:values(element.getBoundingClientRect()),badges:rect('.asset-note-issue-badges'),date:rect('.asset-note-date-pill'),chevron:rect('.asset-note-issue-chevron'),title:rect('.asset-note-issue-title'),overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};});
     expect(layout.summary.right).toBeLessThanOrEqual(viewport.width);expect(layout.overflow,`${viewport.name} horizontal overflow`).toBeLessThanOrEqual(1);expect(layout.title.width).toBeGreaterThan(20);
-    if(viewport.width<=560){expect(layout.identity.top,`${viewport.name} identity row`).toBeGreaterThanOrEqual(layout.badges.bottom+3);expect(Math.abs(layout.badges.centerY-layout.chevron.centerY),`${viewport.name} status/chevron alignment`).toBeLessThanOrEqual(4);expect(layout.identity.right).toBeLessThanOrEqual(layout.summary.right-6);}
-    else{expect(Math.abs(layout.badges.centerY-layout.identity.centerY),`${viewport.name} horizontal alignment`).toBeLessThanOrEqual(4);expect(layout.identity.left,`${viewport.name} status/identity spacing`).toBeGreaterThanOrEqual(layout.badges.right+6);expect(layout.chevron.left,`${viewport.name} identity/chevron spacing`).toBeGreaterThanOrEqual(layout.identity.right+6);}
+    expect(layout.date.width).toBeGreaterThan(30);expect(layout.chevron.right).toBeLessThanOrEqual(layout.summary.right);
+    if(viewport.width<=560){expect(layout.title.top,`${viewport.name} title row`).toBeGreaterThanOrEqual(layout.badges.bottom+3);expect(layout.date.left).toBeGreaterThanOrEqual(layout.badges.right);}
+    else{expect(layout.title.left,`${viewport.name} badge/title spacing`).toBeGreaterThanOrEqual(layout.badges.right+6);expect(layout.date.left,`${viewport.name} title/date spacing`).toBeGreaterThanOrEqual(layout.title.right+6);}
   }
 });
 
@@ -179,5 +180,83 @@ for(const library of ['machine','equipment'] as const){
     });
     await page.getByRole('button',{name:'Save Note',exact:true}).click();
     await expect.poll(()=>savedLabor).toEqual([{userId:1,hours:1.5,isPrimary:true}]);await expect(page.locator('.asset-note-form')).toHaveCount(0);
+  });
+}
+
+
+for(const library of ['machine','equipment'] as const){
+  test(library+' PDF attachments share a canonical compact ribbon icon for generated, uploaded and pending files',async({page},testInfo)=>{
+    const record=maintenanceIssue(library);
+    record.attachments.push({...note(library).attachments[1]},{...record.attachments[0],id:92,filename:'service.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+    await openNotes(page,library,true,[record]);const card=page.locator('.asset-note-active-issue-card');await card.locator('.asset-note-issue-toggle').click();
+    const generated=card.getByLabel('Generated note PDF '+record.pdfFilename);const uploaded=card.getByLabel('Attachment supporting-service-report.pdf');
+    const checkPdf=async(attachment:import('@playwright/test').Locator)=>{
+      const icon=attachment.locator('.mcc-file-type-icon--pdf');await expect(icon).toBeVisible();await expect(icon).toHaveAttribute('aria-hidden','true');
+      await expect(icon.locator('svg')).toHaveAttribute('focusable','false');await expect(icon.locator('.mcc-file-type-icon__pdf-ribbon')).toHaveCount(1);await expect(icon.locator('text,.mcc-file-type-icon__page')).toHaveCount(0);
+      const styles=await icon.evaluate(element=>{const s=getComputedStyle(element);const box=element.getBoundingClientRect();const svg=element.querySelector('svg')!.getBoundingClientRect();return {background:s.backgroundColor,image:s.backgroundImage,border:s.borderTopWidth,accent:getComputedStyle(element.querySelector('path')!).stroke,width:svg.width,height:svg.height,centerX:Math.abs(box.x+box.width/2-svg.x-svg.width/2),centerY:Math.abs(box.y+box.height/2-svg.y-svg.height/2),nestedControls:element.querySelectorAll('button,a,[tabindex]').length};});
+      expect(styles).toMatchObject({background:'rgba(0, 0, 0, 0)',image:'none',border:'0px',accent:'rgb(255, 77, 95)',nestedControls:0});expect(styles.width).toBeLessThanOrEqual(28);expect(styles.width).toBeGreaterThanOrEqual(20);expect(styles.height).toBe(styles.width);expect(styles.centerX).toBeLessThanOrEqual(1);expect(styles.centerY).toBeLessThanOrEqual(1);
+      expect(await attachment.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
+    };
+    await checkPdf(generated);await checkPdf(uploaded);await checkPdf(card.getByLabel('1 photographed work-order PDF included in maintenance record'));
+    const geometry=await generated.locator('svg').innerHTML();expect(await uploaded.locator('svg').innerHTML()).toBe(geometry);
+    for(const attachment of [generated,uploaded]){await expect(attachment.getByRole('button',{name:'Preview',exact:true})).toBeVisible();await expect(attachment.getByRole('button',{name:'Download',exact:true})).toBeVisible();}
+    await expect(generated).toContainText(record.pdfFilename);await expect(uploaded).toContainText('PDF · 4.0 KB');
+    const word=card.getByLabel('Attachment service.docx');await expect(word.locator('.glass-file-icon--docx')).toHaveText('W');await expect(word.locator('.mcc-file-type-icon--pdf')).toHaveCount(0);await expect(word.getByRole('button',{name:'Preview'})).toHaveCount(0);
+    const image=card.getByLabel('Attachment nameplate-photo.webp');await expect(image.locator('img.asset-attachment-thumbnail')).toBeVisible();await expect(image.locator('.mcc-file-type-icon--pdf')).toHaveCount(0);
+    await generated.getByRole('button',{name:'Preview'}).click();const viewer=page.getByRole('dialog',{name:record.pdfFilename+' viewer'});await expect(viewer.locator('object')).toHaveAttribute('data',record.pdfUrl);await viewer.getByRole('button',{name:'Close',exact:true}).first().click();
+    await page.getByRole('button',{name:'Add Note',exact:true}).click();await page.locator('.asset-note-attachment-picker input[type=file]').setInputFiles({name:'pending-service.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 pending icon fixture')});
+    const pending=page.getByLabel('Pending attachment pending-service.pdf');await checkPdf(pending);expect(await pending.locator('svg').innerHTML()).toBe(geometry);await expect(pending).toContainText('Ready to upload');await expect(pending.getByRole('button',{name:'Preview'})).toBeVisible();
+    for(const width of [390,820,1440]){await page.setViewportSize({width,height:900});await checkPdf(pending);expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);}
+    await page.locator('.asset-note-form').getByRole('button',{name:'Cancel',exact:true}).click();await card.locator('.asset-note-issue-toggle').evaluate(element=>{if(element.getAttribute('aria-expanded')!=='true')(element as HTMLButtonElement).click();});
+    await checkPdf(generated);await checkPdf(uploaded);await card.screenshot({path:testInfo.outputPath('pdf-attachment-icons.png')});
+  });
+}
+
+for(const library of ['machine','equipment'] as const){
+  test(`${library} compact work information and resource cards preserve actions across viewports`,async({page},testInfo)=>{
+    const record=maintenanceIssue(library);record.attachments=note(library).attachments;
+    record.title='Long maintenance record title '+ 'wrap safely '.repeat(8);
+    record.pdfFilename='Long_generated_maintenance_record_'+ 'filename_'.repeat(12)+'.pdf';
+    await openNotes(page,library,true,[record]);
+    const card=page.locator('.asset-note-active-issue-card');await card.locator('.asset-note-issue-toggle').click();
+    const info=card.locator('.asset-note-work-info-section');const files=card.locator('.asset-note-files-section');
+    for(const viewport of [{width:1440,height:900},{width:820,height:1180},{width:390,height:844}]){
+      await page.setViewportSize(viewport);
+      const geometry=await card.evaluate(element=>{
+        const info=element.querySelector('.asset-note-work-info-section')!;const files=element.querySelector('.asset-note-files-section')!;
+        return {infoWidth:info.getBoundingClientRect().width,filesWidth:files.getBoundingClientRect().width,
+          rows:Array.from(files.querySelectorAll('.asset-attachment-chip')).map(row=>({width:row.getBoundingClientRect().width,overflow:row.scrollWidth-row.clientWidth})),
+          overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,infoOverflow:info.scrollWidth-info.clientWidth};
+      });
+      if(viewport.width>700){expect(geometry.infoWidth).toBeLessThanOrEqual(480);expect(geometry.filesWidth).toBeLessThanOrEqual(620);}
+      expect(geometry.infoOverflow).toBeLessThanOrEqual(1);expect(geometry.overflow).toBeLessThanOrEqual(1);
+      expect(geometry.rows).toHaveLength(4);for(const row of geometry.rows){expect(row.width).toBeLessThanOrEqual(604);expect(row.overflow).toBeLessThanOrEqual(1);}
+      for(const label of ['Work Order #','Record title','Asset'])await expect(info.getByText(label,{exact:true})).toBeVisible();
+      await expect(info.getByText(record.title,{exact:true})).toBeVisible();await expect(info.getByText(record.workOrder,{exact:true})).toBeVisible();
+      await expect(files).toContainText('1 photographed page PDF · 2 supporting files');
+      const more=info.getByRole('button',{name:`More actions for ${record.title}`,exact:true});
+      const moreSize=await more.evaluate(element=>{const box=element.getBoundingClientRect();const arrow=element.querySelector('span')!.getBoundingClientRect();const style=getComputedStyle(element);return{height:box.height,width:box.width,radius:parseFloat(style.borderTopLeftRadius),fontSize:parseFloat(style.fontSize),centerDelta:Math.abs(box.top+box.height/2-arrow.top-arrow.height/2),touch:matchMedia('(pointer:coarse), (max-width:700px)').matches};});
+      expect(moreSize.radius).toBeGreaterThanOrEqual(moreSize.height/2);expect(moreSize.width).toBeLessThan(90);expect(moreSize.centerDelta).toBeLessThanOrEqual(2);
+      if(moreSize.touch)expect(moreSize.height).toBeGreaterThanOrEqual(44);else{expect(moreSize.height).toBeLessThanOrEqual(28);expect(moreSize.fontSize).toBeLessThanOrEqual(12);}
+      await more.scrollIntoViewIfNeeded();await more.click();
+      const menu=page.getByRole('menu',{name:`More actions for ${record.title}`,exact:true});await expect(menu.getByRole('menuitem',{name:'Edit Note',exact:true})).toBeVisible();
+      await page.keyboard.press('Escape');await expect(menu).not.toBeVisible();
+      const generated=files.getByLabel(`Generated note PDF ${record.pdfFilename}`);
+      await expect(generated).toContainText('Updated');await expect(generated.locator('.asset-note-file-type-icon')).toBeVisible();
+      for(const action of ['Preview','Download']){
+        const button=generated.getByRole('button',{name:action,exact:true});
+        const size=await button.evaluate(element=>({radius:parseFloat(getComputedStyle(element).borderTopLeftRadius),height:element.getBoundingClientRect().height,width:element.getBoundingClientRect().width,touch:matchMedia('(pointer:coarse), (max-width:700px)').matches}));
+        expect(size.radius).toBeGreaterThanOrEqual(size.height/2);expect(size.width).toBeLessThan(120);if(size.touch)expect(size.height).toBeGreaterThanOrEqual(44);
+      }
+      await generated.getByRole('button',{name:'Preview',exact:true}).click();
+      const viewer=page.getByRole('dialog',{name:`${record.pdfFilename} viewer`});await expect(viewer).toBeVisible();await viewer.getByRole('button',{name:'Close',exact:true}).first().click();
+      await info.screenshot({path:testInfo.outputPath(`compact-work-info-${viewport.width}.png`)});
+      await files.screenshot({path:testInfo.outputPath(`compact-files-${viewport.width}.png`)});
+    }
+    for(const [label,filename] of [[`Generated note PDF ${record.pdfFilename}`,record.pdfFilename],['Attachment electrical-inspection.pdf','electrical-inspection.pdf']]){
+      const download=page.waitForEvent('download');await files.getByLabel(label,{exact:true}).getByRole('button',{name:'Download',exact:true}).click();expect((await download).suggestedFilename()).toBe(filename);
+    }
+    await files.getByLabel('Attachment electrical-inspection.pdf',{exact:true}).getByRole('button',{name:'Preview',exact:true}).click();
+    await expect(page.getByRole('dialog',{name:'electrical-inspection.pdf viewer'})).toBeVisible();
   });
 }

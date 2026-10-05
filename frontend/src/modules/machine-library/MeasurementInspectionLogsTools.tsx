@@ -1,3 +1,4 @@
+import { fileTypeIconVariant, MccFileTypeIcon } from '../../components/MccFileTypeIcon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MccDateInput, formatDateDisplay, isValidMccDateValue, localIsoDate } from '../../components/MccDateInput';
 import { MccFolderIcon } from '../../components/MccFolderIcon';
@@ -778,7 +779,7 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
           const checked = selectedIds.has(log.id) && ready;
           return <article className={ready ? 'measurement-log-row measurement-record-row' : 'measurement-log-row measurement-record-row log-only'} key={log.id}>
             <label className="measurement-log-select" title={ready ? 'Select record' : 'Upload this record again before printing.'}><input type="checkbox" checked={checked} disabled={!ready} onChange={event=>toggleSelected(log.id,event.target.checked)} /><span /></label>
-            <div className="measurement-log-main"><div className="measurement-record-title-line"><span className="measurement-asset-pill">{log.assetNumber}</span><span className="measurement-record-date-pill">{formatDateDisplay(log.recordDate)}</span><strong>{log.name}</strong></div><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Screw & Barrel Inspection Records / {log.year || recordYear(log.recordDate)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
+            <div className="measurement-log-main"><div className="measurement-record-title-line"><span className="measurement-asset-pill">{log.assetNumber}</span><span className="measurement-record-date-pill">{formatDateDisplay(log.recordDate)}</span><strong className="measurement-record-filename"><MccFileTypeIcon type={fileTypeIconVariant(log.name)}/>{log.name}</strong></div><span>{log.type || 'File'} / {formatBytes(log.size)} / Uploaded {new Date(log.uploadedAt).toLocaleString()}</span><small>Saved: Screw & Barrel Inspection Records / {log.year || recordYear(log.recordDate)} / {log.name}</small>{!ready&&<small className="measurement-log-upload-note">Upload again to print.</small>}</div>
             <div className="measurement-record-date-cell"><MccDateInput label="Record Date" value={log.recordDate} onChange={recordDate=>void updateRecordDate(log, recordDate)} /></div>
             <div className="measurement-log-row-actions"><em className={ready ? 'measurement-status-pill status-ready' : 'measurement-status-pill status-log-only'}>{ready ? 'READY' : 'LOG ONLY'}</em><button className="secondary-button compact-button" type="button" onClick={()=>void openLogFile(log)}>Open</button></div>
           </article>;

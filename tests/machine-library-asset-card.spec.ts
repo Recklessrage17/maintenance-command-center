@@ -130,8 +130,8 @@ test('Machine warning notes use the shared high-attention label treatment', asyn
   await page.getByRole('button',{name:/Asset Notes & Attachments/}).click();
   const warningBadge=page.locator('.asset-note-issue-toggle .asset-note-warning-badge');
   await expect(warningBadge).toHaveText('Warning / Needs Attention');
-  await expect(warningBadge).toHaveCSS('color','rgb(255, 212, 189)');
-  await expect(warningBadge).toHaveCSS('border-color','rgba(255, 138, 76, 0.72)');
+  await expect(warningBadge).toHaveCSS('background-color','rgba(255, 196, 102, 0.19)');
+  await expect(warningBadge).toHaveCSS('border-color','rgba(255, 196, 102, 0.76)');
 });
 
 test('#97 asset card semantics and visual layout have no dead zones', async ({ page }) => {

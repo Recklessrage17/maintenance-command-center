@@ -7,6 +7,7 @@ import type { Response } from 'express';
 export type WorkOrderRecordLibrary = 'machine' | 'equipment';
 
 export type WorkOrderRecordAttachmentSource = {
+  entryId?:number|null;
   id: number;
   filename: string;
   mimeType: string;
@@ -19,6 +20,8 @@ export type WorkOrderRecordAttachmentSource = {
 };
 
 export type WorkOrderRecordUpdateSource = {
+  entries?: Array<{id:number;updateId:number;workDate:string;body:string;laborHours:number;createdAt:string;updatedAt:string|null;createdByUserId:number|null;updatedByUserId:number|null}>;
+  laborHours?:number;
   id: number;
   body: string;
   createdByUserId: number | null;
@@ -60,7 +63,7 @@ export type WorkOrderRecordSource = {
     reopenedAt: string | null;
     reopenedByUserId: number | null;
     reopenedBy: string;
-    labor: Array<{ userId: number | null; displayName: string; hours: number; isPrimary: boolean; order: number }>;
+    labor: Array<{ userId: number | null; displayName: string; hours: number; manualHours?:number;dailyHours?:number; isPrimary: boolean; order: number }>;
     totalLaborHours: number;
   };
   generatedPdf: WorkOrderRecordAttachmentSource | null;
@@ -79,6 +82,7 @@ export type WorkOrderArchiveEntry = {
   library: WorkOrderRecordLibrary;
   assetId: number;
   recordId: number;
+  entryId?:number|null;
   attachmentId?: number;
   updateId?: number;
   downloadUrl?: string;
@@ -169,6 +173,7 @@ function binaryEntry(input: {
       assetId: record.asset.id,
       recordId: record.note.id,
       attachmentId: source.id,
+      ...(source.entryId===undefined?{}:{entryId:source.entryId}),
       ...(input.updateId === undefined ? {} : { updateId: input.updateId }),
       downloadUrl: source.downloadUrl,
       sourcePath: source.sourcePath,
@@ -181,7 +186,7 @@ function binaryEntry(input: {
 
 function publicAttachment(entry: WorkOrderArchiveEntry | null) {
   if (!entry) return null;
-  return { id: entry.attachmentId, filename: path.posix.basename(entry.path).replace(/^\d+_/, ''), mimeType: entry.mimeType, sizeBytes: entry.sizeBytes, sha256: entry.sha256, archiveEntryKey: entry.key };
+  return { ...(entry.entryId===undefined?{}:{entryId:entry.entryId}),id: entry.attachmentId, filename: path.posix.basename(entry.path).replace(/^\d+_/, ''), mimeType: entry.mimeType, sizeBytes: entry.sizeBytes, sha256: entry.sha256, archiveEntryKey: entry.key };
 }
 
 export function buildWorkOrderArchivePlan(input: { year: number; generatedAt: string; records: WorkOrderRecordSource[] }): WorkOrderArchivePlan {

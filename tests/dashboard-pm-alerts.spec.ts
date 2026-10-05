@@ -272,23 +272,30 @@ test('centers and highlights smoothly rotating PM chevrons in both libraries',as
     const toggle=section.getByRole('button',{name:new RegExp(assetName)});
     const chevron=toggle.locator('.dashboard-pm-chevron');
     const icon=chevron.locator('svg');
+    const toggleBox=await toggle.boundingBox();expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+    const chevronBox=await chevron.boundingBox();expect(Math.abs(chevronBox!.width-chevronBox!.height)).toBeLessThan(1);
+    await expect(chevron).toHaveCSS('border-radius','50%');
     const closedStyle=await chevron.evaluate(element=>{
       const style=getComputedStyle(element);
-      const identityBox=element.parentElement!.querySelector('.dashboard-pm-asset-identity')!.getBoundingClientRect();
+      const summaryBox=element.closest('.dashboard-pm-summary')!.getBoundingClientRect();
       const chevronBox=element.getBoundingClientRect();
+      const iconBox=element.querySelector('svg')!.getBoundingClientRect();
       return {
-        centerOffset:Math.abs((chevronBox.top+chevronBox.height/2)-(identityBox.top+identityBox.height/2)),
+        centerOffset:Math.abs((chevronBox.top+chevronBox.height/2)-(summaryBox.top+summaryBox.height/2)),
+        iconOffset:Math.max(Math.abs((iconBox.top+iconBox.height/2)-(chevronBox.top+chevronBox.height/2)),Math.abs((iconBox.left+iconBox.width/2)-(chevronBox.left+chevronBox.width/2))),
         background:style.backgroundColor,
         boxShadow:style.boxShadow,
         transitionProperties:style.transitionProperty,
       };
     });
     expect(closedStyle.centerOffset).toBeLessThanOrEqual(1);
+    expect(closedStyle.iconOffset).toBeLessThanOrEqual(1);
     expect(closedStyle.transitionProperties).toContain('box-shadow');
     await expect(icon).toHaveCSS('transition-property','transform');
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded','true');
+    await expect(chevron).toHaveCSS('border-radius','50%');
     await expect(icon).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');
     const openStyle=await chevron.evaluate(element=>({background:getComputedStyle(element).backgroundColor,boxShadow:getComputedStyle(element).boxShadow}));
     expect(openStyle.background).not.toBe(closedStyle.background);
@@ -400,11 +407,11 @@ test('PM columns hold four collapsed assets and expanded cards use the available
     }else{expect(fifthBox!.y).toBeGreaterThan(compactBox!.y);expect(ninthBox!.y).toBeGreaterThan(fifthBox!.y);}
     const toggle=first.locator('.dashboard-pm-asset-toggle');const body=first.locator('.dashboard-pm-accordion-body');await toggle.click();await expect(toggle).toHaveAttribute('aria-expanded','true');
     await expect(body).toHaveAttribute('aria-hidden','false');await expect(body).not.toHaveAttribute('inert');
-    expect(await body.evaluate(el=>getComputedStyle(el).transitionDuration)).toContain('0.22s');
+    expect(await body.evaluate(el=>getComputedStyle(el).transitionDuration)).toContain('0.3s');
     const expandedBox=await first.boundingBox();const listBox=await section.locator('.dashboard-pm-asset-list').boundingBox();
     if(testInfo.project.name==='desktop-chromium'){expect(expandedBox!.width).toBeGreaterThan(compactBox!.width*2);expect(Math.abs(expandedBox!.width-listBox!.width)).toBeLessThanOrEqual(2);}else{expect(Math.abs(expandedBox!.width-listBox!.width)).toBeLessThanOrEqual(2);}
     await expect(first.locator('.dashboard-pm-task-row')).toBeVisible();await toggle.press('Escape');await expect(toggle).toBeFocused();await expect(body).toHaveAttribute('inert','');
-    const closedBox=await first.boundingBox();expect(Math.abs(closedBox!.width-compactBox!.width)).toBeLessThanOrEqual(2);
+    await expect(first).not.toHaveClass(/is-wide/);const closedBox=await first.boundingBox();expect(Math.abs(closedBox!.width-compactBox!.width)).toBeLessThanOrEqual(2);
     await page.emulateMedia({reducedMotion:'reduce'});await expect(body).toHaveCSS('transition-duration','0s');await toggle.click();await expect(first.locator('.dashboard-pm-task-row')).toBeVisible();await toggle.click();await page.emulateMedia({reducedMotion:'no-preference'});
   }
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
@@ -461,16 +468,35 @@ test('keeps Dashboard scrolling on the document without snap, nested traps, or s
 for(const library of ['machine','equipment'] as const){
   test(`${library} combines WO Open and Hold counts, preserves filters, deep links and responsive layout`,async({page},testInfo)=>{
     const identity={assetLibrary:library,assetId:900,assetNumber:'Press 900'};
-    await mockDashboard(page,[],[warningNote(9601,{...identity,title:'Open issue',hold:false}),warningNote(9602,{...identity,title:'Waiting for parts',hold:true}),warningNote(9603,{...identity,title:'Resolved held issue',hold:true,status:'resolved'}),warningNote(9604,{...identity,title:'Ordinary held input',hold:true,warning:false})]);
+    await mockDashboard(page,[alert(9001,'Due Now',{...identity,assetName:'Line Press'})],[warningNote(9601,{...identity,title:'Open issue',hold:false}),warningNote(9602,{...identity,title:'Waiting for parts',hold:true}),warningNote(9603,{...identity,title:'Resolved held issue',hold:true,status:'resolved'}),warningNote(9604,{...identity,title:'Ordinary held input',hold:true,warning:false})]);
     await page.goto('/');const section=page.locator(`.dashboard-pm-section--${library}`);const open=section.getByRole('button',{name:'Open 1 Open work orders for Press 900'});const hold=section.getByRole('button',{name:'Open 1 Hold work orders for Press 900'});
     await expect(open).toBeVisible();await expect(hold).toBeVisible();await expect(open).toHaveClass(/\bis-open\b/);await expect(open).toHaveCSS('color','rgb(99, 239, 184)');await expect(hold).toHaveCSS('color','rgb(255, 224, 163)');await expect(section.locator('.dashboard-pm-section-counts')).toHaveCount(0);
     const badge=section.getByRole('group',{name:'Work order counts for Press 900'});await expect(badge).toHaveCount(1);await expect(badge).toHaveText('WO(Open 1/Hold 1)');
+    const summary=section.locator('.dashboard-pm-summary');const toggle=summary.locator('.dashboard-pm-asset-toggle');const chevron=toggle.locator('.dashboard-pm-chevron');
+    await expect(toggle.locator('button')).toHaveCount(0);expect(await badge.evaluate(element=>element.closest('button')===null)).toBe(true);
+    const expectCentered=async()=>{
+      const summaryBox=await summary.boundingBox();const circleBox=await chevron.boundingBox();const iconBox=await chevron.locator('svg').boundingBox();
+      expect(Math.abs((circleBox!.y+circleBox!.height/2)-(summaryBox!.y+summaryBox!.height/2))).toBeLessThanOrEqual(1);
+      expect(Math.abs((iconBox!.y+iconBox!.height/2)-(circleBox!.y+circleBox!.height/2))).toBeLessThanOrEqual(1);
+      expect(Math.abs((iconBox!.x+iconBox!.width/2)-(circleBox!.x+circleBox!.width/2))).toBeLessThanOrEqual(1);
+    };
     for(const width of [390,768,1440]){
-      await page.setViewportSize({width,height:900});await expect(badge).toBeVisible();
+      await page.setViewportSize({width,height:900});await page.mouse.move(0,0);await expect(badge).toBeVisible();
+      for(const control of [open,hold]){
+        await expect(control).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+        await expect(control).toHaveCSS('background-image','none');
+        await expect(control).toHaveCSS('border-top-width','0px');
+      }
       const openBox=await open.boundingBox();const holdBox=await hold.boundingBox();expect(Math.abs(holdBox!.y-openBox!.y)).toBeLessThan(2);
+      await expectCentered();
       expect(await badge.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
       expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     }
+    await chevron.click();await expect(toggle).toHaveAttribute('aria-expanded','true');await expect(chevron.locator('svg')).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');await expectCentered();
+    const expandedBody=await section.locator('.dashboard-pm-accordion-body').boundingBox();const summaryBox=await summary.boundingBox();expect(expandedBody!.y).toBeGreaterThanOrEqual(summaryBox!.y+summaryBox!.height-1);
+    await toggle.press('Enter');await expect(toggle).toHaveAttribute('aria-expanded','false');await expect(toggle).toHaveCSS('outline-style','solid');
+    await open.focus();await page.keyboard.press('Tab');await expect(hold).toBeFocused();await expect(hold).toHaveCSS('outline-style','solid');await expect(hold).toHaveCSS('outline-width','2px');
+    await page.keyboard.press('Shift+Tab');await expect(open).toBeFocused();await expect(open).toHaveCSS('outline-style','solid');await expect(open).toHaveCSS('outline-width','2px');
     await page.screenshot({path:testInfo.outputPath('hold-dashboard.png'),fullPage:true});
     for(const [control,label,title,id] of [[open,'Tech Open','Open issue',9601],[hold,'Hold','Waiting for parts',9602]] as const){
       await control.click();const dialog=page.getByRole('dialog',{name:`${label} for Press 900`});await expect(dialog.locator('.dashboard-tech-note-row')).toHaveCount(1);await dialog.getByRole('button',{name:new RegExp(title)}).click();await expect(dialog.getByRole('link',{name:'Open full asset detail'})).toHaveAttribute('href',`/${library}-library?asset=900&note=${id}`);await page.keyboard.press('Escape');await expect(control).toBeFocused();
@@ -478,3 +504,127 @@ for(const library of ['machine','equipment'] as const){
     await page.emulateMedia({reducedMotion:'reduce'});await expect(hold).toHaveCSS('animation-name','none');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   });
 }
+
+
+// Inspect native CSS transitions at reproducible frames without depending on headless paint cadence.
+async function seekPmMotion(group:Locator,time:number){
+  await group.evaluate((card,time)=>{
+    for(const selector of ['.dashboard-accordion-body','.dashboard-pm-chevron','.dashboard-pm-chevron svg']){
+      card.querySelector(selector)?.getAnimations().forEach(animation=>{animation.pause();animation.currentTime=time;});
+    }
+  },time);
+}
+async function finishPmMotion(group:Locator){
+  await group.evaluate(card=>{
+    for(const selector of ['.dashboard-accordion-body','.dashboard-pm-chevron','.dashboard-pm-chevron svg'])card.querySelector(selector)?.getAnimations().forEach(animation=>animation.finish());
+  });
+}
+async function pmGeometry(group:Locator){
+  return group.evaluate(card=>{
+    const rect=(selector:string)=>card.querySelector(selector)!.getBoundingClientRect();const circle=rect('.dashboard-pm-chevron');
+    return {x:circle.x,right:circle.right,cardRight:card.getBoundingClientRect().right,left:[...card.querySelectorAll('.dashboard-pm-asset-identity,.dashboard-pm-asset-identity > span,.dashboard-pm-asset-statuses,.dashboard-wo-badge')].map(el=>({x:el.getBoundingClientRect().x,width:el.getBoundingClientRect().width})),transform:getComputedStyle(card.querySelector('.dashboard-pm-chevron')!).transform};
+  });
+}
+
+test('travels between compact and full-width PM edges with synchronized 300ms motion at responsive widths',async({page})=>{
+  test.setTimeout(60000);
+  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});await page.emulateMedia({reducedMotion:'no-preference'});
+  const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:12},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:library+' '+(i+1)})));
+  const warnings=['machine','equipment'].map((library,index)=>warningNote(9900+index,{assetLibrary:library,assetId:1,assetNumber:library+' 1'}));
+  await mockDashboard(page,alerts,warnings);await page.goto('/');
+  for(const width of [390,820,1440]){
+    await page.setViewportSize({width,height:900});
+    for(const library of ['machine','equipment']){
+      const section=page.locator('.dashboard-pm-section--'+library);
+      for(const index of [0,4,8]){
+        const group=section.locator('.dashboard-pm-asset-group').nth(index);const toggle=group.locator('.dashboard-pm-asset-toggle');const body=group.locator('.dashboard-accordion-body');const circle=toggle.locator('.dashboard-pm-chevron');const before=await pmGeometry(group);
+        expect(before.cardRight-before.right).toBeCloseTo(10,0);
+        await toggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(group,0);
+        expect(Math.abs((await pmGeometry(group)).x-before.x)).toBeLessThanOrEqual(1);
+        await expect(toggle).toHaveAttribute('aria-expanded','true');await expect(body).not.toHaveAttribute('inert');
+        await expect(circle).toHaveCSS('transition-duration','0.3s, 0.3s, 0.3s, 0.3s, 0.3s');await expect(circle).toHaveCSS('transition-timing-function','cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1), cubic-bezier(0.2, 0, 0, 1)');await expect(body).toHaveCSS('transition-duration','0.3s, 0.3s, 0s');
+        await seekPmMotion(group,100);const opening=await pmGeometry(group);
+        const opacity=Number(await body.evaluate(el=>getComputedStyle(el).opacity));expect(opacity).toBeGreaterThan(0);expect(opacity).toBeLessThan(1);
+        await finishPmMotion(group);await expect(body).toHaveCSS('opacity','1');const expanded=await pmGeometry(group);
+        expect(expanded.cardRight-expanded.right).toBeCloseTo(10,0);
+        if(expanded.x-before.x>5){expect(opening.x).toBeGreaterThan(before.x+1);expect(opening.x).toBeLessThan(expanded.x-1);}
+        for(const geometry of [opening,expanded])geometry.left.forEach((item,i)=>{expect(Math.abs(item.x-before.left[i].x)).toBeLessThanOrEqual(1);expect(Math.abs(item.width-before.left[i].width)).toBeLessThanOrEqual(1);});
+        await expect(circle.locator('svg')).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');await expect(toggle.locator('button')).toHaveCount(0);
+        await toggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(group,0);
+        expect(Math.abs((await pmGeometry(group)).x-expanded.x)).toBeLessThanOrEqual(1);
+        await seekPmMotion(group,100);const closing=await pmGeometry(group);if(expanded.x-before.x>5){expect(closing.x).toBeGreaterThan(before.x+1);expect(closing.x).toBeLessThan(expanded.x-1);}
+        await expect(body).toHaveAttribute('inert','');await toggle.focus();await group.locator('.dashboard-pm-task-row').first().evaluate(el=>(el as HTMLButtonElement).focus());await expect(toggle).toBeFocused();
+        await finishPmMotion(group);await expect(group).not.toHaveClass(/is-wide/);const collapsed=await pmGeometry(group);expect(Math.abs(collapsed.x-before.x)).toBeLessThanOrEqual(1);expect(collapsed.transform).toBe('matrix(1, 0, 0, 1, 0, -15)');
+        await expect(circle.locator('svg')).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+      }
+    }
+  }
+});
+
+test('direct PM switches return A and move B without flashes, stale transforms or overflow',async({page})=>{
+  test.setTimeout(60000);
+  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});
+  const alerts=['machine','equipment'].flatMap((library,index)=>Array.from({length:12},(_,i)=>alert(index*100+i+1,'Due Soon',{assetLibrary:library,assetId:i+1,assetNumber:library+' '+(i+1)})));
+  await mockDashboard(page,alerts);await page.goto('/');
+  for(const width of [390,820,1440]){
+    await page.setViewportSize({width,height:900});
+    for(const library of ['machine','equipment']){
+      const section=page.locator('.dashboard-pm-section--'+library);const a=section.locator('.dashboard-pm-asset-group').nth(0);const b=section.locator('.dashboard-pm-asset-group').nth(4);const aToggle=a.locator('.dashboard-pm-asset-toggle');const bToggle=b.locator('.dashboard-pm-asset-toggle');
+      const aClosed=await pmGeometry(a);const bClosed=await pmGeometry(b);await aToggle.click();await expect(a.locator('.dashboard-pm-chevron svg')).toHaveCSS('transform','matrix(-1, 0, 0, -1, 0, 0)');const aOpen=await pmGeometry(a);
+      await bToggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(a,0);await seekPmMotion(b,0);
+      expect(Math.abs((await pmGeometry(a)).x-aOpen.x)).toBeLessThanOrEqual(1);expect(Math.abs((await pmGeometry(b)).x-bClosed.x)).toBeLessThanOrEqual(1);
+      await expect(aToggle).toHaveAttribute('aria-expanded','false');await expect(bToggle).toHaveAttribute('aria-expanded','true');await expect(section.locator('.dashboard-pm-asset-toggle[aria-expanded="true"]')).toHaveCount(1);
+      await seekPmMotion(a,100);await seekPmMotion(b,100);const aMid=await pmGeometry(a);const bMid=await pmGeometry(b);
+      if(aOpen.x-aClosed.x>5){expect(aMid.x).toBeGreaterThan(aClosed.x+1);expect(aMid.x).toBeLessThan(aOpen.x-1);}
+      await finishPmMotion(a);await finishPmMotion(b);await expect(a).not.toHaveClass(/is-wide/);const bOpen=await pmGeometry(b);
+      expect(Math.abs((await pmGeometry(a)).x-aClosed.x)).toBeLessThanOrEqual(1);expect((await pmGeometry(a)).transform).toBe('matrix(1, 0, 0, 1, 0, -15)');expect(bOpen.cardRight-bOpen.right).toBeCloseTo(10,0);
+      if(bOpen.x-bClosed.x>5){expect(bMid.x).toBeGreaterThan(bClosed.x+1);expect(bMid.x).toBeLessThan(bOpen.x-1);}
+      // Resize an already expanded card: its endpoint must follow the actual new geometry.
+      await page.setViewportSize({width:width+37,height:900});await expect.poll(async()=>{const g=await pmGeometry(b);return Math.abs(g.cardRight-g.right-10);}).toBeLessThanOrEqual(1);
+      await page.setViewportSize({width,height:900});await expect.poll(async()=>{const g=await pmGeometry(b);return Math.abs(g.cardRight-g.right-10);}).toBeLessThanOrEqual(1);
+      // Reverse the switch while the later-column card is open; its compact slot must stay stable.
+      const bBeforeReverse=await pmGeometry(b);
+      await aToggle.evaluate(async el=>{(el as HTMLButtonElement).click();await new Promise(requestAnimationFrame);});await seekPmMotion(b,0);await seekPmMotion(a,0);
+      expect(Math.abs((await pmGeometry(b)).x-bBeforeReverse.x)).toBeLessThanOrEqual(1);expect(Math.abs((await pmGeometry(a)).x-aClosed.x)).toBeLessThanOrEqual(1);
+      await seekPmMotion(b,100);const bReturning=await pmGeometry(b);if(bBeforeReverse.x-bClosed.x>5){expect(bReturning.x).toBeGreaterThan(bClosed.x+1);expect(bReturning.x).toBeLessThan(bBeforeReverse.x-1);}
+      await finishPmMotion(b);await finishPmMotion(a);await expect(b).not.toHaveClass(/is-wide/);expect(Math.abs((await pmGeometry(b)).x-bClosed.x)).toBeLessThanOrEqual(1);
+      await page.emulateMedia({reducedMotion:'reduce'});await bToggle.click();await expect(a).not.toHaveClass(/is-wide/);await aToggle.click();await expect(b).not.toHaveClass(/is-wide/);const reduced=await pmGeometry(a);expect(reduced.cardRight-reduced.right).toBeCloseTo(10,0);await expect(a.locator('.dashboard-pm-chevron')).toHaveCSS('transition-duration','0s');
+      await a.locator('.dashboard-pm-chevron').click();await expect(a).not.toHaveClass(/is-wide/);expect(Math.abs((await pmGeometry(a)).x-aClosed.x)).toBeLessThanOrEqual(1);await page.emulateMedia({reducedMotion:'no-preference'});
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+  }
+});
+
+test('keeps polished task action circles centered in their rows throughout accordion motion',async({page})=>{
+  await page.addInitScript(()=>{Element.prototype.scrollIntoView=()=>{};});
+  await mockDashboard(page);await page.goto('/');
+  for(const library of ['machine','equipment']){
+    const group=page.locator('.dashboard-pm-section--'+library+' .dashboard-pm-asset-group').first();
+    const toggle=group.locator('.dashboard-pm-asset-toggle');const body=group.locator('.dashboard-accordion-body');
+    await toggle.click();await expect(body).toHaveCSS('opacity','1');
+    const checkAlignment=async()=>{
+      const layout=await group.locator('.dashboard-pm-task-row').evaluateAll(rows=>rows.map(row=>{
+        const circle=row.querySelector<HTMLElement>('.dashboard-pm-task-open')!;const icon=circle.querySelector('svg')!;
+        const r=row.getBoundingClientRect();const c=circle.getBoundingClientRect();const i=icon.getBoundingClientRect();
+        return {width:c.width,height:c.height,rowCenter:Math.abs(c.y+c.height/2-r.y-r.height/2),iconX:Math.abs(i.x+i.width/2-c.x-c.width/2),iconY:Math.abs(i.y+i.height/2-c.y-c.height/2),rightInset:r.right-c.right,position:getComputedStyle(circle).position,margin:getComputedStyle(circle).margin,padding:getComputedStyle(circle).padding,overflow:row.scrollWidth-row.clientWidth};
+      }));
+      expect(layout.length).toBeGreaterThan(0);
+      for(const item of layout){expect(item.width).toBe(30);expect(item.height).toBe(30);expect(item.rowCenter).toBeLessThanOrEqual(1);expect(item.iconX).toBeLessThanOrEqual(1);expect(item.iconY).toBeLessThanOrEqual(1);expect(item.rightInset).toBeCloseTo(11,0);expect(item.position).toBe('relative');expect(item.margin).toBe('0px');expect(item.padding).toBe('0px');expect(item.overflow).toBeLessThanOrEqual(1);}
+    };
+    for(const width of [390,768,1440]){
+      await page.setViewportSize({width,height:900});await checkAlignment();
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    // Seek native CSS transitions to a reproducible intermediate frame, avoiding headless paint throttling.
+    for(const expanded of [false,true]){
+      await toggle.evaluate(async element=>{(element as HTMLButtonElement).click();await new Promise(requestAnimationFrame);const body=element.closest('article')!.querySelector('.dashboard-accordion-body')!;body.getAnimations().forEach(animation=>{animation.pause();animation.currentTime=100;});});
+      await expect(toggle).toHaveAttribute('aria-expanded',String(expanded));await checkAlignment();
+      await body.evaluate(element=>element.getAnimations().forEach(animation=>animation.play()));
+      await expect(body).toHaveCSS('opacity',expanded?'1':'0');
+    }
+    const row=group.locator('.dashboard-pm-task-row').first();await expect(row.locator('button')).toHaveCount(0);
+    await expect(row.locator('.dashboard-pm-task-open')).toHaveAttribute('aria-hidden','true');
+    await row.focus();await row.press('Enter');await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
+    await page.emulateMedia({reducedMotion:'reduce'});await expect(body).toHaveCSS('transition-duration','0s');await expect(group.locator('.dashboard-pm-task-open svg').first()).toHaveCSS('transition-duration','0s');await toggle.click();await expect(body).toHaveAttribute('inert','');await page.emulateMedia({reducedMotion:'no-preference'});
+  }
+});

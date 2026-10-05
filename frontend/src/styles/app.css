@@ -1376,7 +1376,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-record-preview-main { min-width: 0; display: grid; gap: 4px; }
 .machine-record-preview-main > strong { overflow: hidden; color: #f3fbff; font-size: .88rem; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .machine-record-preview-filename { display: flex; align-items: center; gap: 8px; }
-.machine-record-inline-file-icon { flex: 0 0 auto; display: inline-grid; width: 31px; height: 31px; place-items: center; border: 1px solid rgba(255,117,138,.45); border-radius: 8px; color: #ffe3e8; background: linear-gradient(145deg,rgba(143,31,52,.72),rgba(82,15,30,.72)); font-size: .58rem; font-weight: 1000; letter-spacing: .04em; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+
 .machine-record-preview-main > span:not(.machine-record-preview-pills),.machine-record-preview-main > small { color: #9fbdcc; font-size: .72rem; font-weight: 800; line-height: 1.25; }
 .machine-record-preview-pills { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
 .machine-record-preview-pills em { margin: 0; font-style: normal; }
@@ -1666,8 +1666,8 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-entry-heading .asset-note-created-meta { color: #9ebdcc; font-size: .76rem; line-height: 1.4; }
 .asset-note-date-pill { display: inline-flex; width: fit-content; min-height: 23px; align-items: center; padding: 0 8px; border: 1px solid rgba(68,215,255,.3); border-radius: 999px; color: #c8f5ff; background: rgba(6,67,98,.28); font-size: .67rem; font-weight: 950; }
 .asset-note-active-issue-card .asset-note-date-pill { color: #fff; }
-.asset-note-entry .asset-note-warning-badge,.asset-note-active-issue-card .asset-note-warning-badge{display:inline-flex;width:fit-content;min-height:18px;align-items:center;gap:4px;padding:1px 5px;border:1px solid rgba(255,138,76,.72);border-radius:999px;color:#ffd4bd;background:linear-gradient(135deg,rgba(125,43,31,.62),rgba(91,45,19,.5));box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 8px rgba(255,91,68,.05);font-size:.57rem;font-weight:950;line-height:1.1;letter-spacing:.015em}
-.asset-note-entry .asset-note-warning-badge::before,.asset-note-active-issue-card .asset-note-warning-badge::before{content:"!";width:10px;height:10px;display:inline-grid;place-items:center;border:1px solid rgba(255,174,126,.72);border-radius:50%;color:#fff;background:rgba(151,48,32,.76);font-size:.46rem;font-weight:1000;line-height:1}
+.asset-note-entry .asset-note-warning-badge,.asset-note-active-issue-card .asset-note-warning-badge{display:inline-flex;width:fit-content;min-height:18px;align-items:center;gap:4px;padding:1px 5px;border:1px solid rgba(var(--mcc-status-warning-rgb),.76);border-radius:999px;color:color-mix(in srgb,var(--mcc-status-warning) 78%,white);background:rgba(var(--mcc-status-warning-rgb),.19);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 8px rgba(var(--mcc-status-warning-rgb),.14);font-size:.57rem;font-weight:950;line-height:1.1;letter-spacing:.015em}
+.asset-note-entry .asset-note-warning-badge::before,.asset-note-active-issue-card .asset-note-warning-badge::before{content:"!";width:10px;height:10px;display:inline-grid;place-items:center;border:1px solid rgba(var(--mcc-status-warning-rgb),.9);border-radius:50%;color:#281902;background:var(--mcc-status-warning);font-size:.46rem;font-weight:1000;line-height:1}
 .asset-note-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
 .asset-note-body-preview { display: -webkit-box; overflow: hidden; margin: 0; color: #c2d8e3; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .asset-attachment-grid { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit,minmax(min(360px,100%),1fr)); align-items: stretch; gap: 8px; }
@@ -1678,7 +1678,6 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-attachment-thumbnail { display: block; width: 46px; height: 38px; border: 1px solid rgba(54,229,170,.42); border-radius: 7px; background: rgba(1,10,18,.86); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); object-fit: cover; }
 .asset-file-icon-button { appearance: none; padding: 0; cursor: pointer; font-family: inherit; }
 .asset-file-icon-button:hover,.asset-file-icon-button:focus-visible { border-color: #44d7ff; outline: none; box-shadow: 0 0 0 3px rgba(68,215,255,.12); }
-.asset-attachment-chip.kind-pdf .asset-file-icon { border-color: rgba(255,117,138,.42); color: #ffe3e8; background: rgba(143,31,52,.46); }
 .asset-attachment-chip.kind-word .asset-file-icon { border-color: rgba(83,151,255,.5); color: #e3efff; background: rgba(28,74,148,.52); font-size: 1rem; }
 .asset-attachment-chip.kind-image .asset-file-icon { border-color: rgba(54,229,170,.4); color: #caffef; background: rgba(18,97,71,.42); }
 .asset-attachment-copy,.asset-attachment-name { min-width: 0; display: grid; gap: 2px; }
@@ -1711,7 +1710,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-issue-summary-text { display: -webkit-box; overflow: hidden; color: #a9c0cb; font-size: .71rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 .asset-note-issue-chevron { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid color-mix(in srgb,var(--asset-note-issue-accent) 45%,transparent); border-radius: 50%; color: color-mix(in srgb,var(--asset-note-issue-accent) 64%,white); background: color-mix(in srgb,var(--asset-note-issue-accent) 13%,rgba(27,39,48,.88)); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
 .asset-note-issue-chevron svg { width: 17px; height: 17px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 200ms cubic-bezier(.4,0,.2,1); }
-.asset-note-active-issue-card.is-expanded .asset-note-issue-chevron svg { transform: rotate(180deg); }
+.asset-note-active-issue-card.is-expanded > .asset-note-issue-toggle > .asset-note-issue-chevron svg { transform: rotate(180deg); }
 .asset-note-issue-details { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; border-top: 1px solid transparent; transition: grid-template-rows 190ms ease,opacity 150ms ease,visibility 0s linear 190ms,border-color 190ms ease; }
 .asset-note-active-issue-card.is-expanded .asset-note-issue-details { grid-template-rows: 1fr; opacity: 1; visibility: visible; border-top-color: color-mix(in srgb,var(--asset-note-issue-accent) 22%,transparent); transition: grid-template-rows 190ms ease,opacity 170ms ease 25ms,visibility 0s,border-color 190ms ease; }
 .asset-note-issue-details-inner { min-height: 0; overflow: hidden; }
@@ -1738,7 +1737,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-resolved-asset strong { color: #edfff8; }
 .asset-note-original-label { margin-bottom: -5px; color: #ffcfb5; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
 .asset-note-entry.is-warning-issue .asset-note-body-preview { display: block; overflow: visible; -webkit-line-clamp: initial; }
-.asset-note-update-section { display: grid; gap: 9px; padding: 11px; border: 1px solid rgba(68,215,255,.18); border-radius: 10px; background: rgba(2,16,29,.48); }
+.asset-note-update-section { display: grid; gap: 9px; padding: 11px; border: 1px solid var(--mcc-border-default); border-radius: 10px; background: rgba(2,16,29,.48); }
 .asset-note-update-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .asset-note-update-heading > div { display: grid; gap: 2px; }
 .asset-note-update-heading strong { color: #effbff; font-size: .82rem; }
@@ -1746,10 +1745,14 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-update-timeline { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .asset-note-update-timeline > li { position: relative; display: grid; gap: 7px; padding: 10px 10px 10px 18px; border-left: 2px solid rgba(68,215,255,.44); border-radius: 0 8px 8px 0; background: rgba(6,34,53,.48); }
 .asset-note-update-timeline > li::before { position: absolute; top: 14px; left: -5px; width: 8px; height: 8px; border: 2px solid #8fe8ff; border-radius: 50%; background: #092338; content: ""; }
-.asset-note-update-timeline > li > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.asset-note-update-meta { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+.asset-note-update-meta > strong { min-width: 0; overflow-wrap: anywhere; }
+.asset-note-update-meta-actions { min-width: 0; display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.asset-note-update-meta-actions time { overflow-wrap: anywhere; }
+.asset-note-update-meta-actions > .asset-note-edit-update { flex: 0 0 auto; width: max-content; max-width: 100%; min-height: 36px; white-space: nowrap; }
 .asset-note-update-timeline strong { color: #eafaff; font-size: .76rem; }
 .asset-note-update-timeline time { color: #91afbf; font-size: .66rem; }
-.asset-note-update-timeline p { margin: 0; color: #c4dbe6; font-size: .76rem; line-height: 1.5; white-space: pre-wrap; }
+.asset-note-update-timeline > li > p { margin: 0; color: var(--mcc-status-warning); font-size: .76rem; line-height: 1.5; white-space: pre-wrap; }
 .asset-note-update-form,.asset-note-lifecycle-form { display: grid; gap: 10px; padding: 11px; border: 1px solid rgba(68,215,255,.25); border-radius: 10px; background: rgba(6,26,43,.74); }
 .asset-note-update-form textarea,.asset-note-lifecycle-form textarea { resize: vertical; }
 .asset-note-update-attachment-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -2435,19 +2438,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
   box-shadow: 0 0 18px rgba(68, 215, 255, 0.2), inset 0 1px 0 rgba(255,255,255,0.18);
   transform: translateY(-1px);
 }
-.history-action-icon {
-  display: inline-grid;
-  place-items: center;
-  min-width: 28px;
-  min-height: 18px;
-  padding: 0 4px;
-  border-radius: 999px;
-  color: #051525;
-  background: #dff7ff;
-  font-size: .58rem;
-  font-weight: 1000;
-  line-height: 1;
-}
+
 .history-reason-cell { color: #dcefff; line-height: 1.35; }
 @media (max-width: 820px) { .header-actions { justify-content: flex-start; } .auth-card { padding: 24px; } }
 @media (max-width: 1180px) { .settings-page .network-link-grid, .backup-center-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -2488,7 +2479,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-notes-panel :is(span,strong),.asset-note-history-modal :is(span,strong) { margin-bottom: 0; }
 :is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-note-status-badge,.asset-note-work-order,.asset-note-date-pill) { display: inline-flex; }
 :is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-copy,:is(.asset-notes-panel,.asset-note-history-modal) .asset-note-labor-view > div > span { display: grid; }
-:is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-file-icon,.asset-work-order-pages-icon) { display: inline-grid; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-file-icon { display: inline-grid; }
 .asset-note-form { position: relative; align-items: start; gap: 6px 8px; padding: 8px; border-color: rgba(68,215,255,.48); background: linear-gradient(145deg,rgba(8,34,55,.84),rgba(4,18,33,.82)); box-shadow: inset 4px 0 0 rgba(68,215,255,.58),0 8px 22px rgba(0,0,0,.16); }
 .asset-note-form.is-editing { border-color: rgba(167,139,250,.7); background: linear-gradient(145deg,rgba(38,29,75,.52),rgba(5,22,39,.88)); box-shadow: inset 4px 0 0 rgba(167,139,250,.78),0 9px 24px rgba(0,0,0,.2); }
 .asset-note-editor-banner { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; min-height: 0; padding: 3px 7px; border: 1px solid rgba(68,215,255,.25); border-radius: 8px; background: rgba(5,25,42,.72); }
@@ -2554,6 +2545,15 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-issue-title { overflow: hidden; font-size: .8rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .asset-note-status-badge,.asset-note-work-order { min-height: 19px; padding: 1px 6px; font-size: .58rem; line-height: 1.1; }
 .asset-note-status-badge.is-active i { width: 6px; height: 6px; border-radius: 50%; background: #ffc766; box-shadow: 0 0 7px rgba(255,199,102,.64); }
+
+/* Warning issue summary: compact status stack, centered title, visible date. */
+.asset-note-issue-toggle { grid-template-columns: max-content minmax(0,1fr) max-content 27px; grid-template-areas: "badges title date chevron"; min-height: 68px; column-gap: 12px; }
+.asset-note-issue-toggle > .asset-note-issue-badges { grid-area: badges; display: flex; flex-direction: column; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 3px; min-width: 0; }
+.asset-note-issue-toggle > .asset-note-issue-badges > * { width: max-content; max-width: 100%; justify-content: center; text-align: center; }
+.asset-note-issue-toggle > .asset-note-issue-title { grid-area: title; min-width: 0; max-width: 100%; text-align: center; white-space: normal; overflow-wrap: anywhere; font-size: .88rem; }
+.asset-note-issue-toggle > .asset-note-date-pill { grid-area: date; display: inline-flex; white-space: nowrap; }
+.asset-note-issue-toggle > .asset-note-issue-chevron { grid-area: chevron; }
+.asset-note-update-edited { display: block; margin: 4px 0; color: #a8dce8; font-size: .72rem; }
 .asset-note-date-pill { min-height: 20px; padding-inline: 6px; font-size: .59rem; }
 .asset-note-issue-chevron { width: 25px; height: 25px; }
 .asset-note-issue-chevron svg { width: 15px; height: 15px; }
@@ -2590,7 +2590,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .asset-note-update-section { padding: 9px; }
 .asset-note-files-section .asset-attachment-grid { grid-template-columns: repeat(auto-fit,minmax(min(300px,100%),1fr)); }
 .asset-work-order-pages-card { border-color: rgba(246,190,63,.36); background: linear-gradient(145deg,rgba(82,56,15,.38),rgba(3,15,26,.76)); }
-.asset-work-order-pages-icon { display: inline-grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(246,190,63,.44); border-radius: 9px; color: #ffe2a3; background: rgba(94,60,10,.48); font-size: .65rem; font-weight: 1000; }
+
 .asset-attachment-chip.is-work-order-photo { border-color: rgba(246,190,63,.45); background: rgba(72,50,17,.38); }
 .asset-note-history-control { width: auto; min-width: 0; height: 38px; padding: 5px 10px 5px 7px !important; gap: 7px; white-space: nowrap; }
 .asset-note-history-control .mcc-folder-icon { width: 22px; height: 22px; }
@@ -5476,7 +5476,11 @@ tr:hover td {
 .asset-note-hold-field:has(input:disabled) { opacity: .7; }
 @media (prefers-reduced-motion: reduce) { .asset-note-hold-field,.asset-note-hold-field .asset-note-warning-track > span { transition: none; } }
 
-.is-on-hold .asset-note-warning-badge { color: #fff09a; border-color: #f5d547; background: #494315; }
+@media (max-width: 560px) {
+  .asset-note-update-meta-actions { display: grid; justify-items: end; gap: 4px; }
+  .asset-note-update-meta-actions time { display: block; text-align: right; }
+  .asset-note-update-meta-actions > .asset-note-edit-update { min-height: 44px; }
+}
 
 .asset-note-state-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 
@@ -5486,3 +5490,109 @@ tr:hover td {
 .asset-note-hold-field.is-on .asset-note-warning-toggle { border-color: #f5d547; background: #494315; }
 .asset-note-hold-field.is-on .asset-note-warning-track { border-color: #f5d547; background: #8a791c; }
 .asset-note-hold-field.is-on .asset-note-warning-track > span { background: #fff09a; }
+
+@media (max-width: 560px) {
+  .asset-note-issue-toggle { grid-template-columns: minmax(0,1fr) max-content 25px; grid-template-areas: "badges date chevron" "title title title"; min-height: 90px; gap: 6px 8px; }
+  .asset-note-issue-toggle > .asset-note-issue-badges { flex-direction: column; align-items: flex-start; overflow: visible; }
+  .asset-note-issue-toggle > .asset-note-issue-title { grid-area: title; text-align: left; white-space: normal; }
+  .asset-note-issue-toggle > .asset-note-date-pill { display: inline-flex; grid-area: date; align-self: start; }
+}
+
+/* Technician-owned daily work logs. */
+.asset-work-log-entries { display:grid; gap:12px; min-width:0; }
+.asset-work-log-entry { min-width:0; border-top:1px solid var(--mcc-border-default); padding-top:9px; }
+.asset-work-log-entry > header { display:flex; flex-wrap:wrap; align-items:center; gap:8px; color:var(--mcc-text-secondary); font-size:.72rem; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-work-log-entry > header button.compact-button { margin-left:auto; min-height:44px; }
+.asset-work-log-entry > p { margin:8px 0 0; color:var(--mcc-status-warning); white-space:pre-wrap; overflow-wrap:anywhere; font-size:.76rem; line-height:1.5; }
+.asset-work-log-labor { color:var(--mcc-text-secondary); font-size:.69rem; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-work-log-add-entry.compact-button { width:fit-content; max-width:100%; min-height:44px; }
+.asset-work-log-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(100px,.7fr); gap:10px; }
+.asset-work-log-entry > header > .asset-work-log-completion { color:var(--mcc-status-success); font-size:1rem; font-weight:900; }
+.asset-work-log-completion.is-completing { animation:work-log-complete .4s ease-out both; }
+@keyframes work-log-complete { from { opacity:0; transform:scale(.5); } 65% { opacity:1; transform:scale(1.15); } to { opacity:1; transform:scale(1); } }
+.asset-note-labor-section { width:fit-content; max-width:min(100%,440px); justify-self:start; }
+.asset-note-labor-section > header { gap:16px; }
+.asset-note-labor-view > div { justify-content:flex-start; flex-wrap:wrap; }
+.asset-note-labor-view strong { white-space:normal; overflow-wrap:anywhere; }
+.asset-note-labor-view output { white-space:normal; }
+@media(max-width:700px) { .asset-note-labor-section { box-sizing:border-box; width:100%; max-width:100%; } .asset-work-log-fields { grid-template-columns:minmax(0,1fr); } }
+@media(prefers-reduced-motion:reduce) { .asset-work-log-completion.is-completing { animation:none; } }
+
+.asset-work-log-entry > header > span:not(.asset-work-log-completion) { color:var(--mcc-text-secondary); font-size:.72rem; font-weight:650; letter-spacing:normal; text-transform:none; }
+
+/* Compact identity-based technician cards; scoped to Asset Notes. */
+.asset-technician-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),320px)); gap:10px; align-items:start; min-width:0; }
+.asset-technician-card { min-width:0; border:1px solid var(--mcc-border-default); border-radius:10px; background:rgba(2,24,34,.7); overflow:hidden; }
+.asset-technician-card.is-open { grid-column:1 / -1; width:100%; max-width:620px; }
+.asset-technician-toggle { display:flex; align-items:center; justify-content:space-between; gap:16px; width:100%; min-height:58px; padding:10px 12px; border:0; border-radius:9px; background:transparent; color:var(--mcc-text-primary); text-align:left; cursor:pointer; }
+.asset-technician-toggle > span:first-child { display:grid; gap:3px; min-width:0; }
+.asset-technician-toggle strong { font-size:.78rem; overflow-wrap:anywhere; }
+.asset-technician-toggle small { font-size:.72rem; color:var(--mcc-text-secondary); }
+.asset-technician-toggle .asset-note-issue-chevron { flex:none; border-color:var(--mcc-border-default); color:var(--mcc-text-secondary); background:rgba(27,39,48,.88); transition:transform 300ms ease; }
+.asset-technician-card.is-open > .asset-technician-toggle .asset-note-issue-chevron { transform:rotate(180deg); }
+.asset-technician-toggle:focus-visible { outline:2px solid var(--mcc-status-success); outline-offset:-3px; }
+.asset-technician-details { display:grid; grid-template-rows:0fr; opacity:0; visibility:hidden; transition:grid-template-rows 300ms ease,opacity 250ms ease,visibility 0s 300ms; }
+.asset-technician-card.is-open > .asset-technician-details { grid-template-rows:1fr; opacity:1; visibility:visible; transition:grid-template-rows 300ms ease,opacity 250ms ease,visibility 0s; }
+.asset-technician-details-inner { min-height:0; overflow:hidden; display:grid; gap:10px; }
+.asset-technician-card.is-open .asset-technician-details-inner { padding:0 12px 12px; }
+.asset-technician-tools { display:flex; align-items:center; gap:8px; }
+.asset-technician-card .asset-note-update-meta { color:var(--mcc-text-secondary); font-size:.66rem; }
+.asset-work-log-attachments { display:grid; gap:6px; margin-top:8px; }
+.asset-work-log-attachments > small { color:var(--mcc-text-secondary); font-size:.67rem; }
+:is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-technician-tools,.asset-note-update-heading,.asset-note-update-attachment-row,.asset-attachment-actions,.asset-note-lifecycle-actions,.asset-note-update-form .modal-actions,.asset-note-lifecycle-form .modal-actions) button { width:max-content; max-width:100%; min-height:32px; padding:5px 10px; font-size:.72rem; flex:0 0 auto; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-actions { display:flex; flex-wrap:wrap; justify-content:flex-start; gap:6px; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-note-update-form { width:100%; max-width:620px; box-sizing:border-box; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-note-update-heading { align-items:flex-start; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-note-update-form .modal-actions { justify-content:flex-start; }
+@media (max-width:700px) { .asset-technician-grid { grid-template-columns:minmax(0,1fr); } .asset-technician-card.is-open { max-width:100%; } }
+@media (pointer:coarse), (max-width:700px) { :is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-technician-tools,.asset-note-update-heading,.asset-note-update-attachment-row,.asset-attachment-actions,.asset-note-lifecycle-actions,.asset-note-update-form .modal-actions,.asset-note-lifecycle-form .modal-actions) button { min-height:44px; } }
+@media (prefers-reduced-motion:reduce) { .asset-technician-details,.asset-technician-card.is-open > .asset-technician-details,.asset-technician-toggle .asset-note-issue-chevron { transition:none; } }
+
+/* Technician editor control polish, shared by Machine and Equipment. */
+.asset-technician-toggle .asset-note-issue-chevron { width:26px; height:26px; padding:0; display:grid; place-items:center; line-height:0; }
+.asset-technician-toggle .asset-note-issue-chevron svg { width:16px; height:16px; margin:0; transform:none; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update { min-height:30px; padding:3px 8px; border:1px solid rgba(143,205,233,.32); border-radius:var(--mcc-radius-pill); color:#d7edf5; background:linear-gradient(180deg,rgba(26,49,61,.72),rgba(8,26,37,.88)); box-shadow:inset 0 1px 0 rgba(255,255,255,.045); font-size:.70rem; font-weight:650; line-height:1.2; letter-spacing:.015em; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update:hover:not(:disabled) { border-color:rgba(68,215,255,.68); color:#effcff; background:linear-gradient(180deg,rgba(27,65,78,.78),rgba(8,34,47,.94)); box-shadow:0 0 10px rgba(68,215,255,.12),inset 0 1px 0 rgba(143,232,255,.12); transform:translateY(-1px); }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update:focus-visible { outline:2px solid #8fe8ff; outline-offset:3px; border-color:#8fe8ff; }
+.asset-note-update-form .mcc-date-trigger { top:50%; right:6px; width:32px; height:32px; padding:0; border:1px solid rgba(68,215,255,.32); border-radius:8px; color:#8fe8ff; background:linear-gradient(145deg,rgba(22,59,75,.76),rgba(5,26,39,.94)); box-shadow:inset 0 1px 0 rgba(255,255,255,.07); transform:translateY(-50%); }
+.asset-note-update-form .mcc-date-control:hover .mcc-date-trigger,.asset-note-update-form .mcc-date-trigger:focus-visible,.asset-note-update-form .mcc-date-open .mcc-date-trigger { border-color:rgba(68,215,255,.76); color:#dffaff; background:linear-gradient(145deg,rgba(24,76,93,.85),rgba(7,35,48,.96)); box-shadow:0 0 10px rgba(68,215,255,.16),inset 0 1px 0 rgba(143,232,255,.12); transform:translateY(-50%); }
+.asset-note-update-form .mcc-date-trigger:focus-visible { outline:2px solid #8fe8ff; outline-offset:2px; }
+.asset-note-update-form .mcc-date-icon { display:block; width:20px; height:20px; border:0; border-radius:0; background:currentColor; box-shadow:none; transform:none; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M8 3v4m8-4v4M3 10h18M7 14h2m3 0h2m3 0h.01M7 17h2m3 0h2'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; }
+.asset-note-update-form .mcc-date-icon::before,.asset-note-update-form .mcc-date-icon::after { content:none; }
+@media (pointer:coarse), (max-width:700px) { :is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update { min-height:44px; padding:6px 9px; } .asset-note-update-form .mcc-date-trigger { width:44px; height:44px; } .asset-note-update-form .mcc-date-input { min-height:48px; padding-right:58px; } }
+@media (prefers-reduced-motion:reduce) { :is(.asset-notes-panel,.asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update:hover:not(:disabled) { transform:none; } .asset-note-update-form .mcc-date-trigger,.asset-note-update-form .mcc-date-icon { transition:none; } }
+
+/* Compact record resources, shared by Machine and Equipment Asset Notes. */
+.asset-note-work-info-section { width:100%; max-width:480px; justify-self:start; padding:8px; gap:6px; }
+.asset-note-work-info-section > header { flex-wrap:wrap; }
+.asset-note-work-info-grid { grid-template-columns:minmax(0,1fr); gap:5px; }
+.asset-note-work-info-grid > div { grid-template-columns:100px minmax(0,1fr); align-items:baseline; gap:8px; padding:5px 7px; }
+.asset-note-work-info-grid > div:last-child { grid-column:auto; }
+.asset-note-work-info-section .asset-note-actions { flex:none; }
+.asset-note-work-info-section .mcc-overflow-menu__trigger { width:max-content; min-width:0; height:28px; min-height:28px; padding:3px 9px; gap:4px; font-size:.68rem; line-height:1.2; }
+.asset-note-files-section { width:100%; max-width:620px; justify-self:start; padding:8px; gap:6px; }
+.asset-note-files-section > header { flex-wrap:wrap; gap:5px 9px; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-grid.glass-attachments { grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),520px)); }
+.asset-note-files-section .asset-attachment-grid.glass-attachments { grid-template-columns:minmax(0,1fr); }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-chip.glass-attachment { grid-template-columns:auto minmax(0,1fr); align-items:start; padding:8px; gap:6px 9px; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-chip .asset-attachment-actions { grid-column:1 / -1; justify-content:flex-end; padding-top:6px; border-top:1px solid rgba(143,205,233,.12); }
+/* Reserve the hover shadow and focus ring inside the accordion's clipping box. */
+.asset-technician-card.is-open .asset-technician-details-inner { padding-top:12px; }
+@media (pointer:coarse), (max-width:700px) {
+  .asset-note-work-info-section .mcc-overflow-menu__trigger { min-width:44px; height:44px; min-height:44px; }
+  :is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-actions button { min-height:44px; }
+}
+@media (max-width:700px) {
+  .asset-note-work-info-section,.asset-note-files-section { max-width:100%; }
+  :is(.asset-notes-panel,.asset-note-history-modal) .asset-attachment-grid.glass-attachments { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:380px) {
+  .asset-note-work-info-grid > div { grid-template-columns:minmax(0,1fr); gap:3px; }
+}
+
+/* Text actions share pill geometry; icon and accordion controls keep their shapes. */
+:is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-note-entry,.asset-note-form) button.glass-button:not(.mcc-date-trigger) { border-radius:var(--mcc-radius-pill); width:max-content; max-width:100%; }
+:is(.asset-notes-panel,.asset-note-history-modal) .asset-note-lifecycle-actions { gap:6px; }
+@media (pointer:coarse), (max-width:700px) {
+  :is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-note-entry,.asset-note-form > .modal-actions) button.glass-button:not(.mcc-date-trigger) { min-height:44px; }
+}

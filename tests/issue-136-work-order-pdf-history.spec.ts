@@ -1,6 +1,17 @@
 import {expect,type Page,test} from '@playwright/test';
 
 type Library='machine'|'equipment';
+async function expandIssueCard(card:ReturnType<Page['locator']>){
+  const toggle=card.locator('.asset-note-issue-toggle');
+  await toggle.click();await expect(toggle).toHaveAttribute('aria-expanded','true');
+  // The clipped grid accordion can scroll its inner container while opening.
+  // Finish that movement before targeting a button near the viewport edge.
+  await card.locator('.asset-note-issue-details').evaluate(async element=>{
+    await Promise.all(element.getAnimations({subtree:true})
+      .filter(animation=>animation.effect?.getComputedTiming().iterations!==Infinity)
+      .map(animation=>animation.finished.catch(()=>{})));
+  });
+}
 type NotePermissions={canEdit:boolean;canDelete:boolean;canResolve:boolean;canReopen:boolean;canAddUpdate:boolean;canDeleteAttachments:boolean};
 
 const writable:NotePermissions={canEdit:true,canDelete:true,canResolve:true,canReopen:false,canAddUpdate:true,canDeleteAttachments:true};
@@ -36,7 +47,7 @@ for(const library of ['machine','equipment'] as const){
     await baseRoutes(page,library,notes);
     await page.route(new RegExp(`/api/${library}-library/asset-notes/${note.id}/resolve$`),async route=>{resolveCalls+=1;const body=route.request().postDataJSON();expect(body.resolutionSummary).toBe('Final repair verified under production load.');Object.assign(note,{status:'resolved',resolvedAt:'2026-09-22T14:00:00Z',resolvedBy:'Issue 136 Technician',resolutionSummary:body.resolutionSummary,resolvedYear:'2026',updatedAt:'2026-09-22T14:00:00Z',permissions:{...readOnly}});await route.fulfill({json:{ok:true,note}});});
     await page.route(new RegExp(`/api/${library}-library/asset-notes/${note.id}/pdf(?:\\?.*)?$`),route=>{pdfRequests+=1;return route.fulfill({contentType:'application/pdf',body:Buffer.from('%PDF-1.4\n%%EOF')});});
-    await openNotes(page,library);const card=page.locator('.asset-note-active-issue-card',{hasText:note.title});await card.locator('.asset-note-issue-toggle').click();await card.getByRole('button',{name:'Issue is Resolved'}).click();await card.getByLabel('Resolution Summary *').fill('Final repair verified under production load.');await card.getByRole('button',{name:'Confirm Resolution'}).click();
+    await openNotes(page,library);const card=page.locator('.asset-note-active-issue-card',{hasText:note.title});await expandIssueCard(card);await card.getByRole('button',{name:'Issue is Resolved'}).click();await card.getByLabel('Resolution Summary *').fill('Final repair verified under production load.');await card.getByRole('button',{name:'Confirm Resolution'}).click();
     const prompt=page.getByRole('alertdialog',{name:'Print / save the Maintenance Record PDF now?'});await expect(prompt).toBeVisible();await expect(prompt.getByRole('button',{name:'Yes',exact:true})).toBeFocused();await prompt.getByRole('button',{name:'No',exact:true}).click();await expect(prompt).toHaveCount(0);expect(resolveCalls).toBe(1);expect(pdfRequests).toBe(0);
     const historyButton=page.getByRole('button',{name:/Work Order History/});await historyButton.click();const history=page.getByRole('dialog',{name:`Resolved History for ${assetFor(library).assetNumber}`});const year=history.getByRole('button',{name:/2026.*1 resolved issue/});await year.click();const saved=history.locator('.asset-note-entry',{hasText:note.title});await expect(saved).toContainText('Final repair verified under production load.');const more=saved.getByRole('button',{name:`More actions for ${note.title}`});await expect(more).toBeVisible();await more.click();const menu=page.getByRole('menu',{name:`More actions for ${note.title}`});await expect(menu.getByRole('menuitem',{name:'Print Maintenance Record'})).toBeVisible();await expect(menu.getByRole('menuitem',{name:/Edit|Delete/})).toHaveCount(0);
   });
@@ -46,7 +57,7 @@ for(const library of ['machine','equipment'] as const){
     await baseRoutes(page,library,notes);
     await page.route(new RegExp(`/api/${library}-library/asset-notes/${note.id}/resolve$`),route=>{resolveCalls+=1;Object.assign(note,{status:'resolved',resolvedAt:'2026-09-22T14:00:00Z',resolvedBy:'Issue 136 Technician',resolutionSummary:'Completed PDF data verified.',resolvedYear:'2026',updatedAt:'2026-09-22T14:00:00Z',permissions:{...readOnly}});return route.fulfill({json:{ok:true,note}});});
     await page.route(new RegExp(`/api/${library}-library/asset-notes/${note.id}/pdf(?:\\?.*)?$`),route=>route.fulfill({contentType:'application/pdf',body:Buffer.from('%PDF-1.4\n%%EOF')}));
-    await openNotes(page,library);const card=page.locator('.asset-note-active-issue-card',{hasText:note.title});await card.locator('.asset-note-issue-toggle').click();await card.getByRole('button',{name:'Issue is Resolved'}).click();await card.getByLabel('Resolution Summary *').fill('Completed PDF data verified.');await card.getByRole('button',{name:'Confirm Resolution'}).click();const prompt=page.getByRole('alertdialog',{name:'Print / save the Maintenance Record PDF now?'});await prompt.getByRole('button',{name:'Yes',exact:true}).click();
+    await openNotes(page,library);const card=page.locator('.asset-note-active-issue-card',{hasText:note.title});await expandIssueCard(card);await card.getByRole('button',{name:'Issue is Resolved'}).click();await card.getByLabel('Resolution Summary *').fill('Completed PDF data verified.');await card.getByRole('button',{name:'Confirm Resolution'}).click();const prompt=page.getByRole('alertdialog',{name:'Print / save the Maintenance Record PDF now?'});await prompt.getByRole('button',{name:'Yes',exact:true}).click();
     const viewer=page.getByRole('dialog',{name:`${note.pdfFilename} viewer`});await expect(viewer).toBeVisible();await expect(viewer.locator('object')).toHaveAttribute('data',note.pdfUrl);await expect(viewer.getByRole('button',{name:'Download',exact:true})).toBeVisible();await expect(viewer.getByRole('button',{name:'Print',exact:true})).toBeVisible();await expect(viewer.getByRole('button',{name:'Open Original',exact:true})).toBeVisible();expect(resolveCalls).toBe(1);
   });
 

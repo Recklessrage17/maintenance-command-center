@@ -2210,12 +2210,6 @@ body {
   background: var(--mcc-surface-card-nested);
 }
 
-.history-action-icon {
-  border-color: var(--mcc-border-interactive);
-  color: var(--mcc-module-accent);
-  background: rgba(var(--mcc-accent-module-history-rgb), 0.12);
-}
-
 .history-reason-cell,
 .history-preview-row :where(p, small) {
   color: var(--mcc-text-muted);
