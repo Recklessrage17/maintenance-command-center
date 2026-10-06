@@ -1389,8 +1389,7 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .machine-inspection-component-summary-card--barrel { --component-accent: #ffc17a; }
 .machine-inspection-component-summary-card strong { margin: 0; color: var(--component-accent); font-size: .95rem; }
 .machine-inspection-component-summary-card > span { margin: 0; color: #d5e3eb; font-size: .8rem; line-height: 1.35; }
-.machine-inspection-component-summary-card .machine-inspection-component-summary-age, .machine-inspection-component-summary-card .machine-inspection-component-summary-size { color: var(--component-accent); }
-.machine-inspection-component-summary-size { border: 1px solid color-mix(in srgb,var(--component-accent) 35%,transparent); border-radius: 999px; padding: 3px 8px; }
+.machine-inspection-component-summary-card .machine-inspection-component-summary-age { color: var(--component-accent); }
 .machine-inspection-component-summary-card:hover { border-color: var(--component-accent); }
 .machine-inspection-component-summary-card:focus-visible { outline: 3px solid var(--component-accent); outline-offset: 3px; box-shadow: 0 0 14px color-mix(in srgb,var(--component-accent) 20%,transparent); }
 .machine-inspection-component-summary-card:disabled { cursor: default; opacity: .7; }

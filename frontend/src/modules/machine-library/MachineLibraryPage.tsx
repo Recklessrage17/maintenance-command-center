@@ -783,13 +783,12 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
           const key = section.key as PrimaryComponentKey;
           const value = currentAsset[primaryComponentDates[key]];
           const date = installedDate(value);
-          const summary = key==='screw' ? detailSummary(currentAsset.screwType,conditionLabels[screwCondition]) : key==='screwTip' ? currentAsset.screwTipType : key==='barrel' ? conditionLabels[barrelCondition] : '';
+          const summary = key==='screw' ? detailSummary(currentAsset.screwType,conditionLabels[screwCondition]) : key==='screwTip' ? currentAsset.screwTipType : key==='barrel' ? detailSummary(conditionLabels[barrelCondition],currentAsset.barrelDiameter?.trim() ? `Size: ${currentAsset.barrelDiameter}` : undefined) : '';
           return <button key={key} type="button" className={`machine-inspection-component-summary-card machine-inspection-component-summary-card--${machineDetailAccents[key]}`} aria-label={`${canEdit?'Edit':'View'} ${section.title} component`} aria-expanded={openSection===key} aria-controls={`machine-component-detail-${key}`} disabled={Boolean(editingSection)} onClick={()=>canEdit?beginSectionEdit(key):toggleOpenSection(key)}>
             <strong>{section.title}</strong>
             {summary&&<span className="machine-inspection-component-summary-state">{summary}</span>}
             <span className="machine-inspection-component-summary-age">Age: {ageYears(value)}</span>
             <span>{date ? `Installed: ${new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(date)}` : 'Installed date unknown'}</span>
-            {key==='barrel'&&<span className="machine-inspection-component-summary-size">Size: {currentAsset.barrelDiameter || 'Unknown'}</span>}
           </button>;
         })}
       </div>
