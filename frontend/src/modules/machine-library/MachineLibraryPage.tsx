@@ -1,3 +1,4 @@
+import { MccCompactDetailGrid } from '../../components/MccCompactDetailGrid';
 import { fileTypeIconVariant, MccFileTypeIcon } from '../../components/MccFileTypeIcon';
 import { type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { LibraryMobileSearchFilter } from '../../components/LibraryMobileSearchFilter';
@@ -796,12 +797,12 @@ function MachineDetailView({asset,canEdit,canManagePm,performedBy,onClose,onEdit
         return <div key={section.key} id={`machine-component-detail-${section.key}`} hidden={!active}>{active&&renderSection(section)}</div>;
       })}
     </>} />
-    <div className="machine-detail-accordion-list">
+    <MccCompactDetailGrid openSection={openSection}>
       {sections.filter(section=>!primaryComponentKeys.has(section.key)).map(renderSection)}
       <PreventiveMaintenanceTracking asset={currentAsset} canEdit={canManagePm} performedBy={performedBy} expanded={openSection==='pm'} onToggle={()=>toggleOpenSection('pm')} />
       <AssetDocumentLibrary asset={currentAsset} canEdit={canEdit} controlledExpanded={openSection==='documents'} controlledToggle={()=>toggleOpenSection('documents')} />
       <AssetNotesAttachments asset={currentAsset} canEdit={canEdit} controlledExpanded={openSection==='notes'} controlledToggle={()=>toggleOpenSection('notes')} onDirtyChange={setNotesDirty} />
-    </div>
+    </MccCompactDetailGrid>
     <div className="modal-actions glass-modal__actions"><button className="secondary-button glass-button glass-button--secondary" type="button" onClick={closeDetail}>Close</button><button className="primary-button glass-button glass-button--primary" type="button" onClick={onEdit}>{canEdit ? 'Edit Mode' : 'View Form'}</button></div>
   </section>{showAssetSpec&&<MachineAssetSpecPreview asset={currentAsset} onClose={()=>setShowAssetSpec(false)} />}</>;
 

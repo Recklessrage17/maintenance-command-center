@@ -5609,3 +5609,44 @@ tr:hover td {
 @media (pointer:coarse), (max-width:700px) {
   :is(.asset-notes-panel,.asset-note-history-modal) :is(.asset-note-entry,.asset-note-form > .modal-actions) button.glass-button:not(.mcc-date-trigger) { min-height:44px; }
 }
+
+/* Summary headers occupy the grid; the original, single section panel follows all cards. */
+.mcc-compact-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
+.mcc-compact-detail-grid > .machine-detail-accordion-card { display: contents; }
+.mcc-compact-detail-grid > .machine-detail-accordion-card > .machine-detail-accordion-header {
+  order: 0; min-width: 0; grid-template-columns: minmax(0, 1fr); align-content: start;
+  border: 1px solid var(--machine-detail-card-border); border-radius: 12px;
+  background: var(--machine-detail-card-bg); box-shadow: inset 3px 0 0 rgba(var(--mcc-category-rgb),.62), inset 0 1px 0 rgba(255,255,255,.065);
+}
+.mcc-compact-detail-grid > .machine-detail-accordion-card.is-open > .machine-detail-accordion-header {
+  border-color: var(--machine-detail-card-open-border); background: var(--machine-detail-card-open-bg);
+}
+.mcc-compact-detail-grid .machine-detail-accordion-toggle { height: 100%; min-height: 76px; align-items: start; }
+.mcc-compact-detail-grid .mcc-accordion-header-main { flex-direction: column; align-items: flex-start; gap: 8px; }
+.mcc-compact-detail-grid .machine-detail-section-actions { justify-content: flex-end; flex-wrap: wrap; }
+.mcc-compact-detail-grid .machine-detail-section-actions .compact-button { flex: 0 1 auto; width: auto; }
+.mcc-compact-detail-grid > .machine-detail-accordion-card > .machine-detail-accordion-panel {
+  order: 1; grid-column: 1 / -1; display: none;
+}
+.mcc-compact-detail-grid > .machine-detail-accordion-card.is-open > .machine-detail-accordion-panel {
+  display: block; min-width: 0; max-height: none; overflow: visible; padding: 16px;
+  border: 1px solid var(--machine-detail-card-open-border); border-radius: 12px;
+  background: var(--machine-detail-card-open-bg); transition: none; transform: none;
+}
+:is(.machine-detail-modal,.equipment-detail-page) :is(button,a):is(.secondary-button,.primary-button,.link-button):not(.asset-detail-back,.mcc-date-trigger) {
+  border-radius: 999px; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
+}
+.mcc-compact-detail-grid :is(button,a):focus-visible {
+  outline: 2px solid #9eefff; outline-offset: 3px;
+}
+@media (max-width: 1100px) {
+  .mcc-compact-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .mcc-compact-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .mcc-compact-detail-grid :is(.secondary-button,.primary-button,.link-button) { min-height: 44px; }
+  .mcc-compact-detail-grid > .machine-detail-accordion-card.is-open > .machine-detail-accordion-panel { padding: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mcc-compact-detail-grid *, .mcc-compact-detail-grid *::before, .mcc-compact-detail-grid *::after { transition: none !important; animation: none !important; }
+}
