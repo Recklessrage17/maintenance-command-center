@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const machine = { id: 13801, assetNumber: 'Press 138', assetName: 'North Press', brand: 'Toyo', model: 'SI-250', serialNumber: 'T-138', machineYear: '2020', location: 'North', department: 'Molding', status: 'active', pmSummary: { total: 0, status: 'current', label: 'PM: Current' }, historyPreview: [] };
+const machine = { screwInstalledDate:'',screwTipInstalledDate:'',barrelInstalledDate:'',barrelEndCapInstalledDate:'', id: 13801, assetNumber: 'Press 138', assetName: 'North Press', brand: 'Toyo', model: 'SI-250', serialNumber: 'T-138', machineYear: '2020', location: 'North', department: 'Molding', status: 'active', pmSummary: { total: 0, status: 'current', label: 'PM: Current' }, historyPreview: [] };
 const equipment = { id: 13802, assetNumber: 'EQ-138', equipmentName: 'North Dryer', assetName: 'North Dryer', category: 'Dryer', equipmentType: 'Dryer', manufacturer: 'Matsui', brand: 'Matsui', model: 'MJ5', serialNumber: 'D-138', equipmentYear: '2020', year: '2020', location: 'North', department: 'Molding', status: 'active', criticality: 'high', powerType: 'Electric', voltage: '480', phase: '3', amperage: '42', airRequirement: '', waterRequirement: '', capacityRating: '500', dimensions: '48', weight: '825', specificationNotes: '', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
 
 for (const item of [

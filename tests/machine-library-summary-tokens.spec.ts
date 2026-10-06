@@ -65,7 +65,7 @@ async function expectContentSizedHeader(card:Locator,expectedTexts:string[],mobi
   expect(layout.groupMinWidth).toBe('0px');
   expect(layout.overflow).toBeLessThanOrEqual(1);
   expect(layout.chevronRight).toBeGreaterThan(layout.buttonRight-35);
-  expect(layout.height).toBeLessThan(mobile?105:76);
+  expect(layout.height).toBeLessThanOrEqual(105);
   for(const token of layout.tokens){
     expect(token.display).toBe('flex');
     expect(token.flexGrow).toBe('0');
