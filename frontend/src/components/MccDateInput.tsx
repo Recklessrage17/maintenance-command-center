@@ -79,6 +79,7 @@ export function MccDateInput({
   disabled = false,
   helper,
   required = false,
+  showSelectedDay = false,
 }: {
   label: string;
   value: string;
@@ -86,6 +87,7 @@ export function MccDateInput({
   disabled?: boolean;
   helper?: ReactNode;
   required?: boolean;
+  showSelectedDay?: boolean;
 }) {
   const today = useMemo(()=>new Date(),[]);
   const generatedId=useId().replace(/:/g,'');
@@ -94,6 +96,11 @@ export function MccDateInput({
   const [open,setOpen]=useState(false);
   const parsed = parseTypedDate(value);
   const selectedDate = parsed.valid && parsed.iso ? parseIsoDate(parsed.iso) : null;
+  const triggerLabel = showSelectedDay
+    ? `Open ${label.replace(/\s*\*$/, '')} calendar — ${selectedDate
+      ? `selected ${selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+      : value.trim() ? 'enter a valid date' : 'no date selected'}`
+    : `Open ${label} calendar`;
   const [viewDate,setViewDate]=useState<Date>(selectedDate ?? today);
   const [focusedIso,setFocusedIso]=useState(selectedDate ? localIsoDate(selectedDate) : localIsoDate(today));
   const [focusRequest,setFocusRequest]=useState(0);
@@ -202,12 +209,13 @@ export function MccDateInput({
       closeCalendar(true);
     }
     document.addEventListener('pointerdown',onPointerDown);
-    document.addEventListener('keydown',onKeyDown);
+    // Handle the owned calendar before an enclosing dialog's Escape listener.
+    document.addEventListener('keydown',onKeyDown,true);
     window.addEventListener('resize',updatePopoverPosition);
     window.addEventListener('scroll',updatePopoverPosition,true);
     return ()=>{
       document.removeEventListener('pointerdown',onPointerDown);
-      document.removeEventListener('keydown',onKeyDown);
+      document.removeEventListener('keydown',onKeyDown,true);
       window.removeEventListener('resize',updatePopoverPosition);
       window.removeEventListener('scroll',updatePopoverPosition,true);
     };
@@ -349,7 +357,8 @@ export function MccDateInput({
         ref={triggerRef}
         className="mcc-date-trigger"
         type="button"
-        aria-label={`Open ${label} calendar`}
+        aria-label={triggerLabel}
+        title={showSelectedDay ? triggerLabel : undefined}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={calendarId}
@@ -364,7 +373,9 @@ export function MccDateInput({
           else openCalendar(event.currentTarget);
         }}
       >
-        <span className="mcc-date-icon" aria-hidden="true" />
+        <span className="mcc-date-icon" aria-hidden="true">
+          {showSelectedDay&&<span className="mcc-date-icon-day">{selectedDate ? selectedDate.getDate() : '—'}</span>}
+        </span>
       </button>
       {calendar}
     </div>

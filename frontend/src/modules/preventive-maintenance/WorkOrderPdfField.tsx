@@ -15,16 +15,18 @@ import {
 type CapturedPage={id:string;file:File;previewUrl:string};
 type AttachmentInfo={kind:'pdf'|'photos';filename:string;size:number;pageCount?:number};
 type UploadRulesResponse={rules?:{maxBytes?:number;acceptedMimeTypes?:string[]}};
+const missingPdfMessage='Select the matching work-order PDF or use Take Photo for this Work Order Number.';
 
 function pageId(){return typeof crypto.randomUUID==='function'?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`;}
 
-export function WorkOrderPdfField({asset,taskTitle,workOrderNumber,value,disabled,onChange,onMaxBytesChange,onProcessingChange}:{asset:AssetIdentity;taskTitle:string;workOrderNumber:string;value:File|null;disabled:boolean;onChange:(file:File|null)=>void;onMaxBytesChange:(maxBytes:number)=>void;onProcessingChange:(processing:boolean)=>void}){
+export function WorkOrderPdfField({requirementWaived=false,asset,taskTitle,workOrderNumber,value,disabled,onChange,onMaxBytesChange,onProcessingChange}:{requirementWaived?:boolean;asset:AssetIdentity;taskTitle:string;workOrderNumber:string;value:File|null;disabled:boolean;onChange:(file:File|null)=>void;onMaxBytesChange:(maxBytes:number)=>void;onProcessingChange:(processing:boolean)=>void}){
   const pdfInputRef=useRef<HTMLInputElement>(null);const cameraInputRef=useRef<HTMLInputElement>(null);const choosePdfButtonRef=useRef<HTMLButtonElement>(null);const takePhotoButtonRef=useRef<HTMLButtonElement>(null);const previewRef=useRef<HTMLElement>(null);const generatedPreviewRef=useRef<HTMLElement>(null);const generatedPreviewButtonRef=useRef<HTMLButtonElement>(null);const urlsRef=useRef(new Set<string>());const abortRef=useRef<AbortController|null>(null);const cameraModeRef=useRef<'new'|'continue'>('new');
   const [maxBytes,setMaxBytes]=useState(DEFAULT_PM_WORK_ORDER_MAX_BYTES);const [rulesLoaded,setRulesLoaded]=useState(false);const [captureSupported]=useState(()=>{const input=document.createElement('input');return 'capture' in input;});
   const [pages,setPages]=useState<CapturedPage[]>([]);const [draft,setDraft]=useState<CapturedPage|null>(null);const [attachment,setAttachment]=useState<AttachmentInfo|null>(null);const [generatedPreviewUrl,setGeneratedPreviewUrl]=useState('');const [previewingGeneratedPdf,setPreviewingGeneratedPdf]=useState(false);const [processing,setProcessing]=useState(false);const [progress,setProgress]=useState('');const [status,setStatus]=useState('');const [fieldError,setFieldError]=useState('');
 
   useEffect(()=>{const controller=new AbortController();fetch('/api/preventive-maintenance/work-order-upload-rules',{credentials:'include',cache:'no-store',signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error('Upload rules unavailable.');return response.json() as Promise<UploadRulesResponse>;}).then(data=>{const authoritative=Number(data.rules?.maxBytes);if(Number.isFinite(authoritative)&&authoritative>0){setMaxBytes(authoritative);onMaxBytesChange(authoritative);setRulesLoaded(true);}}).catch(error=>{if((error as Error).name!=='AbortError')setRulesLoaded(false);});return()=>controller.abort();},[onMaxBytesChange]);
   useEffect(()=>{onProcessingChange(processing);},[onProcessingChange,processing]);
+  useEffect(()=>{if(requirementWaived)setFieldError(message=>message===missingPdfMessage?'':message);},[requirementWaived]);
   useEffect(()=>()=>onProcessingChange(false),[onProcessingChange]);
   useEffect(()=>{const input=cameraInputRef.current;if(!input)return;const canceled=()=>{setFieldError(captureSupported?'No photo was captured. Camera access may be blocked or canceled. Try again or use Choose PDF.':'Direct camera capture is unavailable in this browser. Choose an image or use Choose PDF instead.');};input.addEventListener('cancel',canceled);return()=>input.removeEventListener('cancel',canceled);},[captureSupported]);
   useEffect(()=>()=>{abortRef.current?.abort();for(const url of urlsRef.current)URL.revokeObjectURL(url);urlsRef.current.clear();},[]);
@@ -73,14 +75,14 @@ export function WorkOrderPdfField({asset,taskTitle,workOrderNumber,value,disable
   function closeGeneratedPreview(){setPreviewingGeneratedPdf(false);requestAnimationFrame(()=>generatedPreviewButtonRef.current?.focus());}
   function removeAttachment(){clearWorkingPages();setPreviewingGeneratedPdf(false);onChange(null);setAttachment(null);setProgress('');setFieldError('');setStatus('Work-order PDF removed. Choose a PDF or take photos to replace it.');if(pdfInputRef.current)pdfInputRef.current.value='';}
 
-  const required=Boolean(workOrderNumber.trim())&&!/^n\s*\/\s*a$/i.test(workOrderNumber.trim());const shownAttachment=attachment??(value?{kind:'pdf' as const,filename:value.name,size:value.size}:null);const limitLabel=formatWorkOrderFileSize(maxBytes);
+  const required=!requirementWaived&&Boolean(workOrderNumber.trim())&&!/^n\s*\/\s*a$/i.test(workOrderNumber.trim());const shownAttachment=attachment??(value?{kind:'pdf' as const,filename:value.name,size:value.size}:null);const limitLabel=formatWorkOrderFileSize(maxBytes);
   return <div className="form-field pm-form-wide pm-work-order-file">
-    <span id="pm-work-order-pdf-label">Work-order PDF{required?' *':''}</span>
+    <span id="pm-work-order-pdf-label">Work-order PDF{required?' *':''}{requirementWaived?' · Optional — requirement waived':''}</span>
     <div className="pm-work-order-source-actions" role="group" aria-labelledby="pm-work-order-pdf-label">
       <button ref={choosePdfButtonRef} className="secondary-button glass-button glass-button--secondary" type="button" disabled={disabled||processing} onClick={()=>pdfInputRef.current?.click()}>Choose PDF</button>
       <button ref={takePhotoButtonRef} className="secondary-button glass-button glass-button--secondary pm-work-order-camera-button" type="button" disabled={disabled||processing} onClick={beginPhotoSeries}>Take Photo</button>
     </div>
-    <input ref={pdfInputRef} className="pm-work-order-native-input" aria-label="Choose work-order PDF" type="file" accept=".pdf,application/pdf" required={required&&!value} onInvalid={event=>{event.preventDefault();setFieldError('Select the matching work-order PDF or use Take Photo for this Work Order Number.');requestAnimationFrame(()=>choosePdfButtonRef.current?.focus());}} onChange={event=>choosePdf(event.target.files?.[0])}/>
+    <input ref={pdfInputRef} className="pm-work-order-native-input" aria-label="Choose work-order PDF" type="file" accept=".pdf,application/pdf" required={required&&!value} onInvalid={event=>{event.preventDefault();setFieldError(missingPdfMessage);requestAnimationFrame(()=>choosePdfButtonRef.current?.focus());}} onChange={event=>choosePdf(event.target.files?.[0])}/>
     <input ref={cameraInputRef} hidden aria-label="Take work-order photo" type="file" accept="image/*" capture="environment" onChange={event=>{stageCameraFile(event.target.files?.[0]);event.currentTarget.value='';}}/>
     <small>Choose an existing PDF or photograph up to {PM_WORK_ORDER_PHOTO_MAX_PAGES} pages. The rear camera is requested where supported; other browsers open an image picker. Server limit: {limitLabel}{rulesLoaded?'':' (verified again on upload)'}.</small>
     {shownAttachment&&<div className={`pm-work-order-attachment-summary${shownAttachment.kind==='photos'?' is-generated':''}`} aria-label="Attached work-order PDF">

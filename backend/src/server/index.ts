@@ -24,7 +24,7 @@ import { LibraryUploadReservationCoordinator, ResumableLibraryUploadStore, confi
 import { prepareMasterExport, publicMasterExportPlan, streamMasterExport, type MasterExportSource } from './libraryMasterExport.js';
 import { createPmMachineAssetResolver } from './pmAssetResolver.js';
 import { canonicalHttpsAccess } from './networkAccess.js';
-import { createPmWorkOrderStorage, DEFAULT_PM_WORK_ORDER_MAX_BYTES, PM_WORK_ORDER_DIRECTORY_NAME, PM_WORK_ORDER_MIME, validatePmFollowUp, validatePmWorkOrderNumber, type StagedPmWorkOrder, type StoredPmWorkOrder } from './pmWorkOrders.js';
+import { createPmWorkOrderStorage, DEFAULT_PM_WORK_ORDER_MAX_BYTES, PM_WORK_ORDER_DIRECTORY_NAME, PM_WORK_ORDER_MIME, validatePmFollowUp, validatePmWorkOrderNumber, validatePmWorkOrderException, PM_WORK_ORDER_EXCEPTION_LABEL, type StagedPmWorkOrder, type StoredPmWorkOrder } from './pmWorkOrders.js';
 import {
   PM_EXCEL_MIME,
   calculateWorkbookPm,
@@ -451,7 +451,7 @@ CREATE TABLE IF NOT EXISTS equipment_assets (id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS equipment_document_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT, FOREIGN KEY(parent_id) REFERENCES equipment_document_folders(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS equipment_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, folder_id INTEGER NOT NULL, original_filename TEXT NOT NULL, display_filename TEXT NOT NULL COLLATE NOCASE, stored_filename TEXT NOT NULL UNIQUE, extension TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, description TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, uploaded_by_user_id INTEGER, updated_by_user_id INTEGER, FOREIGN KEY(asset_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT, FOREIGN KEY(folder_id) REFERENCES equipment_document_folders(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', client_request_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', interval_type TEXT NOT NULL, interval_value REAL NOT NULL, last_completed_date TEXT, last_completed_meter REAL, current_meter REAL, next_due_date TEXT, next_due_meter REAL, assigned_to TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, hold INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', created_by_user_id INTEGER, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, deleted_at TEXT, deleted_by_user_id INTEGER, deletion_reason TEXT NOT NULL DEFAULT '', deleted_task_snapshot_json TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', completion_request_id TEXT, work_order_number TEXT NOT NULL DEFAULT '', task_status TEXT NOT NULL DEFAULT 'Completed', start_date TEXT, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', work_order_type TEXT NOT NULL DEFAULT 'Preventive Maintenance', interval_type TEXT NOT NULL DEFAULT '', task_type TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', no_issues_found INTEGER NOT NULL DEFAULT 1, follow_up_required INTEGER NOT NULL DEFAULT 0, follow_up_reason TEXT NOT NULL DEFAULT '', meter_override_type TEXT, meter_override_reason TEXT, import_source_ref TEXT, previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', completion_request_id TEXT, work_order_number TEXT NOT NULL DEFAULT '', machine_not_scheduled_or_running INTEGER NOT NULL DEFAULT 0 CHECK(machine_not_scheduled_or_running IN (0,1)), task_status TEXT NOT NULL DEFAULT 'Completed', start_date TEXT, completion_date TEXT NOT NULL, completed_meter REAL, performed_by_user_id INTEGER, performed_by_name TEXT NOT NULL DEFAULT '', work_order_type TEXT NOT NULL DEFAULT 'Preventive Maintenance', interval_type TEXT NOT NULL DEFAULT '', task_type TEXT NOT NULL DEFAULT '', completion_notes TEXT NOT NULL DEFAULT '', no_issues_found INTEGER NOT NULL DEFAULT 1, follow_up_required INTEGER NOT NULL DEFAULT 0, follow_up_reason TEXT NOT NULL DEFAULT '', meter_override_type TEXT, meter_override_reason TEXT, import_source_ref TEXT, previous_due_date TEXT, previous_due_meter REAL, next_due_date TEXT, next_due_meter REAL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pm_work_order_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_history_id INTEGER NOT NULL UNIQUE, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', asset_display_name TEXT NOT NULL, work_order_number TEXT NOT NULL, original_filename TEXT NOT NULL, stored_relative_path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, mime_type TEXT NOT NULL, uploaded_by_user_id INTEGER, uploaded_by_name TEXT NOT NULL DEFAULT '', uploaded_at TEXT NOT NULL, FOREIGN KEY(pm_history_id) REFERENCES pm_history(id) ON DELETE RESTRICT);
 CREATE TABLE IF NOT EXISTS pm_history_participants (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_history_id INTEGER NOT NULL, user_id INTEGER, display_name TEXT NOT NULL, participant_order INTEGER NOT NULL, is_primary INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY(pm_history_id) REFERENCES pm_history(id) ON DELETE RESTRICT, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE RESTRICT, UNIQUE(pm_history_id,participant_order));
 CREATE TABLE IF NOT EXISTS pm_asset_meters (id INTEGER PRIMARY KEY AUTOINCREMENT, asset_id INTEGER NOT NULL, asset_library TEXT NOT NULL DEFAULT 'machine', meter_type TEXT NOT NULL, current_reading REAL NOT NULL, updated_by_user_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(asset_library,asset_id,meter_type));
@@ -773,6 +773,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_history_asset ON pm_history (asset_id,completi
   if (!pmHistoryColumns.has('asset_library')) run("ALTER TABLE pm_history ADD COLUMN asset_library TEXT NOT NULL DEFAULT 'machine'");
   const pmHistoryMigrations: Array<{name:string;definition:string}> = [
     {name:'completion_request_id',definition:'TEXT'},
+    {name:'machine_not_scheduled_or_running',definition:'INTEGER NOT NULL DEFAULT 0 CHECK(machine_not_scheduled_or_running IN (0,1))'},
     {name:'work_order_number',definition:"TEXT NOT NULL DEFAULT ''"},
     {name:'task_status',definition:"TEXT NOT NULL DEFAULT 'Completed'"},
     {name:'start_date',definition:'TEXT'},
@@ -7072,6 +7073,10 @@ function historyWhere(filters: HistoryFilters) {
   }
   return { clause: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
+function historyPmWorkOrderException(row:HistoryLogRow) {
+  if(row.action!=='pm_completed')return false;
+  try{return JSON.parse(row.new_value_json??'{}')?.machineNotScheduledOrRunning===true;}catch{return false;}
+}
 function publicHistoryRecord(row: HistoryLogRow) {
   return {
     id: row.id,
@@ -7082,6 +7087,7 @@ function publicHistoryRecord(row: HistoryLogRow) {
     entityId: row.entity_id ?? '',
     entityLabel: row.entity_label ?? '',
     workOrderNumber: row.work_order_number ?? '',
+    machineNotScheduledOrRunning: historyPmWorkOrderException(row),
     partNumber: row.part_number ?? '',
     requisitionNumber: row.requisition_number ?? '',
     assetId: row.asset_id ?? '',
@@ -7199,10 +7205,10 @@ async function buildHistoryPdf(input: { section: HistorySection; rows: HistoryLo
       row.action,
       historyRecordLabel(row),
       row.user_name || '-',
-      row.work_order_number || '-',
+      historyPmWorkOrderException(row)?'Waived':row.work_order_number || '-',
       historyReference(row),
       historyQty(row),
-      row.reason_note || '',
+      historyPmWorkOrderException(row)?`Work Order: ${PM_WORK_ORDER_EXCEPTION_LABEL}. ${row.reason_note||''}`:row.reason_note || '',
     ];
     values.forEach((value,index)=>{
       const column = columns[index];
@@ -7548,7 +7554,7 @@ type PmIntervalType = 'hourly' | 'days' | 'bi_weekly' | 'weekly' | 'monthly' | '
 type PmScheduleStatus = 'active' | 'hold' | 'inactive';
 type AssetLibrary = 'machine' | 'equipment';
 type PmTaskRow = { id:number; asset_id:number; asset_library:AssetLibrary; title:string; instructions:string; interval_type:PmIntervalType; interval_value:number; last_completed_date:string|null; last_completed_meter:number|null; current_meter:number|null; next_due_date:string|null; next_due_meter:number|null; assigned_to:string; active:number; hold:number; notes:string; created_by_user_id:number|null; updated_by_user_id:number|null; created_at:string; updated_at:string; deleted:number; deleted_at:string|null; deleted_by_user_id:number|null; deletion_reason:string; deleted_task_snapshot_json:string };
-type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; asset_library:AssetLibrary; completion_request_id:string|null; work_order_number:string; task_status:string; start_date:string|null; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; work_order_type:string; interval_type:string; task_type:string; completion_notes:string; no_issues_found:number; follow_up_required:number; follow_up_reason:string; meter_override_type:string|null; meter_override_reason:string|null; import_source_ref:string|null; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
+type PmHistoryRow = { id:number; pm_task_id:number; asset_id:number; asset_library:AssetLibrary; completion_request_id:string|null; work_order_number:string; machine_not_scheduled_or_running:number; task_status:string; start_date:string|null; completion_date:string; completed_meter:number|null; performed_by_user_id:number|null; performed_by_name:string; work_order_type:string; interval_type:string; task_type:string; completion_notes:string; no_issues_found:number; follow_up_required:number; follow_up_reason:string; meter_override_type:string|null; meter_override_reason:string|null; import_source_ref:string|null; previous_due_date:string|null; previous_due_meter:number|null; next_due_date:string|null; next_due_meter:number|null; created_at:string };
 type PmWorkOrderAttachmentRow = { id:number; pm_history_id:number; asset_id:number; asset_library:AssetLibrary; asset_display_name:string; work_order_number:string; original_filename:string; stored_relative_path:string; size_bytes:number; sha256:string; mime_type:string; uploaded_by_user_id:number|null; uploaded_by_name:string; uploaded_at:string };
 type PmHistoryParticipantRow = { id:number; pm_history_id:number; user_id:number|null; display_name:string; participant_order:number; is_primary:number; created_at:string };
 type PmMeterType = 'hours'|'cycles';
@@ -8679,7 +8685,7 @@ function servePmWorkOrderPdf(res:Response,historyId:number,library:AssetLibrary)
 }
 function publicPmHistory(row:PmHistoryRow) {
   const attachment=pmWorkOrderAttachment(row.id);const storedParticipants=pmHistoryParticipants(row.id);const participants=storedParticipants.length?storedParticipants.map(publicPmHistoryParticipant):[{userId:row.performed_by_user_id,displayName:row.performed_by_name||'Unknown user',isPrimary:true,order:0}];
-  return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,workOrderNumber:row.work_order_number,followUpRequired:Boolean(row.follow_up_required),followUpReason:row.follow_up_required?row.follow_up_reason:'',attachment:attachment?publicPmWorkOrderAttachment(attachment):null,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:participants.map(item=>item.displayName).join(', '),participants,completionNotes:row.completion_notes,noIssuesFound:Boolean(row.no_issues_found),previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
+  return { id:row.id,pmTaskId:row.pm_task_id,assetId:row.asset_id,workOrderNumber:row.work_order_number,machineNotScheduledOrRunning:row.machine_not_scheduled_or_running===1,followUpRequired:Boolean(row.follow_up_required),followUpReason:row.follow_up_required?row.follow_up_reason:'',attachment:attachment?publicPmWorkOrderAttachment(attachment):null,completionDate:row.completion_date,completedMeter:row.completed_meter,performedBy:participants.map(item=>item.displayName).join(', '),participants,completionNotes:row.completion_notes,noIssuesFound:Boolean(row.no_issues_found),previousDueDate:row.previous_due_date,previousDueMeter:row.previous_due_meter,nextDueDate:row.next_due_date,nextDueMeter:row.next_due_meter,createdAt:row.created_at };
 }
 function machineAssetPmCardSummary(tasks:PmTaskRow[]) {
   if (!tasks.length) return null;
@@ -8803,7 +8809,7 @@ function pmTrackerUpdate(task:PmTaskRow,assetNumber:string,currentDate=new Date(
 }
 function pmHistoryWorkbookRow(history:PmHistoryRow,task:PmTaskRow,assetNumber:string):HistoryWorkbookAppend {
   const attachment=pmWorkOrderAttachment(history.id);const participants=pmHistoryParticipants(history.id);const performedBy=participants.length?participants.map(item=>item.display_name).join(', '):(history.performed_by_name||'Unknown user');
-  return {assetNumber,workOrderNumber:history.work_order_number||`MCC-PM-${history.id}`,workOrderHyperlink:attachment?.stored_relative_path??null,taskStatus:history.task_status||'Completed',startDate:history.start_date||history.completion_date,completionDate:history.completion_date,workOrderType:history.work_order_type||'Preventive Maintenance',performedBy,intervalType:pmWorkbookInterval(task.interval_type),taskType:history.task_type||task.title,taskNote:history.completion_notes};
+  return {assetNumber,workOrderNumber:history.machine_not_scheduled_or_running===1?`${PM_WORK_ORDER_EXCEPTION_LABEL}${history.work_order_number?` (${history.work_order_number})`:''}`:history.work_order_number||`MCC-PM-${history.id}`,workOrderHyperlink:attachment?.stored_relative_path??null,taskStatus:history.task_status||'Completed',startDate:history.start_date||history.completion_date,completionDate:history.completion_date,workOrderType:history.work_order_type||'Preventive Maintenance',performedBy,intervalType:pmWorkbookInterval(task.interval_type),taskType:history.task_type||task.title,taskNote:history.completion_notes};
 }
 function pmSyncState() {
   const state=one<PmExcelSyncStateRow>('SELECT status,attempted_at,synchronized_at,original_filename,source_path,error_message,changed_cells,appended_history,updated_by_user_id FROM pm_excel_sync_state WHERE id=1');
@@ -9008,22 +9014,23 @@ function pmCompletionInput(task:PmTaskRow,body:Record<string,unknown>,upload:Exp
   const completedMeter=optionalPmNumber(body.completedMeter,'Completed meter');
   if(pmMeterIntervals.has(task.interval_type)&&completedMeter===null)throw new Error(`${pmIntervalLabels[task.interval_type]} PM completion requires a meter value.`);
   if(task.interval_type==='cycles'&&completedMeter!==null&&!Number.isInteger(completedMeter))throw new Error('Cycle completion readings must use whole numbers.');
-  const workOrder=validatePmWorkOrderNumber(body.workOrderNumber);
+  const machineNotScheduledOrRunning=validatePmWorkOrderException(body.machineNotScheduledOrRunning);
+  const workOrder=validatePmWorkOrderNumber(body.workOrderNumber,machineNotScheduledOrRunning);
   const followUp=validatePmFollowUp(body.followUpRequired,body.followUpReason);
-  if(!workOrder.notApplicable&&!upload)throw new Error('A valid work-order PDF is required for a real Work Order Number.');
+  if(!machineNotScheduledOrRunning&&!workOrder.notApplicable&&!upload)throw new Error('A valid work-order PDF is required for a real Work Order Number.');
   const completion=pmCompletionNote(body,task.interval_type,completedMeter);
   const override=pmMeterOverride(body,task,completedMeter);
   const participants=pmCompletionParticipants(body,actor);
   const due=pmDueValues(task.interval_type,task.interval_value,completionDate,completedMeter);
   const staged=pmWorkOrderStorage.stage(upload);
-  return {completionDate,completedMeter,...workOrder,...followUp,completion,override,participants,due,staged};
+  return {completionDate,completedMeter,machineNotScheduledOrRunning,...workOrder,...followUp,completion,override,participants,due,staged};
 }
 function commitPmCompletion(input:{task:PmTaskRow;assetDisplayName:string;actor:User;requestId:string;values:ReturnType<typeof pmCompletionInput>;beforeFinalize?:()=>void}) {
   const {task,actor,requestId,values}=input;const timestamp=now();let historyId=0;let stored:StoredPmWorkOrder|null=null;
   db.exec('BEGIN IMMEDIATE');
   try{
-    const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_request_id,work_order_number,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,follow_up_required,follow_up_reason,meter_override_type,meter_override_reason,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
-      task.id,task.asset_id,task.asset_library,requestId,values.workOrderNumber,'Completed',values.completionDate,values.completionDate,values.completedMeter,actor.id,actor.full_name,'Preventive Maintenance',task.interval_type,task.title,values.completion.note,values.completion.noIssuesFound?1:0,values.followUpRequired?1:0,values.followUpReason,values.override?.type??null,values.override?.reason??null,task.next_due_date,task.next_due_meter,values.due.nextDueDate,values.due.nextDueMeter,timestamp,
+    const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_request_id,work_order_number,machine_not_scheduled_or_running,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,follow_up_required,follow_up_reason,meter_override_type,meter_override_reason,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
+      task.id,task.asset_id,task.asset_library,requestId,values.workOrderNumber,values.machineNotScheduledOrRunning?1:0,'Completed',values.completionDate,values.completionDate,values.completedMeter,actor.id,actor.full_name,'Preventive Maintenance',task.interval_type,task.title,values.completion.note,values.completion.noIssuesFound?1:0,values.followUpRequired?1:0,values.followUpReason,values.override?.type??null,values.override?.reason??null,task.next_due_date,task.next_due_meter,values.due.nextDueDate,values.due.nextDueMeter,timestamp,
     ]);historyId=Number(result.lastInsertRowid);
     values.participants.forEach((participant,index)=>run('INSERT INTO pm_history_participants (pm_history_id,user_id,display_name,participant_order,is_primary,created_at) VALUES (?,?,?,?,?,?)',[historyId,participant.userId,participant.displayName,index,participant.isPrimary?1:0,timestamp]));
     if(values.staged){
@@ -10283,7 +10290,7 @@ app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAu
     const {historyId}=commitPmCompletion({task,assetDisplayName:asset.asset_name||asset.asset_number,actor:req.user!,requestId,values,beforeFinalize:failureInjection});staged=null;
     const updated=pmTaskById(task.id)!;
     const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=?',[historyId])!;
-    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,noIssuesFound:values.completion.noIssuesFound,followUpRequired:values.followUpRequired,participants:values.participants.map(item=>({userId:item.userId,displayName:item.displayName,isPrimary:item.isPrimary})),attachmentId:pmWorkOrderAttachment(historyId)?.id??null},reasonNote:values.completion.note});
+    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,machineNotScheduledOrRunning:history.machine_not_scheduled_or_running===1,noIssuesFound:values.completion.noIssuesFound,followUpRequired:values.followUpRequired,participants:values.participants.map(item=>({userId:item.userId,displayName:item.displayName,isPrimary:item.isPrimary})),attachmentId:pmWorkOrderAttachment(historyId)?.id??null},reasonNote:values.completion.note});
     if(values.override)recordPmAudit({action:'pm_meter_override',task:updated,asset,actor:req.user!,oldValue:{currentMeter:values.override.originalValue},newValue:{currentMeter:values.override.newValue,overrideType:values.override.type,completionRequestId:requestId},reasonNote:values.override.reason});
     scheduleAutoBackup('preventive maintenance completed',req.user!);
     let sync:{ok:boolean;error?:string;status:ReturnType<typeof pmSyncState>};
@@ -11099,7 +11106,7 @@ app.post('/api/equipment-library/preventive-maintenance/:pmId/complete',requireA
     const failureInjection=process.env.NODE_ENV==='test'&&String(req.get('X-MCC-Test-PM-Finalize-Failure')??'')==='1'?()=>{throw new Error('Simulated work-order PDF finalization failure.');}:undefined;
     const {historyId}=commitPmCompletion({task,assetDisplayName:asset.equipment_name||asset.asset_number,actor:req.user!,requestId,values,beforeFinalize:failureInjection});staged=null;
     const updated=pmTaskById(task.id,'equipment')!;const history=one<PmHistoryRow>('SELECT * FROM pm_history WHERE id=? AND asset_library=?',[historyId,'equipment'])!;
-    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,noIssuesFound:values.completion.noIssuesFound,followUpRequired:values.followUpRequired,participants:values.participants.map(item=>({userId:item.userId,displayName:item.displayName,isPrimary:item.isPrimary})),attachmentId:pmWorkOrderAttachment(historyId)?.id??null},reasonNote:values.completion.note});
+    recordPmAudit({action:'pm_completed',task:updated,asset,actor:req.user!,oldValue,newValue:{...pmHistoryValue(updated),completionRequestId:requestId,workOrderNumber:history.work_order_number,machineNotScheduledOrRunning:history.machine_not_scheduled_or_running===1,noIssuesFound:values.completion.noIssuesFound,followUpRequired:values.followUpRequired,participants:values.participants.map(item=>({userId:item.userId,displayName:item.displayName,isPrimary:item.isPrimary})),attachmentId:pmWorkOrderAttachment(historyId)?.id??null},reasonNote:values.completion.note});
     if(values.override)recordPmAudit({action:'pm_meter_override',task:updated,asset,actor:req.user!,oldValue:{currentMeter:values.override.originalValue},newValue:{currentMeter:values.override.newValue,overrideType:values.override.type,completionRequestId:requestId},reasonNote:values.override.reason});
     scheduleAutoBackup('equipment preventive maintenance completed',req.user!);res.json({ok:true,task:publicPmTask(updated),history:publicPmHistory(history)});
   }catch(error){pmWorkOrderStorage.discard(staged);res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Preventive maintenance completion could not be saved.')});}

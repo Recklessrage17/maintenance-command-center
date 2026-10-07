@@ -39,9 +39,18 @@ function dangerousPathName(value:string) {
   return !value||value==='.'||value==='..'||value.endsWith('.')||value.endsWith(' ')||windowsReservedName.test(value);
 }
 
-export function validatePmWorkOrderNumber(value:unknown) {
+export const PM_WORK_ORDER_EXCEPTION_LABEL = 'Not required — machine not scheduled / not running';
+
+// Accept only explicit booleans or multipart boolean strings, never truthiness.
+export function validatePmWorkOrderException(value:unknown) {
+  if(value===undefined||value===false||value==='false')return false;
+  if(value===true||value==='true')return true;
+  throw new Error('Machine not scheduled / not running must be true or false.');
+}
+
+export function validatePmWorkOrderNumber(value:unknown,allowBlank=false) {
   const workOrderNumber=normalizeVisibleText(value,120);
-  if(!workOrderNumber)throw new Error('Work Order Number is required. Enter N/A when no work order exists.');
+  if(!workOrderNumber&&!allowBlank)throw new Error('Work Order Number is required. Select the machine not scheduled / not running exception when applicable.');
   if(/^n\s*\/\s*a$/i.test(workOrderNumber))return {workOrderNumber:'N/A',notApplicable:true};
   if(/[\u0000-\u001f\u007f]/.test(workOrderNumber))throw new Error('Work Order Number contains unsupported control characters.');
   return {workOrderNumber,notApplicable:false};

@@ -1,3 +1,4 @@
+import { pmWorkOrderDisplay } from '../preventive-maintenance/pmWorkOrderException';
 import { MccFileTypeIcon } from '../../components/MccFileTypeIcon';
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 import { withJsonRequestDefaults } from '../../apiRequest';
@@ -22,6 +23,7 @@ type HistoryRecord = {
   entityId: string;
   entityLabel: string;
   workOrderNumber: string;
+  machineNotScheduledOrRunning?: boolean;
   partNumber: string;
   requisitionNumber: string;
   assetId: string;
@@ -395,7 +397,7 @@ export function HistoryPage({ userRole, selectedSection, onBackToLanding, onSect
                   <td>{renderActionBadge(record)}</td>
                   <td><strong className="history-record-label">{recordLabel(record)}</strong><span>{referenceLabel(record)}</span></td>
                   <td>{record.userName || '-'}</td>
-                  <td>{record.workOrderNumber || '-'}</td>
+                  <td>{pmWorkOrderDisplay(record) || '-'}</td>
                   <td>{qtyChange(record)}</td>
                   <td className="history-reason-cell">{record.reasonNote || '-'}</td>
                 </tr>

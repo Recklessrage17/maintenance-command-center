@@ -33,6 +33,10 @@ CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGE
     {id:1,completion_date:'2026-01-10',completion_notes:'Legacy row A'},
     {id:2,completion_date:'2026-01-11',completion_notes:'Legacy row B'},
   ]);
+  const exceptionColumn=database.prepare('PRAGMA table_info(pm_history)').all().find(column=>column.name==='machine_not_scheduled_or_running');
+  assert.equal(exceptionColumn.notnull,1);assert.equal(exceptionColumn.dflt_value,'0');
+  assert.deepEqual(database.prepare('SELECT machine_not_scheduled_or_running FROM pm_history ORDER BY id').all().map(row=>row.machine_not_scheduled_or_running),[0,0],'legacy blank work orders must not become exceptions');
+  assert.throws(()=>database.prepare('UPDATE pm_history SET machine_not_scheduled_or_running=2 WHERE id=1').run(),/CHECK constraint/);
   assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='import_source_ref'));
   assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='follow_up_required'));
   assert.ok(database.prepare("PRAGMA table_info(pm_history)").all().some(column=>column.name==='follow_up_reason'));
@@ -68,6 +72,7 @@ CREATE TABLE pm_history (id INTEGER PRIMARY KEY AUTOINCREMENT, pm_task_id INTEGE
   const repeated=database.prepare("SELECT id,asset_id,task_type,work_order_number,import_source_ref FROM pm_history WHERE work_order_number='WO-MIGRATION-SHARED' ORDER BY id").all();
   indexes=database.prepare("PRAGMA index_list(pm_history)").all();
   database.close();database=undefined;
+  const exceptionVerification=new DatabaseSync(dbPath,{readOnly:true});assert.deepEqual(exceptionVerification.prepare('SELECT machine_not_scheduled_or_running FROM pm_history ORDER BY id').all().map(row=>row.machine_not_scheduled_or_running),[0,0]);exceptionVerification.close();
   assert.equal(repeated.length,2,'repeated work-order rows must survive restart migration');
   assert.equal(new Set(repeated.map(row=>row.asset_id)).size,2);
   assert.equal(new Set(repeated.map(row=>row.task_type)).size,2);
