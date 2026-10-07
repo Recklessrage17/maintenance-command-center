@@ -5,6 +5,97 @@ const pmAlert={id:1260,assetId:126,assetNumber:'PRESS 126',assetName:'Photo Work
 
 type CapturedRequest={calls:number;body?:Buffer;contentType?:string};
 
+test('issue 178 round checkbox has distinct unchecked, hover, focus and checked states with native keyboard semantics',async({page},testInfo)=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);const complete=await openCompletion(page);
+  const checkbox=complete.getByRole('checkbox',{name:'Machine not scheduled / not running'});
+  await expect(checkbox).toHaveAttribute('type','checkbox');await expect(checkbox).not.toBeChecked();
+  const unchecked=await checkbox.evaluate(element=>{const style=getComputedStyle(element);const box=element.getBoundingClientRect();return {radius:style.borderRadius,width:box.width,height:box.height,background:style.background,border:style.borderColor,tick:getComputedStyle(element,'::before').transform};});
+  expect(unchecked.radius).toBe('50%');expect(unchecked.width).toBe(unchecked.height);expect(unchecked.width).toBeGreaterThanOrEqual(20);
+  if(testInfo.project.name==='desktop-chromium'){await checkbox.locator('..').hover();expect(await checkbox.evaluate(element=>getComputedStyle(element).borderColor)).not.toBe(unchecked.border);}
+  await checkbox.focus();await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');await expect(checkbox).toBeFocused();expect(await checkbox.evaluate(element=>({style:getComputedStyle(element).outlineStyle,width:getComputedStyle(element).outlineWidth}))).toEqual({style:'solid',width:'2px'});
+  await page.keyboard.press('Space');await expect(checkbox).toBeChecked();expect(await checkbox.evaluate(element=>getComputedStyle(element).background)).not.toBe(unchecked.background);expect(await checkbox.evaluate(element=>getComputedStyle(element,'::before').transform)).not.toBe(unchecked.tick);
+  await page.keyboard.press('Space');await expect(checkbox).not.toBeChecked();expect(captured.calls).toBe(0);
+  await page.emulateMedia({forcedColors:'active'});await checkbox.check();await expect(checkbox).toBeChecked();expect(await checkbox.evaluate(element=>getComputedStyle(element,'::before').borderColor)).not.toBe('rgba(0, 0, 0, 0)');
+});
+
+test('issue 178 compact pill actions retain touch targets and do not stretch to their containers',async({page})=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);const complete=await openCompletion(page);
+  for(const name of ['Close','+ Add Tech','Choose PDF','Take Photo','Cancel','Confirm Completion']){
+    const button=complete.getByRole('button',{name,exact:true});await button.scrollIntoViewIfNeeded();
+    const geometry=await button.evaluate(element=>{const box=element.getBoundingClientRect();const textRange=document.createRange();textRange.selectNodeContents(element);let container=element.parentElement!;while(getComputedStyle(container).display==='contents'&&container.parentElement)container=container.parentElement;return {width:box.width,height:box.height,radius:parseFloat(getComputedStyle(element).borderRadius),textWidth:textRange.getBoundingClientRect().width,parentWidth:container.getBoundingClientRect().width};});
+    expect(geometry.height).toBeGreaterThanOrEqual(44);expect(geometry.width).toBeGreaterThanOrEqual(44);expect(geometry.radius).toBeGreaterThanOrEqual(geometry.height/2);expect(geometry.width-geometry.textWidth).toBeLessThanOrEqual(48);expect(geometry.width).toBeLessThan(geometry.parentWidth);
+    await button.focus();await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');await expect(button).toBeFocused();expect(await button.evaluate(element=>getComputedStyle(element).outlineStyle)).toBe('solid');
+  }
+  await complete.getByRole('button',{name:'+ Add Tech',exact:true}).click();await expect(complete.getByRole('combobox',{name:'Search MCC users'})).toBeVisible();
+});
+
+test('issue 178 icon-only date trigger follows the selected date and preserves keyboard navigation and submission',async({page},testInfo)=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);const complete=await openCompletion(page);
+  const date=complete.getByRole('textbox',{name:'Completion Date'});
+  const trigger=complete.getByRole('button',{name:/^Open Completion Date calendar —/});
+  const day=trigger.locator('.mcc-date-icon-day');
+  await expect(trigger).not.toContainText('Calendar');await expect(trigger.locator('.mcc-date-icon')).toHaveAttribute('aria-hidden','true');await expect(trigger).toHaveAttribute('aria-haspopup','dialog');
+  const geometry=await trigger.evaluate(element=>{const box=element.getBoundingClientRect();return {width:box.width,height:box.height,radius:parseFloat(getComputedStyle(element).borderRadius)};});
+  expect(geometry.height).toBeGreaterThanOrEqual(44);expect(geometry.width).toBeGreaterThanOrEqual(44);expect(geometry.width).toBeLessThanOrEqual(48);expect(geometry.radius).toBeGreaterThanOrEqual(geometry.height/2);
+  await date.fill('10/06/2026');await expect(day).toHaveText('6');await expect(trigger).toHaveAccessibleName('Open Completion Date calendar — selected October 6, 2026');await expect(trigger).toHaveAttribute('title','Open Completion Date calendar — selected October 6, 2026');
+  await trigger.focus();await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');await expect(trigger).toBeFocused();expect(await trigger.evaluate(element=>getComputedStyle(element).outlineStyle)).toBe('solid');await page.keyboard.press('ArrowDown');
+  const calendar=page.getByRole('dialog',{name:'Completion Date * calendar',exact:true});
+  await expect(calendar).toBeVisible();await expect(calendar.getByRole('button',{name:'Tuesday, October 6, 2026',exact:true})).toBeFocused();
+  await page.keyboard.press('ArrowRight');await expect(calendar.getByRole('button',{name:'Wednesday, October 7, 2026',exact:true})).toBeFocused();await page.keyboard.press('Enter');
+  await expect(calendar).toHaveCount(0);await expect(date).toHaveValue('10/07/2026');await expect(day).toHaveText('7');await expect(trigger).toHaveAccessibleName('Open Completion Date calendar — selected October 7, 2026');await expect(trigger).toBeFocused();
+  await complete.locator('.mcc-date-control').screenshot({path:testInfo.outputPath('issue-178-selected-calendar-icon.png')});
+  if(testInfo.project.name==='mobile-chromium')await trigger.tap();else await trigger.click();
+  await expect(calendar).toBeVisible();await page.keyboard.press('Escape');await expect(calendar).toHaveCount(0);await expect(complete).toBeVisible();await expect(trigger).toBeFocused();
+  await page.keyboard.press('Space');await expect(calendar).toBeVisible();await page.keyboard.press('Escape');await expect(trigger).toBeFocused();
+  await date.fill('01/21/2030');await expect(day).toHaveText('21');await expect(trigger).toHaveAccessibleName('Open Completion Date calendar — selected January 21, 2030');
+  await date.fill('2026-10-08');await expect(date).toHaveValue('10/08/2026');await expect(day).toHaveText('8');await expect(trigger).toHaveAttribute('title','Open Completion Date calendar — selected October 8, 2026');
+  await complete.getByRole('checkbox',{name:'Machine not scheduled / not running'}).check();await complete.getByRole('button',{name:'Confirm Completion'}).click();await expect.poll(()=>captured.calls).toBe(1);expect(captured.body!.toString('utf8')).toContain('name="completionDate"\r\n\r\n2026-10-08');
+});
+
+test('issue 178 date icon has no today fallback for empty or invalid dates and retains date validation',async({page})=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);const complete=await openCompletion(page);
+  const date=complete.getByRole('textbox',{name:'Completion Date'});const trigger=complete.getByRole('button',{name:/^Open Completion Date calendar —/});const day=trigger.locator('.mcc-date-icon-day');
+  await complete.getByRole('checkbox',{name:'Machine not scheduled / not running'}).check();
+  await date.fill('');await expect(day).toHaveText('—');await expect(trigger).toHaveAccessibleName('Open Completion Date calendar — no date selected');
+  await complete.getByRole('button',{name:'Confirm Completion'}).click();expect(captured.calls).toBe(0);expect(await date.evaluate(element=>(element as HTMLInputElement).validity.valueMissing)).toBe(true);
+  await date.fill('02/30/2026');await expect(day).toHaveText('—');await expect(date).toHaveAttribute('aria-invalid','true');await expect(trigger).toHaveAttribute('title','Open Completion Date calendar — enter a valid date');await expect(complete.getByText('Enter a valid date.',{exact:true})).toBeVisible();
+  await date.fill('02292028');await expect(date).toHaveValue('02/29/2028');await expect(date).toHaveAttribute('aria-invalid','false');await expect(day).toHaveText('29');await expect(trigger).toHaveAccessibleName('Open Completion Date calendar — selected February 29, 2028');expect(captured.calls).toBe(0);
+});
+
+test('issue 178 waives both requirements explicitly and restores them with keyboard or touch',async({page},testInfo)=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);const complete=await openCompletion(page);
+  const wo=complete.getByRole('textbox',{name:'Work Order Number'});const pdf=complete.getByLabel('Choose work-order PDF');const exception=complete.getByRole('checkbox',{name:'Machine not scheduled / not running'});
+  await expect(exception).not.toBeChecked();await expect(wo).toHaveAttribute('required','');await complete.getByRole('button',{name:'Confirm Completion'}).click();expect(captured.calls).toBe(0);expect(await wo.evaluate(element=>(element as HTMLInputElement).validity.valueMissing)).toBe(true);
+  await wo.fill('WO-178');await expect(pdf).toHaveAttribute('required','');await complete.getByRole('button',{name:'Confirm Completion'}).click();expect(captured.calls).toBe(0);
+  if(testInfo.project.name==='mobile-chromium')await exception.locator('..').tap();else{await exception.focus();await page.keyboard.press('Space');}
+  await expect(exception).toBeChecked();await expect(wo).not.toHaveAttribute('required','');await expect(pdf).not.toHaveAttribute('required','');await expect(complete).toContainText('Work-order PDF / Take Photo requirement waived');await expect(complete).toContainText('Work-order PDF · Optional — requirement waived');
+  await expect(complete.getByRole('alert')).toHaveCount(0);
+  await complete.screenshot({path:testInfo.outputPath('issue-178-exception.png')});
+  if(testInfo.project.name==='mobile-chromium')await exception.locator('..').tap();else{await exception.focus();await page.keyboard.press('Space');}
+  await expect(exception).not.toBeChecked();await expect(wo).toHaveAttribute('required','');await expect(pdf).toHaveAttribute('required','');await complete.getByRole('button',{name:'Confirm Completion'}).click();expect(captured.calls).toBe(0);
+  await exception.check();await wo.fill('');await complete.getByRole('button',{name:'Confirm Completion'}).click();await expect.poll(()=>captured.calls).toBe(1);
+  const body=captured.body!.toString('utf8');expect(body).toContain('name="machineNotScheduledOrRunning"\r\n\r\ntrue');expect(body).toContain('name="workOrderNumber"\r\n\r\n\r\n');expect(body).not.toContain('name="workOrderPdf"');
+});
+
+test('issue 178 bypasses attachment requirements with an optional WO and preserves other validation',async({page})=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);const complete=await openCompletion(page);await complete.getByRole('checkbox',{name:'Machine not scheduled / not running'}).check();await complete.getByRole('textbox',{name:'Work Order Number'}).fill('WO-OPTIONAL-178');
+  await complete.getByRole('combobox',{name:'Follow-up Required'}).selectOption('yes');await complete.getByRole('button',{name:'Confirm Completion'}).click();expect(captured.calls).toBe(0);await complete.getByRole('textbox',{name:'Follow-up Reason'}).fill('Inspect machine before scheduled startup.');
+  await complete.getByRole('checkbox',{name:'No issues found'}).uncheck();await complete.getByRole('button',{name:'Confirm Completion'}).click();expect(captured.calls).toBe(0);await complete.getByRole('textbox',{name:'Task Note'}).fill('Startup inspection is required.');await complete.getByRole('button',{name:'Confirm Completion'}).click();await expect.poll(()=>captured.calls).toBe(1);expect(captured.body!.toString('utf8')).toContain('WO-OPTIONAL-178');expect(captured.body!.toString('utf8')).not.toContain('name="workOrderPdf"');
+});
+
+test('issue 178 checkbox has a touch target and wraps beside the label on responsive screens',async({page},testInfo)=>{
+  const captured:CapturedRequest={calls:0};await mockWorkflow(page,captured);
+  const viewports=testInfo.project.name==='mobile-chromium'?[{width:320,height:740},{width:390,height:844},{width:844,height:390}]:[{width:1440,height:900},{width:768,height:1024},{width:640,height:960},{width:1024,height:768}];
+  for(const viewport of viewports){await page.setViewportSize(viewport);const complete=await openCompletion(page);
+    await complete.getByRole('textbox',{name:'Completion Date'}).fill('10/07/2026');
+    const trigger=complete.getByRole('button',{name:'Open Completion Date calendar — selected October 7, 2026',exact:true});await expect(trigger.locator('.mcc-date-icon-day')).toHaveText('7');await expect(trigger).not.toContainText('Calendar');
+    const dateGeometry=await trigger.evaluate(element=>{const button=element.getBoundingClientRect();const control=element.parentElement!.getBoundingClientRect();return {width:button.width,height:button.height,left:button.left,right:button.right,controlLeft:control.left,controlRight:control.right,center:button.top+button.height/2,controlCenter:control.top+control.height/2};});
+    expect(dateGeometry.width).toBeGreaterThanOrEqual(44);expect(dateGeometry.width).toBeLessThanOrEqual(48);expect(dateGeometry.height).toBeGreaterThanOrEqual(44);expect(Math.abs(dateGeometry.center-dateGeometry.controlCenter)).toBeLessThanOrEqual(1);expect(dateGeometry.left).toBeGreaterThanOrEqual(dateGeometry.controlLeft);expect(dateGeometry.right).toBeLessThanOrEqual(dateGeometry.controlRight);
+    if(testInfo.project.name==='mobile-chromium')await trigger.tap();else await trigger.click();
+    const calendar=page.getByRole('dialog',{name:'Completion Date * calendar',exact:true});await expect(calendar).toBeVisible();const calendarBox=await calendar.boundingBox();expect(calendarBox!.x).toBeGreaterThanOrEqual(0);expect(calendarBox!.x+calendarBox!.width).toBeLessThanOrEqual(viewport.width);expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);await page.keyboard.press('Escape');await expect(complete).toBeVisible();
+    const exception=complete.getByRole('checkbox',{name:'Machine not scheduled / not running'});await exception.scrollIntoViewIfNeeded();const label=exception.locator('..');const box=await label.boundingBox();expect(box!.height).toBeGreaterThanOrEqual(44);await exception.check();await expect(complete).toContainText('Not required — machine not scheduled / not running');const layout=await complete.locator('.pm-work-order-number-field').evaluate(element=>{const field=element.getBoundingClientRect();const label=element.querySelector('.pm-work-order-exception')!.getBoundingClientRect();return {overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,labelLeft:label.left,labelRight:label.right,fieldLeft:field.left,fieldRight:field.right};});expect(layout.overflow).toBeLessThanOrEqual(1);expect(layout.labelLeft).toBeGreaterThanOrEqual(layout.fieldLeft);expect(layout.labelRight).toBeLessThanOrEqual(layout.fieldRight+1);const groups=await complete.locator('.pm-complete-group').evaluateAll(elements=>elements.map(element=>({width:element.clientWidth,scroll:element.scrollWidth})));for(const group of groups)expect(group.scroll).toBeLessThanOrEqual(group.width+1);const noteWidth=await complete.getByRole('textbox',{name:'Task Note'}).evaluate(element=>element.getBoundingClientRect().width);const outcomeWidth=await complete.locator('.pm-complete-outcome').evaluate(element=>element.clientWidth);expect(outcomeWidth-noteWidth).toBeLessThanOrEqual(30);for(const name of ['Close','+ Add Tech','Choose PDF','Take Photo','Cancel','Confirm Completion']){const button=complete.getByRole('button',{name,exact:true});const width=await button.evaluate(element=>element.getBoundingClientRect().width);expect(width).toBeLessThanOrEqual(190);}await complete.evaluate(element=>{element.scrollTop=0;});await complete.screenshot({path:testInfo.outputPath('issue-178-refined-'+viewport.width+'x'+viewport.height+'.png')});await complete.getByRole('button',{name:'Close'}).click();await page.getByRole('dialog',{name:'Work-order photo inspection'}).getByRole('button',{name:'Close'}).first().click();}
+});
+
 async function mockWorkflow(page:Page,captured:CapturedRequest,maxBytes=256*1024){
   await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Photo Technician',email:'photo@example.com',role:'Maintenance Tech 3',isOwnerAdmin:false,forcePasswordChange:false,effectivePermissions:['machine.view','machine.pm_manage']}}}));
   await page.route('**/api/requisitions/summary',route=>route.fulfill({json:{ok:true,requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0}}));
