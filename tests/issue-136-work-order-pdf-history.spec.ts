@@ -16,7 +16,7 @@ type NotePermissions={canEdit:boolean;canDelete:boolean;canResolve:boolean;canRe
 
 const writable:NotePermissions={canEdit:true,canDelete:true,canResolve:true,canReopen:false,canAddUpdate:true,canDeleteAttachments:true};
 const readOnly:NotePermissions={canEdit:false,canDelete:false,canResolve:false,canReopen:false,canAddUpdate:false,canDeleteAttachments:false};
-const machine={id:136,assetNumber:'PRESS-136',assetName:'Issue 136 Press',brand:'MCC',model:'M-136',serialNumber:'M136-SN',machineYear:'2024',location:'North Cell',department:'Molding',status:'active',brandColorHex:'#44D7FF',pmSummary:{total:0,status:'current',label:'PM: Current'},historyPreview:[],createdAt:'2026-09-01T12:00:00Z',updatedAt:'2026-09-22T12:00:00Z'};
+const machine={screwInstalledDate:'',screwTipInstalledDate:'',barrelInstalledDate:'',barrelEndCapInstalledDate:'',id:136,assetNumber:'PRESS-136',assetName:'Issue 136 Press',brand:'MCC',model:'M-136',serialNumber:'M136-SN',machineYear:'2024',location:'North Cell',department:'Molding',status:'active',brandColorHex:'#44D7FF',pmSummary:{total:0,status:'current',label:'PM: Current'},historyPreview:[],createdAt:'2026-09-01T12:00:00Z',updatedAt:'2026-09-22T12:00:00Z'};
 const equipment={id:236,assetNumber:'EQ-136',equipmentName:'Issue 136 Dryer',assetName:'Issue 136 Dryer',category:'Dryer',equipmentType:'Desiccant Dryer',manufacturer:'MCC',brand:'MCC',model:'E-136',serialNumber:'E136-SN',equipmentYear:'2024',year:'2024',location:'South Cell',department:'Molding',status:'active',criticality:'normal',powerType:'Electric',voltage:'480 VAC',phase:'3 phase',amperage:'30 A',airRequirement:'90 PSI',waterRequirement:'N/A',capacityRating:'250 lb',dimensions:'40 x 40 x 70 in',weight:'500 lb',specificationNotes:'',pmSummary:{total:0,dueSoon:0,overdue:0,nextDueDate:null,nextDueMeter:null},latestHistory:null,createdAt:'2026-09-01T12:00:00Z',updatedAt:'2026-09-22T12:00:00Z'};
 
 function assetFor(library:Library){return library==='machine'?machine:equipment;}
@@ -38,7 +38,7 @@ async function baseRoutes(page:Page,library:Library,notes:unknown[]){
 }
 
 async function openNotes(page:Page,library:Library){
-  const asset=assetFor(library);await page.goto(`/${library}-library?asset=${asset.id}`);await page.getByRole('button',{name:/Asset Notes & Attachments/}).click();
+  const asset=assetFor(library);await page.goto(`/${library}-library?asset=${asset.id}`);await page.getByRole('button',{name:/Work Orders & Notes/}).click();
 }
 
 for(const library of ['machine','equipment'] as const){
