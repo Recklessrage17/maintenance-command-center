@@ -92,8 +92,8 @@ test('shared count pills remain content-sized for zero, singular, and large valu
     state.counts=counts;
     const detail=await openDetail(page);
     await expectContentSizedHeader(section(detail,'Asset Document Library'),[`${counts.folders} folder${counts.folders===1?'':'s'}`,`${counts.documents} document${counts.documents===1?'':'s'}`],testInfo.project.name==='mobile-chromium');
-    await expectContentSizedHeader(section(detail,'Asset Notes & Attachments'),[`${counts.notes} note${counts.notes===1?'':'s'}`,`${counts.attachments} attachment${counts.attachments===1?'':'s'}`],testInfo.project.name==='mobile-chromium');
-    await expect(section(detail,'Asset Notes & Attachments').locator('.machine-detail-accordion-toggle')).not.toContainText('No notes');
+    await expectContentSizedHeader(section(detail,'Work Orders & Notes'),[`${counts.notes} note${counts.notes===1?'':'s'}`],testInfo.project.name==='mobile-chromium');
+    await expect(section(detail,'Work Orders & Notes').locator('.machine-detail-accordion-toggle')).not.toContainText('No notes');
     await expect(section(detail,'Preventive Maintenance Tracking').locator('.mcc-summary-token')).toHaveCount(4);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   }
@@ -106,6 +106,6 @@ test('shared count pills remain compact at tablet width',async({page},testInfo)=
   await mockMachineLibrary(page,state);
   const detail=await openDetail(page);
   await expectContentSizedHeader(section(detail,'Asset Document Library'),['12 folders','999 documents'],false);
-  await expectContentSizedHeader(section(detail,'Asset Notes & Attachments'),['12 notes','120 attachments'],false);
+  await expectContentSizedHeader(section(detail,'Work Orders & Notes'),['12 notes'],false);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });

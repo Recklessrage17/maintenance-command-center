@@ -63,7 +63,7 @@ test('shared category accents and searchable Setup Type remain responsive and pe
   await expect(library).toHaveAttribute('data-category-accent','library');
   await expect(library.locator('.mcc-summary-token--folder')).toHaveText('1 folder');
   await expect(library.locator('.mcc-summary-token--document')).toHaveText('1 document');
-  await expect(sectionByTitle(detail,'Asset Notes & Attachments')).toHaveAttribute('data-category-accent','notes');
+  await expect(sectionByTitle(detail,'Work Orders & Notes')).toHaveAttribute('data-category-accent','notes');
   await expect(detail.locator('[data-category-accent="inspection"]')).toHaveCount(1);
 
   const libraryToggle = library.getByRole('button',{name:/Asset Document Library/});

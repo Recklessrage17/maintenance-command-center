@@ -29,7 +29,7 @@ async function openAsset(page:Page,library:'machine'|'equipment',canEdit=true,de
 for(const library of ['machine','equipment'] as const) {
   test(`${library} accepted card selections center the panel without changing focus or horizontal position`,async({page},testInfo)=>{
     const {grid}=await openAsset(page,library);
-    await expect(grid.getByRole('button',{name:/Asset Notes & Attachments/})).toContainText('1 resolved');
+    await expect(grid.getByRole('button',{name:/Work Orders & Notes/})).toContainText('1 resolved');
     await expect(grid.getByRole('button',{name:/Asset Document Library/})).toContainText('1 folder');
     await page.evaluate(()=>{
       const state=window as typeof window & {compactScrolls:Array<{top:number;left:number;behavior:string;panelTop:number}>};
@@ -47,7 +47,7 @@ for(const library of ['machine','equipment'] as const) {
     let expectedCalls=0;
     for(const reducedMotion of ['no-preference','reduce'] as const) {
       await page.emulateMedia({reducedMotion});
-      for(const [title,activation] of [['Asset Document Library','pointer'],['Preventive Maintenance Tracking','Enter'],['Asset Notes & Attachments','Space']] as const) {
+      for(const [title,activation] of [['Asset Document Library','pointer'],['Preventive Maintenance Tracking','Enter'],['Work Orders & Notes','Space']] as const) {
         const card=grid.getByRole('button',{name:new RegExp(`^${title}`)});
         if(activation==='pointer') {
           if(testInfo.project.name==='mobile-chromium')await card.tap();
@@ -76,7 +76,7 @@ for(const library of ['machine','equipment'] as const) {
         expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
       }
       // Closing the active card does not schedule a second centering scroll.
-      const notes=grid.getByRole('button',{name:/Asset Notes & Attachments/});
+      const notes=grid.getByRole('button',{name:/Work Orders & Notes/});
       await notes.click();await expect(notes).toHaveAttribute('aria-expanded','false');
       await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
       expect(await page.evaluate(()=>(window as typeof window & {compactScrolls:unknown[]}).compactScrolls.length)).toBe(expectedCalls);
@@ -91,8 +91,9 @@ for(const library of ['machine','equipment'] as const) {
     for(const text of ['12 schedules','1 due soon','2 overdue','Next 11/1/2026'])await expect(pm).toContainText(text);
     await expect(grid.getByRole('button',{name:/Asset Document Library/})).toContainText('1 folder');
     await expect(grid.getByRole('button',{name:/Asset Document Library/})).toContainText('0 documents');
-    const notes=grid.getByRole('button',{name:/Asset Notes & Attachments/});
-    for(const text of ['1 note','1 resolved','1 attachment'])await expect(notes).toContainText(text);
+    const notes=grid.getByRole('button',{name:/Work Orders & Notes/});
+    for(const text of ['0 notes','1 resolved'])await expect(notes).toContainText(text);
+    await expect(notes).not.toContainText('attachment');
     for(const width of [1440,820,390,320]) {
       await page.setViewportSize({width,height:900});
       const columns=await grid.evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length);
@@ -136,7 +137,7 @@ for(const library of ['machine','equipment'] as const) {
     await basic.getByRole('button',{name:'Save',exact:true}).click();
     await expect(basic.getByLabel(field,{exact:true})).toHaveCount(0);expect(writes()).toBe(1);
     await expect(basic).toContainText('Saved compact asset');
-    await grid.getByRole('button',{name:/Asset Notes & Attachments/}).click();
+    await grid.getByRole('button',{name:/Work Orders & Notes/}).click();
     await grid.getByRole('button',{name:'Add Note',exact:true}).click();
     await grid.getByLabel('Note Title *',{exact:true}).fill('Unsaved note');
     page.once('dialog',async dialog=>{expect(dialog.message()).toContain('unsaved Asset Notes');await dialog.dismiss();});
@@ -145,13 +146,13 @@ for(const library of ['machine','equipment'] as const) {
     page.once('dialog',async dialog=>{await dialog.accept();});
     await grid.getByRole('button',{name:/Asset Document Library/}).click();
     await expect(grid.getByRole('button',{name:/Asset Document Library/})).toHaveAttribute('aria-expanded','true');
-    await grid.getByRole('button',{name:/Asset Notes & Attachments/}).click();
+    await grid.getByRole('button',{name:/Work Orders & Notes/}).click();
     await expect(grid.getByLabel('Note Title *',{exact:true})).toHaveValue('Unsaved note');
   });
 
   test(`${library} read-only deep links preserve histories and permissions`,async({page})=>{
     const {grid,writes}=await openAsset(page,library,false,true);
-    await expect(grid.getByRole('button',{name:/Asset Notes & Attachments/})).toHaveAttribute('aria-expanded','true');
+    await expect(grid.getByRole('button',{name:/Work Orders & Notes/})).toHaveAttribute('aria-expanded','true');
     await expect(page.locator('.asset-note-history-modal')).toBeVisible();
     await page.locator('.asset-note-history-modal').getByRole('button',{name:'Close',exact:true}).click();
     await expect(grid.getByRole('button',{name:'Add Note',exact:true})).toHaveCount(0);
