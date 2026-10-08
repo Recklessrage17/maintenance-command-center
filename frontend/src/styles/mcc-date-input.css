@@ -1,0 +1,96 @@
+/* The approved #178 calendar treatment, shared by every MccDateInput. */
+.machine-date-field .mcc-date-control .mcc-date-input {
+  height: 48px;
+  min-height: 48px;
+  padding-right: 58px;
+}
+
+.machine-date-field .mcc-date-control .mcc-date-trigger {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  top: 50%;
+  right: 3px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(68, 215, 255, .44);
+  border-radius: 999px;
+  color: #dff7ff;
+  background: linear-gradient(145deg, rgba(26, 93, 115, .85), rgba(7, 42, 59, .94));
+  box-shadow: inset 0 1px 0 rgba(202, 241, 255, .13), 0 3px 10px rgba(0, 0, 0, .18);
+  transform: translateY(-50%);
+  cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.machine-date-field :is(.mcc-date-control:hover, .mcc-date-open) .mcc-date-trigger {
+  border-color: rgba(54, 229, 170, .72);
+  box-shadow: 0 0 18px rgba(68, 215, 255, .22);
+}
+
+.machine-date-field .mcc-date-trigger:focus-visible {
+  outline: 2px solid #8fe8ff;
+  outline-offset: 2px;
+}
+
+.machine-date-field .mcc-date-trigger:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.machine-date-field .mcc-date-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 1px 0 0;
+  border: 1.5px solid #8fe8ff;
+  border-top-width: 6px;
+  border-radius: 5px;
+  background-color: #0b3449;
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 5px, rgba(143, 232, 255, .14) 5px 6px),
+    repeating-linear-gradient(90deg, transparent 0 5px, rgba(143, 232, 255, .14) 5px 6px);
+}
+
+.machine-date-field .mcc-date-icon::before,
+.machine-date-field .mcc-date-icon::after {
+  content: '';
+  position: absolute;
+  top: -9px;
+  width: 3px;
+  height: 7px;
+  border-radius: 999px;
+  background: #dff7ff;
+  box-shadow: 0 1px 2px rgba(3, 22, 33, .5);
+}
+
+.machine-date-field .mcc-date-icon::before { left: 3px; }
+.machine-date-field .mcc-date-icon::after { right: 3px; }
+
+.machine-date-field .mcc-date-icon-day {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  color: #effcff;
+  background: rgba(5, 34, 49, .82);
+  font-size: 11px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .machine-date-field :is(.mcc-date-trigger, .mcc-date-icon) { transition: none; }
+}

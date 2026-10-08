@@ -1,0 +1,46 @@
+/* Shared Machine / Equipment note actions, including their portaled dialogs. */
+:is(.asset-notes-panel, .asset-note-history-modal, .asset-note-resolve-pdf-prompt,
+    .asset-note-file-viewer, .asset-note-photo-preview-modal, .work-order-export-modal)
+  button.glass-button:not(.mcc-date-trigger),
+:is(.asset-notes-panel, .asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update,
+:is(.asset-notes-panel, .asset-note-history-modal) .mcc-overflow-menu__trigger {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: 100%;
+  min-width: 44px;
+  height: auto;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: var(--mcc-radius-pill);
+  font-size: .76rem;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:is(.asset-notes-panel, .asset-note-history-modal, .asset-note-resolve-pdf-prompt,
+    .asset-note-file-viewer, .asset-note-photo-preview-modal, .work-order-export-modal)
+  :is(.modal-actions, .glass-modal__actions) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.asset-notes-toolbar, .asset-note-search-toolbar { gap: 8px; }
+.asset-notes-toolbar > div:last-child { display: flex; flex-wrap: wrap; gap: 6px; }
+.asset-note-form { gap: 8px; padding: 10px; }
+.asset-note-body-field textarea { min-height: 112px; }
+.asset-note-editor-banner { padding: 2px 0; border: 0; background: none; }
+.asset-note-form.is-editing .asset-note-editor-banner { border: 0; background: none; }
+.asset-note-editor-banner strong { font-size: .78rem; }
+.asset-note-form .asset-note-warning-toggle { min-height: 44px; }
+.asset-note-state-controls { align-items: center; }
+:is(.asset-notes-panel, .asset-note-history-modal) .asset-note-lifecycle-actions { gap: 6px; }
+:is(.asset-notes-panel, .asset-note-history-modal) .asset-note-update-form .modal-actions { justify-content: flex-start; }
+
+@media (max-width: 700px) {
+  .asset-notes-toolbar { align-items: flex-start; }
+  .asset-notes-toolbar > div:last-child { width: 100%; }
+  :is(.asset-note-file-viewer, .asset-note-photo-preview-modal) .modal-heading { flex-wrap: wrap; gap: 8px; }
+}
