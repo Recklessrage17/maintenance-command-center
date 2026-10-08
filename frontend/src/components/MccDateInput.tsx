@@ -79,7 +79,7 @@ export function MccDateInput({
   disabled = false,
   helper,
   required = false,
-  showSelectedDay = false,
+  showSelectedDay = true,
 }: {
   label: string;
   value: string;
@@ -336,6 +336,7 @@ export function MccDateInput({
         value={draft}
         disabled={disabled}
         required={required}
+        aria-label={label}
         aria-invalid={invalid}
         aria-haspopup="dialog"
         aria-expanded={open}

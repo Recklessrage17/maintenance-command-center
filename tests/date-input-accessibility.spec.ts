@@ -117,6 +117,10 @@ test('date calendar remains an owned, keyboard-accessible portal inside a legacy
   const dateField = outerDialog.locator('.machine-date-field').filter({ hasText: 'Needed-by Date' });
   const input = dateField.locator('input');
   const trigger = dateField.getByRole('button', { name: 'Open Needed-by Date calendar' });
+  await expect(input).toHaveAccessibleName('Needed-by Date');
+  const touchTarget = await trigger.boundingBox();
+  expect(touchTarget!.width).toBeGreaterThanOrEqual(44);
+  expect(touchTarget!.height).toBeGreaterThanOrEqual(44);
 
   for (const control of [input, trigger]) {
     await expect(control).toHaveAttribute('aria-haspopup', 'dialog');
@@ -179,5 +183,9 @@ test('date calendar remains an owned, keyboard-accessible portal inside a legacy
   await expect(page.locator(`#${calendarId}`)).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await expect(outerDialog).toBeVisible();
+  await input.fill('2026-09-23');
+  await expect(input).toHaveAccessibleName('Needed-by Date');
+  await expect(trigger.locator('.mcc-date-icon-day')).toHaveText('23');
+  await expect(trigger).toHaveAttribute('title', /selected September 23, 2026/);
   expect([...unhandled]).toEqual([]);
 });

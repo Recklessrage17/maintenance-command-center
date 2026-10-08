@@ -10,6 +10,8 @@ import './styles/dashboard.css';
 import './styles/mcc-login.css';
 import './styles/mobile-safari-inputs.css';
 import './styles/pm-complete.css';
+import './styles/mcc-date-input.css';
+import './styles/work-orders-notes.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
