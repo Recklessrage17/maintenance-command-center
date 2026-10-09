@@ -343,6 +343,8 @@ test('authorized login update notice persists dismissal per build and View updat
 test('login update notice stays hidden when up to date or unauthorized', async ({ page }) => {
   const upToDate=await mockSettings(page,{initialUpdate:update({state:'idle',code:'up_to_date',message:'No new updates are available.',targetVersion:'1.2.1',targetCommit:'abc1234',checkToken:null,checkExpiresAt:null})});
   await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
+  await expect.poll(()=>upToDate.statusRequests()).toBe(1);
   await expect(page.getByRole('status',{name:'MCC update available'})).toHaveCount(0);
   expect(upToDate.statusRequests()).toBe(1);
 });
@@ -350,6 +352,7 @@ test('login update notice stays hidden when up to date or unauthorized', async (
 test('unauthorized login does not request or render update notification', async ({ page }) => {
   const fixture=await mockSettings(page,{role:'Manager',canViewSystemVersion:false});
   await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Dashboard',exact:true})).toBeVisible();
   await expect(page.getByRole('status',{name:'MCC update available'})).toHaveCount(0);
   expect(fixture.statusRequests()).toBe(0);
 });

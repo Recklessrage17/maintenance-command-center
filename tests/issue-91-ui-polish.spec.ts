@@ -27,6 +27,7 @@ async function mockIssue91(page:Page,{initiallyAuthenticated=false,failVerificat
     if(path==='/api/equipment-library/assets')return route.fulfill({json:{ok:true,assets:[equipment,{...equipment,id:94,assetNumber:'EQ-094',equipmentName:'Vacuum Pump',serialNumber:'EQ-SN-94'}],categories:['Chiller'],permissions:{canEdit:true,canDelete:true,canManagePm:true}}});
     if(path==='/api/requisitions/summary')return route.fulfill({json:{requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0}});
     if(path==='/api/dashboard/preventive-maintenance-due')return route.fulfill({json:{alerts:[],summary:{dueSoon:0,dueNow:0,pastDue:0}}});
+    if(path==='/api/dashboard/inventory-attention')return route.fulfill({json:{items:[],outOfStockCount:0,lowStockCount:0}});
     if(path==='/api/presence/heartbeat')return route.fulfill({json:{ok:true,policy:{heartbeatIntervalMs:25000,rosterRefreshIntervalMs:25000,onlineTimeoutMs:90000,awayAfterMs:300000,writeThrottleMs:20000}}});
     return route.fulfill({json:{ok:true}});
   });
@@ -51,7 +52,7 @@ test('login readiness reaches 100%, resets stale routes, and logout cannot resto
   await expect(loader).toBeVisible();await expect(progress).toHaveAttribute('aria-valuenow','12');await expect(page.locator('.mcc-shell')).toHaveCount(0);await expect(page).toHaveURL(/\/$/);
   await page.evaluate(()=>{const values:number[]=[];(window as unknown as {__issue91Progress:number[]}).__issue91Progress=values;const progress=document.querySelector('[role="progressbar"]');if(!progress)return;values.push(Number(progress.getAttribute('aria-valuenow')));new MutationObserver(()=>values.push(Number(progress.getAttribute('aria-valuenow')))).observe(progress,{attributes:true,attributeFilter:['aria-valuenow']});});
   control.releaseVerification();
-  await expect(page.locator('.mcc-shell')).toBeVisible();await expect(page.getByRole('heading',{name:'Dashboard'})).toBeVisible();
+  await expect(page.locator('.mcc-shell')).toBeVisible();await expect(page.getByRole('heading',{name:'Dashboard'})).toBeVisible();await expect(page.getByText('All enabled stock alerts are clear.')).toBeVisible();
   const progressValues=await page.evaluate(()=>(window as unknown as {__issue91Progress:number[]}).__issue91Progress);expect(progressValues).toContain(100);expect(progressValues).toEqual([...progressValues].sort((left,right)=>left-right));
   await page.getByRole('button',{name:'Open command menu'}).click();await page.getByRole('button',{name:/Machine Library/}).click();await expect(page.getByRole('heading',{name:'Machine Library'})).toBeVisible();await expect(page).toHaveURL(/\/machine-library$/);
   await page.getByRole('button',{name:'Open command menu'}).click();await page.getByRole('button',{name:'Logout'}).click();await expect(page.getByRole('heading',{name:'Enter command center'})).toBeVisible();await expect(page).toHaveURL(/\/$/);

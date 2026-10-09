@@ -69,3 +69,24 @@ test('brand color preview motion honors reduced-motion preference',async({page},
   await page.emulateMedia({reducedMotion:'reduce'});await mockBrandColors(page);await page.goto('/machine-library');await openColorEditor(page);
   const motion=await page.locator('.machine-color-row-preview').first().evaluate(element=>getComputedStyle(element).transitionDuration);expect(motion).toBe('0s');
 });
+
+test('Machine tools keep every action reachable on narrow phones and landscape screens',async({page},testInfo)=>{
+  await mockBrandColors(page);await page.goto('/machine-library');
+  for(const viewport of [{width:390,height:844},{width:320,height:640},{width:844,height:390}]){
+    await page.setViewportSize(viewport);
+    const toggle=page.getByRole('button',{name:'Machine Library tools',exact:true});await toggle.click();
+    const menu=page.getByRole('menu',{name:'Machine Library tools',exact:true});await expect(menu).toBeVisible();
+    const layout=await menu.evaluate(element=>{const rect=element.getBoundingClientRect();return{left:rect.left,right:rect.right,overflow:element.scrollWidth-element.clientWidth,width:innerWidth};});
+    expect(layout.left).toBeGreaterThanOrEqual(0);expect(layout.right).toBeLessThanOrEqual(layout.width);expect(layout.overflow).toBeLessThanOrEqual(1);
+    await menu.screenshot({path:testInfo.outputPath(`machine-tools-${viewport.width}.png`)});
+    for(const item of await menu.getByRole('menuitem').all())await item.click({trial:true});
+    await menu.getByRole('menuitem',{name:/Brand Color Settings/}).click();
+    const dialog=page.getByRole('dialog',{name:'Machine Brand Colors'});await expect(dialog).toBeVisible();
+    const blocksSearch=await dialog.evaluate(element=>{const search=document.querySelector('.library-mobile-search-toggle')!;const rect=search.getBoundingClientRect();return element.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2));});expect(blocksSearch).toBe(true);
+    await dialog.getByRole('button',{name:'About machine brand colors'}).focus();
+    const help=dialog.getByRole('note');await expect(help).toBeVisible();
+    const helpLayout=await help.evaluate(element=>{const rect=element.getBoundingClientRect();return{left:rect.left,right:rect.right,width:innerWidth};});expect(helpLayout.left).toBeGreaterThanOrEqual(0);expect(helpLayout.right).toBeLessThanOrEqual(helpLayout.width);
+    await dialog.screenshot({path:testInfo.outputPath(`brand-colors-${viewport.width}.png`)});
+    await dialog.getByRole('button',{name:'Close',exact:true}).click();await expect(toggle).toHaveAttribute('aria-expanded','false');
+  }
+});

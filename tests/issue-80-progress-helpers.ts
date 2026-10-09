@@ -19,9 +19,12 @@ export function actionProgress(button:Locator){
 export async function expectCurrentActionLabelInsideButton(button:Locator){
   const label=actionProgress(button).locator('.action-button-progress__labels > .is-current');
   await expect(label).toBeVisible();
-  const buttonBox=await button.boundingBox();
-  const labelBox=await label.boundingBox();
-  const indicatorBox=await actionProgress(button).locator('.action-button-progress__indicator').boundingBox();
+  // Sample the same frame: page-entry motion can move the button between protocol calls.
+  const {buttonBox,labelBox,indicatorBox}=await button.evaluate(element=>({
+    buttonBox:element.getBoundingClientRect().toJSON(),
+    labelBox:element.querySelector('.action-button-progress__labels > .is-current')?.getBoundingClientRect().toJSON()??null,
+    indicatorBox:element.querySelector('.action-button-progress__indicator')?.getBoundingClientRect().toJSON()??null,
+  }));
   expect(buttonBox).not.toBeNull();
   expect(labelBox).not.toBeNull();
   expect(indicatorBox).not.toBeNull();

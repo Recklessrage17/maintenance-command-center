@@ -27,12 +27,13 @@ async function swipePageUp(page:Page) {
   await session.detach();
 }
 
-test('shared maintenance-lab decal fills a short Dashboard without intercepting input',async({page},testInfo)=>{
+test('shared maintenance-lab decal follows Dashboard content height without intercepting input',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
   await mockApp(page);
   await page.goto('/');
   const shell=page.locator('.mcc-shell');
   await expect(shell).toBeVisible();
+  await expect(page.locator('.mcc-page-enter')).toHaveCount(0);
   const audit=await shell.evaluate(element=>{
     const rect=element.getBoundingClientRect();
     const top=document.elementFromPoint(rect.left+rect.width/2,Math.min(rect.bottom-2,150));
@@ -55,7 +56,10 @@ test('shared maintenance-lab decal fills a short Dashboard without intercepting 
       webkitScrollbarWidth:getComputedStyle(document.documentElement,'::-webkit-scrollbar').width,
       intercepted:top!==element&&!element.contains(top),
       horizontalOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
-      verticalOverflow:document.documentElement.scrollHeight-window.innerHeight,
+      documentHeight:document.documentElement.scrollHeight,
+      contentHeight:Math.max(window.innerHeight,Math.ceil(document.querySelector('.mcc-main')!.getBoundingClientRect().bottom+window.scrollY)),
+      dashboardFadePointerEvents:getComputedStyle(document.querySelector('.dashboard-page')!,'::after').pointerEvents,
+      dashboardFadeBackground:getComputedStyle(document.querySelector('.dashboard-page')!,'::after').backgroundImage,
     };
   });
   expect(audit.shellBackground).not.toBe('none');
@@ -78,7 +82,13 @@ test('shared maintenance-lab decal fills a short Dashboard without intercepting 
   expect(audit.webkitScrollbarWidth).toBe('0px');
   expect(audit.intercepted).toBe(false);
   expect(audit.horizontalOverflow).toBeLessThanOrEqual(1);
-  expect(audit.verticalOverflow).toBeLessThanOrEqual(1);
+  expect(audit.documentHeight).toBeLessThanOrEqual(audit.contentHeight+1);
+  expect(audit.dashboardFadePointerEvents).toBe('none');
+  expect(audit.dashboardFadeBackground).toContain('gradient');
+  if(mobile&&audit.contentHeight>page.viewportSize()!.height){
+    await swipePageUp(page);
+    await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(0);
+  }
 });
 
 test('Machine detail feathers only the outer workspace while keeping the primary header crisp',async({page})=>{
@@ -139,6 +149,7 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
   await page.goto('/machine-library');
   const cards=page.locator('.machine-asset-card');
   await expect(cards).toHaveCount(18);
+  await expect(page.locator('.mcc-page-enter')).toHaveCount(0);
   const dimensions=await page.evaluate(()=>{const main=document.querySelector('.mcc-main')! as HTMLElement;const workspace=document.querySelector('.mcc-workspace')! as HTMLElement;main.scrollTop=50;workspace.scrollTop=50;const result={scrollHeight:document.documentElement.scrollHeight,innerHeight:window.innerHeight,horizontal:document.documentElement.scrollWidth-document.documentElement.clientWidth,mainScrollTop:main.scrollTop,workspaceScrollTop:workspace.scrollTop};main.scrollTop=0;workspace.scrollTop=0;return result;});
   expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.innerHeight);
   expect(dimensions.horizontal).toBeLessThanOrEqual(1);
@@ -147,7 +158,7 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
 
   if(!mobile) {
     await page.keyboard.press('End');
-    await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(0);
+    await expect.poll(()=>page.evaluate(()=>window.scrollY+window.innerHeight>=document.documentElement.scrollHeight-1)).toBe(true);
     await page.keyboard.press('Control+Home');
     await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(0);
     await page.keyboard.press('PageDown');
@@ -167,8 +178,10 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
   await expect(cards.first()).toBeVisible();
 
   await page.setViewportSize({width:mobile?390:1000,height:500});
-  const logsButton=cards.first().getByRole('button',{name:'Barrel & Screw Logs'});
-  await logsButton.click();
+  await cards.first().locator('.machine-asset-number-pill').click();
+  const detailForLogs=page.locator('.machine-detail-modal');
+  await expect(detailForLogs).toBeVisible();
+  await detailForLogs.locator('.machine-detail-header-actions').getByRole('button',{name:'Barrel & Screw Logs',exact:true}).click();
   const modal=page.locator('.measurement-record-modal');
   await expect(modal).toBeVisible();
   const modalAudit=await modal.evaluate(element=>({scrollHeight:element.scrollHeight,clientHeight:element.clientHeight,scrollbarWidth:getComputedStyle(element).scrollbarWidth,webkitWidth:getComputedStyle(element,'::-webkit-scrollbar').width}));
