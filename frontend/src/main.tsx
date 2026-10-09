@@ -12,6 +12,7 @@ import './styles/mobile-safari-inputs.css';
 import './styles/pm-complete.css';
 import './styles/mcc-date-input.css';
 import './styles/work-orders-notes.css';
+import './styles/asset-note-modal.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

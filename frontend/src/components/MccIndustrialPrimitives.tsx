@@ -445,7 +445,8 @@ function legacyFocusableElements(container: HTMLElement) {
   const ownFocus = container.matches(focusableSelector) ? [container] : [];
   return [...ownFocus, ...Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))]
     .filter(element => (
-      element.getAttribute('aria-disabled') !== 'true'
+      !element.matches(':disabled')
+      && element.getAttribute('aria-disabled') !== 'true'
       && element.tabIndex >= 0
       && elementIsRendered(element)
     ));
@@ -821,10 +822,11 @@ export function MccLegacyDialogManager() {
       if (event.key === 'Escape') {
         if (targetInPortal || portals.length > 0) return;
         const closeControl = findLegacyCloseControl(record.dialog);
-        if (!closeControl) return;
+        // Explicit close controls keep Escape inside their dialog while disabled.
+        if (!closeControl && !record.dialog.querySelector('[data-mcc-dialog-close]')) return;
         event.preventDefault();
         event.stopPropagation();
-        closeControl.click();
+        closeControl?.click();
         return;
       }
 

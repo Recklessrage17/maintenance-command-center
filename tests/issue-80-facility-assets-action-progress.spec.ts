@@ -94,7 +94,7 @@ test('Metadata-only Asset Note create and maintenance update use ordinary action
     return fulfill(route,{ok:true});
   });
   await page.goto('/machine-library');await page.locator('.machine-asset-card').click();const detail=page.locator('.machine-detail-modal');await detail.getByRole('button',{name:/Work Orders & Notes/}).click();
-  await detail.getByRole('button',{name:'Add Note'}).click();let form=detail.locator('.asset-note-form');await form.getByLabel('Note Title *').fill('Metadata-only note');await form.getByLabel('Note Body *').fill('No attachment processing required.');let button=form.locator('button[type="submit"]');
+  await detail.getByRole('button',{name:'Add Note'}).click();let form=page.getByRole('dialog',{name:'Add Note'}).locator('.asset-note-form');await form.getByLabel('Note Title *').fill('Metadata-only note');await form.getByLabel('Note Body *').fill('No attachment processing required.');let button=form.locator('button[type="submit"]');
   await button.evaluate((element:HTMLButtonElement)=>{element.click();element.click();});await expect.poll(()=>noteRequests).toBe(1);await expectActionPending(button);noteGate.release();await expect(actionProgress(button)).toHaveAttribute('data-action-progress','success');await expect(detail.getByText('Metadata-only note')).toBeVisible();
 
   const card=detail.locator('.asset-note-active-issue-card',{hasText:'Issue 80 warning'});await card.locator('.asset-note-issue-toggle').click();await card.getByRole('button',{name:'+ Add Update'}).click();form=card.locator('.asset-note-update-form');await form.getByLabel('Maintenance work / progress update *').fill('Metadata-only maintenance update.');button=form.locator('button[type="submit"]');
