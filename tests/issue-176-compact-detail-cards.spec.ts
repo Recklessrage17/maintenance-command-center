@@ -139,15 +139,19 @@ for(const library of ['machine','equipment'] as const) {
     await expect(basic).toContainText('Saved compact asset');
     await grid.getByRole('button',{name:/Work Orders & Notes/}).click();
     await grid.getByRole('button',{name:'Add Note',exact:true}).click();
-    await grid.getByLabel('Note Title *',{exact:true}).fill('Unsaved note');
-    page.once('dialog',async dialog=>{expect(dialog.message()).toContain('unsaved Asset Notes');await dialog.dismiss();});
-    await grid.getByRole('button',{name:/Asset Document Library/}).click();
-    await expect(grid.getByLabel('Note Title *',{exact:true})).toBeVisible();
+    const noteDialog=page.getByRole('dialog',{name:'Add Note',exact:true});
+    await noteDialog.getByLabel('Note Title *',{exact:true}).fill('Unsaved note');
+    page.once('dialog',async dialog=>{expect(dialog.message()).toContain('unsaved note');await dialog.dismiss();});
+    await noteDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+    await expect(noteDialog.getByLabel('Note Title *',{exact:true})).toHaveValue('Unsaved note');
     page.once('dialog',async dialog=>{await dialog.accept();});
+    await noteDialog.getByRole('button',{name:'Close',exact:true}).click();
+    await expect(noteDialog).toHaveCount(0);
     await grid.getByRole('button',{name:/Asset Document Library/}).click();
     await expect(grid.getByRole('button',{name:/Asset Document Library/})).toHaveAttribute('aria-expanded','true');
     await grid.getByRole('button',{name:/Work Orders & Notes/}).click();
-    await expect(grid.getByLabel('Note Title *',{exact:true})).toHaveValue('Unsaved note');
+    await grid.getByRole('button',{name:'Add Note',exact:true}).click();
+    await expect(noteDialog.getByLabel('Note Title *',{exact:true})).toHaveValue('');
   });
 
   test(`${library} read-only deep links preserve histories and permissions`,async({page})=>{

@@ -71,16 +71,18 @@ export function MccOverflowMenu({items,label='More',ariaLabel,className=''}:{ite
     const below=viewportTop+viewportHeight-rect.bottom-gap-margin;
     const above=rect.top-viewportTop-gap-margin;
     const opensUp=nativeHeightExceeds(naturalHeight,below)&&above>below;
-    const availableHeight=Math.max(72,opensUp?above:below);
+    const availableHeight=Math.max(72,Math.min(viewportHeight-margin*2,opensUp?above:below));
     const renderedHeight=Math.min(naturalHeight,availableHeight);
     const defaultLeft=rect.right-panelWidth;
     const left=Math.min(
       viewportLeft+viewportWidth-margin-panelWidth,
       Math.max(viewportLeft+margin,defaultLeft),
     );
-    const top=opensUp
-      ? Math.max(viewportTop+margin,rect.top-gap-renderedHeight)
-      : Math.min(viewportTop+viewportHeight-margin-renderedHeight,rect.bottom+gap);
+    const preferredTop=opensUp?rect.top-gap-renderedHeight:rect.bottom+gap;
+    const top=Math.max(
+      viewportTop+margin,
+      Math.min(viewportTop+viewportHeight-margin-renderedHeight,preferredTop),
+    );
     setPanelStyle({top,left,width:panelWidth,maxHeight:availableHeight,visibility:'visible'});
   },[]);
 

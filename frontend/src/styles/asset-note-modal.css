@@ -1,0 +1,92 @@
+/* Scoped to the note editor so existing library cards and PM dialogs retain their layout. */
+.modal-backdrop.asset-note-editor-backdrop {
+  align-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  overflow: hidden;
+}
+.modal-backdrop .mcc-card.glass-modal-shell.asset-note-editor-modal {
+  width: min(860px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 20px;
+  border-color: rgba(143, 232, 255, .32);
+  background: linear-gradient(145deg, rgba(14, 37, 52, .97), rgba(5, 17, 29, .98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(210, 245, 255, .12);
+}
+.asset-note-editor-modal .asset-note-form {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.asset-note-editor-modal .asset-note-form :is(span, strong) { margin-top: 0; margin-bottom: 0; }
+.asset-note-editor-modal .asset-note-editor-banner > span { color: #07192a; font-size: .6rem; }
+.asset-note-editor-modal .is-editing .asset-note-editor-banner > span { color: #21153d; }
+.asset-note-editor-modal .asset-note-form.is-editing { background: linear-gradient(145deg, rgba(62, 42, 112, .18), rgba(5, 22, 39, .1)); box-shadow: inset 3px 0 0 rgba(167, 139, 250, .6); }
+.asset-note-editor-modal .asset-note-camera-button { min-height: 44px; }
+.asset-note-modal-heading, .asset-note-modal-error { grid-column: 1 / -1; }
+.asset-note-modal-heading { gap: 12px; margin-bottom: 2px; }
+.asset-note-modal-heading > div { min-width: 0; overflow-wrap: anywhere; }
+.asset-note-modal-heading h3 { margin: 0; font-size: 1.2rem; }
+.asset-note-modal-heading .eyebrow { margin: 0 0 4px; font-size: .65rem; }
+.asset-note-editor-modal button.glass-button:not(.mcc-date-trigger) { min-height: 44px; border-radius: 999px; width: max-content; max-width: 100%; }
+.asset-note-editor-modal .asset-note-work-order-photo-row { flex-wrap: wrap; }
+.asset-note-editor-modal .asset-note-work-order-photo-row > div:first-child { min-width: 0; flex: 1 1 260px; }
+.asset-note-editor-modal .asset-note-save-actions {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  position: sticky;
+  bottom: -14px;
+  z-index: 2;
+  margin: 0 -14px -14px;
+  padding: 12px 14px;
+  background: rgba(5, 19, 31, .97);
+  border-top: 1px solid rgba(143, 232, 255, .16);
+}
+.asset-note-editor-modal .asset-note-save-actions > button {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 0 14px;
+  font-size: .82rem;
+  line-height: 1;
+}
+.asset-note-save-feedback .action-button-progress,
+.asset-note-save-feedback .action-button-progress__labels,
+.asset-note-save-feedback .action-button-progress__labels > span { height: 14px; max-height: 14px; margin: 0; padding: 0; line-height: 14px; }
+.asset-note-editor-modal .asset-note-save-feedback { display: inline-flex; align-items: center; justify-content: center; gap: 7px; color: inherit; }
+.asset-note-save-feedback span { color: inherit; }
+.asset-note-save-feedback .action-button-progress { display: inline-grid; }
+.asset-note-save-feedback .action-button-progress__labels { display: grid; }
+.asset-note-save-check { display: none; width: 23px; height: 23px; flex: 0 0 23px; stroke: currentColor; stroke-width: 1.8; }
+.asset-note-save-feedback.is-success .asset-note-save-check { display: block; animation: note-save-pop 320ms ease-out both; }
+.asset-note-save-check circle { stroke-opacity: .5; }
+.asset-note-save-check path { stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 18; stroke-dashoffset: 0; animation: note-save-check 360ms ease-out both; }
+.asset-note-save-feedback.is-success .action-button-progress__indicator { display: none; }
+.asset-note-save-feedback.is-success .action-button-progress { grid-template-columns: minmax(0, auto); }
+.asset-note-editor-modal .asset-note-save-button.is-saved { opacity: 1; color: #dcffee; border-color: rgba(63, 205, 141, .7); background: linear-gradient(135deg, #13513c, #103729); box-shadow: 0 0 18px rgba(63, 205, 141, .18); }
+@keyframes note-save-pop { from { opacity: 0; transform: scale(.75); } to { opacity: 1; transform: scale(1); } }
+@keyframes note-save-check { from { stroke-dashoffset: 18; } to { stroke-dashoffset: 0; } }
+@media (pointer: coarse), (max-width: 700px) {
+  .asset-note-editor-modal button.glass-button:not(.mcc-date-trigger) { min-height: 44px; }
+  .asset-note-editor-modal .asset-note-save-actions > button { height: 44px; }
+}
+@media (max-width: 700px) {
+  .asset-note-editor-modal .asset-note-form { grid-template-columns: minmax(0, 1fr); }
+  .asset-note-editor-modal .asset-note-body-field textarea { min-height: 110px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .asset-note-editor-modal *, .asset-note-editor-modal *::before, .asset-note-editor-modal *::after { animation: none !important; transition: none !important; }
+}

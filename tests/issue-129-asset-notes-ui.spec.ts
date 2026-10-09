@@ -207,6 +207,7 @@ for(const library of ['machine','equipment'] as const){
     await page.getByRole('button',{name:'Add Note',exact:true}).click();await page.locator('.asset-note-attachment-picker input[type=file]').setInputFiles({name:'pending-service.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 pending icon fixture')});
     const pending=page.getByLabel('Pending attachment pending-service.pdf');await checkPdf(pending);expect(await pending.locator('svg').innerHTML()).toBe(geometry);await expect(pending).toContainText('Ready to upload');await expect(pending.getByRole('button',{name:'Preview'})).toBeVisible();
     for(const width of [390,820,1440]){await page.setViewportSize({width,height:900});await checkPdf(pending);expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);}
+    page.once('dialog',prompt=>prompt.accept());
     await page.locator('.asset-note-form').getByRole('button',{name:'Cancel',exact:true}).click();await card.locator('.asset-note-issue-toggle').evaluate(element=>{if(element.getAttribute('aria-expanded')!=='true')(element as HTMLButtonElement).click();});
     await checkPdf(generated);await checkPdf(uploaded);await card.screenshot({path:testInfo.outputPath('pdf-attachment-icons.png')});
   });
