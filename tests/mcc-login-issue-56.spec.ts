@@ -95,6 +95,9 @@ async function mockLoginAndDashboard(page: Page) {
     if (path === '/api/dashboard/preventive-maintenance-due') {
       return route.fulfill({ json: { alerts: [], summary: { dueSoon: 0, dueNow: 0, pastDue: 0 } } });
     }
+    if (path === '/api/dashboard/inventory-attention') {
+      return route.fulfill({ json: { items: [], outOfStockCount: 0, lowStockCount: 0 } });
+    }
 
     return route.fulfill({ json: { ok: true } });
   });
@@ -196,6 +199,7 @@ test('invalid, recovery, keyboard login, authenticating, and dashboard flows rem
 
   await expect(page.locator('.mcc-shell')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+  await expect(page.getByText('All enabled stock alerts are clear.')).toBeVisible();
   await expectContained(page);
   await page.screenshot({
     path: resolve(artifactDirectory, 'dashboard-after-logon-1366x768.png'),

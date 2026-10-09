@@ -204,6 +204,7 @@ test('Equipment create uses shared progress and suppresses duplicate submissions
     if(path==='/api/auth/status')return fulfill(route,auth);
     if(path==='/api/equipment-library/assets'&&method==='GET')return fulfill(route,{ok:true,assets:[],categories:['Dryer'],permissions:{canEdit:true,canDelete:true,canManagePm:true}});
     if(path==='/api/equipment-library/assets'&&method==='POST'){requests+=1;await gate.promise;return fulfill(route,{ok:true,asset:equipment},201);}
+    if(path==='/api/equipment-library/assets/301/history')return fulfill(route,{ok:true,records:[]});
     return fulfill(route,{ok:true});
   });
   await page.goto('/equipment-library');
@@ -219,6 +220,7 @@ test('Equipment create uses shared progress and suppresses duplicate submissions
   gate.release();
   await expect(progress(button)).toHaveAttribute('data-action-progress','success');
   await expect(modal).toHaveCount(0);
+  await expect(page.locator('.equipment-detail-page')).toContainText('Issue 80 Dryer');
 });
 
 test('PM schedule save keeps PM polling semantics while sharing compact completion feedback',async({page})=>{

@@ -10,7 +10,7 @@ import { historySectionFromPath, historySectionSlug, type HistorySection } from 
 import { useMccPresence } from './presence/useMccPresence';
 
 type DashboardRequisitionView = 'active'|'requested'|'ordered';
-function cachedImport<T>(loader:()=>Promise<T>){let promise:Promise<T>|undefined;return()=>promise??=loader();}
+function cachedImport<T>(loader:()=>Promise<T>){let promise:Promise<T>|undefined;return()=>promise??=loader().catch(error=>{promise=undefined;throw error;});}
 const loadDashboard=cachedImport(()=>import('./modules/dashboard/DashboardPage'));
 const loadInventory=cachedImport(()=>import('./modules/inventory/InventoryPage'));
 const loadVendors=cachedImport(()=>import('./modules/vendors/VendorsPage'));
@@ -39,7 +39,10 @@ class RouteModuleBoundary extends Component<{resetKey:MccSection;children:ReactN
 
 type User = { id:number; fullName:string; email:string; role:string; isOwnerAdmin:boolean; canViewSystemVersion:boolean; forcePasswordChange:boolean; effectivePermissions?:string[] };
 type AuthMode = 'loading' | 'initializing' | 'setup' | 'login' | 'forgot' | 'change' | 'app';
-type AppInitialization = { progress:number; stage:string; error:string; target:MccSection; resetToDashboard:boolean };
+type AppInitialization = { progress:number; stage:string; error:string; target:MccSection; resetToDashboard:boolean; reloadRequired?:boolean };
+class RouteModuleLoadError extends Error {
+  constructor(){super('Workspace could not load. The module download was interrupted. Retry initialization to reload MCC.');}
+}
 async function api(path:string, options:RequestInit={}) { const res=await fetch(path,withJsonRequestDefaults(options)); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error || 'Request failed.'); return data; }
 type UpdateNoticeState={kind:'available'|'succeeded';version:string;commit:string;storageKey:string};
 function cleanNoticePart(value:unknown){return typeof value==='string'?value.replace(/[^a-zA-Z0-9._-]/g,'').slice(0,80):'';}
@@ -130,7 +133,7 @@ function App() {
       if(initializationRunRef.current!==runId)return;
       setUser(readyUser);
       update(38,'Secure session verified. Loading operator workspace...');
-      await routeLoaders[route.section]();
+      try{await routeLoaders[route.section]();}catch{throw new RouteModuleLoadError();}
       update(76,`${route.section==='dashboard'?'Dashboard':'Workspace'} module ready. Synchronizing interface...`);
       if(document.fonts?.ready)await document.fonts.ready;
       update(92,'Interface ready. Finalizing controls...');
@@ -141,7 +144,7 @@ function App() {
     } catch(value) {
       if(initializationRunRef.current!==runId)return;
       const message=(value as Error).message||'MCC could not finish loading. Check the connection and try again.';
-      setInitialization(current=>({...current,error:message,stage:'Initialization interrupted.'}));
+      setInitialization(current=>({...current,error:message,stage:'Initialization interrupted.',reloadRequired:value instanceof RouteModuleLoadError}));
     }
   }
   function refresh(resetToDashboard=false) {
@@ -189,7 +192,7 @@ function App() {
   }
   const page = activeSection === 'inventory' ? <InventoryPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} userFullName={user?.fullName ?? ''} onRefreshStatusChange={setInventoryLiveStatus} onBackToDashboard={()=>navigate('dashboard')} onOpenRequisitions={()=>navigate('requisitions')} /> : activeSection === 'vendors' ? <VendorsPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} /> : activeSection === 'machine-library' ? <MachineLibraryPage userRole={user?.role ?? ''} userFullName={user?.fullName ?? ''} /> : activeSection === 'equipment-library' ? <EquipmentLibraryPage userFullName={user?.fullName ?? ''} /> : activeSection === 'facility-info' ? <FacilityInfoPage /> : activeSection === 'history' ? (permissions.canViewHistory ? <HistoryPage userRole={user?.role ?? ''} selectedSection={historySection} onSectionChange={section=>navigate('history',section)} onBackToLanding={()=>navigate('history')} /> : <div className="page-stack"><div className="page-heading"><p className="eyebrow">Not Authorized</p><h2>History Logs locked</h2><p>History Logs permission is required.</p></div></div>) : activeSection === 'requisitions' ? <RequisitionsPage userRole={user?.role ?? ''} effectivePermissions={user?.effectivePermissions} userFullName={user?.fullName ?? ''} /> : activeSection === 'users' ? <UsersPage /> : activeSection === 'settings' ? <SettingsPage isOwnerAdmin={Boolean(user?.isOwnerAdmin)} canViewSystemVersion={Boolean(user?.canViewSystemVersion)} /> : <DashboardPage onOpenRequisitions={navigateToRequisitions} userFullName={user?.fullName??''} effectivePermissions={user?.effectivePermissions??[]} />;
   if(mode==='loading') return <MccAppLoading progress={0} stage="Checking secure local session..." />;
-  if(mode==='initializing') return <MccAppLoading progress={initialization.progress} stage={initialization.stage} error={initialization.error} onRetry={initialization.error&&user?()=>void initializeApplication(user,{resetToDashboard:initialization.resetToDashboard,verifySession:true}):undefined} />;
+  if(mode==='initializing') return <MccAppLoading progress={initialization.progress} stage={initialization.stage} error={initialization.error} onRetry={initialization.error&&user?()=>{if(initialization.reloadRequired)window.location.reload();else void initializeApplication(user,{resetToDashboard:initialization.resetToDashboard,verifySession:true});}:undefined} />;
   if(mode==='setup') return <Setup onDone={()=>setMode('login')} />;
   if(mode==='login') return <Login onForgot={()=>setMode('forgot')} onLogin={u=>{if(u.forcePasswordChange){setUser(u);setActiveSection('dashboard');setHistorySection(null);window.history.replaceState(null,'','/');setMode('change');return;}void initializeApplication(u,{resetToDashboard:true,verifySession:true});}} />;
   if(mode==='forgot') return <MccForgotPassword onBack={()=>setMode('login')} requestReset={async email=>{const data=await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email})});return data.message;}} />;
