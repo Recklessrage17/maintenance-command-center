@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import type { Request, Response } from 'express';
 
 export const LIBRARY_LIMITS_MB={documents:500,pictures:500,videos:1024} as const;
 export const LIBRARY_LIMITS_BYTES={
@@ -13,14 +14,77 @@ export type LibraryMediaType='document'|'picture'|'video'|'file';
 export type ValidatedLibraryFile={displayFilename:string;extension:string;mimeType:string;mediaType:LibraryMediaType};
 
 const MAX_CONCURRENT_LIBRARY_UPLOADS=2;
+export const MAX_WAITING_LIBRARY_UPLOADS=16;
 let activeLibraryUploads=0;
-const libraryUploadWaiters:Array<()=>void>=[];
+const libraryUploadWaiters:Array<{grant:()=>void}>=[];
 
-export async function acquireLibraryUploadSlot(){
-  if(activeLibraryUploads>=MAX_CONCURRENT_LIBRARY_UPLOADS)await new Promise<void>(resolve=>libraryUploadWaiters.push(resolve));
-  else activeLibraryUploads+=1;
-  let released=false;
-  return ()=>{if(released)return;released=true;const next=libraryUploadWaiters.shift();if(next)next();else activeLibraryUploads-=1;};
+export class LibraryUploadQueueFullError extends Error {
+  constructor(){super('Upload queue is full. Try again shortly.');this.name='LibraryUploadQueueFullError';}
+}
+
+export function acquireLibraryUploadSlot(signal?:AbortSignal):Promise<()=>void>{
+  return new Promise((resolve,reject)=>{
+    let release:(()=>void)|undefined;
+    let waiting=false;
+    const cancelled=()=>{
+      if(release){release();return;}
+      if(waiting){const index=libraryUploadWaiters.indexOf(waiter);if(index!==-1)libraryUploadWaiters.splice(index,1);waiting=false;}
+      signal?.removeEventListener('abort',cancelled);
+      reject(new DOMException('Upload connection closed.','AbortError'));
+    };
+    const waiter={grant:()=>{
+      waiting=false;
+      activeLibraryUploads+=1;
+      let released=false;
+      release=()=>{
+        if(released)return;
+        released=true;
+        signal?.removeEventListener('abort',cancelled);
+        activeLibraryUploads-=1;
+        libraryUploadWaiters.shift()?.grant();
+      };
+      resolve(release);
+    }};
+    if(signal?.aborted){cancelled();return;}
+    signal?.addEventListener('abort',cancelled,{once:true});
+    if(activeLibraryUploads<MAX_CONCURRENT_LIBRARY_UPLOADS){waiter.grant();return;}
+    if(libraryUploadWaiters.length>=MAX_WAITING_LIBRARY_UPLOADS){
+      signal?.removeEventListener('abort',cancelled);
+      reject(new LibraryUploadQueueFullError());return;
+    }
+    waiting=true;
+    libraryUploadWaiters.push(waiter);
+  });
+}
+
+// Request "close" also occurs after an ordinary completed body. Only an
+// incomplete/aborted request, or a closed response, cancels upload ownership.
+export async function acquireRequestLibraryUploadSlot(req:Request,res:Response){
+  const controller=new AbortController();
+  let release:(()=>void)|undefined;
+  const dispose=()=>{
+    req.off('aborted',stop);req.off('close',requestClosed);
+    res.off('finish',stop);res.off('close',stop);
+  };
+  const stop=()=>{controller.abort();release?.();dispose();};
+  const requestClosed=()=>{if(req.aborted||!req.complete)stop();};
+  req.once('aborted',stop);req.once('close',requestClosed);
+  res.once('finish',stop);res.once('close',stop);
+  if(req.aborted||res.destroyed||res.writableFinished){stop();return undefined;}
+  try{
+    release=await acquireLibraryUploadSlot(controller.signal);
+    if(controller.signal.aborted){release();dispose();return undefined;}
+    return release;
+  }catch(error){
+    dispose();
+    if(controller.signal.aborted)return undefined;
+    if(error instanceof LibraryUploadQueueFullError){
+      res.setHeader('Retry-After','1');
+      res.status(503).json({ok:false,error:error.message,code:'UPLOAD_QUEUE_FULL'});
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 export function cleanupStagingDirectory(directory:string){

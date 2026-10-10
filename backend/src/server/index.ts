@@ -18,7 +18,7 @@ import JSZip from 'jszip';
 import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
-import { LIBRARY_LIMITS_BYTES, LIBRARY_LIMITS_MB, acquireLibraryUploadSlot, cleanupStagedFiles, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
+import { LIBRARY_LIMITS_BYTES, LIBRARY_LIMITS_MB, acquireRequestLibraryUploadSlot, cleanupStagedFiles, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
 import { LibraryUploadReservationCoordinator, ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError } from './libraryResumableUpload.js';
 import { prepareMasterExport, publicMasterExportPlan, streamMasterExport, type MasterExportSource } from './libraryMasterExport.js';
@@ -8266,7 +8266,7 @@ async function validatedMachineDocument(file: Express.Multer.File) {
   return validateStagedLibraryFile({path:file.path,originalName:file.originalname,mimeType:file.mimetype,sizeBytes:file.size,maxBytes:limit.maxBytes,maxMb:limit.maxMb});
 }
 async function receiveMachineDocuments(req: Request,res:Response,next:NextFunction) {
-  const release=await acquireLibraryUploadSlot();res.once('finish',release);res.once('close',release);
+  if(!await acquireRequestLibraryUploadSlot(req,res))return;
   machineDocumentUpload.array('documents',20)(req,res,error=>{
     if (!error) return next();
     const message=error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE'?'File exceeds the configured server limit.':safeErrorMessage(error,[],'File upload failed.');
@@ -8274,7 +8274,7 @@ async function receiveMachineDocuments(req: Request,res:Response,next:NextFuncti
   });
 }
 async function receiveEquipmentDocuments(req: Request,res:Response,next:NextFunction) {
-  const release=await acquireLibraryUploadSlot();res.once('finish',release);res.once('close',release);
+  if(!await acquireRequestLibraryUploadSlot(req,res))return;
   equipmentDocumentUpload.array('documents',20)(req,res,error=>{
     if(!error)return next();
     const message=error instanceof multer.MulterError&&error.code==='LIMIT_FILE_SIZE'?'File exceeds the configured server limit.':safeErrorMessage(error,[],'File upload failed.');
