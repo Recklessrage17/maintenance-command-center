@@ -4,6 +4,60 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { backendFixture, owner, request, healthy, filesUnder, password, pause, root, assertFixturePath } from './helpers/security-process.mjs';
+import { acquireLibraryUploadSlot, acquireRequestLibraryUploadSlot, MAX_WAITING_LIBRARY_UPLOADS, LibraryUploadQueueFullError } from '../backend/dist/server/libraryUpload.js';
+import { EventEmitter } from 'node:events';
+
+// Deterministically exercise the microtask handoff race independently of HTTP timing.
+async function limiterLifecycle() {
+  const before = new AbortController(); before.abort();
+  await assert.rejects(acquireLibraryUploadSlot(before.signal), { name: 'AbortError' });
+  const a = await acquireLibraryUploadSlot(), b = await acquireLibraryUploadSlot();
+  const queued = new AbortController();
+  const cancelled = acquireLibraryUploadSlot(queued.signal);
+  const cancellation = assert.rejects(cancelled, { name: 'AbortError' });
+  queued.abort(); await cancellation;
+  const racing = new AbortController();
+  const grant = acquireLibraryUploadSlot(racing.signal);
+  a(); racing.abort(); (await grant)(); b(); b();
+  const first = await acquireLibraryUploadSlot(), second = await acquireLibraryUploadSlot();
+  const controllers = Array.from({ length: MAX_WAITING_LIBRARY_UPLOADS }, () => new AbortController());
+  const rejected = controllers.map(controller => assert.rejects(acquireLibraryUploadSlot(controller.signal), { name: 'AbortError' }));
+  await assert.rejects(acquireLibraryUploadSlot(), LibraryUploadQueueFullError);
+  controllers.forEach(controller => controller.abort()); await Promise.all(rejected);
+  first(); second();
+  const fakeConnection = () => ({ req: Object.assign(new EventEmitter(), { complete: false, aborted: false }),
+    res: Object.assign(new EventEmitter(), { destroyed: false, writableFinished: false }) });
+  const heldA = await acquireLibraryUploadSlot(), heldB = await acquireLibraryUploadSlot();
+  const waitingConnection = fakeConnection();
+  const waitingRequest = acquireRequestLibraryUploadSlot(waitingConnection.req, waitingConnection.res);
+  waitingConnection.req.aborted = true; waitingConnection.req.emit('aborted');
+  assert.equal(await waitingRequest, undefined);
+  const handoffConnection = fakeConnection();
+  const handoffRequest = acquireRequestLibraryUploadSlot(handoffConnection.req, handoffConnection.res);
+  heldA(); handoffConnection.res.destroyed = true; handoffConnection.res.emit('close');
+  assert.equal(await handoffRequest, undefined); heldB();
+  for (const connection of [waitingConnection, handoffConnection]) {
+    assert.equal(connection.req.listenerCount('aborted') + connection.req.listenerCount('close'), 0);
+    assert.equal(connection.res.listenerCount('finish') + connection.res.listenerCount('close'), 0);
+  }
+  const alreadyClosed = fakeConnection(); alreadyClosed.res.destroyed = true;
+  assert.equal(await acquireRequestLibraryUploadSlot(alreadyClosed.req, alreadyClosed.res), undefined);
+  for (let i = 0; i < 20; i++) {
+    const req = Object.assign(new EventEmitter(), { complete: true, aborted: false });
+    const res = Object.assign(new EventEmitter(), { destroyed: false, writableFinished: false });
+    assert.ok(await acquireRequestLibraryUploadSlot(req, res));
+    const other = await acquireLibraryUploadSlot();
+    let acquired = false;
+    const waiter = acquireLibraryUploadSlot().then(release => { acquired = true; return release; });
+    req.emit('close'); // Ordinary completed request bodies must retain ownership.
+    await Promise.resolve(); assert.equal(acquired, false, 'Body completion must not release an active response slot.');
+    res.emit('finish'); res.emit('close');
+    (await waiter)(); other();
+    for (const event of ['aborted', 'close']) assert.equal(req.listenerCount(event), 0);
+    for (const event of ['finish', 'close']) assert.equal(res.listenerCount(event), 0);
+  }
+}
+await limiterLifecycle();
 
 // Unsafe values live only in a disposable runtime .env and point at a guarded
 // sibling inside this checkout's ignored test area, never a real configuration.
@@ -229,6 +283,37 @@ try {
       await legitimate(pathname, field);
     }
   }
+  for (let round = 0; round < 4; round++) {
+    const before = recordCounts();
+    const holders = [await partial(machineDocuments, cookie), await partial(equipmentDocuments, cookie)];
+    for (const upload of holders) await entered(upload, 'disk');
+    const queued = [];
+    for (let i = 0; i < MAX_WAITING_LIBRARY_UPLOADS; i++) queued.push(await partial(i % 2 ? facilityFiles : machineDocuments, cookie, i % 2 ? 'files' : 'documents'));
+    const overflow = await partial(machineDocuments, cookie);
+    await waitFor(() => overflow.response().includes('UPLOAD_QUEUE_FULL'), 'Saturated queue must return controlled rejection.');
+    assert.match(overflow.response(), /^HTTP\/1\.1 503/); assert.match(overflow.response(), /Retry-After: 1/i);
+    assert.equal(observed(overflow.id, 'storage-start').length, 0, 'Rejected requests cannot enter storage.');
+    for (const upload of queued.slice(0, 8)) await cancel(upload);
+    const replacements = [];
+    for (let i = 0; i < 8; i++) replacements.push(await partial(equipmentDocuments, cookie));
+    const overflowAgain = await partial(facilityFiles, cookie, 'files');
+    await waitFor(() => overflowAgain.response().includes('UPLOAD_QUEUE_FULL'), 'Cancelled waiters must immediately free exactly their queue capacity.');
+    for (const upload of [...queued.slice(8), ...replacements]) {
+      assert.equal(observed(upload.id, 'storage-start').length, 0, 'Queued cancellation must happen before acquisition.');
+      await cancel(upload);
+    }
+    assert.deepEqual(recordCounts(), before, 'Queued aborts and saturation must not persist records.');
+    const first = await partial(facilityFiles, cookie, 'files', true);
+    const second = await partial(machineDocuments, cookie, 'documents', true);
+    await cancel(holders[0], 'disk');
+    await waitFor(() => first.response().startsWith('HTTP/1.1 201') && second.response().startsWith('HTTP/1.1 201'), 'Valid queued requests must complete fairly after cancelled uploads.');
+    const order = events().filter(row => row.event === 'storage-start' && [first.id, second.id].includes(row.id)).map(row => row.id);
+    assert.deepEqual(order, [first.id, second.id], 'Valid waiters retain FIFO access.');
+    await cancel(holders[1], 'disk');
+    await waitFor(() => incoming().length === 0, 'All concurrent staging files must be cleared.');
+    await healthy(runtime);
+    await legitimate(equipmentDocuments, 'documents');
+  }
   for (const [pathname, field, kind] of [[machineDocuments, 'documents', 'disk'], [equipmentDocuments, 'documents', 'disk'],
     [facilityFiles, 'files', 'disk'], [notes, 'attachments', 'memory']]) {
     const before = recordCounts();
@@ -251,5 +336,5 @@ try {
   download = await fetch(`${runtime.base}${result.data.documents[0].downloadUrl}`, { headers: { Cookie: cookie }, signal: AbortSignal.timeout(3_000) });
   assert.deepEqual(Buffer.from(await download.arrayBuffer()), boundaryPdf, 'Exact permitted byte limit survives storage.');
   await healthy(runtime);
-  console.log(`Upload security passed: all 11 configurations, ${assertions} HTTP assertions; isolated unsafe .env; 24 observed active aborts including completed-first/partial-second files with file/handle/record cleanup and valid recovery.`);
+  console.log(`Upload security passed: all 11 configurations, ${assertions} HTTP assertions; isolated unsafe .env; 24 observed active aborts including completed-first/partial-second files with file/handle/record cleanup and valid recovery; 4 saturated concurrent queue cycles with 96 queued cancellations, FIFO recovery, and deterministic request handoff races.`);
 } finally { for (const socket of sockets) socket.destroy(); await runtime.close(); }

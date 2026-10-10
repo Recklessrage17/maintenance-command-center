@@ -5,7 +5,7 @@ import type { Application, NextFunction, Request, RequestHandler, Response } fro
 import multer from 'multer';
 import { ZipArchive, type Archiver } from 'archiver';
 
-import { acquireLibraryUploadSlot, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
+import { acquireRequestLibraryUploadSlot, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
 import { ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError, type LibraryUploadReservationCoordinator } from './libraryResumableUpload.js';
 import type { MasterExportSource } from './libraryMasterExport.js';
@@ -146,7 +146,7 @@ export function createFacilityInfoService(deps:{
   }
 
   async function receiveFiles(req:Request,res:Response,next:NextFunction) {
-    const release=await acquireLibraryUploadSlot();res.once('finish',release);res.once('close',release);
+    if(!await acquireRequestLibraryUploadSlot(req,res))return;
     upload.array('files',20)(req,res,error=>{
       if(!error)return next();
       cleanupIncoming(req);
