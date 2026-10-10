@@ -19,6 +19,25 @@ async function mockApp(page:Page) {
   await page.route(/\/api\/machine-library\/assets\/\d+\/documents$/,route=>route.fulfill({json:{ok:true,documents:[]}}));
 }
 
+async function pressDocumentScrollKey(page:Page,key:string) {
+  // Reaching an edge can precede Chromium's native keyboard-scroll completion.
+  await page.evaluate(()=>{
+    const state={ended:false,onEnd:()=>{state.ended=true;}};
+    (window as Window&{mccTestScroll?:typeof state}).mccTestScroll=state;
+    document.addEventListener('scrollend',state.onEnd,{once:true});
+  });
+  try {
+    await page.keyboard.press(key);
+    await expect.poll(()=>page.evaluate(()=>(window as Window&{mccTestScroll?:{ended:boolean}}).mccTestScroll?.ended)).toBe(true);
+  } finally {
+    await page.evaluate(()=>{
+      const testWindow=window as Window&{mccTestScroll?:{onEnd:()=>void}};
+      if(testWindow.mccTestScroll)document.removeEventListener('scrollend',testWindow.mccTestScroll.onEnd);
+      delete testWindow.mccTestScroll;
+    });
+  }
+}
+
 async function swipePageUp(page:Page) {
   const session=await page.context().newCDPSession(page);
   await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:195,y:700,radiusX:4,radiusY:4,force:1}]});
@@ -157,11 +176,11 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
   expect(dimensions.workspaceScrollTop).toBe(0);
 
   if(!mobile) {
-    await page.keyboard.press('End');
+    await pressDocumentScrollKey(page,'End');
     await expect.poll(()=>page.evaluate(()=>window.scrollY+window.innerHeight>=document.documentElement.scrollHeight-1)).toBe(true);
-    await page.keyboard.press('Control+Home');
+    await pressDocumentScrollKey(page,'Control+Home');
     await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(0);
-    await page.keyboard.press('PageDown');
+    await pressDocumentScrollKey(page,'PageDown');
     await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBeGreaterThan(0);
   }
   await page.evaluate(()=>window.scrollTo(0,0));
