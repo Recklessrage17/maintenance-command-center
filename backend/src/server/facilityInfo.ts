@@ -64,12 +64,14 @@ export function createFacilityInfoService(deps:{
   const configuredLimits=[uploadPolicy.documentsMb,uploadPolicy.picturesMb,uploadPolicy.videosMb];
   const configuredMultipartMaxBytes=configuredLimits.some(value=>value===null)?null:Math.max(...configuredLimits.map(value=>Number(value)))*1024*1024;
 
+  // Keep text fields flat while preserving file limits and storage policy.
+  const multipartFieldLimits = { fieldArrayIndexLimit: 0, fieldNestingDepth: 0 };
   const upload=multer({
     storage:multer.diskStorage({
       destination:(_req,_file,callback)=>callback(null,incoming),
       filename:(_req,_file,callback)=>callback(null,`${crypto.randomUUID()}.upload`),
     }),
-    limits:{files:20,...(configuredMultipartMaxBytes===null?{}:{fileSize:configuredMultipartMaxBytes})},
+    limits:{...multipartFieldLimits,files:20,...(configuredMultipartMaxBytes===null?{}:{fileSize:configuredMultipartMaxBytes})},
   });
 
   function ensureSchema() {
