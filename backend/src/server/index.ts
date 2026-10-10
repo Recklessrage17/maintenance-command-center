@@ -335,17 +335,19 @@ cleanupStagingDirectory(equipmentDocumentIncomingDir);
 fs.mkdirSync(pmExcelSourceDir, { recursive: true });
 fs.mkdirSync(pmExcelBackupDir, { recursive: true });
 fs.mkdirSync(portableIncomingDir, { recursive: true });
+// Multipart forms use flat keys; structured metadata is sent as JSON values.
+const multipartFieldLimits = { fieldArrayIndexLimit: 0, fieldNestingDepth: 0 };
 const pmWorkOrderStorage=createPmWorkOrderStorage(pmWorkOrderDir,pmWorkOrderMaxBytes);
-const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 8 * 1024 * 1024 } });
-const pmExcelUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 20 * 1024 * 1024 } });
-const pmWorkOrderUpload = multer({ storage: multer.memoryStorage(), preservePath:true, limits: { files: 1, fileSize: pmWorkOrderMaxBytes } });
-const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 1 * 1024 * 1024 } });
-const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
-const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 25 * 1024 * 1024 } });
-const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { ...multipartFieldLimits, files: 1, fileSize: 8 * 1024 * 1024 } });
+const pmExcelUpload = multer({ storage: multer.memoryStorage(), limits: { ...multipartFieldLimits, files: 1, fileSize: 20 * 1024 * 1024 } });
+const pmWorkOrderUpload = multer({ storage: multer.memoryStorage(), preservePath:true, limits: { ...multipartFieldLimits, files: 1, fileSize: pmWorkOrderMaxBytes } });
+const brandingLogoUpload = multer({ storage: multer.memoryStorage(), limits: { ...multipartFieldLimits, files: 1, fileSize: 1 * 1024 * 1024 } });
+const machineComponentImageUpload = multer({ storage: multer.memoryStorage(), limits: { ...multipartFieldLimits, files: 1, fileSize: 10 * 1024 * 1024 } });
+const machineInspectionRecordUpload = multer({ storage: multer.memoryStorage(), limits: { ...multipartFieldLimits, files: 1, fileSize: 25 * 1024 * 1024 } });
+const machineAssetNoteUpload = multer({ storage: multer.memoryStorage(), limits: { ...multipartFieldLimits, files: 10, fileSize: 50 * 1024 * 1024 } });
 const configuredLibraryLimits=[libraryUploadPolicyConfig.documentsMb,libraryUploadPolicyConfig.picturesMb,libraryUploadPolicyConfig.videosMb];
 const configuredLibraryMultipartMaxBytes=configuredLibraryLimits.some(value=>value===null)?null:Math.max(...configuredLibraryLimits.map(value=>Number(value)))*1024*1024;
-const libraryMultipartLimits={files:20,...(configuredLibraryMultipartMaxBytes===null?{}:{fileSize:configuredLibraryMultipartMaxBytes})};
+const libraryMultipartLimits={...multipartFieldLimits,files:20,...(configuredLibraryMultipartMaxBytes===null?{}:{fileSize:configuredLibraryMultipartMaxBytes})};
 const machineDocumentUpload = multer({ storage: multer.diskStorage({destination:(_req,_file,callback)=>callback(null,machineDocumentIncomingDir),filename:(_req,_file,callback)=>callback(null,`${crypto.randomUUID()}.upload`)}), limits:libraryMultipartLimits });
 const equipmentDocumentUpload = multer({ storage: multer.diskStorage({destination:(_req,_file,callback)=>callback(null,equipmentDocumentIncomingDir),filename:(_req,_file,callback)=>callback(null,`${crypto.randomUUID()}.upload`)}), limits:libraryMultipartLimits });
 const portableBackupUpload = multer({
@@ -353,8 +355,23 @@ const portableBackupUpload = multer({
     destination: (_req, _file, callback) => callback(null, portableIncomingDir),
     filename: (_req, _file, callback) => callback(null, `portable-${crypto.randomUUID()}.zip`),
   }),
-  limits: { files: 1, fileSize: portableUploadMaxBytes },
+  limits: { ...multipartFieldLimits, files: 1, fileSize: portableUploadMaxBytes },
 });
+// Scope error handling to parsing: malformed multipart bodies are client errors.
+function receiveSingleUpload(parser: multer.Multer, fieldName = 'file') {
+  const receive = parser.single(fieldName);
+  return (req: Request, res: Response, next: NextFunction) => {
+    receive(req, res, error => {
+      if (!error) return next();
+      const parserError = error instanceof multer.MulterError;
+      res.status(parserError && error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+        ok: false,
+        ...(parserError ? { code: error.code } : {}),
+        error: parserError ? error.message : 'Multipart upload was rejected.',
+      });
+    });
+  };
+}
 function receivePortableBackup(req: Request, res: Response, next: NextFunction) {
   portableBackupUpload.single('file')(req, res, error=>{
     if (!error) return next();
@@ -9756,7 +9773,7 @@ app.get('/api/vendors/export/csv', requireAuth, requirePermission('vendors.impor
   audit(req,'vendor export CSV','vendor','bulk',{rowCount:rows.length});
   sendDownload(res, `MCC_Vendors_Export_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', vendorCsvFromRows(rows));
 });
-app.post('/api/vendors/import', requireAuth, requirePermission('vendors.import_export'), upload.single('file'), async (req:AuthRequest,res)=>{
+app.post('/api/vendors/import', requireAuth, requirePermission('vendors.import_export'), receiveSingleUpload(upload), async (req:AuthRequest,res)=>{
   try {
     const file = req.file;
     if (!file) throw new Error('Choose a CSV file to import.');
@@ -10129,7 +10146,7 @@ app.get('/api/pm-excel/package/download',requireAuth,requirePermission('machine.
   }catch(error){const message=safeErrorMessage(error,[],'The PM package could not be created.');pmDownloadLog(requestId,'request_error',{kind:'package',error:message});if(!res.headersSent&&!res.destroyed)res.status(/No synchronized PM workbook/i.test(message)?404:500).json({ok:false,error:message});}
   finally{release?.();}
 });
-app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manage'),(req:AuthRequest,_res,next)=>{const operationId=String(req.get('X-PM-Operation-Id')??'').trim();const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE id=? AND is_current=1 AND created_by_user_id=? AND status='active'",[operationId,req.user!.id]);if(operation)updatePmExcelOperation(operation.id,'uploading');next();},pmExcelUpload.single('file'),async(req:AuthRequest,res)=>{
+app.post('/api/pm-excel/preview',requireAuth,requirePermission('machine.pm_manage'),(req:AuthRequest,_res,next)=>{const operationId=String(req.get('X-PM-Operation-Id')??'').trim();const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE id=? AND is_current=1 AND created_by_user_id=? AND status='active'",[operationId,req.user!.id]);if(operation)updatePmExcelOperation(operation.id,'uploading');next();},receiveSingleUpload(pmExcelUpload),async(req:AuthRequest,res)=>{
   const release=await acquirePmWorkbookLock();let operationId='';let operationStarted=false;
   try {
     if(!req.file)throw new Error('Choose a PM Excel workbook to preview.');
@@ -11018,7 +11035,7 @@ app.post('/api/machine-library/measurement-inspection/pdf', requireAuth, require
 app.get('/api/machine-library/export/template', requireAuth, requirePermission('machine.import_export'), (_req,res)=>{
   sendDownload(res, `MCC_Machine_List_Template_${downloadDateStamp()}.csv`, 'text/csv; charset=utf-8', machineCsvFromRows(machineImportHeaders, []));
 });
-app.post('/api/machine-library/import', requireAuth, requirePermission('machine.import_export'), upload.single('file'), async (req:AuthRequest,res)=>{
+app.post('/api/machine-library/import', requireAuth, requirePermission('machine.import_export'), receiveSingleUpload(upload), async (req:AuthRequest,res)=>{
   try {
     const rows = await parseMachineImportFile(req.file);
     const summary = importMachineAssetRows(req, rows, machineImportModeFromValue(isRecord(req.body) ? req.body.importMode : ''));
@@ -11063,7 +11080,7 @@ app.get('/api/equipment-library/export/template',requireAuth,requirePermission('
 app.get('/api/equipment-library/export',requireAuth,requirePermission('equipment.import_export'),(_req,res)=>{
   const rows=all<EquipmentAssetRow>('SELECT * FROM equipment_assets WHERE deleted=0 ORDER BY asset_number COLLATE NOCASE').map(row=>{const item=publicEquipmentAsset(row);return Object.fromEntries(equipmentImportHeaders.map(header=>[header,({ 'Equipment Asset Number':item.assetNumber,'Equipment Name':item.equipmentName,'Category':item.category,'Equipment Type':item.equipmentType,'Manufacturer / Brand':item.manufacturer,'Model':item.model,'Serial Number':item.serialNumber,'Year':item.equipmentYear,'Location':item.location,'Department / Area':item.department,'Status':item.status,'Criticality':item.criticality,'Power Type':item.powerType,'Voltage':item.voltage,'Phase':item.phase,'Amperage':item.amperage,'Air Requirement':item.airRequirement,'Water Requirement':item.waterRequirement,'Capacity / Rating':item.capacityRating,'Dimensions':item.dimensions,'Weight':item.weight,'Specification Notes':item.specificationNotes } as Record<string,string>)[header]??'']));});sendDownload(res,`MCC_Equipment_Library_${downloadDateStamp()}.csv`,'text/csv; charset=utf-8',machineCsvFromRows(equipmentImportHeaders,rows));
 });
-app.post('/api/equipment-library/import',requireAuth,requirePermission('equipment.import_export'),upload.single('file'),async(req:AuthRequest,res)=>{try{const rows=await parseEquipmentImportFile(req.file);res.json(importEquipmentRows(req,rows,machineImportModeFromValue(isRecord(req.body)?req.body.importMode:'')));}catch(error){const message=safeErrorMessage(error);res.status(/Choose|must include|must be CSV|required/i.test(message)?400:500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],changedAssetNumbers:[]});}});
+app.post('/api/equipment-library/import',requireAuth,requirePermission('equipment.import_export'),receiveSingleUpload(upload),async(req:AuthRequest,res)=>{try{const rows=await parseEquipmentImportFile(req.file);res.json(importEquipmentRows(req,rows,machineImportModeFromValue(isRecord(req.body)?req.body.importMode:'')));}catch(error){const message=safeErrorMessage(error);res.status(/Choose|must include|must be CSV|required/i.test(message)?400:500).json({ok:false,error:message,addedCount:0,updatedCount:0,skippedCount:0,rejectedDuplicateCount:0,errorCount:1,errors:[message],changedAssetNumbers:[]});}});
 
 app.get('/api/equipment-library/assets/:assetId/preventive-maintenance',requireAuth,requirePermission('equipment.view'),(req,res)=>{
   const asset=equipmentAssetById(Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:'Equipment asset not found.'});
@@ -11688,7 +11705,7 @@ app.put('/api/settings/branding', requireAuth, requireOwnerAdmin, (req:AuthReque
     res.status(/required|characters|invalid/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/settings/branding/logo', requireAuth, requireOwnerAdmin, brandingLogoUpload.single('file'), (req:AuthRequest,res)=>{
+app.post('/api/settings/branding/logo', requireAuth, requireOwnerAdmin, receiveSingleUpload(brandingLogoUpload), (req:AuthRequest,res)=>{
   try {
     if (!req.file) throw new Error('Choose a logo/icon file.');
     const extension = allowedLogoMimeTypes[req.file.mimetype];
@@ -12616,7 +12633,7 @@ app.post('/api/inventory/native/backups/create', requireAuth, requirePermission(
     res.status(500).json({ok:false,error:message});
   }
 });
-app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.import'), upload.single('file'), async (req,res)=>{
+app.post('/api/inventory/native/import', requireAuth, requirePermission('inventory.import'), receiveSingleUpload(upload), async (req,res)=>{
   try {
     const backupFiles = createAndAuditNativeBackup(req,'auto-before-import');
     const rows = await parseInventoryImportFile(req.file);

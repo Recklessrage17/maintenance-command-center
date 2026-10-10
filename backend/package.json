@@ -11,11 +11,11 @@
     "archiver": "^8.0.0",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "jszip": "^3.10.1",
     "maintenance-command-center": "file:..",
-    "multer": "^2.2.0",
-    "nodemailer": "^9.0.1",
+    "multer": "^2.4.0",
+    "nodemailer": "^10.0.16",
     "pdf-lib": "^1.17.1",
     "saxes": "^5.0.1",
     "xlsx-populate": "^1.21.0"
@@ -25,7 +25,6 @@
     "@types/express": "^5.0.0",
     "@types/multer": "^2.1.0",
     "@types/node": "^22.10.5",
-    "@types/nodemailer": "^8.0.1",
     "typescript": "^5.7.3"
   },
   "engines": {
