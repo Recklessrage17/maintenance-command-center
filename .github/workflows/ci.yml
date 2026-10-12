@@ -1,0 +1,117 @@
+name: MCC CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcc-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-regression:
+    name: Build and focused regressions (Node 22)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      MCC_PLAYWRIGHT_PORT: '4297'
+      MCC_BIND_HOST: 127.0.0.1
+      MCC_UPDATE_MODE: ''
+      MCC_HTTPS_MODE: ''
+      SESSION_SECRET: mcc-ci-disposable-session-only
+      SMTP_HOST: ''
+      SMTP_PORT: ''
+      SMTP_USER: ''
+      SMTP_PASS: ''
+      SMTP_FROM: ''
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Prepare isolated test storage
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcc-ci"
+          printf '%s\n' \
+            "MCC_DATA_DIR=$RUNNER_TEMP/mcc-ci/data" \
+            "MCC_UPLOADS_DIR=$RUNNER_TEMP/mcc-ci/uploads" \
+            "MCC_BACKUPS_DIR=$RUNNER_TEMP/mcc-ci/backups" \
+            "MCC_RECOVERY_DIR=$RUNNER_TEMP/mcc-ci/recovery" \
+            "MCC_PM_EXCEL_DIR=$RUNNER_TEMP/mcc-ci/pm-excel" \
+            "MCC_PM_WORK_ORDER_DIR=$RUNNER_TEMP/mcc-ci/pm-work-orders" >> "$GITHUB_ENV"
+
+      - name: Install locked dependencies
+        timeout-minutes: 5
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm ci --prefix frontend --include=dev --no-audit --no-fund
+          npm ci --prefix backend --include=dev --no-audit --no-fund
+
+      - name: Frontend TypeScript and production build
+        timeout-minutes: 3
+        env:
+          NODE_ENV: production
+        run: npm run build --prefix frontend
+
+      - name: Backend TypeScript build
+        timeout-minutes: 3
+        env:
+          NODE_ENV: production
+        run: npm run build --prefix backend
+
+      - name: Application smoke test
+        timeout-minutes: 2
+        env:
+          PORT: '4298'
+          MCC_SMOKE_URL: http://127.0.0.1:4298
+        run: npm run smoke
+
+      - name: Isolated backend and authorization regressions
+        timeout-minutes: 3
+        run: |
+          node tests/backend-dependency-security-regression.mjs
+          node tests/authentication-password-change-regression.mjs
+          node tests/system-update-api.mjs
+
+      - name: Install Chromium and Ubuntu browser dependencies
+        timeout-minutes: 5
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Desktop and mobile browser regressions
+        timeout-minutes: 6
+        run: >-
+          npx --no-install playwright test
+          tests/settings-system-update.spec.ts
+          tests/asset-note-modal.spec.ts
+          tests/dashboard-tech-notes.spec.ts
+          tests/route-code-splitting.spec.ts
+          --forbid-only --workers=2 --retries=0 --max-failures=5 --reporter=github,line
+
+      - name: Retain browser failure traces and screenshots
+        if: ${{ failure() }}
+        timeout-minutes: 2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-failures-${{ github.run_attempt }}
+          path: |
+            test-results/**/*.zip
+            test-results/**/*.png
+          retention-days: 3
+          if-no-files-found: ignore
