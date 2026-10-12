@@ -72,7 +72,6 @@ const replacementGroups: Array<{ title: string; enabled: (form: AssetForm) => bo
 ];
 const editableRoles = new Set(['Maintenance Tech 3','Manager','Admin']);
 const deleteRoles = new Set(['Manager','Admin']);
-const measurementFolderDeleteRoles = new Set(['Maintenance Tech 3','Tier 3','Manager','Admin','Administrator']);
 const recordLogFileAccept = '.pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xls,.doc,.docx';
 const unitFields: Array<{ key: UnitFieldKey; label: string }> = [
   { key: 'machineLength', label: 'Machine Length' },
@@ -346,7 +345,6 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const canEdit = permissions.canEdit || editableRoles.has(userRole);
   const canDelete = permissions.canDelete || deleteRoles.has(userRole);
   const canManagePm = permissions.canManagePm || editableRoles.has(userRole);
-  const canManageMeasurementYearFolders = measurementFolderDeleteRoles.has(userRole);
 
   function loadAssets() {
     const params = new URLSearchParams();
@@ -502,7 +500,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         <div id="machine-library-desktop-filters" className="library-mobile-filter-panel">{filterFields}</div>
         <div className="machine-toolbar-actions">
           <button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={openAdd} disabled={!canEdit}>Add Machine Asset</button>
-          <MachineLibraryToolsDropdown canEdit={canEdit} canManageYearFolders={canManageMeasurementYearFolders} importMode={importMode} setImportMode={setImportMode} isImporting={isImporting} onImportMachineList={()=>fileRef.current?.click()} onExportTemplate={downloadTemplate} onOpenBrandColors={()=>setShowColors(true)} />
+          <MachineLibraryToolsDropdown canEdit={canEdit} importMode={importMode} setImportMode={setImportMode} isImporting={isImporting} onImportMachineList={()=>fileRef.current?.click()} onExportTemplate={downloadTemplate} onOpenBrandColors={()=>setShowColors(true)} />
           <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden-file-input" onChange={()=>void importMachineList()} />
         </div>
         <p className="form-help machine-toolbar-note">Add New Only rejects existing Asset Numbers. Upsert updates existing assets and creates new ones. Duplicate Asset Numbers inside one file are always rejected after the first valid row.</p>
@@ -539,7 +537,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
       </>}
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
       {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} actionPhase={machineAction.phase} actionActive={machineAction.active} onReplacement={(asset,field)=>{replacementAction.reset();setReplacement({asset,field,installDate:'',reasonNote:''});}} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
-      {recordLogsAsset&&<AssetMeasurementRecordLogsModal asset={recordLogsAsset} canManageYearFolders={canManageMeasurementYearFolders} onClose={()=>setRecordLogsAsset(null)} />}
+      {recordLogsAsset&&<AssetMeasurementRecordLogsModal asset={recordLogsAsset} onClose={()=>setRecordLogsAsset(null)} />}
       {importSummary&&<ImportResultModal summary={importSummary} onClose={closeImportSummary} />}
       {showColors&&<BrandColorModal brandSettings={brandSettings} colorDrafts={colorDrafts} setColorDrafts={setColorDrafts} canEdit={canEdit} onSave={saveColor} onClose={()=>setShowColors(false)} />}
       {replacement&&<ReplacementModal replacement={replacement} setReplacement={setReplacement} actionPhase={replacementAction.phase} actionActive={replacementAction.active} onSubmit={updateReplacement} />}
