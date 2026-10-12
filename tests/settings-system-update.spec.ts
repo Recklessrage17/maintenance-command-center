@@ -471,6 +471,8 @@ for (const role of ['Manager', 'Maintenance Tech 1', 'Maintenance Tech 2', 'Main
   test(`${role} cannot render or request updater metadata`, async ({ page },testInfo) => {
     const fixture = await mockSettings(page, { role, canViewSystemVersion: false });
     await page.goto('/settings');
+    // This landmark is rendered by Settings and is available to every role.
+    await expect(page.getByText('Launcher logo and company name', { exact: true })).toBeVisible();
     await expect(page.getByRole('complementary', { name: 'MCC system version' })).toHaveCount(0);
     expect(fixture.statusRequests()).toBe(0);
     expect(fixture.checkRequests()).toBe(0);
