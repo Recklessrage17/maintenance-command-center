@@ -3957,29 +3957,6 @@ tr:hover td {
   font-style: normal;
 }
 
-.measurement-folder-delete-x {
-  appearance: none;
-  width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid rgba(255, 117, 138, .58);
-  border-radius: 999px;
-  color: #ffd3d7;
-  background: rgba(126, 32, 48, .72);
-  cursor: pointer;
-  font: inherit;
-  font-size: .78rem;
-  font-weight: 1000;
-  line-height: 1;
-}
-
-.measurement-folder-delete-x:hover {
-  border-color: rgba(255, 152, 167, .9);
-  color: #ffffff;
-  box-shadow: 0 0 14px rgba(255,117,138,.18);
-}
-
 .measurement-folder-records {
   display: grid;
   gap: 8px;

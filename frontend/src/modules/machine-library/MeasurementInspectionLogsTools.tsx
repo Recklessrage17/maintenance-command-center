@@ -374,7 +374,6 @@ async function printBlankForm() {
 
 export function MachineLibraryToolsDropdown({
   canEdit,
-  canManageYearFolders,
   importMode,
   setImportMode,
   isImporting,
@@ -383,7 +382,6 @@ export function MachineLibraryToolsDropdown({
   onOpenBrandColors,
 }: {
   canEdit: boolean;
-  canManageYearFolders: boolean;
   importMode: MachineImportMode;
   setImportMode: (value: MachineImportMode) => void;
   isImporting: boolean;
@@ -431,7 +429,7 @@ export function MachineLibraryToolsDropdown({
         <button className={machineToolClass('measurement', showLogs)} type="button" role="menuitem" onClick={()=>setShowLogs(current=>!current)}><MachineToolBadge category="measurement" /><span>Measurement Inspection Logs</span><small>All asset record folders</small></button>
         <MeasurementQuickActions />
       </div>
-      {showLogs&&<MeasurementRecordLogsPanel canManageYearFolders={canManageYearFolders} />}
+      {showLogs&&<MeasurementRecordLogsPanel />}
     </div>}
   </div>;
 }
@@ -473,16 +471,16 @@ function MeasurementQuickActions() {
   </>;
 }
 
-export function AssetMeasurementRecordLogsModal({ asset, canManageYearFolders, onClose }: { asset: MachineRecordLogAsset; canManageYearFolders: boolean; onClose: () => void }) {
+export function AssetMeasurementRecordLogsModal({ asset, onClose }: { asset: MachineRecordLogAsset; onClose: () => void }) {
   return <div className="modal-backdrop measurement-modal-backdrop" role="dialog" aria-modal="true">
     <section className="mcc-card measurement-record-modal mcc-wide-modal">
       <div className="modal-heading measurement-modal-heading"><div><p className="eyebrow">Screw & Barrel Inspection Records</p><h3>{assetLabel(asset)} Barrel &amp; Screw Logs</h3><p>{[asset.brand, asset.model, asset.serialNumber ? `S/N ${asset.serialNumber}` : ''].filter(Boolean).join(' / ')}</p></div><button className="link-button compact-button" type="button" onClick={onClose}>Close</button></div>
-      <MeasurementRecordLogsPanel asset={asset} canManageYearFolders={canManageYearFolders} />
+      <MeasurementRecordLogsPanel asset={asset} />
     </section>
   </div>;
 }
 
-function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: MachineRecordLogAsset; canManageYearFolders: boolean }) {
+function MeasurementRecordLogsPanel({ asset }: { asset?: MachineRecordLogAsset }) {
   const fileInputRef = useRef<HTMLInputElement|null>(null);
   const importInputRef = useRef<HTMLInputElement|null>(null);
   const templateInputRef = useRef<HTMLInputElement|null>(null);
@@ -684,31 +682,6 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
     setSelectedIds(new Set());
   }
 
-  async function deleteYearFolder(year: string) {
-    if (!canManageYearFolders) {
-      window.alert('Folder delete is locked for this account.');
-      return;
-    }
-    const deleteIds = scopedLogs.filter(log => (log.year || recordYear(log.recordDate)) === year).map(log => log.id);
-    if (!deleteIds.length) {
-      window.alert(`The ${year} folder is already empty.`);
-      return;
-    }
-    if (!window.confirm(`WARNING: Delete the entire ${year} record folder and all ${deleteIds.length} log(s)? This cannot be undone.`)) return;
-    if (window.prompt(`Type DELETE ${year} to confirm folder deletion.`) !== `DELETE ${year}`) {
-      window.alert('Folder delete cancelled.');
-      return;
-    }
-    const targets = scopedLogs.filter(log => deleteIds.includes(log.id));
-    await Promise.all(targets.map(log => log.storage === 'server' && log.serverId
-      ? fetch(`/api/machine-library/inspection-records/${log.serverId}`, { method: 'DELETE', credentials: 'include' }).then(response => { if (!response.ok) throw new Error('Delete failed.'); })
-      : deleteStoredFile(log.id)).map(promise => promise.catch(() => undefined)));
-    writeLogs(readLogs().filter(log => !deleteIds.includes(log.id)));
-    setLogs(await loadMeasurementRecordLogs(asset));
-    notifyRecordLogsUpdated();
-    setSelectedIds(new Set());
-  }
-
   async function updateTemplate(file: File) {
     setBusy('template');
     try {
@@ -761,7 +734,6 @@ function MeasurementRecordLogsPanel({ asset, canManageYearFolders }: { asset?: M
         const active = year === activeYear && (isAssetPanel || isGlobalFolderView);
         return <span className={active ? 'measurement-folder-pill-wrap active' : 'measurement-folder-pill-wrap'} key={year}>
           <button className="measurement-year-folder" type="button" onClick={()=>{ isAssetPanel ? (setSelectedYear(year), setSelectedIds(new Set())) : openFolder(year); }} aria-pressed={active}><MccFolderIcon size="compact" open={active} />{year}<em>{count}</em></button>
-          {active&&<button className="measurement-folder-delete-x" type="button" aria-label={`Delete ${year} folder`} onClick={()=>void deleteYearFolder(year)}>x</button>}
         </span>;
       })}
     </div>
