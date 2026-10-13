@@ -1,0 +1,20 @@
+.glass-modal-shell.pm-history-modal.pm-selection-modal { display:flex;flex-direction:column;overflow:hidden; }
+.pm-selection-modal > .modal-heading { align-items:flex-start;gap:12px; }
+.pm-selection-modal > .modal-heading > div { flex:1;min-width:0; }
+.pm-selection-modal > .modal-heading > button { flex:0 0 auto;width:auto; }
+.pm-selection-modal > .modal-heading,.pm-selection-modal > .modal-actions,.pm-selection-modal > .pm-report-toolbar { flex-shrink:0; }
+.pm-selection-modal > .pm-history-list { flex:1 1 auto;min-height:0;overflow:auto;grid-auto-rows:max-content;align-content:start; }
+.pm-selection-modal .pm-history-entry p { overflow-wrap:anywhere; }
+.pm-report-toolbar { display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:14px;margin:12px 0;border:1px solid var(--glass-border, #42616b);border-radius:12px;background:rgba(15,36,45,.65); }
+.pm-report-month { flex:1 1 210px;min-width:0;margin:0; }
+.pm-report-month select { width:100%;min-height:44px; }
+.pm-report-toolbar button,.pm-report-toolbar a { min-height:44px;max-width:100%;white-space:normal; }
+.pm-report-count { align-self:center;font-weight:700; }
+.pm-report-hint,.pm-report-toolbar > p { width:100%;margin:0;overflow-wrap:anywhere; }
+.pm-report-checkbox { grid-column:1/-1;display:inline-flex;align-items:center;gap:8px;min-height:44px;width:fit-content;cursor:pointer; }
+.pm-report-checkbox input { width:20px;height:20px;accent-color:#57cabb; }
+@media(max-width:600px) {
+  .pm-report-toolbar { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:10px;gap:8px; }
+  .pm-report-month,.pm-report-hint,.pm-report-toolbar > p,.pm-report-count { grid-column:1/-1; }
+  .pm-report-count { justify-self:end; }
+}
