@@ -21,6 +21,7 @@ import { PreventiveMaintenanceTracking } from './PreventiveMaintenanceTracking';
 import { MachineAssetSpecPreview } from './MccAssetSpecSheet';
 import { downloadAssetSpecPdf } from './assetSpecHelpers';
 import { MachineLifecycleControls, lifecycleLabel, type MachineLifecycleAsset } from './MachineLifecycleControls';
+import { MachineHistoryExportProgress, useMachineHistoryExport } from './MachineHistoryExport';
 import './machine-archive.css';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
@@ -316,6 +317,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const [permissions,setPermissions]=useState({canEdit:editableRoles.has(userRole),canDelete:deleteRoles.has(userRole),canManagePm:editableRoles.has(userRole)});
   const [search,setSearch]=useState('');
   const [archiveView,setArchiveView]=useState(false);
+  const historyExport=useMachineHistoryExport();
   const canManageLifecycle=userRole==='Manager'||userRole==='Admin';
   const assetsRequest=useRef(0);
   const [brandFilter,setBrandFilter]=useState('');
@@ -510,7 +512,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   return (
     <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'} ${archiveView?'is-archive-view':''}`}>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
-      {detailAsset ? <><MachineLifecycleControls asset={detailAsset} canManage={canManageLifecycle} onChanged={lifecycleChanged} onOpenReplacement={id=>void openReplacement(id)} /><MachineDetailView key={detailAsset.id} asset={detailAsset} canEdit={canEdit&&detailAsset.lifecycleStatus!=='archived'} canManagePm={canManagePm&&(!detailAsset.lifecycleStatus||detailAsset.lifecycleStatus==='active')} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /></> : <>
+      {detailAsset ? <><MachineLifecycleControls asset={detailAsset} canManage={canManageLifecycle} onChanged={lifecycleChanged} onOpenReplacement={id=>void openReplacement(id)} onExport={asset=>void historyExport.start(asset)} /><MachineDetailView key={detailAsset.id} asset={detailAsset} canEdit={canEdit&&detailAsset.lifecycleStatus!=='archived'} canManagePm={canManagePm&&(!detailAsset.lifecycleStatus||detailAsset.lifecycleStatus==='active')} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /></> : <>
         <div className="machine-library-view-switch" role="group" aria-label="Machine library view"><button className="secondary-button" type="button" aria-pressed={!archiveView} onClick={()=>setArchiveView(false)}>Machine Library</button><button className="secondary-button" type="button" aria-pressed={archiveView} onClick={()=>setArchiveView(true)}>Old Machines Archive</button></div>
         {archiveView&&<p className="form-help">Archived machines retain their identities and history. Managers and Admins can restore machines or export their available history.</p>}
         <LibraryMobileSearchFilter library="Machine Library" label="Search assets" placeholder="Press 14, Toyo, model, serial number..." query={search} onQueryChange={setSearch} activeFilterCount={activeFilterCount} filtersOpen={filtersOpen} onFiltersOpenChange={setFiltersOpen} filtersId="machine-library-mobile-filters" filters={filterFields} />
@@ -555,6 +557,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
         {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>{archiveView?'No archived machines match this search.':'Add a machine asset or import the press list template.'}</p></section>}
         </div>
       </>}
+      <MachineHistoryExportProgress flow={historyExport} />
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
       {showEditor&&<MachineEditorModal form={form} setField={setField} onClose={()=>setShowEditor(false)} onSubmit={saveAsset} canEdit={canEdit} canDisable={canDelete} asset={editing} actionPhase={machineAction.phase} actionActive={machineAction.active} onReplacement={(asset,field)=>{replacementAction.reset();setReplacement({asset,field,installDate:'',reasonNote:''});}} onRecordLogs={asset=>setRecordLogsAsset(asset)} onDisable={async asset=>{if(await disableAsset(asset)){setShowEditor(false);setEditing(null);}}} />}
       {recordLogsAsset&&<AssetMeasurementRecordLogsModal asset={recordLogsAsset} onClose={()=>setRecordLogsAsset(null)} />}

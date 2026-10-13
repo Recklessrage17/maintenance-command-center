@@ -5,6 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {owner,password,request,root} from './helpers/security-process.mjs';
 import {inspectionFixture} from './helpers/inspection-records-fixture.mjs';
 import {seedMachineHistory} from './helpers/machine-archive-data.mjs';
+import JSZip from '../backend/node_modules/jszip/lib/index.js';
 
 const asset={...Object.fromEntries(['screwType','screwTipType','screwInstalledDate','screwTipInstalledDate','barrelInstalledDate','barrelEndCapInstalledDate','screwLength','barrelLength','screw2Type','screw2TipType','screw2InstalledDate','screw2TipInstalledDate','screw2Length','barrel2InstalledDate','barrel2EndCapInstalledDate','barrel2Diameter','barrel2Length','plungerType','plungerInstalledDate','plungerLength','plungerDiameter','plungerBarrelType','plungerBarrelInstalledDate','plungerBarrelEndCapInstalledDate','plungerBarrelLength','plungerBarrelDiameter','notes','criticalNotes','machineLength','machineWidth','machineHeight','fullDieHeightLength','voltageValue','voltageType','fullLoadAmp'].map(key=>[key,''])),id:1,assetNumber:'ARCHIVE-QA',assetName:'Synthetic Retirement Press',brand:'MCC',model:'Local',serialNumber:'QA-ONLY',machineYear:'2020',machineType:'Injection Molding Machine',powerType:'Electric',setupType:'Standard Injection',shotSizeOz:12,tonnage:300,barrelDiameter:'40 mm',status:'active',location:'Disposable Cell',department:'QA',screwConditionStatus:'used',barrelConditionStatus:'used',hasDoubleShotInjection:false,hasPlungerInjection:false,createdAt:'2025-01-01T12:00:00Z',updatedAt:'2025-01-01T12:00:00Z',brandColorHex:'#44D7FF',historyPreview:[],pmSummary:null,lifecycleStatus:'archived',lifecycleRevision:1,retirementReason:'replaced',retirementNotes:'Synthetic archived machine',retiredAt:'2025-01-01T12:00:00Z',retiredBy:'Synthetic Manager',replacementMachineId:2,replacementMachine:{id:2,assetNumber:'NEW-QA',assetName:'Replacement',lifecycleStatus:'active'}};
 function observations(page:Page){const errors:string[]=[],requests:string[]=[],failed:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});page.on('request',request=>requests.push(`${request.method()} ${request.url()}`));page.on('requestfailed',request=>failed.push(`${request.url()} ${request.failure()?.errorText}`));return{errors,requests,failed};}
@@ -25,7 +26,7 @@ for(const role of ['Maintenance Tech 1','Maintenance Tech 2','Maintenance Tech 3
   const administrative=['Manager','Admin','Owner Admin'].includes(role);
   await expect(page.getByRole('button',{name:'Retire / Archive Machine',exact:true})).toHaveCount(administrative?1:0);
   await expect(page.getByRole('button',{name:'Restore Machine',exact:true})).toHaveCount(administrative?1:0);
-  await expect(page.getByRole('button',{name:'Export History',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Export History',exact:true})).toHaveCount(administrative?1:0);
   await expect(page.getByRole('button',{name:'Replacement: NEW-QA',exact:true})).toBeVisible();
   expect(observed.errors).toEqual([]);expect(observed.requests.some(line=>line.startsWith('DELETE')||line.includes('/lifecycle'))).toBe(false);
 });
@@ -111,5 +112,43 @@ test('archive, search, replacement navigation and restore preserve records with 
     expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     expect(observed.errors).toEqual([]);expect(observed.requests.filter(line=>line.startsWith('DELETE'))).toEqual([]);
     await testInfo.attach('browser-review.json',{body:JSON.stringify(observed,null,2),contentType:'application/json'});
+  }finally{await runtime.close();}
+});
+
+test('history ZIP uses save picker, discloses legacy coverage, cancels writes, reports errors and supports download fallback',async({page},testInfo)=>{
+  const {runtime,id}=await realRuntime(page,'machine-history-browser');
+  try{
+    await page.getByRole('button',{name:'View details for ARCHIVE-QA',exact:true}).click();
+    await page.evaluate(async()=>{
+      localStorage.setItem('mcc:screw-barrel-inspection-records:v3',JSON.stringify([{id:'legacy-qa',assetId:'1',assetNumber:'ARCHIVE-QA',storage:'browser',name:'Browser-only.txt'}]));
+      await new Promise<void>((resolve,reject)=>{const request=indexedDB.open('mcc-measurement-inspection-logs',1);request.onupgradeneeded=()=>request.result.createObjectStore('files',{keyPath:'id'});request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result;const tx=db.transaction('files','readwrite');tx.objectStore('files').put({id:'unmapped-qa',name:'Orphan-inspection.txt',blob:new Blob(['Unmapped browser inspection'])});tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};};});
+      const state={bytes:0,closed:false,aborted:false,suggested:'',hold:false,activated:false};(window as any).qaSave=state;
+      (window as any).showSaveFilePicker=async(options:any)=>{state.activated=navigator.userActivation.isActive;state.suggested=options.suggestedName;return{createWritable:async()=>({write:async(bytes:Uint8Array)=>{state.bytes+=bytes.length;if(state.hold)await new Promise(resolve=>{(window as any).releaseWrite=resolve;});},close:async()=>{state.closed=true;},abort:async()=>{state.aborted=true;}})};};
+    });
+    await page.getByRole('button',{name:'Retire / Archive Machine',exact:true}).click();
+    const retirement=page.getByRole('dialog',{name:'Retire / Archive Machine',exact:true});await retirement.getByRole('combobox',{name:'Retirement Reason *',exact:true}).selectOption('other');await retirement.getByRole('textbox',{name:'Explanation *',exact:true}).fill('Keep retirement draft while exporting');
+    const exportRequest=page.waitForRequest(request=>request.url().includes('/history-export.zip?'));
+    await retirement.getByRole('button',{name:'Export History',exact:true}).click();
+    const progress=page.getByRole('dialog',{name:'Machine History Export',exact:true});await expect(progress.getByText(/ZIP saved/)).toBeVisible();
+    const query=new URL((await exportRequest).url()).searchParams;expect(query.get('legacyCount')).toBe('1');expect(query.get('unmappedFiles')).toBe('1');expect(query.get('legacyChecked')).toBe('1');
+    const saved=await page.evaluate(()=>(window as any).qaSave);expect(saved.bytes).toBeGreaterThan(1000);expect(saved.closed).toBe(true);expect(saved.activated).toBe(true);expect(saved.suggested).toMatch(/History\.zip$/);
+    await expect(progress.getByText(/browser-only records/)).toBeVisible();await page.screenshot({path:path.join(root,'output/machine-archive/screenshots',`${testInfo.project.name}-export-result.png`),fullPage:true});
+    expect(await progress.locator('.library-upload-progress strong').evaluate(element=>getComputedStyle(element).whiteSpace)).toBe('normal');
+    await progress.getByRole('button',{name:'Close',exact:true}).click();
+    await expect(retirement.getByRole('textbox',{name:'Explanation *',exact:true})).toHaveValue('Keep retirement draft while exporting');await retirement.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.getByText('Lifecycle: Active',{exact:true})).toBeVisible();
+    await page.evaluate(()=>{(window as any).qaSave.hold=true;});await page.getByRole('button',{name:'Export History',exact:true}).click();
+    await expect(progress.getByText('Saving the history ZIP…',{exact:true})).toBeVisible();
+    await progress.getByRole('button',{name:'Cancel Export',exact:true}).click();await page.evaluate(()=>(window as any).releaseWrite?.());
+    await expect(progress.getByText('History export cancelled.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).qaSave.aborted)).toBe(true);await progress.getByRole('button',{name:'Close',exact:true}).click();
+    await page.route('**/history-export.zip?*',route=>route.fulfill({status:507,json:{ok:false,error:'There is insufficient temporary storage for a safe history snapshot.'}}));
+    await page.getByRole('button',{name:'Export History',exact:true}).click();await expect(progress.getByRole('alert')).toHaveText(/insufficient temporary storage/);await progress.getByRole('button',{name:'Close',exact:true}).click();await page.unroute('**/history-export.zip?*');
+    await page.evaluate(()=>{delete(window as any).showSaveFilePicker;});
+    const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Export History',exact:true}).click();const download=await downloadPromise;
+    const zipPath=path.join(root,'output/machine-archive',`${testInfo.project.name}-history.zip`);
+    expect(download.suggestedFilename()).toMatch(/History\.zip$/);await download.saveAs(zipPath);expect(await download.failure()).toBeNull();
+    const zip=await JSZip.loadAsync(fs.readFileSync(zipPath));const manifest=JSON.parse(await zip.file(Object.keys(zip.files).find(name=>name.endsWith('/MANIFEST.json'))!)!.async('string'));
+    expect(manifest.coverage.browserInspectionRecords).toMatchObject({checked:true,recordCount:1,unmappedFiles:1});expect(manifest.coverage.completeAvailableHistory).toBe(false);expect(manifest.entries.some((entry:any)=>entry.originalFilename==='Browser-only.txt'||entry.originalFilename==='Orphan-inspection.txt')).toBe(false);
+    await expect(progress.getByText(/browser manages download progress and cancellation/)).toBeVisible();
+    await progress.getByRole('button',{name:'Close',exact:true}).focus();await page.keyboard.press('Tab');await expect(progress.getByRole('button',{name:'Close',exact:true})).toBeFocused();await page.keyboard.press('Escape');await expect(progress).toHaveCount(0);
   }finally{await runtime.close();}
 });

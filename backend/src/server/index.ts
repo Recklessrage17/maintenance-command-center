@@ -23,7 +23,8 @@ import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFol
 import { LibraryUploadReservationCoordinator, ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError } from './libraryResumableUpload.js';
 import { prepareMasterExport, publicMasterExportPlan, streamMasterExport, type MasterExportSource } from './libraryMasterExport.js';
 import { createPmMachineAssetResolver } from './pmAssetResolver.js';
-import { migrateMachineLifecycle, publicMachineLifecycle, changeMachineLifecycle, MachineLifecycleError, type MachineLifecycleRow } from './machineLifecycle.js';
+import { migrateMachineLifecycle, publicMachineLifecycle, changeMachineLifecycle, canManageMachineLifecycle, MachineLifecycleError, type MachineLifecycleRow } from './machineLifecycle.js';
+import { createMachineHistoryExporter } from './machineHistoryExport.js';
 import { canonicalHttpsAccess } from './networkAccess.js';
 import { createPmWorkOrderStorage, DEFAULT_PM_WORK_ORDER_MAX_BYTES, PM_WORK_ORDER_DIRECTORY_NAME, PM_WORK_ORDER_MIME, validatePmFollowUp, validatePmWorkOrderNumber, validatePmWorkOrderException, PM_WORK_ORDER_EXCEPTION_LABEL, type StagedPmWorkOrder, type StoredPmWorkOrder } from './pmWorkOrders.js';
 import {
@@ -10058,6 +10059,38 @@ function requireActiveMachinePm(req:AuthRequest,res:Response,next:NextFunction){
   if(asset.lifecycle_status!=='active')return res.status(409).json({ok:false,code:'LIFECYCLE_NOT_ACTIVE',error:'Restore this machine to Active before scheduling or completing maintenance.'});
   next();
 }
+const exportMachineHistory=createMachineHistoryExporter();
+app.get('/api/machine-library/assets/:id/history-export.zip',requireAuth,async(req:AuthRequest,res)=>{
+  if(!canManageMachineLifecycle(req.user!))return res.status(403).json({ok:false,error:'Manager or Admin access is required.'});
+  const id=Number(req.params.id);
+  const count=(value:unknown)=>value===undefined?0:typeof value==='string'&&/^\d{1,6}$/.test(value)&&Number(value)<=100000?Number(value):null;
+  const recordCount=count(req.query.legacyCount),unmappedFiles=count(req.query.unmappedFiles);
+  if(!Number.isSafeInteger(id)||id<1||recordCount===null||unmappedFiles===null||(req.query.legacyChecked!==undefined&&req.query.legacyChecked!=='1'))return res.status(400).json({ok:false,error:'Invalid history export request.'});
+  const controller=new AbortController();
+  const cancel=()=>{if(!res.writableFinished)controller.abort();};
+  res.on('close',cancel);
+  const preparationTimeout=setTimeout(()=>controller.abort(),180000);
+  res.setTimeout(120000,()=>controller.abort());
+  try{
+    await exportMachineHistory({db,assetId:id,appVersion:applicationVersion??'unknown',uploads:uploadsDir,documents:machineDocumentAssetDirectory(id),pmWorkOrders:pmWorkOrderDir,
+      legacy:{checked:req.query.legacyChecked==='1',recordCount,unmappedFiles},signal:controller.signal,
+      generated:details=>{
+        clearTimeout(preparationTimeout);
+        const asset=machineAssetById(id);
+        if(!asset)throw new MachineLifecycleError('Machine changed during export.',409);
+        db.exec('BEGIN IMMEDIATE');
+        try{
+          recordMachineAssetHistory({action:'machine_history_export_generated',actor:req.user!,row:asset,newValue:details,reasonNote:'History ZIP generated; client delivery and browser-only coverage are not certified.'});
+          audit(req,'machine_history_export_generated','machine_asset',id,details);
+          db.exec('COMMIT');
+        }catch(error){db.exec('ROLLBACK');throw error;}
+        scheduleAutoBackup('machine history export receipt',req.user!);
+      }},res);
+  }catch(error){
+    if(res.headersSent){if(!res.destroyed)res.destroy();}
+    else if(!res.destroyed){const known=error instanceof MachineLifecycleError;res.status(known?error.status:controller.signal.aborted?408:500).json({ok:false,error:known?error.message:controller.signal.aborted?'History export was cancelled or timed out.':'Machine history export could not be prepared.',code:known?error.code:'HISTORY_EXPORT_FAILED'});}
+  }finally{clearTimeout(preparationTimeout);res.off('close',cancel);}
+});
 app.get('/api/machine-library/assets/:id/specification.pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
   try {
     const asset = machineAssetById(Number(req.params.id));
