@@ -23,6 +23,7 @@ import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFol
 import { LibraryUploadReservationCoordinator, ResumableLibraryUploadStore, configuredLibraryLimit, libraryUploadPolicy, publicLibraryUploadLimits, receiveLibraryChunk, sendLibraryUploadError } from './libraryResumableUpload.js';
 import { prepareMasterExport, publicMasterExportPlan, streamMasterExport, type MasterExportSource } from './libraryMasterExport.js';
 import { createPmMachineAssetResolver } from './pmAssetResolver.js';
+import { migrateMachineLifecycle, publicMachineLifecycle, changeMachineLifecycle, MachineLifecycleError, type MachineLifecycleRow } from './machineLifecycle.js';
 import { canonicalHttpsAccess } from './networkAccess.js';
 import { createPmWorkOrderStorage, DEFAULT_PM_WORK_ORDER_MAX_BYTES, PM_WORK_ORDER_DIRECTORY_NAME, PM_WORK_ORDER_MIME, validatePmFollowUp, validatePmWorkOrderNumber, validatePmWorkOrderException, PM_WORK_ORDER_EXCEPTION_LABEL, type StagedPmWorkOrder, type StoredPmWorkOrder } from './pmWorkOrders.js';
 import {
@@ -908,6 +909,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_tasks_live_asset ON pm_tasks (asset_library,as
   const hierarchyForeignKeyErrors=all<Record<string,unknown>>('PRAGMA foreign_key_check');
   if(hierarchyForeignKeyErrors.length)throw new Error('Asset library folder hierarchy migration failed foreign-key validation.');
 
+  migrateMachineLifecycle(db);
   const existingOwner = one<{ id: number }>('SELECT id FROM users WHERE is_owner_admin=1 ORDER BY id LIMIT 1');
   if (existingOwner) {
     run('UPDATE users SET is_owner_admin=0 WHERE id<>?', [existingOwner.id]);
@@ -7577,7 +7579,7 @@ type PmHistoryParticipantRow = { id:number; pm_history_id:number; user_id:number
 type PmMeterType = 'hours'|'cycles';
 type PmAssetMeterRow = { id:number; asset_id:number; asset_library:AssetLibrary; meter_type:PmMeterType; current_reading:number; updated_by_user_id:number|null; created_at:string; updated_at:string };
 type PmMeterHistoryRow = { id:number; meter_id:number; asset_id:number; asset_library:AssetLibrary; meter_type:PmMeterType; previous_reading:number|null; new_reading:number; change_type:string; reason:string; source:string; user_id:number|null; user_name:string; created_at:string };
-type MachineAssetRow = {
+type MachineAssetRow = MachineLifecycleRow & {
   id: number; asset_number: string; asset_name: string; brand: string; model: string; serial_number: string; machine_year: string; machine_type: string; power_type: string; setup_type: string; shot_size_oz: number; tonnage: number; barrel_diameter: string; location: string; department: string; status: MachineAssetStatus; voltage_value: string; voltage_type: string; full_load_amp: string; machine_length: string; machine_width: string; machine_height: string; full_die_height_length: string; screw_type: string; screw_tip_type: string; screw_tip_installed_date: string; screw_installed_date: string; barrel_installed_date: string; barrel_end_cap_installed_date: string; barrel_length: string; screw_length: string; screw_rebuild_repaired: number; barrel_rebuild_repaired: number; screw_condition_status: MachineConditionStatus; barrel_condition_status: MachineConditionStatus; has_double_shot_injection: number; has_plunger_injection: number; screw2_type: string; screw2_tip_type: string; screw2_rebuild_repaired: number; screw2_condition_status: MachineConditionStatus; screw2_installed_date: string; screw2_tip_installed_date: string; screw2_length: string; barrel2_diameter: string; barrel2_rebuild_repaired: number; barrel2_condition_status: MachineConditionStatus; barrel2_installed_date: string; barrel2_end_cap_installed_date: string; barrel2_length: string; plunger_type: string; plunger_rebuild_repaired: number; plunger_condition_status: MachineConditionStatus; plunger_installed_date: string; plunger_length: string; plunger_diameter: string; plunger_barrel_type: string; plunger_barrel_rebuild_repaired: number; plunger_barrel_condition_status: MachineConditionStatus; plunger_barrel_installed_date: string; plunger_barrel_end_cap_installed_date: string; plunger_barrel_length: string; plunger_barrel_diameter: string; notes: string; critical_notes: string; created_at: string; updated_at: string; created_by_user_id: number | null; updated_by_user_id: number | null; deleted: number; deleted_at: string | null; deleted_by_user_id: number | null; brand_color_hex?: string | null;
 };
 const machineStatuses: MachineAssetStatus[] = ['active','down','disabled','removed'];
@@ -7745,6 +7747,7 @@ function validateMachineAssetInput(body: unknown) {
 }
 function publicMachineAsset(row: MachineAssetRow) {
   return {
+    ...publicMachineLifecycle(row, db),
     id: row.id, assetNumber: row.asset_number, assetName: row.asset_name, brand: row.brand, model: row.model, serialNumber: row.serial_number, machineYear: row.machine_year, machineType: row.machine_type, powerType: row.power_type, setupType: row.setup_type || (row.has_double_shot_injection ? 'Two-Shot / 2K Injection' : row.has_plunger_injection ? 'Plunger Injection' : 'Standard Injection'),
     shotSizeOz: Number(row.shot_size_oz ?? 0), tonnage: Number(row.tonnage ?? 0), barrelDiameter: row.barrel_diameter, location: row.location, department: row.department, status: row.status, voltageValue: row.voltage_value, voltageType: row.voltage_type, fullLoadAmp: row.full_load_amp,
     machineLength: row.machine_length, machineWidth: row.machine_width, machineHeight: row.machine_height, fullDieHeightLength: row.full_die_height_length, screwType: row.screw_type, screwTipType: row.screw_tip_type, screwTipInstalledDate: row.screw_tip_installed_date, screwInstalledDate: row.screw_installed_date,
@@ -8574,6 +8577,7 @@ function pmMeterOverrideFromInput(input:Record<string,unknown>,previousReading:n
 }
 function validatePmMeterReading(value:unknown,meterType:PmMeterType){const reading=optionalPmNumber(value,meterType==='hours'?'Hour Meter':'Cycle Counter');if(reading===null)throw new Error(`${meterType==='hours'?'Hour Meter':'Cycle Counter'} reading is required.`);if(meterType==='cycles'&&!Number.isInteger(reading))throw new Error('Cycle Counter must use a whole number.');return reading;}
 function applyPmAssetMeter(input:{assetId:number;library:AssetLibrary;meterType:PmMeterType;newReading:number;actor:User;source:string;assetLabel:string;override?:{type:string;reason:string}|null;allowDecrease?:boolean;timestamp?:string}){
+  if(input.library==='machine'&&machineAssetById(input.assetId)?.lifecycle_status!=='active')throw new Error('Restore this machine to Active before changing maintenance meters.');
   const timestamp=input.timestamp??now();const previous=pmAssetMeter(input.assetId,input.library,input.meterType);const previousReading=previous===undefined?null:Number(previous.current_reading);const decreasing=previousReading!==null&&input.newReading<previousReading;const override=input.override??(input.allowDecrease?null:pmMeterOverrideFromInput({},previousReading,input.newReading));
   if(decreasing&&!override&&!input.allowDecrease)throw new Error(`A decreasing meter reading requires an authorized correction. Stored reading: ${previousReading}.`);
   run(`INSERT INTO pm_asset_meters (asset_id,asset_library,meter_type,current_reading,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)
@@ -8632,7 +8636,7 @@ function dashboardPmAlerts(libraries:Set<AssetLibrary>=new Set(['machine','equip
     FROM pm_tasks p JOIN machine_assets a ON a.id=p.asset_id
     LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand)
     LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default'
-    WHERE p.asset_library='machine' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`,[machineDefaultBrandColors.Default]):[];
+    WHERE p.asset_library='machine' AND p.deleted=0 AND a.deleted=0 AND a.lifecycle_status='active' ORDER BY p.id`,[machineDefaultBrandColors.Default]):[];
   const equipmentRows=libraries.has('equipment')?all<DashboardPmRow>(`SELECT p.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,'' AS accent_color,a.category
     FROM pm_tasks p JOIN equipment_assets a ON a.id=p.asset_id
     WHERE p.asset_library='equipment' AND p.deleted=0 AND a.deleted=0 ORDER BY p.id`):[];
@@ -8661,7 +8665,7 @@ function dashboardWarningNotes(user:User) {
   if (hasPermission(user,'machine.view')) rows.push(...all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number,a.location,'' AS category,'machine' AS asset_library,COALESCE(bs.color_hex,def.color_hex,?) AS accent_color,COALESCE(u.full_name,'Unknown user') AS created_by_name
     FROM machine_asset_notes n JOIN machine_assets a ON a.id=n.asset_id
     LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default'
-    LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.is_warning=1 AND n.issue_status='active' AND n.deleted=0 AND a.deleted=0`,[machineDefaultBrandColors.Default]));
+    LEFT JOIN users u ON u.id=n.created_by_user_id WHERE n.is_warning=1 AND n.issue_status='active' AND n.deleted=0 AND a.deleted=0 AND a.lifecycle_status='active'`,[machineDefaultBrandColors.Default]));
   if (hasPermission(user,'equipment.view')) rows.push(...all<MachineAssetNoteRow>(`SELECT n.*,a.asset_number,a.equipment_name AS asset_name,a.manufacturer AS brand,a.model,a.serial_number,a.location,a.category,'equipment' AS asset_library,'' AS accent_color,COALESCE(u.full_name,'Unknown user') AS created_by_name
     FROM equipment_asset_notes n JOIN equipment_assets a ON a.id=n.asset_id LEFT JOIN users u ON u.id=n.created_by_user_id
     WHERE n.is_warning=1 AND n.issue_status='active' AND n.deleted=0 AND a.deleted=0`));
@@ -8847,7 +8851,7 @@ async function performPmWorkbookSyncUnlocked(input:{actor:User;sourcePath:string
   updatePmSyncState({status:'syncing',actor:input.actor,sourcePath:input.sourcePath,originalFilename:input.originalFilename});
   if(input.operationId)updatePmExcelOperation(input.operationId,'workbook_sync');
   try {
-    const assetChoices=all<Pick<MachineAssetRow,'asset_number'>>("SELECT asset_number FROM machine_assets WHERE deleted=0 AND status IN ('active','down') ORDER BY asset_number COLLATE NOCASE,id").map(asset=>asset.asset_number);const intervalChoices=pmIntervalTypes.map(value=>({value,label:pmIntervalLabels[value]}));
+    const assetChoices=all<Pick<MachineAssetRow,'asset_number'>>("SELECT asset_number FROM machine_assets WHERE deleted=0 AND lifecycle_status='active' AND status IN ('active','down') ORDER BY asset_number COLLATE NOCASE,id").map(asset=>asset.asset_number);const intervalChoices=pmIntervalTypes.map(value=>({value,label:pmIntervalLabels[value]}));
     const result=await synchronizePmWorkbook({sourcePath:input.sourcePath,destinationPath:pmExcelLatestPath,backupDir:pmExcelBackupDir,trackerUpdates:input.trackerUpdates,trackerRemovals:input.trackerRemovals,historyRows:input.historyRows,assetChoices,intervalChoices,onStage:input.operationId?(stage)=>updatePmExcelOperation(input.operationId!,stage):undefined});
     updatePmSyncState({status:'success',actor:input.actor,sourcePath:pmExcelLatestPath,originalFilename:input.originalFilename,changedCells:result.changedCells,appendedHistory:result.appendedHistory});
     if(input.operationId)updatePmExcelOperation(input.operationId,'succeeded');
@@ -8883,7 +8887,7 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   const token=options.token??crypto.randomUUID();const sha256=workbookSha256(buffer);const previewedAt=options.previewedAt??now();
   const additions:Array<Record<string,unknown>>=[];const updates:Array<Record<string,unknown>>=[];const conflicts:Array<Record<string,unknown>>=[];const warnings=[...parsed.warnings];const rejectedRows=[...parsed.rejectedRows];const ignoredRows:Array<Record<string,unknown>>=[];
   const trackerActions:PmImportTrackerAction[]=[];const trackerSyncActions:PmImportTrackerAction[]=[];const historyActions:PmImportHistoryAction[]=[];
-  const assetResolver=createPmMachineAssetResolver(all<MachineAssetRow>('SELECT * FROM machine_assets WHERE deleted=0 ORDER BY id'));
+  const assetResolver=createPmMachineAssetResolver(all<MachineAssetRow>("SELECT * FROM machine_assets WHERE deleted=0 ORDER BY id"));
   const aliasResolutionAudit=new Map<string,{workbookIdentifier:string;resolvedAssetNumber:string;matchType:'press_alias';usages:Array<{sheet:string;rowNumber:number}>}>();
   const resolutionDetails=(workbookIdentifier:string,resolution:Extract<ReturnType<typeof assetResolver.resolve>,{status:'resolved'}>,sheet:string,rowNumber:number)=>{
     const details={workbookAssetNumber:workbookIdentifier,resolvedAssetNumber:resolution.asset.asset_number,assetMatchType:resolution.matchType};
@@ -8901,7 +8905,7 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   const sharedReadings=new Map<string,{assetId:number;assetNumber:string;intervalType:'hourly'|'cycles';rows:number[];values:Set<number>}>();
   for(const row of parsed.trackerRows){
     if((row.intervalType!=='hourly'&&row.intervalType!=='cycles')||row.currentMeter===null)continue;
-    const resolution=trackerAssetResolutions.get(row.rowNumber);if(!resolution||resolution.status!=='resolved')continue;
+    const resolution=trackerAssetResolutions.get(row.rowNumber);if(!resolution||resolution.status!=='resolved'||resolution.asset.lifecycle_status!=='active')continue;
     const key=`${resolution.asset.id}:${row.intervalType}`;const group=sharedReadings.get(key)??{assetId:resolution.asset.id,assetNumber:resolution.asset.asset_number,intervalType:row.intervalType,rows:[],values:new Set<number>()};
     group.rows.push(row.rowNumber);group.values.add(row.currentMeter);sharedReadings.set(key,group);
   }
@@ -8920,6 +8924,7 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   for (const row of parsed.trackerRows) {
     const resolution=trackerAssetResolutions.get(row.rowNumber)!;const assetKey=resolution.status==='resolved'?`asset:${resolution.asset.id}`:`workbook:${normalizedPmKey(row.assetNumber)}`;const key=pmImportTaskKey(assetKey,row.taskTitle,row.intervalType);
     const sectionDetails={machineSectionInherited:row.assetNumberInherited,machineSectionRow:row.machineSectionRow};
+    if(resolution.status==='resolved'&&resolution.asset.lifecycle_status!=='active'){ignoredRows.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,code:'MACHINE_NOT_ACTIVE',reason:`Machine is ${resolution.asset.lifecycle_status==='archived'?'Archived':'Out of Service'}; its workbook section is preserved without importing maintenance changes.`});continue;}
     if ((workbookKeyCounts.get(key)??0)>1) {conflicts.push({sheet:'Machine Pm Tracker',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskTitle:row.taskTitle,...sectionDetails,code:'AMBIGUOUS_WORKBOOK_MATCH',message:'More than one workbook row has this asset and PM task.'});continue;}
     if (resolution.status!=='resolved') {
       const message=resolution.status==='ambiguous'?'More than one active MCC asset matches this Asset Number.':'No active MCC machine asset matches this Asset Number.';
@@ -8943,6 +8948,7 @@ function buildPmImportStage(parsed:ParsedPmWorkbook,buffer:Buffer,filename:strin
   for (const row of parsed.historyRows) {
     if (seenHistory.has(row.sourceRef)) {warnings.push({sheet:'PMHistory',rowNumber:row.rowNumber,message:'Duplicate workbook history row ignored.'});continue;}seenHistory.add(row.sourceRef);
     const resolution=assetResolver.resolve(row.assetNumber);
+    if(resolution.status==='resolved'&&resolution.asset.lifecycle_status!=='active'){ignoredRows.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskType:row.taskType,code:'MACHINE_NOT_ACTIVE',reason:'Machine is Archived or Out of Service; existing history is retained without importing new maintenance records.'});continue;}
     if (resolution.status!=='resolved') {if(resolution.status==='ambiguous')conflicts.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskType:row.taskType,code:'AMBIGUOUS_ASSET_MATCH',assetMatchType:resolution.matchType,pressAlias:resolution.alias,candidateAssetNumbers:resolution.assets.map(item=>item.asset_number),message:'Asset Number is ambiguous in MCC.'});else ignoredRows.push({sheet:'PMHistory',rowNumber:row.rowNumber,assetNumber:row.assetNumber,taskType:row.taskType,reason:'Machine not in MCC; history row skipped.'});continue;}
     const asset=resolution.asset;const matchDetails=resolutionDetails(row.assetNumber,resolution,'PMHistory',row.rowNumber);const taskKey=pmImportTaskKey(asset.asset_number,row.taskType,row.intervalType);
     const duplicate=one<{id:number}>('SELECT id FROM pm_history WHERE import_source_ref=?',[row.sourceRef]);
@@ -8987,7 +8993,7 @@ async function generateVerifiedPmDownloadWorkbook(actor:User,requestId:string,fo
   if(forcedFailure)throw new Error('Forced PM workbook generation failure for regression testing.');
   const workbook=fs.readFileSync(pmExcelLatestPath);
   pmDownloadLog(requestId,'workbook_generated_bytes',{byteSize:workbook.length});
-  const assetChoices=all<Pick<MachineAssetRow,'asset_number'>>("SELECT asset_number FROM machine_assets WHERE deleted=0 AND status IN ('active','down') ORDER BY asset_number COLLATE NOCASE,id").map(asset=>asset.asset_number);
+  const assetChoices=all<Pick<MachineAssetRow,'asset_number'>>("SELECT asset_number FROM machine_assets WHERE deleted=0 AND lifecycle_status='active' AND status IN ('active','down') ORDER BY asset_number COLLATE NOCASE,id").map(asset=>asset.asset_number);
   const intervalChoices=pmIntervalTypes.map(value=>({value,label:pmIntervalLabels[value]}));
   try{
     const validation=await validatePmWorkbookForDownload(workbook,assetChoices,intervalChoices);
@@ -9044,6 +9050,7 @@ function pmCompletionInput(task:PmTaskRow,body:Record<string,unknown>,upload:Exp
 }
 function commitPmCompletion(input:{task:PmTaskRow;assetDisplayName:string;actor:User;requestId:string;values:ReturnType<typeof pmCompletionInput>;beforeFinalize?:()=>void}) {
   const {task,actor,requestId,values}=input;const timestamp=now();let historyId=0;let stored:StoredPmWorkOrder|null=null;
+  if(task.asset_library==='machine'&&machineAssetById(task.asset_id)?.lifecycle_status!=='active')throw new Error('Restore this machine to Active before completing maintenance.');
   db.exec('BEGIN IMMEDIATE');
   try{
     const result=run(`INSERT INTO pm_history (pm_task_id,asset_id,asset_library,completion_request_id,work_order_number,machine_not_scheduled_or_running,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,follow_up_required,follow_up_reason,meter_override_type,meter_override_reason,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[
@@ -9193,6 +9200,10 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
   const summary = { ok: true, addedCount: 0, updatedCount: 0, skippedCount: 0, rejectedDuplicateCount: 0, errorCount: 0, errors: [] as string[], rejectedDuplicates: [] as MachineImportRejectedDuplicate[], changedAssetNumbers: [] as string[] };
   const seen = new Set<string>();
   const dbAssetsByKey = activeMachineAssetsByNormalizedNumber();
+  // CSV/XLSX imports add "Press " to the asset number. Protect both spellings
+  // of non-active identities without changing existing active-machine matching.
+  const protectedImportNumbers=new Set(all<MachineAssetRow>("SELECT * FROM machine_assets WHERE deleted=0 AND lifecycle_status<>'active'")
+    .map(asset=>normalizedMachineAssetNumber(asset.asset_number).replace(/^press\s+/,'')));
   const rejectDuplicate = (rowNumber: number, assetNumber: string, reason: string) => {
     summary.rejectedDuplicateCount += 1;
     summary.skippedCount += 1;
@@ -9216,6 +9227,7 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
       const dbMatches = dbAssetsByKey.get(key) ?? [];
       try {
         seen.add(key);
+        if(protectedImportNumbers.has(key.replace(/^press\s+/,'')))throw new Error('This machine is archived or out of service. Restore its lifecycle explicitly before importing updates.');
         if (dbMatches.length > 1) {
           rejectDuplicate(row.rowNumber, assetNumber, 'Duplicate Asset Number already exists in MCC. Clean existing records first.');
           continue;
@@ -9225,6 +9237,7 @@ function importMachineAssetRows(req: AuthRequest, rows: ReturnType<typeof machin
           continue;
         }
         const existing = mode === 'upsert' && dbMatches.length === 1 ? dbMatches[0] : undefined;
+        if (existing && existing.lifecycle_status !== 'active') throw new Error('This machine is archived or out of service. Restore its lifecycle explicitly before importing updates.');
         const input = machineInputFromImport(row, existing);
         if (existing) {
           const oldValue = machineAssetHistoryValue(existing);
@@ -10001,24 +10014,50 @@ app.get('/api/machine-library/assets', requireAuth, requirePermission('machine.v
   const search = queryText(req.query.q);
   const brand = queryText(req.query.brand);
   const status = queryText(req.query.status);
+  const lifecycle = req.query.lifecycle ?? 'current';
+  if (!['current','archived','all'].includes(String(lifecycle))) return res.status(400).json({ok:false,error:'Lifecycle filter is invalid.'});
   const where = ['a.deleted=0'];
+  if(lifecycle!=='all')where.push(lifecycle==='archived'?"a.lifecycle_status='archived'":"a.lifecycle_status<>'archived'");
   const params: SqlParam[] = [machineDefaultBrandColors.Default];
   if (search) {
     const like = `%${escapeLike(search)}%`;
-    where.push('(a.asset_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.asset_name LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.brand LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.model LIKE ? ESCAPE \'\\\' COLLATE NOCASE OR a.serial_number LIKE ? ESCAPE \'\\\' COLLATE NOCASE)');
-    params.push(like,like,like,like,like);
+    where.push('(a.asset_number LIKE ? ESCAPE char(92) COLLATE NOCASE OR a.asset_name LIKE ? ESCAPE char(92) COLLATE NOCASE OR a.brand LIKE ? ESCAPE char(92) COLLATE NOCASE OR a.model LIKE ? ESCAPE char(92) COLLATE NOCASE OR a.serial_number LIKE ? ESCAPE char(92) COLLATE NOCASE OR a.retirement_reason LIKE ? ESCAPE char(92) COLLATE NOCASE OR a.retirement_notes LIKE ? ESCAPE char(92) COLLATE NOCASE)');
+    params.push(like,like,like,like,like,like,like);
   }
   if (brand) { where.push('lower(a.brand)=lower(?)'); params.push(brand); }
   if (status && machineStatuses.includes(status as MachineAssetStatus)) { where.push('a.status=?'); params.push(status); }
   const assetRows = all<MachineAssetRow>(`SELECT a.*, COALESCE(bs.color_hex, def.color_hex, ?) AS brand_color_hex FROM machine_assets a LEFT JOIN machine_brand_settings bs ON lower(bs.brand_name)=lower(a.brand) LEFT JOIN machine_brand_settings def ON lower(def.brand_name)='default' WHERE ${where.join(' AND ')} ORDER BY a.asset_number COLLATE NOCASE`, params);
   const assets = assetRows.map(row=>({
     ...publicMachineAsset(row),
-    pmSummary:machineAssetPmCardSummary(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND deleted=0 ORDER BY active DESC,hold ASC,updated_at DESC",[row.id])),
+    pmSummary:row.lifecycle_status!=='active'?null:machineAssetPmCardSummary(all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND deleted=0 ORDER BY active DESC,hold ASC,updated_at DESC",[row.id])),
     historyPreview:all<HistoryLogRow>("SELECT * FROM history_logs WHERE section='machine_library' AND entity_type='machine_asset' AND (entity_id=? OR asset_id=? OR entity_label=?) ORDER BY created_at DESC,id DESC LIMIT 1",[String(row.id),String(row.id),row.asset_number]).map(publicHistoryRecord),
   }));
   const brandSettings = all<{ brand_name: string; color_hex: string }>('SELECT brand_name,color_hex FROM machine_brand_settings ORDER BY brand_name COLLATE NOCASE').map(row=>({brandName:row.brand_name,colorHex:safeHexColor(row.color_hex)}));
   res.json({ok:true,assets,brandSettings,permissions:{canEdit:hasPermission(req.user!,'machine.edit')||hasPermission(req.user!,'machine.create'),canDelete:hasPermission(req.user!,'machine.delete'),canManagePm:hasPermission(req.user!,'machine.pm_manage'),effective:[...getEffectivePermissions(req.user!)].filter(key=>key.startsWith('machine.'))}});
 });
+app.get('/api/machine-library/assets/:id',requireAuth,requirePermission('machine.view'),(req:AuthRequest,res)=>{
+  const asset=machineAssetById(Number(req.params.id));
+  if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  res.json({ok:true,asset:publicMachineAsset(asset)});
+});
+app.post('/api/machine-library/assets/:id/lifecycle',requireAuth,(req:AuthRequest,res)=>{
+  try {
+    const changed=changeMachineLifecycle(db,Number(req.params.id),req.user!,req.body,event=>{
+      recordMachineAssetHistory({action:event.action,actor:req.user!,row:event.after as MachineAssetRow,
+        oldValue:publicMachineAsset(event.before as MachineAssetRow),newValue:publicMachineAsset(event.after as MachineAssetRow),reasonNote:event.reason});
+      audit(req,event.action,'machine_asset',event.after.id,{reason:event.reason,lifecycle:publicMachineLifecycle(event.after,db)});
+    });
+    scheduleAutoBackup('machine lifecycle changed',req.user!);
+    res.json({ok:true,asset:publicMachineAsset(changed as MachineAssetRow)});
+  }catch(error){if(error instanceof MachineLifecycleError)return res.status(error.status).json({ok:false,error:error.message,code:error.code});res.status(500).json({ok:false,error:'Machine lifecycle could not be changed.'});}
+});
+function requireActiveMachinePm(req:AuthRequest,res:Response,next:NextFunction){
+  const id=req.params.assetId?Number(req.params.assetId):pmTaskById(Number(req.params.pmId),'machine',true)?.asset_id;
+  const asset=id?machineAssetById(id):undefined;
+  if(!asset)return res.status(404).json({ok:false,error:'Machine asset not found.'});
+  if(asset.lifecycle_status!=='active')return res.status(409).json({ok:false,code:'LIFECYCLE_NOT_ACTIVE',error:'Restore this machine to Active before scheduling or completing maintenance.'});
+  next();
+}
 app.get('/api/machine-library/assets/:id/specification.pdf', requireAuth, requirePermission('machine.view'), async (req:AuthRequest,res)=>{
   try {
     const asset = machineAssetById(Number(req.params.id));
@@ -10167,6 +10206,7 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
     if(!/^[A-Za-z0-9._:-]{8,128}$/.test(requestId))throw new Error('A valid import confirmation request identifier is required.');
     const duplicate=one<{summary_json:string}>('SELECT summary_json FROM pm_excel_imports WHERE confirm_request_id=?',[requestId]);if(duplicate)return res.json({ok:true,duplicatePrevented:true,import:JSON.parse(duplicate.summary_json),sync:pmSyncState()});
     const previewStage=pmImportStages.get(token);if(!previewStage)throw new Error('The PM import preview expired. Upload the workbook and preview it again.');
+    if([...previewStage.trackerActions,...previewStage.trackerSyncActions,...previewStage.meterActions,...previewStage.historyActions].some(action=>machineAssetById(action.assetId)?.lifecycle_status!=='active'))return res.status(409).json({ok:false,error:'A previewed machine is no longer Active. Preview the workbook again and review its excluded sections.',code:'LIFECYCLE_NOT_ACTIVE'});
     const operation=one<PmExcelOperationRow>("SELECT * FROM pm_excel_operations WHERE preview_token=? AND is_current=1 AND status='active'",[token]);if(!operation)throw new Error('This PM workbook preview was superseded. Upload and preview the workbook again.');operationId=operation.id;
     updatePmExcelOperation(operationId,'importing');updatePmExcelOperation(operationId,'validating');const reparsed=await inspectPmWorkbook(previewStage.buffer);updatePmExcelOperation(operationId,'analyzing');const revalidated=buildPmImportStage(reparsed,previewStage.buffer,previewStage.filename,previewStage.importedByUserId,{token:previewStage.token,previewedAt:previewStage.previewedAt,store:false});const stage=revalidated;
     const canConfirm=Boolean((stage.preview.confirmEligibility as Record<string,unknown>)?.canConfirm);
@@ -10174,7 +10214,7 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
     const sourcePath=writePmImportSource(stage.buffer,stage.sha256);const timestamp=now();const changedTaskIds:number[]=[];const insertedHistoryIds:Array<{id:number;workbookAssetNumber:string}>=[];let added=0;let updated=0;let restored=0;let historyAdded=0;
     updatePmExcelOperation(operationId,'database_update');db.exec('BEGIN IMMEDIATE');
     try {
-      for(const action of stage.trackerActions){const row=action.row;const values=pmTaskValuesFromWorkbook(row);let task:PmTaskRow;
+      for(const action of stage.trackerActions){if(machineAssetById(action.assetId)?.lifecycle_status!=='active')throw new Error('A workbook machine is no longer Active. Preview the workbook again.');const row=action.row;const values=pmTaskValuesFromWorkbook(row);let task:PmTaskRow;
         if(action.kind==='addition'){
           const createRequestId=`pm-import:${stage.sha256.slice(0,20)}:${row.rowNumber}`;const result=run(`INSERT INTO pm_tasks (asset_id,asset_library,client_request_id,title,instructions,interval_type,interval_value,last_completed_date,last_completed_meter,current_meter,next_due_date,next_due_meter,active,hold,notes,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[action.assetId,'machine',createRequestId,values.title,'',values.intervalType,values.intervalValue,values.lastCompletedDate,values.lastCompletedMeter,values.currentMeter,values.nextDueDate,values.nextDueMeter,1,0,'Imported from synchronized PM workbook.',req.user!.id,req.user!.id,timestamp,timestamp]);task=pmTaskById(Number(result.lastInsertRowid))!;const asset=machineAssetById(task.asset_id)!;recordPmAudit({action:'pm_import_added',task,asset,actor:req.user!,newValue:{...pmHistoryValue(task),workbookRow:row.rowNumber,importedByUserId:stage.importedByUserId,confirmedByUserId:req.user!.id}});added+=1;
         }else{
@@ -10186,7 +10226,7 @@ app.post('/api/pm-excel/confirm',requireAuth,requirePermission('machine.pm_manag
         changedTaskIds.push(task.id);
       }
       for(const action of stage.meterActions){const meterType:PmMeterType=action.intervalType==='hourly'?'hours':'cycles';const asset=machineAssetById(action.assetId)!;const applied=applyPmAssetMeter({assetId:action.assetId,library:'machine',meterType,newReading:action.reading,actor:req.user!,source:action.conflictingWorkbookRows?'pm_excel_normalization':'pm_excel_import',assetLabel:asset.asset_number,allowDecrease:true,timestamp});for(const task of applied.tasks)if(!changedTaskIds.includes(task.id))changedTaskIds.push(task.id);}
-      for(const action of stage.historyActions){const task=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND deleted=0",[action.assetId]).filter(item=>item.interval_type===action.row.intervalType&&normalizedPmKey(item.title)===normalizedPmKey(action.row.taskType));if(task.length!==1)throw new Error(`PMHistory row ${action.row.rowNumber} no longer matches exactly one live MCC PM task and interval.`);const row=action.row;const workOrder=row.workOrderNumber||`MCC-IMPORT-${row.sourceRef.slice(0,12).toUpperCase()}`;const result=run(`INSERT OR IGNORE INTO pm_history (pm_task_id,asset_id,asset_library,work_order_number,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,import_source_ref,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[task[0].id,action.assetId,'machine',workOrder,row.taskStatus,row.startDate,row.completionDate,null,null,row.performedBy,row.workOrderType,row.intervalType,row.taskType,row.taskNote,/no issues found/i.test(row.taskNote)?1:0,row.sourceRef,null,null,null,null,timestamp]);if(Number(result.changes)>0){insertedHistoryIds.push({id:Number(result.lastInsertRowid),workbookAssetNumber:row.assetNumber});historyAdded+=1;}}
+      for(const action of stage.historyActions){if(machineAssetById(action.assetId)?.lifecycle_status!=='active')throw new Error('A workbook machine is no longer Active. Preview the workbook again.');const task=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND deleted=0",[action.assetId]).filter(item=>item.interval_type===action.row.intervalType&&normalizedPmKey(item.title)===normalizedPmKey(action.row.taskType));if(task.length!==1)throw new Error(`PMHistory row ${action.row.rowNumber} no longer matches exactly one live MCC PM task and interval.`);const row=action.row;const workOrder=row.workOrderNumber||`MCC-IMPORT-${row.sourceRef.slice(0,12).toUpperCase()}`;const result=run(`INSERT OR IGNORE INTO pm_history (pm_task_id,asset_id,asset_library,work_order_number,task_status,start_date,completion_date,completed_meter,performed_by_user_id,performed_by_name,work_order_type,interval_type,task_type,completion_notes,no_issues_found,import_source_ref,previous_due_date,previous_due_meter,next_due_date,next_due_meter,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[task[0].id,action.assetId,'machine',workOrder,row.taskStatus,row.startDate,row.completionDate,null,null,row.performedBy,row.workOrderType,row.intervalType,row.taskType,row.taskNote,/no issues found/i.test(row.taskNote)?1:0,row.sourceRef,null,null,null,null,timestamp]);if(Number(result.changes)>0){insertedHistoryIds.push({id:Number(result.lastInsertRowid),workbookAssetNumber:row.assetNumber});historyAdded+=1;}}
       const summary={added,updated,restored,historyAdded,conflicts:(stage.preview.conflicts as unknown[]).length,rejectedRows:(stage.preview.rejectedRows as unknown[]).length,ignoredRows:(stage.preview.ignoredRows as unknown[]).length,warnings:(stage.preview.warnings as unknown[]).length,filename:stage.filename,sha256:stage.sha256,importedByUserId:stage.importedByUserId,confirmedByUserId:req.user!.id,confirmedAt:timestamp};
       run('INSERT INTO pm_excel_imports (preview_token,confirm_request_id,workbook_sha256,original_filename,source_path,imported_by_user_id,confirmed_by_user_id,previewed_at,confirmed_at,summary_json) VALUES (?,?,?,?,?,?,?,?,?,?)',[token,requestId,stage.sha256,stage.filename,sourcePath,stage.importedByUserId,req.user!.id,stage.previewedAt,timestamp,JSON.stringify(summary)]);
       recordHistoryLog({section:'preventive_maintenance',action:'pm_excel_import_confirmed',entityType:'pm_excel_import',entityId:token,entityLabel:stage.filename,newValue:summary,reasonNote:'Explicit PM Excel import confirmation.',actor:req.user!});db.exec('COMMIT');
@@ -10224,7 +10264,7 @@ app.get('/api/machine-library/assets/:assetId/preventive-maintenance', requireAu
   const tasks=all<PmTaskRow>("SELECT * FROM pm_tasks WHERE asset_library='machine' AND asset_id=? AND deleted=0 ORDER BY active DESC,hold ASC,COALESCE(next_due_date,'9999-12-31'),COALESCE(next_due_meter,999999999999),title COLLATE NOCASE",[asset.id]).map(publicPmTask);
   res.status(200).json(tasks);
 });
-app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.pm_manage'), async(req:AuthRequest,res)=>{
+app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireAuth, requirePermission('machine.pm_manage'), requireActiveMachinePm, async(req:AuthRequest,res)=>{
   try {
     const asset=machineAssetById(Number(req.params.assetId));
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
@@ -10252,7 +10292,7 @@ app.post('/api/machine-library/assets/:assetId/preventive-maintenance', requireA
     res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
   }
 });
-app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.pm_manage'), async(req:AuthRequest,res)=>{
+app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requirePermission('machine.pm_manage'), requireActiveMachinePm, async(req:AuthRequest,res)=>{
   try {
     const existing=pmTaskById(Number(req.params.pmId));
     if (!existing) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
@@ -10274,7 +10314,7 @@ app.put('/api/machine-library/preventive-maintenance/:pmId', requireAuth, requir
     res.status(/not found/i.test(message)?404:400).json({ok:false,error:message,...(message==='PM title is required.'?{field:'title'}:{})});
   }
 });
-app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.pm_manage'), (req:AuthRequest,res)=>{
+app.post('/api/machine-library/preventive-maintenance/:pmId/deactivate', requireAuth, requirePermission('machine.pm_manage'), requireActiveMachinePm, (req:AuthRequest,res)=>{
   const task=pmTaskById(Number(req.params.pmId));
   if (!task) return res.status(404).json({ok:false,error:'Preventive maintenance tracking not found.'});
   const asset=machineAssetById(task.asset_id);
@@ -10290,7 +10330,7 @@ app.get('/api/preventive-maintenance/work-order-upload-rules',requireAuth,(_req,
   res.setHeader('Cache-Control','private, no-store');
   res.json({ok:true,rules:{maxBytes:pmWorkOrderMaxBytes,acceptedMimeTypes:[PM_WORK_ORDER_MIME],filenameExtension:'.pdf'}});
 });
-app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), receivePmWorkOrder, async(req:AuthRequest,res)=>{
+app.post('/api/machine-library/preventive-maintenance/:pmId/complete', requireAuth, requirePermission('machine.pm_manage'), requireActiveMachinePm, receivePmWorkOrder, async(req:AuthRequest,res)=>{
   let staged:StagedPmWorkOrder|null=null;
   try {
     const task=pmTaskById(Number(req.params.pmId));
@@ -10806,6 +10846,7 @@ app.put('/api/machine-library/assets/:id', requireAuth, requirePermission('machi
     const id = Number(req.params.id);
     const existing = machineAssetById(id);
     if (!existing) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    if(existing.lifecycle_status==='archived')return res.status(409).json({ok:false,error:'Restore this machine before editing its configuration.',code:'LIFECYCLE_NOT_ACTIVE'});
     const input = validateMachineAssetInput(req.body);
     const duplicate = machineAssetByNumber(input.assetNumber);
     if (duplicate && duplicate.id !== id && !duplicate.deleted) return res.status(409).json({ok:false,error:'Asset Number already exists.'});
@@ -10847,6 +10888,7 @@ app.delete('/api/machine-library/assets/:id', requireAuth, requirePermission('ma
     const actor = req.user!;
     const asset = machineAssetById(Number(req.params.id));
     if (!asset) return res.status(404).json({ok:false,error:'Machine asset not found.'});
+    if(asset.lifecycle_status!=='active')return res.status(409).json({ok:false,error:'Restore the machine before using the existing remove action.',code:'LIFECYCLE_NOT_ACTIVE'});
     const reasonNote = requiredReasonNote(isRecord(req.body) ? req.body.reasonNote ?? req.body.reason : '', 'Machine delete');
     const timestamp = now();
     run('UPDATE machine_assets SET deleted=1,status=?,deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?', ['removed',timestamp,actor.id,timestamp,actor.id,asset.id]);
