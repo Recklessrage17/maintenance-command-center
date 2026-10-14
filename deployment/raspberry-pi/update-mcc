@@ -8,6 +8,7 @@ readonly MCC_SERVICE="mcc.service"
 readonly HEALTH_URL="http://127.0.0.1:4273/"
 readonly CONFIG_FILE="/etc/mcc-update.conf"
 readonly STATUS_WRITER="/usr/local/lib/mcc-update/write-status.py"
+readonly SAFETY_HELPER="/usr/local/lib/mcc-update/deployment-safety.mjs"
 readonly REQUEST_MODE="${1:---manual}"
 
 if [[ "${REQUEST_MODE}" != "--request" && "${REQUEST_MODE}" != "--manual" ]]; then
@@ -29,6 +30,8 @@ source "${CONFIG_FILE}"
 : "${MCC_APP_DIR:?MCC_APP_DIR is required}"
 : "${MCC_UPDATE_STATE_DIR:=/var/lib/mcc-update}"
 : "${MCC_UPDATE_BACKUP_DIR:=/var/backups/mcc-updates}"
+: "${MCC_STORAGE_MANIFEST:?A reviewed root-owned full storage/mount manifest is required}"
+[[ -f "${SAFETY_HELPER}" && ! -L "${SAFETY_HELPER}" ]]
 
 readonly APP_DIR="$(readlink -f "${MCC_APP_DIR}")"
 readonly STATE_DIR="$(readlink -m "${MCC_UPDATE_STATE_DIR}")"
@@ -66,6 +69,7 @@ target_version=""
 backup_path=""
 code_changed="false"
 service_stopped="false"
+candidate_started="false"
 
 write_status() {
   local state="$1"
@@ -104,20 +108,38 @@ read_local_version() {
 
 restore_previous_build() {
   set +e
-  write_status "rolling_back" "The new build failed verification. Restoring the previous MCC version." "none"
-  /usr/bin/systemctl stop "${MCC_SERVICE}"
+  write_status "rolling_back" "Checking storage and lifecycle compatibility before any fallback." "none"
+  if ! /usr/bin/systemctl stop "${MCC_SERVICE}"; then
+    write_status "failed" "Critical rollback failure: MCC could not be stopped. Operator recovery is required." "failed"
+    exit 2
+  fi
+  if [[ "${candidate_started}" == "true" ]]; then
+    # A candidate may have migrated data or accepted operational writes even when
+    # HTTP health fails. Preserve that complete state and never restore old data
+    # or start pre-lifecycle code automatically.
+    if node "${SAFETY_HELPER}" snapshot --manifest "${MCC_STORAGE_MANIFEST}" --service "${MCC_SERVICE}" --phase failed-candidate; then
+      write_status "failed" "Automatic rollback blocked after candidate start. MCC is stopped; post-update data and the failed-candidate snapshot are retained. Use lifecycle-aware operator recovery; an older recovery point requires an explicit data-loss decision." "failed"
+    else
+      write_status "failed" "Automatic rollback blocked after candidate start; failed-candidate snapshot creation also failed. MCC remains stopped and original post-update data is retained in place. Preserve it before operator recovery; no old snapshot or code was restored." "failed"
+    fi
+    exit 2
+  fi
+  if [[ -z "${backup_path}" ]] || ! node "${SAFETY_HELPER}" unchanged --manifest "${MCC_STORAGE_MANIFEST}" --snapshot "${backup_path}" --service "${MCC_SERVICE}"; then
+    write_status "failed" "Critical rollback failure: unchanged complete storage cannot be proved. MCC remains stopped for operator recovery." "failed"
+    exit 2
+  fi
   if [[ "${code_changed}" == "true" ]]; then
-    git -C "${APP_DIR}" update-ref "refs/heads/${APPROVED_BRANCH}" "${old_commit}" "${target_commit}"
-    git -C "${APP_DIR}" read-tree --reset -u "${old_commit}"
+    if ! { git -C "${APP_DIR}" update-ref "refs/heads/${APPROVED_BRANCH}" "${old_commit}" "${target_commit}" && git -C "${APP_DIR}" read-tree --reset -u "${old_commit}"; }; then
+      write_status "failed" "Critical rollback failure: previous code could not be restored. Data is retained; operator recovery required." "failed"
+      exit 2
+    fi
   fi
-  if [[ -n "${backup_path}" && -f "${backup_path}" ]]; then
-    tar -xzf "${backup_path}" -C "${APP_DIR}"
-  fi
-  npm ci --prefix "${APP_DIR}/frontend"
-  npm ci --prefix "${APP_DIR}/backend"
-  npm run build --prefix "${APP_DIR}"
-  /usr/bin/systemctl start "${MCC_SERVICE}"
-  if health_check \
+  if npm ci --prefix "${APP_DIR}/frontend" \
+    && npm ci --prefix "${APP_DIR}/backend" \
+    && npm run build --prefix "${APP_DIR}" \
+    && node "${SAFETY_HELPER}" compatible --manifest "${MCC_STORAGE_MANIFEST}" --target-app "${APP_DIR}" --service "${MCC_SERVICE}" \
+    && /usr/bin/systemctl start "${MCC_SERVICE}" \
+    && health_check \
     && [[ "$(git -C "${APP_DIR}" rev-parse HEAD)" == "${old_commit}" ]] \
     && [[ "$(read_local_version)" == "${old_version}" ]]; then
     write_status "rolled_back" "The update failed. MCC was restored to the previous healthy version." "rolled_back"
@@ -222,26 +244,16 @@ if [[ "${target_commit}" == "${old_commit}" ]]; then
 fi
 
 write_status "stopping" "Stopping MCC before the runtime-data safety snapshot."
+node "${SAFETY_HELPER}" validate-live --manifest "${MCC_STORAGE_MANIFEST}" --pid "$(/usr/bin/systemctl show "${MCC_SERVICE}" --property=MainPID --value)"
 /usr/bin/systemctl stop "${MCC_SERVICE}"
 service_stopped="true"
 
 write_status "backing_up" "Creating and verifying the pre-update MCC safety backup."
-timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-backup_path="${BACKUP_ROOT}/mcc-pre-update-${timestamp}-${old_commit:0:7}.tar.gz"
-runtime_paths=()
-for relative_path in backend/data backend/uploads backend/documents backend/files backend/.env .env; do
-  if [[ -e "${APP_DIR}/${relative_path}" ]]; then
-    runtime_paths+=("${relative_path}")
-  fi
-done
-if [[ "${#runtime_paths[@]}" -gt 0 ]]; then
-  tar -czf "${backup_path}" -C "${APP_DIR}" -- "${runtime_paths[@]}"
-else
-  tar -czf "${backup_path}" --files-from /dev/null
-fi
-tar -tzf "${backup_path}" >/dev/null
-test -s "${backup_path}"
-chmod 0600 "${backup_path}"
+# The reviewed manifest covers backend/data, backend/uploads, backend/documents,
+# backend/files, backend/.env, .env AND externally configured PM/recovery/backup roots.
+snapshot_result="$(node "${SAFETY_HELPER}" snapshot --manifest "${MCC_STORAGE_MANIFEST}" --service "${MCC_SERVICE}" --phase pre-update)"
+backup_path="$(printf '%s' "${snapshot_result}" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).directory))')"
+node "${SAFETY_HELPER}" verify --snapshot "${backup_path}"
 
 write_status "pulling" "Fast-forwarding MCC to the verified approved commit."
 git -C "${APP_DIR}" merge --ff-only "${target_commit}"
@@ -255,11 +267,15 @@ write_status "building" "Building the MCC frontend and backend."
 npm run build --prefix "${APP_DIR}"
 
 write_status "starting" "Starting the updated MCC service."
+node "${SAFETY_HELPER}" unchanged --manifest "${MCC_STORAGE_MANIFEST}" --snapshot "${backup_path}" --service "${MCC_SERVICE}"
+node "${SAFETY_HELPER}" compatible --manifest "${MCC_STORAGE_MANIFEST}" --target-app "${APP_DIR}" --service "${MCC_SERVICE}"
+candidate_started="true"
 /usr/bin/systemctl start "${MCC_SERVICE}"
 service_stopped="false"
 
 write_status "health_check" "Verifying MCC health on port 4273 and confirming the running build."
 health_check
+node "${SAFETY_HELPER}" validate-live --manifest "${MCC_STORAGE_MANIFEST}" --pid "$(/usr/bin/systemctl show "${MCC_SERVICE}" --property=MainPID --value)"
 [[ "$(git -C "${APP_DIR}" rev-parse HEAD)" == "${target_commit}" ]]
 [[ "$(read_local_version)" == "${target_version}" ]]
 
