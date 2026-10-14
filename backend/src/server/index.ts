@@ -67,6 +67,7 @@ import {
   databasePathInPackage,
   extractAndImportPortableArchive,
   importedPackagePath,
+  inspectPortableArchive,
   listImportedPortablePackages,
   packageFileChecksums,
   packagePayloadSize,
@@ -3195,6 +3196,16 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
   const type = backupTypeFromValue(manifest?.backupType, backupTypeFromFolderName(name) ?? (category === 'legacy' ? 'legacy' : 'manual'));
   const dbFile = databasePathInPackage(folderPath, manifest);
   const portableArchivePath = portableArchivePathFromManifest(manifest);
+  let portableReady = false;
+  let portableError = '';
+  if (portableArchivePath && fs.existsSync(portableArchivePath)) {
+    try {
+      inspectPortableArchive(portableArchivePath, { maxArchiveBytes: portableUploadMaxBytes });
+      if (!/^[a-f0-9]{64}\s/i.test(fs.readFileSync(`${portableArchivePath}.sha256`, 'utf8'))) throw new Error('Missing checksum');
+      portableReady = true;
+    }
+    catch { portableError = 'This ZIP is outside the supported recovery limits. Create a new Master Backup; if it is still too large, preserve the verified local package and arrange supervised recovery.'; }
+  }
   const stat = fs.statSync(folderPath);
   return {
     id: name,
@@ -3213,12 +3224,12 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     workOrderAttachments: manifest?.workOrderAttachments,
     workOrderRecords: manifest?.workOrderRecords,
     checksumSha256: manifest?.checksumSha256 ?? '',
-    notes: manifest?.notes ?? '',
+    notes: [manifest?.notes, portableError].filter(Boolean).join(' '),
     restorable: fs.existsSync(dbFile),
     folderLabel: backupFolderLabel(category),
     portableArchiveFilename: portableArchivePath ? path.basename(portableArchivePath) : undefined,
     portableArchiveSizeBytes: portableArchivePath && fs.existsSync(portableArchivePath) ? fs.statSync(portableArchivePath).size : undefined,
-    portableReady: Boolean(portableArchivePath && fs.existsSync(portableArchivePath) && fs.statSync(portableArchivePath).isFile()),
+    portableReady,
   };
 }
 function listBackupDirectory(category: BackupCategory) {
@@ -3380,11 +3391,11 @@ async function createBackup(input: { category: CreatableBackupCategory; type?: B
     if (portable && portableIdentity) {
       validatePortablePackage(targetDir, applicationVersion ?? '0.0.0');
       try {
-        archiveResult = await createPortableArchive(targetDir, path.join(portableBackupDir, portableIdentity.filename), portableIdentity.packageRoot);
-        if(archiveResult.sizeBytes>portableUploadMaxBytes){const oversizedPath=archiveResult.archivePath;archiveResult=null;fs.rmSync(oversizedPath,{force:true});throw new Error(`archive exceeds the ${Math.floor(portableUploadMaxBytes/1024/1024)} MB verified non-ZIP64 recovery ceiling`);}
+        archiveResult = await createPortableArchive(targetDir, path.join(portableBackupDir, portableIdentity.filename), portableIdentity.packageRoot, { maxArchiveBytes: portableUploadMaxBytes });
         fs.writeFileSync(`${archiveResult.archivePath}.sha256`, `${archiveResult.sha256}  ${archiveResult.filename}\n`, { encoding: 'utf8', mode: 0o600 });
       } catch (error) {
-        portableWarning = ` Portable archive failed: ${safeErrorMessage(error, [], 'archive creation failed')}`;
+        archiveResult = null;
+        portableWarning = ` Portable recovery is not ready: ${safeErrorMessage(error, [], 'archive creation failed')}. The verified local package is retained. Create a smaller supported package or arrange supervised recovery.`;
       }
       const external = currentExternalBackupSettings();
       if (archiveResult && external.enabled && external.destination) {
@@ -3414,7 +3425,9 @@ async function createBackup(input: { category: CreatableBackupCategory; type?: B
         }
       }
     }
-    applyBackupRetention(category);
+    // A failed portable artifact must not evict an older verified recovery unit.
+    // The new local package remains available for supervised recovery.
+    if (!portable || archiveResult) applyBackupRetention(category);
     const summary = summaryFromBackupFolder(targetDir, category);
     lastBackupResult = { ok: true, category, type, backupId: folderName, createdAt, message: `${backupTypeLabel(type)} backup created.${portableWarning}`.trim() };
     return summary!;
@@ -11656,6 +11669,7 @@ app.get('/api/backup/portable/:backupId/download', requireAuth, async(req:AuthRe
     const manifest = readBackupManifest(folderPath);
     const archivePath = portableArchivePathFromManifest(manifest);
     if (!archivePath || !fs.existsSync(archivePath)) throw new Error('Portable archive is missing. Create a new verified Master Backup.');
+    inspectPortableArchive(archivePath, { maxArchiveBytes: portableUploadMaxBytes });
     const checksumPath = `${archivePath}.sha256`;
     const expected = fs.existsSync(checksumPath) ? fs.readFileSync(checksumPath, 'utf8').trim().split(/\s+/)[0] : '';
     if (!/^[a-f0-9]{64}$/i.test(expected) || await sha256PortableFile(archivePath) !== expected) throw new Error('Portable archive checksum verification failed.');

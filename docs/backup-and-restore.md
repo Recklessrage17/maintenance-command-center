@@ -193,3 +193,7 @@ Do not release based on automated tests alone. On an isolated Raspberry Pi stagi
 7. Confirm a verified `pre_restore` package exists, a new Master Backup can be created/downloaded, external-copy success/failure is visible, and no service depends on the disconnected source path.
 
 Release approval requires this rehearsal to pass without using production runtime/data.
+
+## Portable archive readiness hardening
+
+Creation now runs the same import inspector before publication. Entries rejected only for exceptional compression are rebuilt with ZIP STORE and inspected again; untrusted imports retain ratio/size/entry/path/ZIP64 defenses. A failed archive leaves its verified local package intact, is not advertised as portable-ready, and reports a smaller-package or supervised-recovery remedy. Existing ZIPs are also inspected before being listed as ready or downloaded. See [deployment recovery hardening](release-deployment-safety.md) for complete external snapshots and guarded lifecycle-aware recovery. A full deployment snapshot also preserves PM Excel source/backups, recovery/backup histories and OS configuration that a Master package does not replace.
