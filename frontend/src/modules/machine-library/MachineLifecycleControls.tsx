@@ -10,9 +10,9 @@ export type MachineLifecycleAsset = {
 };
 export const lifecycleLabel = (state?: string) => state === 'archived' ? 'Archived' : state === 'out_of_service' ? 'Out of Service' : 'Active';
 
-export function MachineLifecycleControls({ asset, canManage, onChanged, onOpenReplacement }: {
+export function MachineLifecycleControls({ asset, canManage, onChanged, onOpenReplacement, onExport }: {
   asset: MachineLifecycleAsset; canManage: boolean; onChanged: (asset: MachineLifecycleAsset) => void;
-  onOpenReplacement: (id: number) => void;
+  onOpenReplacement: (id: number) => void; onExport: (asset: MachineLifecycleAsset) => void;
 }) {
   const [mode, setMode] = useState<'retire' | 'restore' | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -30,13 +30,14 @@ export function MachineLifecycleControls({ asset, canManage, onChanged, onOpenRe
     {canManage && <div className="machine-lifecycle-actions">
       <button className="secondary-button compact-button" type="button" onClick={event => { opener.current = event.currentTarget; setMode('retire'); }}>Retire / Archive Machine</button>
       {asset.lifecycleStatus && asset.lifecycleStatus !== 'active' && <button className="primary-button compact-button" type="button" onClick={event => { opener.current = event.currentTarget; setMode('restore'); }}>Restore Machine</button>}
+      <button className="secondary-button compact-button" type="button" onClick={() => onExport(asset)}>Export History</button>
     </div>}
-    {mode && <MachineLifecycleDialog key={`${asset.id}:${mode}`} asset={asset} restore={mode === 'restore'} onClose={close} onChanged={updated => { onChanged(updated); close(); }} />}
+    {mode && <MachineLifecycleDialog key={`${asset.id}:${mode}`} asset={asset} restore={mode === 'restore'} onClose={close} onChanged={updated => { onChanged(updated); close(); }} onExport={() => onExport(asset)} />}
   </section>;
 }
-function MachineLifecycleDialog({ asset, restore, onClose, onChanged }: {
+function MachineLifecycleDialog({ asset, restore, onClose, onChanged, onExport }: {
   asset: MachineLifecycleAsset; restore: boolean; onClose: () => void;
-  onChanged: (asset: MachineLifecycleAsset) => void;
+  onChanged: (asset: MachineLifecycleAsset) => void; onExport: () => void;
 }) {
   const [state, setState] = useState(restore ? 'active' : asset.lifecycleStatus === 'out_of_service' ? 'out_of_service' : 'archived');
   const [reason, setReason] = useState(asset.retirementReason ?? '');
@@ -98,7 +99,7 @@ function MachineLifecycleDialog({ asset, restore, onClose, onChanged }: {
         {reason === 'replaced' && <label className="form-field"><span>Replacement Machine (optional)</span><select value={replacement} onChange={event => setReplacement(event.target.value)} disabled={pending}><option value="">No replacement selected</option>{asset.replacementMachine && !choices.some(item => item.id === asset.replacementMachine!.id) && <option value={asset.replacementMachine.id}>{asset.replacementMachine.assetNumber}</option>}{choices.map(item => <option key={item.id} value={item.id}>{item.assetNumber} · {item.assetName}</option>)}</select></label>}</>}
       <label className="form-field"><span>{restore ? 'Restore Reason *' : reason === 'other' ? 'Explanation *' : 'Retirement Notes'}</span><textarea value={notes} onChange={event => setNotes(event.target.value)} maxLength={1200} required={restore || reason === 'other'} disabled={pending} rows={3} /></label>
       {error && <p className="form-message error" role="alert">{error}</p>}
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={pending}>Cancel</button>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onExport} disabled={pending}>Export History</button><button type="button" className="secondary-button" onClick={onClose} disabled={pending}>Cancel</button>
         <button type="submit" className="primary-button" disabled={!valid || pending}>{pending ? 'Saving…' : restore ? 'Confirm Restore' : state === 'archived' ? 'Confirm Archive' : 'Confirm Out of Service'}</button></div>
     </form>
   </div>, document.body);
