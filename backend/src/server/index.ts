@@ -18,6 +18,7 @@ import JSZip from 'jszip';
 import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
 import { createPmHistoryReportBuilder, pmReportSelection, PM_REPORT_LIMITS, PmReportError } from './pmHistoryReport.js';
+import { storedUploadPath } from './storedUploadPath.js';
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { LIBRARY_LIMITS_BYTES, LIBRARY_LIMITS_MB, acquireRequestLibraryUploadSlot, cleanupStagedFiles, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
@@ -7797,12 +7798,7 @@ function publicMachineComponentImage(row: MachineComponentImageRow) {
   return { id:row.id,assetId:row.asset_id,componentType:row.component_type,filename:row.original_filename,mimeType:row.mime_type,fileSize:Number(row.file_size),uploadedAt:row.uploaded_at,contentUrl:`${baseUrl}?v=${version}`,downloadUrl:`${baseUrl}?download=true&v=${version}` };
 }
 function machineComponentImageFilePath(storedReference: string) {
-  const relative = storedReference.replace(/\\/g,'/');
-  if (!relative.startsWith('uploads/machine-component-images/')) throw new Error('Component image file reference is invalid.');
-  const resolved = path.resolve(__dirname,'../../',relative);
-  const root = path.resolve(machineComponentImagesDir);
-  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Component image file reference is invalid.');
-  return resolved;
+  return storedUploadPath(machineComponentImagesDir, storedReference, 'uploads/machine-component-images/');
 }
 function validatedMachineComponentImage(file: Express.Multer.File) {
   const extension = path.extname(file.originalname).toLowerCase();
@@ -7861,12 +7857,7 @@ function validatedMachineInspectionRecord(file: Express.Multer.File) {
   return { extension, mimeType: expectedMime };
 }
 function machineInspectionRecordFilePath(storedReference: string) {
-  const relative = storedReference.replace(/\\/g,'/');
-  if (!relative.startsWith('uploads/machine-inspection-records/')) throw new Error('Inspection record file reference is invalid.');
-  const resolved = path.resolve(__dirname,'../../',relative);
-  const root = path.resolve(machineInspectionRecordsDir);
-  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('Inspection record file reference is invalid.');
-  return resolved;
+  return storedUploadPath(machineInspectionRecordsDir, storedReference, 'uploads/machine-inspection-records/');
 }
 function machineInspectionRecordById(id: number) {
   return one<MachineInspectionRecordRow>(`SELECT r.*,a.asset_number,a.asset_name,a.brand,a.model,a.serial_number FROM machine_inspection_records r JOIN machine_assets a ON a.id=r.asset_id WHERE r.id=? AND a.deleted=0`,[id]);

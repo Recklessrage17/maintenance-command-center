@@ -173,10 +173,15 @@ try {
   result = await checked(`/api/facility-info/areas/${area}/folders`, { method: 'POST', cookie, body: { name: 'Security files' } }, 201);
   const facilityFiles = `/api/facility-info/areas/${area}/folders/${result.data.folder.id}/items`;
   const notes = `/api/machine-library/assets/${machine}/notes`;
+  // A real active task lets lifecycle validation reach the malformed-body parser.
+  const taskDb = new DatabaseSync(path.join(runtime.env.MCC_DATA_DIR, 'mcc.sqlite'));
+  const taskId = Number(taskDb.prepare('INSERT INTO pm_tasks (asset_id,asset_library,title,interval_type,interval_value,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+    .run(machine, 'machine', 'Malformed upload parser fixture', 'monthly', 1, new Date().toISOString(), new Date().toISOString()).lastInsertRowid);
+  taskDb.close();
   const routes = [
     ['CSV import', 'POST', '/api/vendors/import'],
     ['PM workbook', 'POST', '/api/pm-excel/preview'],
-    ['PM work order', 'POST', '/api/machine-library/preventive-maintenance/99999/complete'],
+    ['PM work order', 'POST', `/api/machine-library/preventive-maintenance/${taskId}/complete`],
     ['Branding logo', 'POST', '/api/settings/branding/logo'],
     ['Component image', 'PUT', `/api/machine-library/assets/${machine}/component-images/barrel`],
     ['Inspection record', 'POST', `/api/machine-library/assets/${machine}/inspection-records`],
