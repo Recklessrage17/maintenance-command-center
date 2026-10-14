@@ -17,6 +17,7 @@ import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from 'pdf
 import JSZip from 'jszip';
 import XlsxPopulate from 'xlsx-populate';
 import { buildEquipmentAssetSpecPdf, buildMachineAssetSpecPdf, equipmentAssetSpecPdfFilename, machineAssetSpecPdfFilename } from './assetSpecPdf.js';
+import { createPmHistoryReportBuilder, pmReportSelection, PM_REPORT_LIMITS, PmReportError } from './pmHistoryReport.js';
 import { createFacilityInfoService, type FacilityInfoService } from './facilityInfo.js';
 import { LIBRARY_LIMITS_BYTES, LIBRARY_LIMITS_MB, acquireRequestLibraryUploadSlot, cleanupStagedFiles, cleanupStagingDirectory, libraryFileType, promoteStagedFile, safeLibraryFilename, validateStagedLibraryFile } from './libraryUpload.js';
 import { prepareShareableFolderArchive, safeShareableSegment, streamShareableFolderArchive } from './libraryFolderExport.js';
@@ -383,6 +384,12 @@ function receivePortableBackup(req: Request, res: Response, next: NextFunction) 
     res.status(400).json({ok:false,error:message});
   });
 }
+// The read-only reporting request contains IDs only. Bound it before the
+// general application parser, including requests using chunked transfer.
+const pmReportPath = /^\/api\/(machine|equipment)-library\/assets\/[^/]+\/preventive-maintenance\/history\/report\.pdf$/;
+app.use(pmReportPath, express.json({ limit: '8kb' }), (error: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+  res.status(error.status === 413 ? 413 : 400).json({ ok: false, error: error.status === 413 ? 'The report selection request is too large.' : 'The report selection must be valid JSON.' });
+});
 app.use(express.json({ limit: '50mb' }));
 app.use('/api', (req,res,next)=>{
   if (!activePortableRestores.size) return next();
@@ -10279,8 +10286,55 @@ app.get('/api/preventive-maintenance/technicians',requireAuth,requirePmManage,(r
 });
 
 function pmAssetDescriptor(library:AssetLibrary,assetId:number){if(library==='machine'){const asset=machineAssetById(assetId);return asset?{id:asset.id,label:asset.asset_number,displayName:asset.asset_name||asset.asset_number,brand:asset.brand}:null;}const asset=equipmentAssetById(assetId);return asset?{id:asset.id,label:asset.asset_number,displayName:asset.equipment_name||asset.asset_number,brand:asset.manufacturer}:null;}
+const buildPmHistoryReport = createPmHistoryReportBuilder();
 function registerPmWorkflowIntegrityRoutes(library:AssetLibrary){
   const base=`/api/${library}-library`;const viewPermission=`${library}.view`;const managePermission=`${library}.pm_manage`;
+  app.post(`${base}/assets/:assetId/preventive-maintenance/history/report.pdf`, requireAuth, requirePermission(viewPermission), async (req, res) => {
+    try {
+      const assetId = Number(req.params.assetId);
+      if (!/^\d+$/.test(String(req.params.assetId)) || !Number.isSafeInteger(assetId) || assetId <= 0) throw new PmReportError('Asset not found.', 404);
+      const descriptor = pmAssetDescriptor(library, assetId);
+      if (!descriptor) throw new PmReportError('Asset not found.', 404);
+      const selection = pmReportSelection(req.body);
+      if (selection.taskId !== undefined) {
+        const task = pmTaskById(selection.taskId, library, true);
+        if (!task || task.asset_id !== assetId) throw new PmReportError('PM task not found for this asset.', 404);
+      }
+      const placeholders = selection.ids.map(() => '?').join(',');
+      const scope = `h.asset_library=? AND h.asset_id=? AND h.id IN (${placeholders})${selection.taskId === undefined ? '' : ' AND h.pm_task_id=?'}`;
+      const params = [library, assetId, ...selection.ids, ...(selection.taskId === undefined ? [] : [selection.taskId])];
+      const join = 'FROM pm_history h JOIN pm_tasks t ON t.id=h.pm_task_id AND t.asset_id=h.asset_id AND t.asset_library=h.asset_library';
+      const size = one<{ count: number; bytes: number }>(`SELECT COUNT(*) AS count, COALESCE(SUM(
+        LENGTH(CAST(COALESCE(h.completion_notes,'') AS BLOB))+LENGTH(CAST(COALESCE(h.follow_up_reason,'') AS BLOB))+LENGTH(CAST(t.title AS BLOB))
+        +LENGTH(CAST(COALESCE(h.performed_by_name,'') AS BLOB))+LENGTH(CAST(COALESCE(h.work_order_number,'') AS BLOB))+LENGTH(CAST(COALESCE(h.task_type,'') AS BLOB))
+        +COALESCE((SELECT SUM(LENGTH(CAST(p.display_name AS BLOB))) FROM pm_history_participants p WHERE p.pm_history_id=h.id),0)
+        +COALESCE((SELECT SUM(LENGTH(CAST(a.original_filename AS BLOB))) FROM pm_work_order_attachments a WHERE a.pm_history_id=h.id),0)
+      ),0) AS bytes ${join} WHERE ${scope}`, params)!;
+      if (size.count !== selection.ids.length) throw new PmReportError('One or more selected completions are unavailable in this asset and task scope. Refresh the history and review your selection.', 404);
+      if (size.bytes > PM_REPORT_LIMITS.textBytes) throw new PmReportError('This selection exceeds the report text limit. Select fewer records.', 413);
+      const rows = all<PmHistoryRow & { schedule_title: string; schedule_interval: string }>(`SELECT
+        h.id,h.pm_task_id,h.asset_id,h.asset_library,h.work_order_number,h.machine_not_scheduled_or_running,
+        h.completion_date,h.completed_meter,h.performed_by_user_id,h.performed_by_name,h.interval_type,h.task_type,
+        h.completion_notes,h.no_issues_found,h.follow_up_required,h.follow_up_reason,h.previous_due_date,h.previous_due_meter,
+        h.next_due_date,h.next_due_meter,h.created_at,t.title AS schedule_title,t.interval_type AS schedule_interval
+        ${join} WHERE ${scope} ORDER BY h.completion_date,h.id`, params);
+      const records = rows.map(row => {
+        const record = publicPmHistory(row), attachment = pmWorkOrderAttachment(row.id);
+        return { ...record, performedBy: row.performed_by_name || record.performedBy, taskTitle: row.task_type || row.schedule_title,
+          intervalType: row.interval_type || row.schedule_interval,
+          attachment: attachment && attachment.asset_id === assetId && attachment.asset_library === library ? record.attachment : null };
+      });
+      const machine = library === 'machine' ? machineAssetById(assetId) : null;
+      const equipment = library === 'equipment' ? equipmentAssetById(assetId) : null;
+      const report = await buildPmHistoryReport({ library, asset: { number: descriptor.label, name: descriptor.displayName,
+        model: machine?.model || equipment?.model || '', serial: machine?.serial_number || equipment?.serial_number || '' }, records, generatedAt: now() });
+      res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-MCC-PM-Report-Count', String(report.count));
+      sendDownload(res, report.filename, 'application/pdf', report.bytes);
+    } catch (error) {
+      res.status(error instanceof PmReportError ? error.status : 500).json({ ok: false, error: error instanceof PmReportError ? error.message : 'The PM history report could not be generated. Try a smaller selection or retry.' });
+    }
+  });
   app.get(`${base}/assets/:assetId/preventive-maintenance/meters`,requireAuth,requirePermission(viewPermission),(req,res)=>{const asset=pmAssetDescriptor(library,Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:`${library==='machine'?'Machine':'Equipment'} asset not found.`});res.json({ok:true,meters:{hours:publicPmAssetMeter(pmAssetMeter(asset.id,library,'hours')),cycles:publicPmAssetMeter(pmAssetMeter(asset.id,library,'cycles'))},history:pmAssetMeterHistory(asset.id,library).map(publicPmMeterHistory)});});
   app.put(`${base}/assets/:assetId/preventive-maintenance/meters/:meterType`,requireAuth,requirePermission(managePermission),async(req:AuthRequest,res)=>{try{const asset=pmAssetDescriptor(library,Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:`${library==='machine'?'Machine':'Equipment'} asset not found.`});const meterType=String(req.params.meterType).toLowerCase() as PmMeterType;if(meterType!=='hours'&&meterType!=='cycles')throw new Error('Meter type must be hours or cycles.');const body=isRecord(req.body)?req.body:{};const reading=validatePmMeterReading(body.reading??body.currentReading,meterType);const previous=pmAssetMeter(asset.id,library,meterType);const override=pmMeterOverrideFromInput(body,previous?Number(previous.current_reading):null,reading);db.exec('BEGIN IMMEDIATE');let applied:ReturnType<typeof applyPmAssetMeter>;try{applied=applyPmAssetMeter({assetId:asset.id,library,meterType,newReading:reading,actor:req.user!,source:'machine_meter_entry',assetLabel:asset.label,override});db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}let sync:null|Awaited<ReturnType<typeof performPmWorkbookSync>>=null;if(library==='machine'&&fs.existsSync(pmExcelLatestPath)){sync=await performPmWorkbookSync({actor:req.user!,sourcePath:pmExcelLatestPath,originalFilename:pmSyncState().originalFilename||'PM_report.xlsx',trackerUpdates:applied.tasks.map(task=>pmTrackerUpdate(task,asset.label,undefined,undefined,asset.displayName)),historyRows:[]});}scheduleAutoBackup(`${library} ${meterType} meter updated`,req.user!);res.json({ok:true,meter:publicPmAssetMeter(applied.meter),updatedScheduleCount:applied.tasks.length,tasks:applied.tasks.map(publicPmTask),sync:sync?.status??pmSyncState(),syncError:sync&&!sync.ok?sync.error:null});}catch(error){res.status(400).json({ok:false,error:safeErrorMessage(error,[],'Machine meter could not be updated.')});}});
   app.get(`${base}/assets/:assetId/preventive-maintenance/history`,requireAuth,requirePermission(viewPermission),(req,res)=>{const asset=pmAssetDescriptor(library,Number(req.params.assetId));if(!asset)return res.status(404).json({ok:false,error:`${library==='machine'?'Machine':'Equipment'} asset not found.`});type AssetHistoryRow=PmHistoryRow&{schedule_title:string;schedule_deleted:number;schedule_deleted_at:string|null};const history=all<AssetHistoryRow>(`SELECT history.*,task.title AS schedule_title,task.deleted AS schedule_deleted,task.deleted_at AS schedule_deleted_at FROM pm_history history JOIN pm_tasks task ON task.id=history.pm_task_id AND task.asset_library=history.asset_library WHERE history.asset_id=? AND history.asset_library=? ORDER BY history.completion_date DESC,history.id DESC`,[asset.id,library]).map(row=>({...publicPmHistory(row),taskTitle:row.schedule_title,scheduleDeleted:Boolean(row.schedule_deleted),scheduleDeletedAt:row.schedule_deleted_at}));res.json({ok:true,asset,history});});
