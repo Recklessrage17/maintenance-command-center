@@ -600,11 +600,16 @@ export function writeRecoveryFiles(input: {
   fs.writeFileSync(path.join(input.packagePath, 'RECOVERY_README.txt'), readme, { encoding: 'utf8', mode: 0o600 });
 }
 
-export async function createPortableArchive(packagePath: string, archivePath: string, packageRoot: string) {
+class PortableCompressionError extends Error {
+  constructor(public entries: string[]) { super(`Portable archive entry has an unsafe compression ratio: ${entries[0]}`); }
+}
+
+export async function createPortableArchive(packagePath: string, archivePath: string, packageRoot: string,
+  limits: Parameters<typeof normalizeArchiveLimits>[0] = {}) {
   if (!PORTABLE_ROOT_PATTERN.test(packageRoot)) throw new Error('Portable package root name is invalid.');
   fs.mkdirSync(path.dirname(archivePath), { recursive: true });
   const temporaryPath = `${archivePath}.partial-${crypto.randomUUID()}`;
-  try {
+  async function writeArchive(storedEntries = new Set<string>()) {
     const output = fs.createWriteStream(temporaryPath, { flags: 'wx', mode: 0o600 });
     const archive = new ZipArchive({ zlib: { level: 6 } });
     const completion = new Promise<void>((resolve, reject) => {
@@ -614,13 +619,31 @@ export async function createPortableArchive(packagePath: string, archivePath: st
       archive.once('error', reject);
     });
     archive.pipe(output);
-    archive.directory(packagePath, packageRoot);
-    await archive.finalize();
-    await completion;
+    archive.directory(packagePath, packageRoot, entry => ({ ...entry,
+      store: storedEntries.has(`${packageRoot}/${entry.name.replaceAll('\\', '/')}`) }));
+    try { await Promise.all([archive.finalize(), completion]); }
+    catch (error) {
+      archive.abort(); output.destroy();
+      if (!output.closed) await new Promise<void>(resolve => output.once('close', resolve));
+      throw error;
+    }
+  }
+  try {
+    // Use the actual importer before publishing; only ratio failures are repaired.
+    await writeArchive();
+    try { inspectPortableArchive(temporaryPath, limits); }
+    catch (error) {
+      if (!(error instanceof PortableCompressionError)) throw error;
+      fs.rmSync(temporaryPath);
+      await writeArchive(new Set(error.entries));
+      inspectPortableArchive(temporaryPath, limits);
+    }
     if (!fs.statSync(temporaryPath).size) throw new Error('Portable archive is empty.');
-    if (fs.existsSync(archivePath)) throw new Error('Portable archive filename already exists.');
-    fs.renameSync(temporaryPath, archivePath);
-    return { archivePath, filename: path.basename(archivePath), sizeBytes: fs.statSync(archivePath).size, sha256: await sha256File(archivePath) };
+    const sha256 = await sha256File(temporaryPath);
+    // Create-only publication also protects a valid archive in a filename race.
+    fs.linkSync(temporaryPath, archivePath);
+    fs.unlinkSync(temporaryPath);
+    return { archivePath, filename: path.basename(archivePath), sizeBytes: fs.statSync(archivePath).size, sha256 };
   } catch (error) {
     if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
     throw error;
@@ -638,6 +661,7 @@ export function inspectPortableArchive(archivePath: string, limitsInput: { maxAr
   const names = new Set<string>();
   const roots = new Set<string>();
   const localOffsets = new Set<number>();
+  const unsafeCompressionEntries: string[] = [];
   for (const entry of entries) {
     validateArchiveEntryName(entry.name);
     const comparisonName = entry.name.replace(/\/$/, '').toLowerCase();
@@ -658,7 +682,7 @@ export function inspectPortableArchive(archivePath: string, limitsInput: { maxAr
     expandedSizeBytes += entry.uncompressedSize;
     if (expandedSizeBytes > limits.maxExpandedBytes) throw new Error(`Portable archive exceeds the ${formatBytes(limits.maxExpandedBytes)} expanded-size limit.`);
     if (entry.compressedSize > 0 && entry.uncompressedSize / entry.compressedSize > 250 && entry.uncompressedSize > 10 * 1024 * 1024) {
-      throw new Error(`Portable archive entry has an unsafe compression ratio: ${entry.name}`);
+      unsafeCompressionEntries.push(entry.name);
     }
   }
   if (roots.size !== 1) throw new Error('Portable archive must contain exactly one MCC Master Backup package root.');
@@ -666,6 +690,7 @@ export function inspectPortableArchive(archivePath: string, limitsInput: { maxAr
   for (const required of [`${rootName}/manifest.json`, `${rootName}/RECOVERY_README.txt`, `${rootName}/database/mcc.sqlite`, `${rootName}/recovery/restore-manifest.json`]) {
     if (!names.has(required.toLowerCase())) throw new Error(`Portable archive is missing required entry: ${required.slice(rootName.length + 1)}`);
   }
+  if (unsafeCompressionEntries.length) throw new PortableCompressionError(unsafeCompressionEntries);
   return { entries, rootName, compressedSizeBytes: stat.size, expandedSizeBytes, centralDirectoryOffset: parsed.centralDirectoryOffset };
 }
 
