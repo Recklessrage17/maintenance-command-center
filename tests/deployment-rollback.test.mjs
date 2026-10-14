@@ -33,7 +33,7 @@ function fixture(t) {
     put(path.join(app, dir, 'package', 'index.js'));
   }
   put(path.join(app, '.npm', 'cache-file'));
-  return { root, app, backups, args: ['--app-dir', app, '--backup-dir', backups] };
+  return { root, app, backups, args: ['--legacy-checkout-only', '--app-dir', app, '--backup-dir', backups] };
 }
 
 function snapshot(t) {
@@ -115,7 +115,7 @@ test('refuses deletion outside the deployment backup directory', t => {
 
 test('refuses archive destination inside MCC source', t => {
   const f = fixture(t);
-  const result = run(['--app-dir', f.app, '--backup-dir', path.join(f.app, 'archive')]);
+  const result = run(['--legacy-checkout-only', '--app-dir', f.app, '--backup-dir', path.join(f.app, 'archive')]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /outside the application directory/);
 });
