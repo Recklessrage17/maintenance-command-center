@@ -1,0 +1,14 @@
+.machine-library-view-switch,.machine-lifecycle-actions {display:flex;flex-wrap:wrap;gap:.65rem;}
+.machine-library-page .machine-library-view-switch button[aria-pressed="true"] {background:rgba(68,215,255,.14);border-color:var(--color-accent,#44d7ff);box-shadow:inset 0 0 0 1px var(--color-accent,#44d7ff);}
+.machine-lifecycle-panel {display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.machine-lifecycle-copy {display:grid;gap:.4rem;min-width:0;overflow-wrap:anywhere;}
+.machine-lifecycle-copy p {margin:0;white-space:pre-wrap;}
+.machine-lifecycle-copy .link-button {justify-self:start;}
+.machine-lifecycle-backdrop {z-index:1100;}
+.machine-lifecycle-dialog {width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:1.4rem;display:grid;gap:.85rem;}
+.machine-lifecycle-dialog p {margin:0;overflow-wrap:anywhere;}
+.machine-lifecycle-dialog select,.machine-lifecycle-dialog textarea {width:100%;min-height:44px;font:inherit;color:inherit;background:var(--glass-input-bg,rgba(8,20,33,.9));border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:.65rem;}
+.machine-lifecycle-dialog .modal-actions {display:flex;flex-wrap:wrap;gap:.6rem;}
+.machine-archive-summary {grid-column:1/-1;display:grid;gap:.25rem;white-space:normal;overflow-wrap:anywhere;}
+@media(max-width:600px),(max-height:500px){.machine-library-page.is-archive-view .machine-toolbar-card{display:none;}}
+@media(max-width:640px){.machine-lifecycle-panel{align-items:stretch;flex-direction:column;}.machine-lifecycle-actions button{flex:1 1 160px;min-height:44px;}.machine-library-view-switch button{flex:1;min-height:44px;}.machine-lifecycle-dialog{padding:1rem;}.machine-lifecycle-dialog .modal-actions button{flex:1 1 140px;min-height:44px;}}

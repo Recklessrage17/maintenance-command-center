@@ -20,18 +20,20 @@ import { AssetDocumentLibrary } from './AssetDocumentLibrary';
 import { PreventiveMaintenanceTracking } from './PreventiveMaintenanceTracking';
 import { MachineAssetSpecPreview } from './MccAssetSpecSheet';
 import { downloadAssetSpecPdf } from './assetSpecHelpers';
+import { MachineLifecycleControls, lifecycleLabel, type MachineLifecycleAsset } from './MachineLifecycleControls';
+import './machine-archive.css';
 
 type ConditionStatus = 'new' | 'used' | 'worn' | 'rebuilt_repaired';
 type HistoryRecord = { id: number; action: string; entityLabel: string; userName: string; reasonNote: string; createdAt: string };
 type MachinePmCardSummary = { total:number; status:'overdue'|'due-now'|'due-soon'|'hold'|'inactive'|'current'|'incomplete'; label:string };
-type MachineAsset = {
+type MachineAsset = MachineLifecycleAsset & {
   id: number; assetNumber: string; assetName: string; brand: string; model: string; serialNumber: string; machineYear: string; machineType: string; powerType: string; setupType: string; shotSizeOz: number; tonnage: number; barrelDiameter: string; location: string; department: string; status: string; voltageValue: string; voltageType: string; fullLoadAmp: string; machineLength: string; machineWidth: string; machineHeight: string; fullDieHeightLength: string; screwType: string; screwTipType: string; screwTipInstalledDate: string; screwInstalledDate: string; barrelInstalledDate: string; barrelEndCapInstalledDate: string; barrelLength: string; screwLength: string; screwRebuildRepaired: boolean; barrelRebuildRepaired: boolean; screwConditionStatus: ConditionStatus; barrelConditionStatus: ConditionStatus; hasDoubleShotInjection: boolean; hasPlungerInjection: boolean; screw2Type: string; screw2TipType: string; screw2RebuildRepaired: boolean; screw2ConditionStatus: ConditionStatus; screw2InstalledDate: string; screw2TipInstalledDate: string; screw2Length: string; barrel2Diameter: string; barrel2RebuildRepaired: boolean; barrel2ConditionStatus: ConditionStatus; barrel2InstalledDate: string; barrel2EndCapInstalledDate: string; barrel2Length: string; plungerType: string; plungerRebuildRepaired: boolean; plungerConditionStatus: ConditionStatus; plungerInstalledDate: string; plungerLength: string; plungerDiameter: string; plungerBarrelType: string; plungerBarrelRebuildRepaired: boolean; plungerBarrelConditionStatus: ConditionStatus; plungerBarrelInstalledDate: string; plungerBarrelEndCapInstalledDate: string; plungerBarrelLength: string; plungerBarrelDiameter: string; notes: string; criticalNotes: string; brandColorHex: string; createdAt: string; updatedAt: string; pmSummary?:MachinePmCardSummary|null; historyPreview?:HistoryRecord[];
 };
 type BrandSetting = { brandName: string; colorHex: string };
 type ImportMode = 'add_new_only' | 'upsert';
 type ImportRejectedDuplicate = { rowNumber: number; assetNumber: string; reason: string };
 type MachineImportSummary = { addedCount: number; updatedCount: number; skippedCount: number; rejectedDuplicateCount: number; errors?: string[]; rejectedDuplicates?: ImportRejectedDuplicate[]; changedAssetNumbers?: string[] };
-type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz' | 'pmSummary' | 'historyPreview'> & { shotSizeOz: string };
+type AssetForm = Omit<MachineAsset, 'id' | 'brandColorHex' | 'createdAt' | 'updatedAt' | 'shotSizeOz' | 'pmSummary' | 'historyPreview' | Exclude<keyof MachineLifecycleAsset, 'id' | 'assetNumber' | 'assetName' | 'brand' | 'model' | 'serialNumber'>> & { shotSizeOz: string };
 type ReplacementField = 'screw' | 'screw_tip' | 'barrel' | 'barrel_end_cap' | 'screw2' | 'screw2_tip' | 'barrel2' | 'barrel2_end_cap' | 'plunger' | 'plunger_barrel' | 'plunger_barrel_end_cap';
 type UnitFieldKey = 'machineLength' | 'machineWidth' | 'machineHeight' | 'fullDieHeightLength' | 'barrelLength' | 'screwLength' | 'screw2Length' | 'barrel2Length' | 'plungerLength' | 'plungerDiameter' | 'plungerBarrelLength' | 'plungerBarrelDiameter';
 type StringFormKey = { [K in keyof AssetForm]: AssetForm[K] extends string ? K : never }[keyof AssetForm];
@@ -313,6 +315,9 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const [brandSettings,setBrandSettings]=useState<BrandSetting[]>([]);
   const [permissions,setPermissions]=useState({canEdit:editableRoles.has(userRole),canDelete:deleteRoles.has(userRole),canManagePm:editableRoles.has(userRole)});
   const [search,setSearch]=useState('');
+  const [archiveView,setArchiveView]=useState(false);
+  const canManageLifecycle=userRole==='Manager'||userRole==='Admin';
+  const assetsRequest=useRef(0);
   const [brandFilter,setBrandFilter]=useState('');
   const [statusFilter,setStatusFilter]=useState('');
   const [filtersOpen,setFiltersOpen]=useState(false);
@@ -347,21 +352,33 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
   const canManagePm = permissions.canManagePm || editableRoles.has(userRole);
 
   function loadAssets() {
-    const params = new URLSearchParams();
+    const requestId=++assetsRequest.current;
+    const params = new URLSearchParams({lifecycle:archiveView?'archived':'current'});
     if (search.trim()) params.set('q', search.trim());
     if (brandFilter) params.set('brand', brandFilter);
     if (statusFilter) params.set('status', statusFilter);
     api<{ok:boolean;assets:MachineAsset[];brandSettings:BrandSetting[];permissions:{canEdit:boolean;canDelete:boolean;canManagePm:boolean}}>(`/api/machine-library/assets?${params}`)
-      .then(data=>{ const nextAssets=data.assets ?? []; setAssets(nextAssets); setBrandSettings(data.brandSettings ?? []); setPermissions(data.permissions ?? permissions); setColorDrafts(Object.fromEntries((data.brandSettings ?? []).map(setting=>[setting.brandName,setting.colorHex]))); const requestedAsset=!requestedAssetOpenedRef.current&&requestedAssetIdRef.current?nextAssets.find(asset=>asset.id===requestedAssetIdRef.current):null; if(requestedAsset){ requestedAssetOpenedRef.current=true; openDetail(requestedAsset); } })
+      .then(async data=>{ if(requestId!==assetsRequest.current)return; const nextAssets=data.assets ?? []; setAssets(nextAssets); setBrandSettings(data.brandSettings ?? []); setPermissions(data.permissions ?? permissions); setColorDrafts(Object.fromEntries((data.brandSettings ?? []).map(setting=>[setting.brandName,setting.colorHex]))); const requestedAsset=!requestedAssetOpenedRef.current&&requestedAssetIdRef.current?nextAssets.find(asset=>asset.id===requestedAssetIdRef.current):null; if(requestedAsset){ requestedAssetOpenedRef.current=true; openDetail(requestedAsset); } else if(!requestedAssetOpenedRef.current&&requestedAssetIdRef.current){ requestedAssetOpenedRef.current=true; const response=await api<{asset:MachineAsset}>(`/api/machine-library/assets/${requestedAssetIdRef.current}`); setArchiveView(response.asset.lifecycleStatus==='archived'); openDetail(response.asset); } })
       .catch(error=>setMessage({kind:'error',text:(error as Error).message}));
   }
-  useEffect(()=>{ loadAssets(); },[search,brandFilter,statusFilter]);
+  useEffect(()=>{ loadAssets(); },[search,brandFilter,statusFilter,archiveView]);
   useEffect(()=>{
     if(!detailAsset)return;
     const frame=window.requestAnimationFrame(()=>document.querySelector<HTMLElement>('.machine-detail-modal')?.focus());
     return()=>window.cancelAnimationFrame(frame);
   },[detailAsset?.id]);
 
+  function lifecycleChanged(updated:MachineLifecycleAsset) {
+    setDetailAsset(updated as MachineAsset);
+    setArchiveView(updated.lifecycleStatus==='archived');
+    setAssets(current=>current.map(asset=>asset.id===updated.id?updated as MachineAsset:asset));
+    setMessage({kind:'success',text:updated.lifecycleStatus==='active'?'Machine restored with its original records.':'Machine lifecycle updated. Records retained.'});
+    loadAssets();
+  }
+  async function openReplacement(id:number){
+    try{const data=await api<{asset:MachineAsset}>(`/api/machine-library/assets/${id}`);openingAssetIdRef.current=null;setArchiveView(data.asset.lifecycleStatus==='archived');openDetail(data.asset);}
+    catch(error){setMessage({kind:'error',text:(error as Error).message});}
+  }
   function openAdd() { machineAction.reset(); setSetupDraft({setupType:'Standard Injection',hasDoubleShotInjection:false,hasPlungerInjection:false}); setShowSetup(true); }
   function continueAddFromSetup() { machineAction.reset(); setEditing(null); setForm({...blankAssetForm,...setupDraft}); setShowSetup(false); setShowEditor(true); }
   function openEdit(asset: MachineAsset) { machineAction.reset(); setEditing(asset); setForm(assetToForm(asset)); setShowEditor(true); }
@@ -491,19 +508,21 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
     <label className="form-field"><span>Status</span><select className="glass-input" value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="">All status</option><option value="active">Active</option><option value="down">Down</option><option value="disabled">Disabled</option><option value="removed">Removed</option></select></label>
   </>;
   return (
-    <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'}`}>
+    <div className={`page-stack machine-library-page mcc-glass-page ${detailAsset ? 'is-detail-view' : 'is-list-view'} ${archiveView?'is-archive-view':''}`}>
       {message&&<p className={message.kind==='error'?'form-message inventory-toast error':'form-message inventory-toast'}>{message.text}<button className="toast-close-button" type="button" onClick={()=>setMessage(null)}>Close</button></p>}
-      {detailAsset ? <MachineDetailView asset={detailAsset} canEdit={canEdit} canManagePm={canManagePm} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /> : <>
+      {detailAsset ? <><MachineLifecycleControls asset={detailAsset} canManage={canManageLifecycle} onChanged={lifecycleChanged} onOpenReplacement={id=>void openReplacement(id)} /><MachineDetailView key={detailAsset.id} asset={detailAsset} canEdit={canEdit&&detailAsset.lifecycleStatus!=='archived'} canManagePm={canManagePm&&(!detailAsset.lifecycleStatus||detailAsset.lifecycleStatus==='active')} performedBy={userFullName} onClose={()=>closeDetail()} onEdit={()=>{ const asset = detailAsset; closeDetail(()=>openEdit(asset)); }} onLogs={()=>{ const asset = detailAsset; closeDetail(()=>void loadLogs(asset)); }} onRecordLogs={asset=>setRecordLogsAsset(asset)} onAssetUpdated={updated=>{ setDetailAsset(updated); setAssets(current=>current.map(asset=>asset.id===updated.id ? updated : asset)); setMessage({kind:'success',text:'Machine asset section updated.'}); loadAssets(); }} /></> : <>
+        <div className="machine-library-view-switch" role="group" aria-label="Machine library view"><button className="secondary-button" type="button" aria-pressed={!archiveView} onClick={()=>setArchiveView(false)}>Machine Library</button><button className="secondary-button" type="button" aria-pressed={archiveView} onClick={()=>setArchiveView(true)}>Old Machines Archive</button></div>
+        {archiveView&&<p className="form-help">Archived machines retain their identities and history. Managers and Admins can restore machines or export their available history.</p>}
         <LibraryMobileSearchFilter library="Machine Library" label="Search assets" placeholder="Press 14, Toyo, model, serial number..." query={search} onQueryChange={setSearch} activeFilterCount={activeFilterCount} filtersOpen={filtersOpen} onFiltersOpenChange={setFiltersOpen} filtersId="machine-library-mobile-filters" filters={filterFields} />
         <section className="mcc-card machine-toolbar-card glass-panel glass-panel--highlight">
         <label className="form-field machine-search"><span>Search assets</span><input className="glass-input" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Press 14, Toyo, model, serial number..." /></label>
         <div id="machine-library-desktop-filters" className="library-mobile-filter-panel">{filterFields}</div>
-        <div className="machine-toolbar-actions">
+        {!archiveView&&<div className="machine-toolbar-actions">
           <button className="primary-button compact-button glass-button glass-button--primary" type="button" onClick={openAdd} disabled={!canEdit}>Add Machine Asset</button>
           <MachineLibraryToolsDropdown canEdit={canEdit} importMode={importMode} setImportMode={setImportMode} isImporting={isImporting} onImportMachineList={()=>fileRef.current?.click()} onExportTemplate={downloadTemplate} onOpenBrandColors={()=>setShowColors(true)} />
           <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden-file-input" onChange={()=>void importMachineList()} />
-        </div>
-        <p className="form-help machine-toolbar-note">Add New Only rejects existing Asset Numbers. Upsert updates existing assets and creates new ones. Duplicate Asset Numbers inside one file are always rejected after the first valid row.</p>
+        </div>}
+        {!archiveView&&<p className="form-help machine-toolbar-note">Add New Only rejects existing Asset Numbers. Upsert updates existing assets and creates new ones. Duplicate Asset Numbers inside one file are always rejected after the first valid row.</p>}
         {!canEdit&&<p className="form-help machine-toolbar-note">Tier 3, Manager, Admin, or Owner Admin access is required to add or edit machine assets.</p>}
         </section>
         <div className={`machine-card-grid ${assets.length === 1 ? 'single-result' : 'multi-results'}`}>
@@ -520,7 +539,7 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
             </div>
             <div className="machine-card-status-cell">
               <span className="machine-card-field-label">Status</span>
-              <MccStatusPill variant={machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.status}`}>{machineStatusLabel(asset.status)}</MccStatusPill>
+              <MccStatusPill variant={asset.lifecycleStatus&&asset.lifecycleStatus!=='active'?'muted':machineStatusVariant(asset.status)} className={`machine-card-status status-${asset.lifecycleStatus&&asset.lifecycleStatus!=='active'?'lifecycle-inactive':asset.status}`}>{asset.lifecycleStatus&&asset.lifecycleStatus!=='active'?lifecycleLabel(asset.lifecycleStatus):machineStatusLabel(asset.status)}</MccStatusPill>
             </div>
             <div className="machine-pill-card-metrics">
               <MccMetricPill label="Year / Age" value={<MachineYearAge year={asset.machineYear} />} />
@@ -529,10 +548,11 @@ export function MachineLibraryPage({ userRole = '', userFullName = '' }: { userR
               <MccMetricPill label="Serial #" value={asset.serialNumber || '-'} />
             </div>
             <div className="machine-card-summary-actions"><span className="machine-card-field-label">PM</span>{asset.pmSummary?<button className="machine-pm-summary-control" type="button" onClick={event=>{ event.stopPropagation(); openDetail(asset); }} aria-label={`${asset.pmSummary.label}. Open machine asset detail.`}><MccStatusPill variant={machinePmSummaryVariant(asset.pmSummary.status)} className={`machine-pm-summary-pill pm-summary-${asset.pmSummary.status}`}>{asset.pmSummary.label}</MccStatusPill></button>:<span className="machine-pm-summary-empty">No PM</span>}</div>
+            {archiveView&&<div className="machine-archive-summary"><span>Reason: {asset.retirementReason||'Not recorded'} · {asset.retiredAt?new Date(asset.retiredAt).toLocaleDateString():''}</span>{asset.retirementNotes&&<span>{asset.retirementNotes}</span>}{asset.replacementMachine&&<span>Replacement: {asset.replacementMachine.assetNumber}</span>}</div>}
             <span className="asset-row-open-cue" aria-hidden="true"><span>Open</span><b>›</b></span>
           </MccPillCard>
         ))}
-        {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>Add a machine asset or import the press list template.</p></section>}
+        {!assets.length&&<section className="mcc-card machine-empty-card"><strong>No machine assets found.</strong><p>{archiveView?'No archived machines match this search.':'Add a machine asset or import the press list template.'}</p></section>}
         </div>
       </>}
       {showSetup&&<InjectionSetupModal setup={setupDraft} setSetup={setSetupDraft} onContinue={continueAddFromSetup} onCancel={()=>setShowSetup(false)} />}
