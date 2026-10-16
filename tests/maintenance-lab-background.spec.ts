@@ -176,7 +176,9 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
   expect(dimensions.workspaceScrollTop).toBe(0);
 
   if(!mobile) {
+    console.log('Document before End',await page.evaluate(()=>({active:document.activeElement?.tagName,focused:document.hasFocus(),y:window.scrollY,h:document.documentElement.scrollHeight,bodyHeight:document.body.scrollHeight})));
     await pressDocumentScrollKey(page,'End');
+    console.log('Document after End',await page.evaluate(()=>({active:document.activeElement?.tagName,focused:document.hasFocus(),y:window.scrollY,h:document.documentElement.scrollHeight,bodyHeight:document.body.scrollHeight})));
     await expect.poll(()=>page.evaluate(()=>window.scrollY+window.innerHeight>=document.documentElement.scrollHeight-1)).toBe(true);
     await pressDocumentScrollKey(page,'Control+Home');
     await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(0);
