@@ -15,7 +15,9 @@ import {pathToFileURL} from 'node:url';
 const {migrateAssetNoteWorkLogs}=await import(pathToFileURL(path.join(legacy,'backend/dist/server/assetNoteWorkLogs.js')).href);
 fs.mkdirSync(evidence,{recursive:true});
 const codeRoots={'source':candidate,'legacy-source':legacy};
-const root=fs.mkdtempSync(path.join(evidence,'migration-'));
+const migrationTemporary=process.platform==='win32'?path.resolve(candidate,'../m'):evidence;
+fs.mkdirSync(migrationTemporary,{recursive:true});
+const root=fs.mkdtempSync(path.join(migrationTemporary,'migration-'));
 const results={source:candidateSha,legacy:legacySha,native,platform:process.platform,node:process.version,checks:[],metrics:{}};
 const output=path.join(evidence,'final-migration-results.json');
 function save(){fs.writeFileSync(output,JSON.stringify(results,null,2));}
@@ -34,7 +36,7 @@ async function start(code,label,storage){
  return {child,base,fixture:storage,env,app,async close(){if(child.exitCode===null){const p=new Promise(r=>child.once('exit',r));child.kill();const timer=setTimeout(()=>child.kill('SIGKILL'),3000);await p;clearTimeout(timer);}alive.delete(child);fs.writeFileSync(path.join(evidence,`migration-${label}.log`),log);}};
 }
 const sourceStorage=path.join(root,'external-state');let runtime,db;
-const tables=['machine_assets','equipment_assets','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','asset_note_updates','asset_note_update_entries','asset_note_update_attachments','asset_note_labor','asset_note_lifecycle_events','pm_tasks','pm_history','pm_history_participants','pm_asset_meters','pm_meter_history','pm_work_order_attachments','machine_documents','machine_document_folders','machine_component_images'];
+const tables=['machine_assets','equipment_assets','machine_inspection_records','machine_asset_notes','machine_asset_note_attachments','equipment_asset_notes','equipment_asset_note_attachments','equipment_documents','equipment_document_folders','asset_note_updates','asset_note_update_entries','asset_note_update_attachments','asset_note_labor','asset_note_lifecycle_events','pm_tasks','pm_history','pm_history_participants','pm_asset_meters','pm_meter_history','pm_work_order_attachments','machine_documents','machine_document_folders','machine_component_images'];
 function snapshot(db){return Object.fromEntries(tables.map(t=>[t,db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()]));}
 function preserved(db,before){for(const[t,rows]of Object.entries(before)){const columns=rows.length?Object.keys(rows[0]):null;const after=db.prepare(`SELECT ${columns?columns.map(c=>'"'+c.replaceAll('"','""')+'"').join(','):'*'} FROM ${t} ORDER BY id`).all();assert.deepEqual(after,rows,t);}}
 async function login(base){const r=await request(base,'/api/auth/login',{method:'POST',body:{email:'owner@example.test',password}});assert.equal(r.response.status,200);return r.cookie;}
@@ -43,10 +45,16 @@ try{
  runtime=await start('legacy-source','legacy-first',sourceStorage);let cookie=await owner(runtime.base);const assets=[];
  for(const assetNumber of['MIGRATION-OLD','MIGRATION-REPLACEMENT']){const r=await request(runtime.base,'/api/machine-library/assets',{method:'POST',cookie,body:{assetNumber,assetName:'Synthetic legacy machine',brand:'MCC',status:'active'}});assert.equal(r.response.status,201,JSON.stringify(r.data));assets.push(r.data.asset);}
  db=new DatabaseSync(path.join(sourceStorage,'data/mcc.sqlite'));const seeded=seedMachineHistory(db,runtime,assets[0].id,assets[1].id);migrateAssetNoteWorkLogs(db);
+ db.prepare('UPDATE pm_history SET completion_notes=? WHERE id=?').run('Original production-schema PM correction',seeded.historyId);
  check('Legacy database really predates lifecycle schema',()=>assert.equal(db.prepare('PRAGMA table_info(machine_assets)').all().some(c=>c.name==='lifecycle_status'),false));
  const workbook=path.join(runtime.env.MCC_PM_EXCEL_DIR,'PM_report_latest.xlsx');fs.copyFileSync(path.join(candidate,'tests/fixtures/pm-report-sanitized.xlsx'),workbook);
  const originals=[...seeded.payloads.map(f=>({path:f.destination,sha256:f.sha256})),{path:workbook,sha256:digest(fs.readFileSync(workbook))}];db.close();db=null;await runtime.close();runtime=null;
- runtime=await start('legacy-source','legacy-normalized',sourceStorage);db=new DatabaseSync(path.join(sourceStorage,'data/mcc.sqlite'));const before=snapshot(db);db.close();db=null;await runtime.close();runtime=null;
+ runtime=await start('legacy-source','legacy-normalized',sourceStorage);cookie=await login(runtime.base);
+ const oldBackup=await request(runtime.base,'/api/backup/create',{method:'POST',cookie,body:{category:'master'}});assert.equal(oldBackup.response.status,201,JSON.stringify(oldBackup.data));
+ const oldArchive=path.join(runtime.env.MCC_BACKUPS_DIR,'portable',oldBackup.data.backup.portableArchiveFilename),oldArchiveHash=await sha256File(oldArchive);
+ const oldPackage=path.join(runtime.env.MCC_BACKUPS_DIR,'MCC Master back up',oldBackup.data.backup.id);
+ check('Original 1.5.18 Master package is valid for 2.0.0 recovery',()=>assert.equal(validatePortablePackage(oldPackage,'2.0.0').ok,true));
+ db=new DatabaseSync(path.join(sourceStorage,'data/mcc.sqlite'));const before=snapshot(db);db.close();db=null;await runtime.close();runtime=null;
  db=new DatabaseSync(path.join(sourceStorage,'data/mcc.sqlite'));db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();db=null;
  fs.cpSync(sourceStorage,path.join(root,'pre-upgrade-preserved'),{recursive:true});fs.writeFileSync(path.join(evidence,'legacy-row-baseline.json'),JSON.stringify(before,null,2));
  results.metrics.legacyDatabaseBytes=fs.statSync(path.join(sourceStorage,'data/mcc.sqlite')).size;
@@ -66,7 +74,7 @@ try{
  const backupStarted=Date.now();const backup=await request(runtime.base,'/api/backup/create',{method:'POST',cookie,body:{category:'master'}});results.metrics.masterBackupMs=Date.now()-backupStarted;
  check('Master Backup creates a portable recovery-ready package',()=>{assert.equal(backup.response.status,201,JSON.stringify(backup.data));assert.equal(backup.data.backup.portableReady,true);});
  const backupId=backup.data.backup.id;const packagePath=path.join(runtime.env.MCC_BACKUPS_DIR,'MCC Master back up',backupId);const archive=path.join(runtime.env.MCC_BACKUPS_DIR,'portable',backup.data.backup.portableArchiveFilename);
- const validation=validatePortablePackage(packagePath,'1.5.18');const inspected=inspectPortableArchive(archive);
+ const validation=validatePortablePackage(packagePath,'2.0.0');const inspected=inspectPortableArchive(archive);
  results.metrics.backup={packageBytes:validation.expandedSizeBytes,archiveBytes:fs.statSync(archive).size,entries:inspected.entries.length,sha256:await sha256File(archive),checkedFileCount:validation.checkedFileCount};
  check('Backup full manifest checksums, database and library payload integrity',()=>assert.equal(validation.ok,true));
  const response=await fetch(`${runtime.base}/api/backup/portable/${encodeURIComponent(backupId)}/download`,{headers:{Cookie:cookie}});assert.equal(response.status,200);const downloaded=path.join(root,'downloaded.zip');await pipeline(Readable.fromWeb(response.body),fs.createWriteStream(downloaded));
@@ -77,6 +85,7 @@ try{
  db=new DatabaseSync(path.join(sourceStorage,'data/mcc.sqlite'));
  check('Master Restore preserves archived state and replacement identity',()=>{assert.deepEqual(db.prepare('SELECT * FROM machine_assets WHERE id=?').get(assets[0].id),lifecycleBefore);preserved(db,stateBeforeBackup);});
  check('Master Restore retains historical files and database integrity',()=>{for(const f of originals)assert.equal(digest(fs.readFileSync(f.path)),f.sha256);assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);});
+ check('Earlier 1.5.18 backup ZIP remains byte-identical after migration and restore',()=>assert.equal(digest(fs.readFileSync(oldArchive)),oldArchiveHash));
  db.close();db=null;await runtime.close();runtime=null;
  results.rollback={status:'NOT VERIFIED',reason:'Historical code is never booted against migrated work here; native deployment helper rejection is tested separately.'};
  results.status='pass';save();console.log(JSON.stringify({passed:results.checks.filter(c=>c.status==='pass').length,failed:0,rollback:results.rollback}));

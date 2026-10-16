@@ -32,4 +32,5 @@ reference/
 playwright-report/
 test-results/
 artifacts/issue-49/
+artifacts/release-2.0.0/
 

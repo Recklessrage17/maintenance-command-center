@@ -1,18 +1,18 @@
 name: MCC isolated native ARM64 validation
 
 on:
-  pull_request:
-    branches: [codex/release-hardening-safe-recovery]
-    types: [opened, synchronize, reopened]
-    paths:
-      - .github/workflows/arm64-release-validation.yml
-      - validation/arm64/**
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Approved immutable 2.0.0 candidate SHA (40 hex characters)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: mcc-arm64-validation-${{ github.event.pull_request.number }}
+  group: mcc-arm64-validation-${{ inputs.candidate_sha }}
   cancel-in-progress: true
 
 defaults:
@@ -22,11 +22,12 @@ defaults:
 jobs:
   compatibility:
     name: Native ARM64 compatibility and bounded profile
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/arm64-release-validation'
+    if: github.repository == 'Recklessrage17/maintenance-command-center'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:
       CI: 'true'
+      MCC_ARM64_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
       MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
       MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
       MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
@@ -38,20 +39,21 @@ jobs:
       - name: Check out validation package head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           path: validation-package
           persist-credentials: false
-      - name: Check out exact PR 201 application candidate
+      - name: Check out exact approved 2.0.0 candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 87e1605f5bced355c484a90e1bb42b405f16f24e
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
           path: candidate
           persist-credentials: false
       - name: Check out historical synthetic migration source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: b6a230ce22b90ed81add79b5a8d1422d6eb2250f
+          ref: 3929a957d4f633d8129997ed1eec818e2e3efbdb
           path: legacy-source
           persist-credentials: false
       - name: Set up native Node.js 22
@@ -83,7 +85,7 @@ jobs:
       - name: Offline synthetic migration, recovery and authorization suites
         timeout-minutes: 14
         run: |
-          sudo -n env -i PATH="$PATH" MCC_ARM64_PACKAGE="$MCC_ARM64_PACKAGE" MCC_ARM64_CANDIDATE="$MCC_ARM64_CANDIDATE" MCC_ARM64_LEGACY="$MCC_ARM64_LEGACY" MCC_ARM64_EVIDENCE="$MCC_ARM64_EVIDENCE" unshare --mount --net --pid --fork --mount-proc --propagation private --kill-child /bin/bash "$MCC_ARM64_PACKAGE/validation/arm64/offline-tests.sh"
+          sudo -n env -i PATH="$PATH" MCC_ARM64_CANDIDATE_SHA="$MCC_ARM64_CANDIDATE_SHA" MCC_ARM64_PACKAGE="$MCC_ARM64_PACKAGE" MCC_ARM64_CANDIDATE="$MCC_ARM64_CANDIDATE" MCC_ARM64_LEGACY="$MCC_ARM64_LEGACY" MCC_ARM64_EVIDENCE="$MCC_ARM64_EVIDENCE" unshare --mount --net --pid --fork --mount-proc --propagation private --kill-child /bin/bash "$MCC_ARM64_PACKAGE/validation/arm64/offline-tests.sh"
       - name: Retain synthetic summaries and bounded metrics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -98,11 +100,12 @@ jobs:
 
   deployment:
     name: Probe and validate disposable native deployment integration
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/arm64-release-validation'
+    if: github.repository == 'Recklessrage17/maintenance-command-center'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     env:
       CI: 'true'
+      MCC_ARM64_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
       MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
       MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
       MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
@@ -114,20 +117,21 @@ jobs:
       - name: Check out validation package head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           path: validation-package
           persist-credentials: false
-      - name: Check out exact PR 201 application candidate
+      - name: Check out exact approved 2.0.0 candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 87e1605f5bced355c484a90e1bb42b405f16f24e
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
           path: candidate
           persist-credentials: false
       - name: Check out incompatible historical source for refusal test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: b6a230ce22b90ed81add79b5a8d1422d6eb2250f
+          ref: 3929a957d4f633d8129997ed1eec818e2e3efbdb
           path: legacy-source
           persist-credentials: false
       - name: Set up native Node.js 22

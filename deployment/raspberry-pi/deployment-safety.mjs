@@ -12,6 +12,17 @@ const roles = ['data','uploads','documents','files','pmWorkOrders','pmExcel','re
 const excludedNames = new Set(['node_modules','.npm','.cache']);
 const inside = (parent, child) => { const r=path.relative(parent,child); return !r || (r!=='..'&&!r.startsWith(`..${path.sep}`)&&!path.isAbsolute(r)); };
 const fail = message => { throw new Error(message); };
+// A missing runtime directory is recorded only after explicit operator review.
+// Check every existing ancestor so absence cannot conceal a linked parent.
+function reviewedRoot(filename, absent=false) {
+  if(!absent)return existing(filename);
+  if(typeof filename!=='string'||!path.isAbsolute(filename)||/[\x00-\x1f]/.test(filename))fail('An absolute explicit storage path is required.');
+  const resolved=path.resolve(filename);let parent=resolved;
+  if(fs.existsSync(resolved))fail(`Reviewed absent storage now exists: ${filename}`);
+  while(!fs.existsSync(parent)){if(fs.lstatSync(parent,{throwIfNoEntry:false}))fail('Linked missing storage is not allowed.');parent=path.dirname(parent);}
+  existing(parent);return resolved;
+}
+function mountPath(filename) {while(!fs.existsSync(filename))filename=path.dirname(filename);return filename;}
 export function fileHash(filename) {
   if(fs.lstatSync(filename).isSymbolicLink()||!fs.statSync(filename).isFile())fail('Snapshot checksums require regular files without links.');
   const fd=fs.openSync(filename,'r'),hash=crypto.createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);
@@ -35,9 +46,11 @@ export function linuxMountInfo(filename) {
 }
 export function validateMounts(storage, mountInfo=linuxMountInfo) {
   for(const filename of [storage.appDir,storage.snapshotDir,...Object.values(storage.roots),...storage.configurationFiles]) {
-    const actual=mountInfo(filename);
+    const actual=mountInfo(mountPath(filename));
     if(!storage.mounts.some(m=>m.target===actual.target&&m.uuid.toLowerCase()===String(actual.uuid).toLowerCase()&&m.fstype===actual.fstype))fail(`Storage mount mismatch or missing persistent mount: ${filename}`);
   }
+  const appMount=mountInfo(storage.appDir),snapshotMount=mountInfo(storage.snapshotDir);
+  if(appMount.target===snapshotMount.target||String(appMount.uuid).toLowerCase()===String(snapshotMount.uuid).toLowerCase())fail('Snapshot storage requires an independently mounted filesystem with a different UUID from application storage.');
 }
 export function loadStorageManifest(filename,{mountInfo=linuxMountInfo}={}) {
   filename=existing(filename,false);
@@ -49,7 +62,10 @@ export function loadStorageManifest(filename,{mountInfo=linuxMountInfo}={}) {
   for(const envFile of ['.env','backend/.env']){const filename=path.join(storage.appDir,envFile);if(fs.existsSync(filename))storage.configurationFiles.push(existing(filename,false));}
   const snapshotStat=fs.statSync(storage.snapshotDir);
   if(process.platform==='linux'&&(snapshotStat.uid!==0||(snapshotStat.mode&0o022)))fail('Snapshot storage must be root-owned and not group/world writable.');
-  for(const role of roles)storage.roots[role]=existing(input.roots[role]);
+  const absent=input.absentRoots??[];
+  if(!Array.isArray(absent)||new Set(absent).size!==absent.length||absent.some(r=>!roles.includes(r)||r==='data'))fail('Invalid explicitly reviewed absent roots.');
+  storage.absentRoots=absent;
+  for(const role of roles)storage.roots[role]=reviewedRoot(input.roots[role],absent.includes(role));
   if(new Set(Object.values(storage.roots)).size!==roles.length)fail('Storage roles must use distinct directories.');
   for(const root of Object.values(storage.roots))if(inside(root,storage.appDir))fail('Runtime storage cannot contain application source.');
   if(storage.roots.documents!==path.join(storage.appDir,'backend','documents')||storage.roots.files!==path.join(storage.appDir,'backend','files'))fail('documents/files must match the actual backend-relative runtime directories.');
@@ -65,7 +81,7 @@ export function assertLiveStorage(storage,pid) {
   const recovery=env.MCC_RECOVERY_DIR||(inside(storage.appDir,data)?env.HOME&&path.join(env.HOME,'.mcc','recovery'):path.join(data,'recovery'));
   if(!recovery)fail('Cannot resolve service recovery storage; configure MCC_RECOVERY_DIR explicitly.');
   const effective={data,uploads:env.MCC_UPLOADS_DIR||'backend/uploads',backups:env.MCC_BACKUPS_DIR||'backend/backups',documents:'backend/documents',files:'backend/files',pmExcel:env.MCC_PM_EXCEL_DIR||path.join(data,'pm-excel'),pmWorkOrders:env.MCC_PM_WORK_ORDER_DIR||path.join(data,'PDF - Work orders'),recovery};
-  for(const role of roles)if(existing(path.resolve(storage.appDir,effective[role]))!==storage.roots[role])fail(`Running MCC ${role} differs from the reviewed storage manifest.`);
+  for(const role of roles)if(reviewedRoot(path.resolve(storage.appDir,effective[role]),storage.absentRoots?.includes(role))!==storage.roots[role])fail(`Running MCC ${role} differs from the reviewed storage manifest.`);
 }
 export function databaseState(dataDir,scratchDir=os.tmpdir()) {
   existing(path.join(dataDir,'mcc.sqlite'),false);
@@ -118,14 +134,14 @@ function comparable(entries){return entries.map(({uid:_uid,gid:_gid,...entry})=>
 export function createSnapshot(storage,{phase='manual',mountInfo=linuxMountInfo}={}) {
   validateMounts(storage,mountInfo);
   const units={source:{original:storage.appDir,entries:inventory(storage.appDir,Object.values(storage.roots),true)}};
-  for(const role of roles)units[role]={original:storage.roots[role],entries:inventory(storage.roots[role],rootExclusions(storage,role))};
+  for(const role of roles)units[role]={original:storage.roots[role],...(storage.absentRoots?.includes(role)?{absent:true}:{}),entries:storage.absentRoots?.includes(role)?[]:inventory(storage.roots[role],rootExclusions(storage,role))};
   const configurations=[...new Set(storage.configurationFiles)].map((file,index)=>({original:file,path:`configuration/${index}-${path.basename(file)}`,bytes:fs.statSync(file).size,sha256:fileHash(file),mode:fs.statSync(file).mode&0o777}));
   const requiredBytes=Object.values(units).flatMap(u=>u.entries).reduce((n,e)=>n+(e.bytes||0),0)+configurations.reduce((n,e)=>n+e.bytes,0);
   const free=fs.statfsSync(storage.snapshotDir);if(free.bavail*free.bsize<requiredBytes+64*1024**2)fail('Insufficient space for full deployment snapshot plus 64 MiB headroom.');
   const id=`mcc-deployment-${new Date().toISOString().replaceAll(':','-')}-${crypto.randomUUID()}`,directory=path.join(storage.snapshotDir,id),partial=path.join(storage.snapshotDir,`.${id}.partial`);
   fs.mkdirSync(partial,{mode:0o700});
   // Failed snapshots are retained as private .partial evidence, never replace valid ones.
-  for(const[name,unit]of Object.entries(units))copyInventory(unit.original,path.join(partial,'units',name),unit.entries);
+  for(const[name,unit]of Object.entries(units))if(!unit.absent)copyInventory(unit.original,path.join(partial,'units',name),unit.entries);
   for(const entry of configurations){const dest=path.join(partial,entry.path);fs.mkdirSync(path.dirname(dest),{recursive:true,mode:0o700});fs.copyFileSync(entry.original,dest,fs.constants.COPYFILE_EXCL);fs.chmodSync(dest,0o600);}
   const state=databaseState(path.join(partial,'units/data'),storage.snapshotDir);
   const manifest={schemaVersion:1,id,phase,createdAt:new Date().toISOString(),units,configurations,state,requiredBytes,mounts:storage.mounts,policy:'Operator recovery into new storage only; never silently overwrite post-snapshot work.'};
@@ -141,6 +157,7 @@ export function verifySnapshot(directory) {
   if(manifest.schemaVersion!==1||!manifest.units||!manifest.id||!Array.isArray(manifest.configurations)||!['source',...roles].every(r=>manifest.units[r]))fail('Incomplete deployment snapshot.');
   for(const[name,unit]of Object.entries(manifest.units)){
     if(!['source',...roles].includes(name)||!Array.isArray(unit.entries))fail('Unexpected snapshot unit.');
+    if(unit.absent){if(name==='source'||name==='data'||unit.absent!==true||unit.entries.length||fs.existsSync(path.join(directory,'units',name)))fail('Invalid absent snapshot unit.');continue;}
     if(JSON.stringify(comparable(inventory(path.join(directory,'units',name))))!==JSON.stringify(comparable(unit.entries)))fail(`Snapshot checksum/tree mismatch: ${name}`);
   }
   for(const entry of manifest.configurations){if(!/^configuration\/[0-9]+-[^/\\]+$/.test(entry.path)||fileHash(path.join(directory,entry.path))!==entry.sha256)fail('Configuration checksum mismatch.');}
@@ -150,7 +167,7 @@ export function verifySnapshot(directory) {
 }
 export function assertUnchanged(snapshot,storage) {
   const manifest=verifySnapshot(snapshot);
-  for(const role of roles)if(storage.roots[role]!==manifest.units[role].original||JSON.stringify(comparable(inventory(storage.roots[role],rootExclusions(storage,role))))!==JSON.stringify(comparable(manifest.units[role].entries)))fail(`Post-snapshot ${role} changed; preserve current state and require an operator recovery decision.`);
+  for(const role of roles){const unit=manifest.units[role];if(storage.roots[role]!==unit.original||(unit.absent?(fs.lstatSync(storage.roots[role],{throwIfNoEntry:false})!==undefined):JSON.stringify(comparable(inventory(storage.roots[role],rootExclusions(storage,role))))!==JSON.stringify(comparable(unit.entries))))fail(`Post-snapshot ${role} changed; preserve current state and require an operator recovery decision.`);}
   for(const entry of manifest.configurations)if(fileHash(entry.original)!==entry.sha256)fail('Deployment configuration changed after snapshot.');
 }
 export function recoverToNewStorage(snapshot,destination,targetApp,decision,{mountInfo=linuxMountInfo,storage}={}) {
@@ -167,8 +184,8 @@ export function recoverToNewStorage(snapshot,destination,targetApp,decision,{mou
   fs.mkdirSync(destination,{mode:0o700});const app=path.join(destination,'application');
   // Never place the old deployment's absolute-path .env into runnable recovery code.
   copyInventory(targetApp,app,inventory(targetApp,[...Object.values(storage.roots),path.join(targetApp,'.env'),path.join(targetApp,'backend/.env')],true));
-  const restored={};for(const role of roles){const target=['documents','files'].includes(role)?path.join(app,'backend',role):path.join(destination,'runtime',role);copyInventory(path.join(snapshot,'units',role),target,manifest.units[role].entries);restored[role]=target;}
-  for(const role of roles)if(JSON.stringify(comparable(inventory(restored[role])))!==JSON.stringify(comparable(manifest.units[role].entries)))fail(`Recovery byte verification failed: ${role}`);
+  const restored={};for(const role of roles){const target=['documents','files'].includes(role)?path.join(app,'backend',role):path.join(destination,'runtime',role);if(!manifest.units[role].absent)copyInventory(path.join(snapshot,'units',role),target,manifest.units[role].entries);restored[role]=target;}
+  for(const role of roles)if(manifest.units[role].absent?fs.existsSync(restored[role]):JSON.stringify(comparable(inventory(restored[role])))!==JSON.stringify(comparable(manifest.units[role].entries)))fail(`Recovery byte verification failed: ${role}`);
   fs.cpSync(path.join(snapshot,'configuration'),path.join(destination,'preserved-configuration'),{recursive:true,errorOnExist:true});
   assertCompatible(app,restored.data,{scratchDir:storage.snapshotDir});validateMounts(storage,mountInfo);
   fs.writeFileSync(path.join(destination,'recovery.json'),JSON.stringify({snapshot:manifest.id,recoveryPoint:manifest.createdAt,decision,app,roots:restored,notStarted:true,notice:'Review configuration, ownership and all paths before starting. Old absolute destinations were not overwritten.'},null,2),{flag:'wx',mode:0o600});

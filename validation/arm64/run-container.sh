@@ -53,10 +53,10 @@ image="$name:local"
 cleanup() { docker rm --force "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 record_base_image
-if ! timeout 360 docker build --pull --platform linux/arm64 --build-arg "MCC_ARM64_BASE_IMAGE=$base_digest" --tag "$image" "$context" > "$evidence/container-build.log" 2>&1; then not_verified 'Disposable container build unavailable; inspect build log'; exit 0; fi
+if ! timeout 360 docker build --pull --platform linux/arm64 --build-arg "MCC_ARM64_BASE_IMAGE=$base_digest" --tag "$image" "$context" > "$evidence/container-build.log" 2>&1; then provenance_failed 'Disposable container build failed; inspect container-build.log'; fi
 record_built_image
 sha256sum "$(command -v node)" > "$evidence/node-binary.sha256.txt"
-if ! docker run --detach --name "$name" --privileged --cgroupns private --network none --memory 4g --memory-swap 4g --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --env MCC_ARM64_DISPOSABLE=1 --env MCC_ARM64_CANDIDATE=/input/candidate --env MCC_ARM64_LEGACY=/input/legacy-source --env MCC_ARM64_EVIDENCE=/evidence --mount "type=bind,src=$MCC_ARM64_CANDIDATE,dst=/input/candidate,readonly" --mount "type=bind,src=$MCC_ARM64_LEGACY,dst=/input/legacy-source,readonly" --mount "type=bind,src=$MCC_ARM64_PACKAGE,dst=/input/package,readonly" --mount "type=bind,src=$evidence,dst=/evidence" "$image" > "$evidence/container-id.txt" 2>&1; then not_verified 'Private systemd container could not start'; exit 0; fi
+if ! docker run --detach --name "$name" --privileged --cgroupns private --network none --memory 4g --memory-swap 4g --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --env MCC_ARM64_DISPOSABLE=1 --env "MCC_ARM64_CANDIDATE_SHA=$MCC_ARM64_CANDIDATE_SHA" --env MCC_ARM64_CANDIDATE=/input/candidate --env MCC_ARM64_LEGACY=/input/legacy-source --env MCC_ARM64_EVIDENCE=/evidence --mount "type=bind,src=$MCC_ARM64_CANDIDATE,dst=/input/candidate,readonly" --mount "type=bind,src=$MCC_ARM64_LEGACY,dst=/input/legacy-source,readonly" --mount "type=bind,src=$MCC_ARM64_PACKAGE,dst=/input/package,readonly" --mount "type=bind,src=$evidence,dst=/evidence" "$image" > "$evidence/container-id.txt" 2>&1; then not_verified 'Private systemd container could not start'; exit 0; fi
 docker inspect "$name" > "$evidence/container-config.json"
 limits="$(docker inspect "$name" --format '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}} {{.HostConfig.CgroupnsMode}}')"
 if [[ "$limits" != '4294967296 4294967296 private' ]]; then not_verified 'Requested private cgroup and exact 4 GiB no-swap limit were not confirmed'; exit 0; fi

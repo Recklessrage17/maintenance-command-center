@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-export const candidateSha='87e1605f5bced355c484a90e1bb42b405f16f24e';
-export const legacySha='b6a230ce22b90ed81add79b5a8d1422d6eb2250f';
+// Local release preparation must supply the immutable commit being validated.
+export const candidateSha=process.env.MCC_ARM64_CANDIDATE_SHA;
+export const legacySha='3929a957d4f633d8129997ed1eec818e2e3efbdb';
 export const packageRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 export const candidate=path.resolve(process.env.MCC_ARM64_CANDIDATE||packageRoot);
 export const legacy=path.resolve(process.env.MCC_ARM64_LEGACY||path.join(candidate,'../legacy-source'));

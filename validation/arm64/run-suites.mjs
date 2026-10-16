@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 import {candidate,packageRoot,evidence,native,local,write,isolatedEnvironment} from './config.mjs';
 if(!local)assert.ok(native,'Refusing to label a non-native run as ARM64 evidence.');
 const suites=['machine-retirement-archive-api.mjs','pm-history-report-api.mjs','portable-recovery-readiness.mjs','portable-master-backup.mjs','external-uploads-api.mjs','backend-upload-security-regression.mjs','pm-workflow-upgrade.mjs','pm-work-order-attachments.mjs','password-permissions-api.mjs','authentication-password-change-regression.mjs','issue-174-inspection-records-api.mjs','system-update-api.mjs'];
+suites.push('release-backup-readiness.mjs');
 const requested=process.argv.slice(2).filter(a=>a!=='--local');for(const suite of requested)assert.ok(suites.includes(suite),'Only reviewed suite filenames are allowed.');
 fs.mkdirSync(evidence,{recursive:true});const tempBase=process.platform==='win32'?path.resolve(packageRoot,'../t'):evidence;fs.mkdirSync(tempBase,{recursive:true});const root=fs.mkdtempSync(path.join(tempBase,'r-')),results=[];
 for(const suite of requested.length?requested:suites){

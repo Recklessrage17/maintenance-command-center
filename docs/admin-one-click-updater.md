@@ -72,6 +72,7 @@ sudo install -o root -g root -m 0755 deployment/raspberry-pi/update-mcc /usr/loc
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/mcc-update /usr/local/bin/mcc-update
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/write-status.py /usr/local/lib/mcc-update/write-status.py
 sudo install -o root -g root -m 0755 deployment/raspberry-pi/deployment-safety.mjs /usr/local/lib/mcc-update/deployment-safety.mjs
+sudo install -o root -g root -m 0755 deployment/raspberry-pi/create-deployment-rollback /usr/local/sbin/create-deployment-rollback
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/mcc-update.conf /etc/mcc-update.conf
 
 sudo install -o root -g root -m 0644 deployment/raspberry-pi/mcc-update-request.service /etc/systemd/system/mcc-update-request.service

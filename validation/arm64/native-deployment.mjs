@@ -42,6 +42,20 @@ try{
  fs.chmodSync(manifestFile,0o666);assert.throws(()=>loadStorageManifest(manifestFile),/root-owned/);fs.chmodSync(manifestFile,0o600);fs.chownSync(manifestFile,1000,1000);assert.throws(()=>loadStorageManifest(manifestFile),/root-owned/);fs.chownSync(manifestFile,0,0);record('writable and non-root-owned storage manifests refused');
  storage=loadStorageManifest(manifestFile);pre=cli('snapshot','--manifest',manifestFile,'--service',unit,'--phase','pre-update');const verified=verifySnapshot(pre.directory);assert.equal(Object.keys(verified.units).length,9);for(const file of graph.payloads)assert.equal(digest(fs.readFileSync(file.destination)),file.sha256);for(const role of['documents','files','pmExcel','recovery','backups'])assert.ok(fs.existsSync(path.join(pre.directory,'units',role,'retained-original.txt')));record('complete quiescent snapshot and checksums verified',{id:pre.id,bytes:pre.requiredBytes});
  const originalManifestHash=fileHash(path.join(pre.directory,'manifest.json'));
+ const sameFilesystem='/sandbox/os/same-filesystem-snapshots';fs.mkdirSync(sameFilesystem,{mode:0o700});
+ const sameManifest='/sandbox/os/same-filesystem.json';fs.writeFileSync(sameManifest,JSON.stringify({...input,snapshotDir:sameFilesystem}),{mode:0o600});
+ assert.throws(()=>loadStorageManifest(sameManifest),/independently mounted/);record('snapshot filesystem must have an independent real mount and UUID');
+ const absentManifest='/sandbox/os/absent-storage.json';
+ for(const role of['documents','files'])fs.renameSync(roots[role],`/sandbox/data/preserved-${role}`);
+ try {
+  fs.writeFileSync(absentManifest,JSON.stringify({...input,absentRoots:['documents','files']}),{mode:0o600});
+  assert.throws(()=>loadStorageManifest(manifestFile));
+  const absentStorage=loadStorageManifest(absentManifest),absentSnapshot=cli('snapshot','--manifest',absentManifest,'--service',unit,'--phase','absent-roots');
+  const verifiedAbsent=verifySnapshot(absentSnapshot.directory);assert.equal(verifiedAbsent.units.documents.absent,true);assert.equal(verifiedAbsent.units.files.absent,true);
+  const recoveredAbsent=recoverToNewStorage(absentSnapshot.directory,path.join(snapshots,'absent-recovery'),app,`RECOVER ${absentSnapshot.id} INTO NEW STORAGE; REVIEW AND ACCEPT THE SNAPSHOT RECOVERY POINT`,{storage:absentStorage});
+  for(const role of['documents','files']){assert.equal(fs.existsSync(roots[role]),false);assert.equal(fs.existsSync(recoveredAbsent.roots[role]),false);}
+  record('reviewed absent directories stay absent in real native snapshots and recovery');
+ } finally {for(const role of['documents','files'])fs.renameSync(`/sandbox/data/preserved-${role}`,roots[role]);}
  assert.throws(()=>assertCompatible(legacy,roots.data,{scratchDir:snapshots}),/Unsafe downgrade/);record('actual historical checkout rejected without booting it');
  command('umount',['/sandbox/data']);assert.throws(()=>loadStorageManifest(manifestFile));record('missing mounted data filesystem refused');
  command('mount',[process.env.MCC_ARM64_CHANGED_DEVICE,'/sandbox/data']);for(const dir of[...Object.values(roots).filter(p=>p.startsWith('/sandbox/data/')),snapshots])fs.mkdirSync(dir,{recursive:true,mode:0o700});assert.throws(()=>loadStorageManifest(manifestFile),/mount mismatch/i);record('different real filesystem UUID at same mount target refused');command('umount',['/sandbox/data']);command('mount',[process.env.MCC_ARM64_DATA_DEVICE,'/sandbox/data']);storage=loadStorageManifest(manifestFile);

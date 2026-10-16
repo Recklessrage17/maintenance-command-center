@@ -1,16 +1,14 @@
-# Isolated native ARM64 validation package
+# MCC 2.0.0 candidate validation
 
-This is a draft for review. It has not been committed, pushed, published or executed on GitHub ARM64. It does not authorize a merge, release, deployment, paid infrastructure, production access or Pi connection. Application version stays **1.5.18**.
+This local package is prepared for owner review. It has not been published or run on native ARM64 for the 2.0.0 candidate. Prior PR #202 evidence tested application `87e1605f5bced355c484a90e1bb42b405f16f24e` at 1.5.18 and cannot certify these new bytes.
 
-The application under test is fixed at **87e1605f5bced355c484a90e1bb42b405f16f24e** (PR #201). The historical synthetic migration source is fixed at **b6a230ce22b90ed81add79b5a8d1422d6eb2250f**. The latter is a known pre-lifecycle 1.5.18 checkout, not a claim about the production Pi's installed SHA. No production configuration or data is used.
+The application and validation checkout must both equal the explicit immutable `MCC_ARM64_CANDIDATE_SHA`. The historical fixture is the owner's installed commit `3929a957d4f633d8129997ed1eec818e2e3efbdb`. No production data or configuration is used. All package and lockfile application versions must equal 2.0.0.
 
-## Proposed publication and trigger
+## Execution after publication approval
 
-After separate publication approval, commit only the added workflow and `validation/arm64/` files on `codex/arm64-release-validation`, based on the exact PR #201 head, and open a review PR **against `codex/release-hardening-safe-recovery`**. Recheck the live base/head and main first; stop and assess drift. Do not modify PR #201 or retarget/merge it as part of validation.
+The local workflow uses `workflow_dispatch` with required `candidate_sha`; it checks out both application and validation source at that SHA, verifies clean trees and the exact historical source, and retains explicit capability results. The workflow must first be published under separate owner approval and be present on the default branch for GitHub manual dispatch eligibility. This preparation neither publishes it nor dispatches an older workflow in its place. Publishing a different commit requires new exact-commit validation. An owner-approved PR-event validation route is another option, but needs an explicitly reviewed trigger change.
 
-The workflow uses `pull_request` with opened/synchronize/reopened events and a base-branch/path filter. It explicitly checks out the validation PR **head SHA**, then separately checks out the fixed application and legacy SHAs. It does not rely on a branch-only `workflow_dispatch`, a merge checkout silently including new main changes, `pull_request_target`, write permissions, repository secrets or credentials. The same-repository/exact-head-branch condition and source-audit script refuse an unexpected input. Only added workflow/validation files may differ from the approved candidate. Checkout credentials are not persisted.
-
-Existing MCC CI will also run on the new review PR because its existing pull-request trigger is unfiltered. It is separate from this ARM64 workflow and is not ARM64 evidence. No existing workflow is edited.
+For local Windows preparation set `MCC_ARM64_CANDIDATE_SHA`, `MCC_ARM64_LEGACY` and `MCC_ARM64_EVIDENCE`, then invoke verify-package, runtime, migration, run-suites and profile with `--local`. Local results must remain labelled Windows x64, not native ARM64. The migration harness preserves original columns across 23 tables, checks the PM correction, old Master-package compatibility, original attachment/workbook hashes, lifecycle identity, repeat startup and Master restore. It retains the earlier ZIP unchanged.
 
 ## Compatibility job
 
@@ -20,7 +18,7 @@ The unprivileged runtime/SQLite/zlib probe runs before workload isolation. Privi
 
 Application tests run inside a fresh PID/mount/network namespace, with loopback only and no default route. Only explicit temporary synthetic storage, disabled updater/HTTPS and empty SMTP settings reach the application. Dependency setup happens before network isolation. The network-namespace command fails rather than silently running with ordinary network access if the runner cannot isolate it.
 
-`migration.mjs` creates synthetic state by booting the fixed historical source, preserves an independent pre-upgrade copy and compares original columns/IDs across 19 tables and eight attachment/workbook hashes after candidate migration. It checks default lifecycle state, repeat-start idempotence, archive/replacement identity, verified Master backup, original ZIP checksum and real restore/database integrity. Historical code is not booted against migrated work.
+`migration.mjs` creates synthetic state by booting the exact installed historical source, preserves an independent pre-upgrade copy and compares original columns/IDs across 23 tables and eight attachment/workbook hashes after candidate migration. It checks default lifecycle state, repeat-start idempotence, archive/replacement identity, verified Master backup, original ZIP checksum and real restore/database integrity. Historical code is not booted against migrated work.
 
 `run-suites.mjs` runs these existing exact candidate tests sequentially, with per-suite logs, deadlines, elapsed time and GNU time CPU/RSS/IO reports on Linux:
 

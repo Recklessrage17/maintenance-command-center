@@ -3202,7 +3202,8 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
   if (portableArchivePath && fs.existsSync(portableArchivePath)) {
     try {
       inspectPortableArchive(portableArchivePath, { maxArchiveBytes: portableUploadMaxBytes });
-      if (!/^[a-f0-9]{64}\s/i.test(fs.readFileSync(`${portableArchivePath}.sha256`, 'utf8'))) throw new Error('Missing checksum');
+      const expected = fs.readFileSync(`${portableArchivePath}.sha256`, 'utf8').trim().split(/\s+/)[0];
+      if (!/^[a-f0-9]{64}$/i.test(expected) || sha256FileSync(portableArchivePath) !== expected.toLowerCase()) throw new Error('Portable archive checksum mismatch');
       portableReady = true;
     }
     catch { portableError = 'This ZIP is outside the supported recovery limits. Create a new Master Backup; if it is still too large, preserve the verified local package and arrange supervised recovery.'; }
@@ -3267,14 +3268,15 @@ function removeBackupFolder(category: CreatableBackupCategory, folderPath: strin
     if (fs.existsSync(`${archivePath}.sha256`)) fs.rmSync(`${archivePath}.sha256`, { force: true });
   }
 }
-function applyBackupRetention(category: CreatableBackupCategory) {
+function applyBackupRetention(category: CreatableBackupCategory, protectVerified = false) {
   const backups = listBackupsByCategory(category);
   const retention = backupRetention[category];
   for (const type of Object.keys(retention) as BackupType[]) {
     const limit = retention[type] ?? 0;
     if (limit <= 0) continue;
     const typed = backups.filter(backup=>backup.type===type).sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
-    typed.slice(limit).forEach(backup=>removeBackupFolder(category, path.join(backupDirectory(category), backup.id)));
+    const protectedId = protectVerified ? typed.find(backup=>backup.portableReady)?.id : undefined;
+    typed.slice(limit).filter(backup=>backup.id!==protectedId).forEach(backup=>removeBackupFolder(category, path.join(backupDirectory(category), backup.id)));
   }
 }
 function defaultManualBackupType(category: CreatableBackupCategory): BackupType {
@@ -3426,9 +3428,9 @@ async function createBackup(input: { category: CreatableBackupCategory; type?: B
         }
       }
     }
-    // A failed portable artifact must not evict an older verified recovery unit.
-    // The new local package remains available for supervised recovery.
-    if (!portable || archiveResult) applyBackupRetention(category);
+    // Bound failed local packages while retaining the newest verified recovery
+    // unit per type (at most one protected package beyond that type's cap).
+    applyBackupRetention(category, portable && !archiveResult);
     const summary = summaryFromBackupFolder(targetDir, category);
     lastBackupResult = { ok: true, category, type, backupId: folderName, createdAt, message: `${backupTypeLabel(type)} backup created.${portableWarning}`.trim() };
     return summary!;

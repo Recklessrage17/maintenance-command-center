@@ -22,7 +22,8 @@ const snapshotDir=path.join(runtime.fixture,'deployment-snapshots');fs.mkdirSync
 // Windows tests inject observed mount records, never a CLI bypass. Real Linux
 // findmnt/UUID/service integration remains an ARM staging gate.
 const mount={target:path.parse(runtime.fixture).root,uuid:'synthetic-ssd-uuid',fstype:'test-fixture'};
-const mountInfo=()=>({...mount});const manifestPath=path.join(runtime.fixture,'storage.json');const input={schemaVersion:1,appDir:runtime.appRoot,snapshotDir,roots,configurationFiles:[config],mounts:[mount]};
+const snapshotMount={target:snapshotDir,uuid:'synthetic-independent-hdd',fstype:'test-fixture'};
+const mountInfo=filename=>({...filename.startsWith(snapshotDir)?snapshotMount:mount});const manifestPath=path.join(runtime.fixture,'storage.json');const input={schemaVersion:1,appDir:runtime.appRoot,snapshotDir,roots,configurationFiles:[config],mounts:[mount,snapshotMount]};
 fs.writeFileSync(path.join(runtime.appRoot,'.env'),'MCC_DATA_DIR='+roots.data+'\n');fs.writeFileSync(manifestPath,JSON.stringify(input));const storage=loadStorageManifest(manifestPath,{mountInfo});let snapshot;
 function invalid(edit){const copy=structuredClone(input);edit(copy);const filename=path.join(runtime.fixture,'invalid-storage.json');fs.writeFileSync(filename,JSON.stringify(copy));return()=>loadStorageManifest(filename,{mountInfo});}
 
@@ -42,3 +43,24 @@ test('clean-storage recovery boots lifecycle-aware code with archived assets, PM
 });
 test('post-upgrade snapshot retains later PM rows and attachment work without replacing earlier snapshot',()=>{const before=fileHash(path.join(snapshot.directory,'manifest.json'));db=new DatabaseSync(path.join(roots.data,'mcc.sqlite'));db.prepare('UPDATE pm_history SET completion_notes=? WHERE id=?').run('Post-upgrade PM completion correction',graph.historyId);db.close();fs.writeFileSync(path.join(roots.pmWorkOrders,'post-upgrade.pdf'),'%PDF-1.4\nNew operational attachment\n%%EOF');const later=createSnapshot(storage,{phase:'failed-candidate',mountInfo});assert.notEqual(later.id,snapshot.id);assert.equal(fileHash(path.join(snapshot.directory,'manifest.json')),before);const data=new DatabaseSync(path.join(later.directory,'units/data/mcc.sqlite'),{readOnly:true});assert.equal(data.prepare('SELECT completion_notes FROM pm_history WHERE id=?').get(graph.historyId).completion_notes,'Post-upgrade PM completion correction');data.close();assert.ok(fs.existsSync(path.join(later.directory,'units/pmWorkOrders/post-upgrade.pdf')));assert.throws(()=>assertUnchanged(snapshot.directory,storage),/Post-snapshot/);});
 test('updater blocks fallback after any candidate start and guards compatibility before start',()=>{const source=fs.readFileSync(path.join(root,'deployment/raspberry-pi/update-mcc'),'utf8');const branch=source.slice(source.indexOf('if [[ "${candidate_started}" == "true" ]]'),source.indexOf('if [[ -z "${backup_path}" ]]'));assert.match(branch,/failed-candidate/);assert.match(branch,/exit 2/);assert.doesNotMatch(branch,/read-tree|tar -x|systemctl start/);assert.match(source,/compatible[\s\S]*candidate_started="true"\s*\/usr\/bin\/systemctl start/);assert.doesNotMatch(source,/tar -xzf/);});
+
+test('snapshot storage on the application filesystem is refused even when listed',()=>{
+ assert.throws(()=>loadStorageManifest(manifestPath,{mountInfo:()=>({...mount})}),/independently mounted/);
+ const filename=path.join(runtime.fixture,'same-uuid.json');fs.writeFileSync(filename,JSON.stringify({...input,mounts:[...input.mounts,{...snapshotMount,uuid:mount.uuid}]}));
+ assert.throws(()=>loadStorageManifest(filename,{mountInfo:p=>({...p.startsWith(snapshotDir)?{...snapshotMount,uuid:mount.uuid}:mount})}),/independently mounted/);
+});
+test('explicitly absent documents/files survive snapshot and recovery without creating source directories',()=>{
+ const absent=['documents','files'],saved={};
+ for(const role of absent){saved[role]=path.join(runtime.fixture,`saved-${role}`);fs.renameSync(roots[role],saved[role]);}
+ try {
+  assert.throws(()=>loadStorageManifest(manifestPath,{mountInfo}));
+  const filename=path.join(runtime.fixture,'absent-storage.json');fs.writeFileSync(filename,JSON.stringify({...input,absentRoots:absent}));
+  const reviewed=loadStorageManifest(filename,{mountInfo}),copy=createSnapshot(reviewed,{mountInfo}),manifest=verifySnapshot(copy.directory);
+  for(const role of absent){assert.equal(manifest.units[role].absent,true);assert.equal(fs.existsSync(roots[role]),false);}
+  assertUnchanged(copy.directory,reviewed);
+  fs.mkdirSync(roots.documents);assert.throws(()=>assertUnchanged(copy.directory,reviewed),/Post-snapshot/);fs.rmdirSync(roots.documents);
+  const recovered=recoverToNewStorage(copy.directory,path.join(snapshotDir,'recovered-absent'),runtime.appRoot,`RECOVER ${copy.id} INTO NEW STORAGE; REVIEW AND ACCEPT THE SNAPSHOT RECOVERY POINT`,{storage:reviewed,mountInfo});
+  for(const role of absent)assert.equal(fs.existsSync(recovered.roots[role]),false);
+  const bad=path.join(runtime.fixture,'bad-absent.json');fs.writeFileSync(bad,JSON.stringify({...input,absentRoots:['data']}));assert.throws(()=>loadStorageManifest(bad,{mountInfo}),/absent roots/);
+ } finally {for(const role of absent)fs.renameSync(saved[role],roots[role]);}
+});
