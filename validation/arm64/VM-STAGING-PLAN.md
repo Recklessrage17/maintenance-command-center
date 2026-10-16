@@ -14,7 +14,7 @@ Review every configured MCC root and every OS/service/updater/mount/Caddy/PKI/sh
 
 ## Full updater rehearsal
 
-Run the exact installed `update-mcc` bytes only inside this VM. Keep network access to production impossible. Prepare a VM-local bare Git fixture and a root-owned Git URL rewrite mapping the approved repository URL to that local fixture; no Git operation may reach a remote MCC service or change GitHub. Record this fixture setup explicitly as test infrastructure, not production configuration. Build synthetic old/new commits from reviewed code with versions remaining 1.5.18; record all intentional fault-injection changes separately from the audited application SHA. Existing locks and an offline npm cache must support real installs/builds without mocked npm/systemctl/findmnt commands.
+Run the exact installed `update-mcc` bytes only inside this VM. Keep network access to production impossible. Prepare a VM-local bare Git fixture and a root-owned Git URL rewrite mapping the approved repository URL to that local fixture; no Git operation may reach a remote MCC service or change GitHub. Record this fixture setup explicitly as test infrastructure, not production configuration. Build synthetic old/new commits from the installed 1.5.18 source and the exact reviewed 2.0.0 candidate; record all intentional fault-injection changes separately from the audited application SHA. Existing locks and an offline npm cache must support real installs/builds without mocked npm/systemctl/findmnt commands.
 
 Exercise the complete runner, ERR trap, request/status files, Git ref changes and actual service lifecycle:
 
