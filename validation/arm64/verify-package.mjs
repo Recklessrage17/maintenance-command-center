@@ -10,5 +10,6 @@ for(const directory of[candidate,packageRoot]){
 assert.equal(git(legacy,'rev-parse','HEAD'),legacySha);
 assert.equal(git(legacy,'status','--porcelain','--untracked-files=normal'),'');
 git(candidate,'merge-base','--is-ancestor',legacySha,candidateSha);
+git(candidate,'merge-base','--is-ancestor','5ed2ee360d09b50f61bc8114eff65a282fcc5525',candidateSha);
 write('source-audit.json',{candidate:candidateSha,legacy:legacySha,validationHead:git(packageRoot,'rev-parse','HEAD'),localPreparation:local,version:'2.0.0'});
 console.log('Exact clean candidate, validation code, and installed historical source verified.');

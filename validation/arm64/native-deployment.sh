@@ -6,7 +6,7 @@ node -e 'if(JSON.parse(require("fs").readFileSync("/evidence/capability-probe.js
 mkdir -p /sandbox/images /sandbox/os /sandbox/data
 loops=()
 cleanup() {
-  systemctl stop mcc-arm64-fixture.service mcc-arm64-recovered.service >/dev/null 2>&1 || true
+  systemctl stop mcc-arm64-fixture.service mcc-arm64-recovered.service mcc-arm64-nonroot.service >/dev/null 2>&1 || true
   for mount in /usr/local/lib/mcc-update /etc/systemd/system /sandbox/data /sandbox/os; do if mountpoint -q "$mount"; then umount "$mount"; fi; done
   for device in "${loops[@]}"; do
     backing="$(losetup --noheadings --output BACK-FILE "$device")"

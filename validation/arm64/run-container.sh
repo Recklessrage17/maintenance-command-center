@@ -6,6 +6,8 @@ mkdir -p "$evidence"
 not_verified() {
   WHY="$1" OUT="$evidence" node -e 'const fs=require("fs");fs.writeFileSync(process.env.OUT+"/deployment-status.json",JSON.stringify({status:"NOT VERIFIED",reason:process.env.WHY,requires:"separate isolated ARM64 VM staging"},null,2));'
   echo "::warning::$1 — deployment integration NOT VERIFIED; VM staging required."
+  # Recovery capability is mandatory for the release candidate, not a green skip.
+  exit 1
 }
 # Provenance helpers: failures stop before any capability test or container start.
 provenance_failed() {
@@ -14,20 +16,20 @@ provenance_failed() {
   exit 1
 }
 record_base_image() {
-  if ! timeout 120 docker pull --platform linux/arm64 ubuntu:24.04 > "$evidence/base-image-pull.log" 2>&1; then provenance_failed 'ARM64 Ubuntu base image pull failed; inspect base-image-pull.log'; fi
-  if ! docker image inspect ubuntu:24.04 > "$context/base-image-inspect.json" 2> "$evidence/image-provenance.log"; then provenance_failed 'Pulled Ubuntu base image inspection failed; inspect image-provenance.log'; fi
+  if ! timeout 120 docker pull --platform linux/arm64 debian:13 > "$evidence/base-image-pull.log" 2>&1; then provenance_failed 'ARM64 Debian base image pull failed; inspect base-image-pull.log'; fi
+  if ! docker image inspect debian:13 > "$context/base-image-inspect.json" 2> "$evidence/image-provenance.log"; then provenance_failed 'Pulled Debian base image inspection failed; inspect image-provenance.log'; fi
   if ! base_digest="$(node - "$context/base-image-inspect.json" "$evidence" 2>> "$evidence/image-provenance.log" <<'NODE'
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const input=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));assert.equal(input.length,1,'Expected one base image');const base=input[0];
 assert.equal(base.Os,'linux');assert.equal(base.Architecture,'arm64');assert.match(base.Id,/^sha256:[a-f0-9]{64}$/);
-assert.ok(base.RepoTags?.includes('ubuntu:24.04'),'Expected pulled Ubuntu 24.04 tag');
-const digest=base.RepoDigests?.find(value=>/^(?:docker\.io\/library\/)?ubuntu@sha256:[a-f0-9]{64}$/.test(value));assert.ok(digest,'Expected official Ubuntu immutable digest');
+assert.ok(base.RepoTags?.includes('debian:13'),'Expected pulled Debian 13 tag');
+const digest=base.RepoDigests?.find(value=>/^(?:docker\.io\/library\/)?debian@sha256:[a-f0-9]{64}$/.test(value));assert.ok(digest,'Expected official Debian immutable digest');
 assert.ok(Array.isArray(base.RootFS?.Layers)&&base.RootFS.Layers.length,'Expected base filesystem layers');
 fs.writeFileSync(process.argv[3]+'/container-base-image.json',JSON.stringify(input,null,2)+'\n',{flag:'wx'});
 fs.writeFileSync(process.argv[3]+'/container-base-digests.json',JSON.stringify(base.RepoDigests,null,2)+'\n',{flag:'wx'});
 process.stdout.write(digest);
 NODE
-  )"; then provenance_failed 'Ubuntu base identity/ARM64/digest verification failed; inspect image-provenance.log'; fi
+  )"; then provenance_failed 'Debian base identity/ARM64/digest verification failed; inspect image-provenance.log'; fi
 }
 record_built_image() {
   if ! docker image inspect "$image" > "$context/built-image-inspect.json" 2>> "$evidence/image-provenance.log"; then provenance_failed 'Built disposable image inspection failed; inspect image-provenance.log'; fi
@@ -38,7 +40,7 @@ assert.equal(built.Os,'linux');assert.equal(built.Architecture,'arm64');assert.m
 assert.ok(built.RootFS?.Layers?.length>base.RootFS.Layers.length,'Expected disposable image layers');
 assert.deepEqual(built.RootFS.Layers.slice(0,base.RootFS.Layers.length),base.RootFS.Layers,'Built image must retain the verified base layers');
 fs.writeFileSync(out+'/container-image.json',JSON.stringify(input,null,2)+'\n',{flag:'wx'});
-fs.writeFileSync(out+'/container-image-provenance.json',JSON.stringify({status:'VERIFIED',platform:'linux/arm64',requestedBase:'ubuntu:24.04',baseDigest:process.argv[4],baseImageId:base.Id,builtImageId:built.Id,baseLayersVerified:base.RootFS.Layers.length},null,2)+'\n',{flag:'wx'});
+fs.writeFileSync(out+'/container-image-provenance.json',JSON.stringify({status:'VERIFIED',platform:'linux/arm64',requestedBase:'debian:13',baseDigest:process.argv[4],baseImageId:base.Id,builtImageId:built.Id,baseLayersVerified:base.RootFS.Layers.length},null,2)+'\n',{flag:'wx'});
 NODE
   then provenance_failed 'Built image ARM64/base-layer provenance verification failed; inspect image-provenance.log'; fi
 }

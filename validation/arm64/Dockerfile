@@ -1,4 +1,4 @@
-ARG MCC_ARM64_BASE_IMAGE=ubuntu:24.04
+ARG MCC_ARM64_BASE_IMAGE=debian:13
 FROM ${MCC_ARM64_BASE_IMAGE}
 ENV container=docker
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv util-linux e2fsprogs iproute2 procps fontconfig fonts-dejavu-core libatomic1 libstdc++6 git python3 curl ca-certificates && rm -rf /var/lib/apt/lists/*

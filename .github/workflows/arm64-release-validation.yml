@@ -1,6 +1,9 @@
 name: MCC isolated native ARM64 validation
 
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       candidate_sha:
@@ -12,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcc-arm64-validation-${{ inputs.candidate_sha }}
+  group: mcc-arm64-validation-${{ github.event.pull_request.number || inputs.candidate_sha }}
   cancel-in-progress: true
 
 defaults:
@@ -22,12 +25,16 @@ defaults:
 jobs:
   compatibility:
     name: Native ARM64 compatibility and bounded profile
-    if: github.repository == 'Recklessrage17/maintenance-command-center'
+    if: >-
+      github.repository == 'Recklessrage17/maintenance-command-center' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'))
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:
       CI: 'true'
-      MCC_ARM64_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      MCC_ARM64_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
       MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
       MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
       MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
@@ -39,14 +46,14 @@ jobs:
       - name: Check out validation package head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
           fetch-depth: 0
           path: validation-package
           persist-credentials: false
       - name: Check out exact approved 2.0.0 candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
           fetch-depth: 0
           path: candidate
           persist-credentials: false
@@ -100,12 +107,16 @@ jobs:
 
   deployment:
     name: Probe and validate disposable native deployment integration
-    if: github.repository == 'Recklessrage17/maintenance-command-center'
+    if: >-
+      github.repository == 'Recklessrage17/maintenance-command-center' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'))
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     env:
       CI: 'true'
-      MCC_ARM64_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      MCC_ARM64_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
       MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
       MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
       MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
@@ -117,14 +128,14 @@ jobs:
       - name: Check out validation package head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
           fetch-depth: 0
           path: validation-package
           persist-credentials: false
       - name: Check out exact approved 2.0.0 candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
           fetch-depth: 0
           path: candidate
           persist-credentials: false
