@@ -45,9 +45,18 @@ test('post-upgrade snapshot retains later PM rows and attachment work without re
 test('updater blocks fallback after any candidate start and guards compatibility before start',()=>{const source=fs.readFileSync(path.join(root,'deployment/raspberry-pi/update-mcc'),'utf8');const branch=source.slice(source.indexOf('if [[ "${candidate_started}" == "true" ]]'),source.indexOf('if [[ -z "${backup_path}" ]]'));assert.match(branch,/failed-candidate/);assert.match(branch,/exit 2/);assert.doesNotMatch(branch,/read-tree|tar -x|systemctl start/);assert.match(source,/compatible[\s\S]*candidate_started="true"\s*\/usr\/bin\/systemctl start/);assert.doesNotMatch(source,/tar -xzf/);});
 
 test('snapshot storage on the application filesystem is refused even when listed',()=>{
- assert.throws(()=>loadStorageManifest(manifestPath,{mountInfo:()=>({...mount})}),/independently mounted/);
- const filename=path.join(runtime.fixture,'same-uuid.json');fs.writeFileSync(filename,JSON.stringify({...input,mounts:[...input.mounts,{...snapshotMount,uuid:mount.uuid}]}));
+ const sameFilesystem=path.join(runtime.fixture,'os-snapshots');fs.mkdirSync(sameFilesystem);
+ const sameManifest=path.join(runtime.fixture,'same-filesystem.json');fs.writeFileSync(sameManifest,JSON.stringify({...input,snapshotDir:sameFilesystem,mounts:[mount]}));
+ assert.throws(()=>loadStorageManifest(sameManifest,{mountInfo:()=>({...mount})}),/independently mounted/);
+ const filename=path.join(runtime.fixture,'same-uuid.json');fs.writeFileSync(filename,JSON.stringify({...input,mounts:[mount,{...snapshotMount,uuid:mount.uuid}]}));
  assert.throws(()=>loadStorageManifest(filename,{mountInfo:p=>({...p.startsWith(snapshotDir)?{...snapshotMount,uuid:mount.uuid}:mount})}),/independently mounted/);
+});
+
+test('a runtime path is bound to its most specific expected mount, even when OS fallback directories exist',()=>{
+ const expected={target:roots.uploads,uuid:'dedicated-uploads',fstype:'test-fixture'};
+ const filename=path.join(runtime.fixture,'bound-storage.json');fs.writeFileSync(filename,JSON.stringify({...input,mounts:[...input.mounts,expected]}));
+ loadStorageManifest(filename,{mountInfo:p=>p.startsWith(roots.uploads)?expected:mountInfo(p)});
+ assert.throws(()=>loadStorageManifest(filename,{mountInfo}),/mount mismatch/);
 });
 test('explicitly absent documents/files survive snapshot and recovery without creating source directories',()=>{
  const absent=['documents','files'],saved={};

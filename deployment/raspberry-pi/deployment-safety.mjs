@@ -45,9 +45,14 @@ export function linuxMountInfo(filename) {
   return mount;
 }
 export function validateMounts(storage, mountInfo=linuxMountInfo) {
+  for(const mount of storage.mounts)if(!mount||typeof mount.target!=='string'||!path.isAbsolute(mount.target)||typeof mount.uuid!=='string'||!mount.uuid||typeof mount.fstype!=='string')fail('Explicit mount target, filesystem UUID and type are required.');
+  if(new Set(storage.mounts.map(m=>m.target)).size!==storage.mounts.length)fail('Each expected mount target must occur exactly once.');
   for(const filename of [storage.appDir,storage.snapshotDir,...Object.values(storage.roots),...storage.configurationFiles]) {
     const actual=mountInfo(mountPath(filename));
-    if(!storage.mounts.some(m=>m.target===actual.target&&m.uuid.toLowerCase()===String(actual.uuid).toLowerCase()&&m.fstype===actual.fstype))fail(`Storage mount mismatch or missing persistent mount: ${filename}`);
+    // Bind to the most specific expected mount for this path. A lost runtime
+    // mount must never be accepted merely because the OS mount is also listed.
+    const expected=storage.mounts.filter(m=>inside(m.target,filename)).sort((a,b)=>b.target.length-a.target.length)[0];
+    if(!expected||expected.target!==actual.target||expected.uuid.toLowerCase()!==String(actual.uuid).toLowerCase()||expected.fstype!==actual.fstype)fail(`Storage mount mismatch or missing persistent mount: ${filename}`);
   }
   const appMount=mountInfo(storage.appDir),snapshotMount=mountInfo(storage.snapshotDir);
   if(appMount.target===snapshotMount.target||String(appMount.uuid).toLowerCase()===String(snapshotMount.uuid).toLowerCase())fail('Snapshot storage requires an independently mounted filesystem with a different UUID from application storage.');
