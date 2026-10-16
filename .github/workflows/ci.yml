@@ -16,7 +16,7 @@ jobs:
   build-and-regression:
     name: Build and focused regressions (Node 22)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 55
     env:
       CI: 'true'
       NODE_ENV: test
@@ -34,7 +34,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Record exact source identity
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p "$RUNNER_TEMP/mcc-ci-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/mcc-ci-evidence/candidate-sha.txt"
 
       - name: Set up Node.js 22
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -94,15 +103,45 @@ jobs:
         timeout-minutes: 5
         run: npx --no-install playwright install --with-deps chromium
 
+      - name: Recheck release layout and keyboard failures before full suite
+        if: github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'
+        timeout-minutes: 5
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-focused-results.json
+        run: npx --no-install playwright test tests/warning-issue-lifecycle.spec.ts tests/maintenance-lab-background.spec.ts tests/machine-retirement-archive.spec.mts tests/maintenance-team-roster.spec.ts tests/user-security-permissions.spec.ts --grep 'technician controls|long Machine Library|archive, search|roster Escape|module badges' --forbid-only --workers=2 --retries=0 --reporter=github,line,json
+
+      - name: Verify native keyboard scroll after paint in independent executions
+        if: github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'
+        timeout-minutes: 3
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-scroll-stability.json
+        run: npx --no-install playwright test tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=3 --forbid-only --workers=1 --retries=0 --reporter=github,line,json
+
       - name: Desktop and mobile browser regressions
-        timeout-minutes: 6
-        run: >-
-          npx --no-install playwright test
-          tests/settings-system-update.spec.ts
-          tests/asset-note-modal.spec.ts
-          tests/dashboard-tech-notes.spec.ts
-          tests/route-code-splitting.spec.ts
-          --forbid-only --workers=2 --retries=0 --max-failures=5 --reporter=github,line
+        # A complete zero-retry run took 28.2 minutes on the hosted runner.
+        # This is orchestration headroom; per-test/assertion deadlines stay intact.
+        timeout-minutes: 40
+        env:
+          RC_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-results.json
+        run: |
+          specs=(tests/settings-system-update.spec.ts tests/asset-note-modal.spec.ts tests/dashboard-tech-notes.spec.ts tests/route-code-splitting.spec.ts)
+          if [[ "$RC_BRANCH" == codex/mcc-2-0-0-release-candidate ]]; then
+            # Select the complete browser suite, excluding node:test modules
+            # whose root/mount fixtures must run in their native harness.
+            mapfile -t specs < <(git ls-files 'tests/*.spec.ts' 'tests/*.spec.mts')
+            test "${#specs[@]}" = 57
+            printf '%s\n' "${specs[@]}" > "$RUNNER_TEMP/mcc-ci-evidence/browser-specs.txt"
+          fi
+          npx --no-install playwright test "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5 --reporter=github,line,json
+
+      - name: Retain source and browser results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: exact-source-browser-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mcc-ci-evidence/
+          retention-days: 7
 
       - name: Retain browser failure traces and screenshots
         if: ${{ failure() }}

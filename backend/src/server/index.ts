@@ -8,6 +8,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import {verifyPortableReadiness} from './portableReadiness.js';
 import { ZipArchive, type Archiver } from 'archiver';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import ExcelJS from 'exceljs';
@@ -3190,7 +3191,7 @@ function readBackupManifest(folderPath: string): BackupManifest | null {
     return null;
   }
 }
-function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCategory): BackupSummary | null {
+async function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCategory): Promise<BackupSummary | null> {
   const name = path.basename(folderPath);
   const manifest = readBackupManifest(folderPath);
   const category = fallbackCategory === 'legacy' ? 'legacy' : manifestBackupCategory(manifest?.backupCategory, fallbackCategory);
@@ -3201,8 +3202,7 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
   let portableError = '';
   if (portableArchivePath && fs.existsSync(portableArchivePath)) {
     try {
-      inspectPortableArchive(portableArchivePath, { maxArchiveBytes: portableUploadMaxBytes });
-      if (!/^[a-f0-9]{64}\s/i.test(fs.readFileSync(`${portableArchivePath}.sha256`, 'utf8'))) throw new Error('Missing checksum');
+      await verifyPortableReadiness(portableArchivePath, portableUploadMaxBytes);
       portableReady = true;
     }
     catch { portableError = 'This ZIP is outside the supported recovery limits. Create a new Master Backup; if it is still too large, preserve the verified local package and arrange supervised recovery.'; }
@@ -3233,24 +3233,26 @@ function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCat
     portableReady,
   };
 }
-function listBackupDirectory(category: BackupCategory) {
+async function listBackupDirectory(category: BackupCategory) {
   const root = backupDirectory(category);
   if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root, { withFileTypes: true })
-    .filter(entry=>entry.isDirectory() && entry.name.startsWith(backupPrefix(category)))
-    .map(entry=>summaryFromBackupFolder(path.join(root, entry.name), category))
+  const summaries: (BackupSummary | null)[] = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith(backupPrefix(category))) summaries.push(await summaryFromBackupFolder(path.join(root, entry.name), category));
+  }
+  return summaries
     .filter((backup): backup is BackupSummary => Boolean(backup))
     .sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
 }
-function listBackupsByCategory(category: BackupCategory, options: { includeLegacy?: boolean } = {}) {
-  const backups = listBackupDirectory(category);
-  if (category === 'master' && options.includeLegacy) return [...backups, ...listBackupDirectory('legacy')].sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
+async function listBackupsByCategory(category: BackupCategory, options: { includeLegacy?: boolean } = {}) {
+  const backups = await listBackupDirectory(category);
+  if (category === 'master' && options.includeLegacy) return [...backups, ...await listBackupDirectory('legacy')].sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
   return backups;
 }
 function listMasterBackupsInternal() {
   return listBackupsByCategory('master', { includeLegacy: true });
 }
-function backupCountsByType(backups = listMasterBackupsInternal()) {
+function backupCountsByType(backups: BackupSummary[]) {
   const counts = Object.fromEntries(knownBackupTypes.map(type=>[type, 0])) as Record<BackupType, number>;
   for (const backup of backups) counts[backup.type] = (counts[backup.type] ?? 0) + 1;
   return counts;
@@ -3267,14 +3269,15 @@ function removeBackupFolder(category: CreatableBackupCategory, folderPath: strin
     if (fs.existsSync(`${archivePath}.sha256`)) fs.rmSync(`${archivePath}.sha256`, { force: true });
   }
 }
-function applyBackupRetention(category: CreatableBackupCategory) {
-  const backups = listBackupsByCategory(category);
+async function applyBackupRetention(category: CreatableBackupCategory, protectVerified = false) {
+  const backups = await listBackupsByCategory(category);
   const retention = backupRetention[category];
   for (const type of Object.keys(retention) as BackupType[]) {
     const limit = retention[type] ?? 0;
     if (limit <= 0) continue;
     const typed = backups.filter(backup=>backup.type===type).sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
-    typed.slice(limit).forEach(backup=>removeBackupFolder(category, path.join(backupDirectory(category), backup.id)));
+    const protectedId = protectVerified ? typed.find(backup=>backup.portableReady)?.id : undefined;
+    typed.slice(limit).filter(backup=>backup.id!==protectedId).forEach(backup=>removeBackupFolder(category, path.join(backupDirectory(category), backup.id)));
   }
 }
 function defaultManualBackupType(category: CreatableBackupCategory): BackupType {
@@ -3426,10 +3429,10 @@ async function createBackup(input: { category: CreatableBackupCategory; type?: B
         }
       }
     }
-    // A failed portable artifact must not evict an older verified recovery unit.
-    // The new local package remains available for supervised recovery.
-    if (!portable || archiveResult) applyBackupRetention(category);
-    const summary = summaryFromBackupFolder(targetDir, category);
+    // Bound failed local packages while retaining the newest verified recovery
+    // unit per type (at most one protected package beyond that type's cap).
+    await applyBackupRetention(category, portable && !archiveResult);
+    const summary = await summaryFromBackupFolder(targetDir, category);
     lastBackupResult = { ok: true, category, type, backupId: folderName, createdAt, message: `${backupTypeLabel(type)} backup created.${portableWarning}`.trim() };
     return summary!;
   } catch (error) {
@@ -3470,10 +3473,10 @@ function scheduleAutoBackup(reason: string, actor?: User | null) {
   }, autoBackupDelayMs);
   autoBackupTimer.unref?.();
 }
-function verifyBackup(category: BackupCategory, id: unknown) {
+async function verifyBackup(category: BackupCategory, id: unknown) {
   const folderPath = backupPathFromId(category, id);
   if (!fs.existsSync(folderPath)) throw new Error('Backup not found.');
-  const summary = summaryFromBackupFolder(folderPath, category);
+  const summary = await summaryFromBackupFolder(folderPath, category);
   if (!summary?.restorable) throw new Error('Backup database file is missing.');
   const manifest = readBackupManifest(folderPath);
   const dbFile = databasePathInPackage(folderPath, manifest);
@@ -3551,7 +3554,7 @@ async function restoreBackup(input: { category: BackupCategory; backupId: unknow
   };
   if (String(input.confirmation ?? '').trim() !== 'RESTORE MCC') throw new Error('Type RESTORE MCC to confirm restore.');
   await reportProgress('revalidating_package', 15, 'Revalidating verified recovery package and checksums...');
-  let verification: ReturnType<typeof verifyBackup>;
+  let verification: Awaited<ReturnType<typeof verifyBackup>>;
   let backupFolderPath: string;
   if (input.importedPackagePath) {
     const portable = validatePortablePackage(input.importedPackagePath, applicationVersion ?? '0.0.0');
@@ -3580,7 +3583,7 @@ async function restoreBackup(input: { category: BackupCategory; backupId: unknow
     verification = { ok: true, backup: summary, checksumSha256: manifest.checksumSha256, missingOrChangedFiles: [], message: 'Imported portable backup verified.' };
     backupFolderPath = input.importedPackagePath;
   } else {
-    verification = verifyBackup(input.category, input.backupId);
+    verification = await verifyBackup(input.category, input.backupId);
     if (!verification.ok) throw new Error(verification.message);
     backupFolderPath = backupPathFromId(input.category, input.backupId);
   }
@@ -3669,9 +3672,9 @@ function hiddenBackupGroup(category: BackupCategory) {
     nextScheduledBackupAt: null,
   };
 }
-function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, actor: User) {
+async function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, actor: User) {
   if (!canViewBackupCategory(actor, category)) return hiddenBackupGroup(category);
-  const backups = listBackupsByCategory(category, { includeLegacy: category === 'master' });
+  const backups = await listBackupsByCategory(category, { includeLegacy: category === 'master' });
   return {
     category,
     categoryLabel: backupCategoryLabel(category),
@@ -3714,20 +3717,21 @@ function backupPermissionStatus(actor: User) {
     canRestoreBackup: canRestoreMaster,
   };
 }
-function masterBackupStatus(actor?: User) {
+async function masterBackupStatus(actor?: User) {
   ensureBackupDirs();
-  const visibleBackups = actor
-    ? (['daily','weekly','master'] as const).flatMap(category=>canViewBackupCategory(actor, category) ? listBackupsByCategory(category, { includeLegacy: category === 'master' }) : [])
-    : listMasterBackupsInternal();
+  const visibleBackups: BackupSummary[] = [];
+  if (actor) {
+    for (const category of ['daily','weekly','master'] as const) if (canViewBackupCategory(actor, category)) visibleBackups.push(...await listBackupsByCategory(category, {includeLegacy:category === 'master'}));
+  } else visibleBackups.push(...await listMasterBackupsInternal());
   const backups = visibleBackups.sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
   const latestBackup = backups[0] ?? null;
   const dbStat = fs.existsSync(dbPath) ? fs.statSync(dbPath) : null;
   const health = databaseQuickCheck();
-  const daily = actor ? backupGroupStatus('daily', actor) : hiddenBackupGroup('daily');
-  const weekly = actor ? backupGroupStatus('weekly', actor) : hiddenBackupGroup('weekly');
-  const master = actor ? backupGroupStatus('master', actor) : hiddenBackupGroup('master');
+  const daily = actor ? await backupGroupStatus('daily', actor) : hiddenBackupGroup('daily');
+  const weekly = actor ? await backupGroupStatus('weekly', actor) : hiddenBackupGroup('weekly');
+  const master = actor ? await backupGroupStatus('master', actor) : hiddenBackupGroup('master');
   const portableBackups = actor && canUsePortableRecovery(actor)
-    ? listBackupsByCategory('master').filter(backup=>backup.portableReady).slice(0, 20)
+    ? (await listBackupsByCategory('master')).filter(backup=>backup.portableReady).slice(0, 20)
     : [];
   const importedRecoveryBackups = actor && canUsePortableRecovery(actor)
     ? listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0').map(item=>({
@@ -3786,8 +3790,8 @@ function backupCreatedAtDate(backup: BackupSummary) {
   const date = new Date(backup.createdAt);
   return Number.isNaN(date.getTime()) ? null : date;
 }
-function hasSuccessfulBackupSince(category: Exclude<BackupCategory, 'legacy'>, start: Date, options: { includeLegacy?: boolean } = {}) {
-  return listBackupsByCategory(category, { includeLegacy: options.includeLegacy }).some(backup=>{
+async function hasSuccessfulBackupSince(category: Exclude<BackupCategory, 'legacy'>, start: Date, options: { includeLegacy?: boolean } = {}) {
+  return (await listBackupsByCategory(category, { includeLegacy: options.includeLegacy })).some(backup=>{
     if (!backup.restorable) return false;
     const createdAt = backupCreatedAtDate(backup);
     return Boolean(createdAt && createdAt >= start);
@@ -3820,7 +3824,7 @@ function currentMonthStart(from = new Date()) {
 }
 async function createMissedWeeklyBackupIfNeeded() {
   const windowStart = currentWeeklyWindowStart();
-  if (hasSuccessfulBackupSince('weekly', windowStart)) return;
+  if (await hasSuccessfulBackupSince('weekly', windowStart)) return;
   try {
     await createBackup({ category: 'weekly', type: 'weekly_scheduled', notes: 'Missed Friday 1:00 PM weekly full backup created on startup.' });
   } catch (error) {
@@ -3830,7 +3834,7 @@ async function createMissedWeeklyBackupIfNeeded() {
 async function createMissedMasterBackupIfNeeded() {
   const currentTime = new Date();
   if (currentTime < currentMonthlyScheduleTime(currentTime)) return;
-  if (hasSuccessfulBackupSince('master', currentMonthStart(currentTime), { includeLegacy: true })) return;
+  if (await hasSuccessfulBackupSince('master', currentMonthStart(currentTime), { includeLegacy: true })) return;
   try {
     await createBackup({ category: 'master', type: 'master_scheduled', notes: 'Missed monthly master backup created on startup.' });
   } catch (error) {
@@ -3868,7 +3872,7 @@ function armMasterBackupTimer(target: Date) {
       return;
     }
     try {
-      if (!hasSuccessfulBackupSince('master', currentMonthStart(), { includeLegacy: true })) {
+      if (!await hasSuccessfulBackupSince('master', currentMonthStart(), { includeLegacy: true })) {
         await createBackup({ category: 'master', type: 'master_scheduled', notes: 'Scheduled monthly master full backup.' });
       }
     } catch (error) {
@@ -6980,7 +6984,7 @@ function historySectionForReset(request: ResetRequest): HistorySection {
 async function performReset(req: AuthRequest, request: ResetRequest) {
   const actor = req.user!;
   const preResetBackup = await createMasterBackup({ type: 'manual', actor, notes: `Pre-reset backup before ${request.section}: ${request.reasonNote}` });
-  const verified = verifyMasterBackup(preResetBackup.id);
+  const verified = await verifyMasterBackup(preResetBackup.id);
   if (!verified.ok) throw new Error('Pre-reset backup could not be verified.');
   const deletedCounts: Record<string, number> = {};
   let message = `${sectionLabels[request.section === 'history_section' ? 'history_settings' : request.section]} reset complete.`;
@@ -11590,18 +11594,18 @@ app.post('/api/history/export/pdf', requireAuth, requirePermission('history.expo
     res.status(/required|section/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/backup/status', requireAuth, requirePermission('settings.view'), (req:AuthRequest,res)=>{
+app.get('/api/backup/status', requireAuth, requirePermission('settings.view'), async(req:AuthRequest,res)=>{
   try {
-    res.json(masterBackupStatus(req.user!));
+    res.json(await masterBackupStatus(req.user!));
   } catch (error) {
     res.status(500).json({ok:false,error:safeErrorMessage(error, [], 'Backup status failed.')});
   }
 });
-app.get('/api/backup/list', requireAuth, (req:AuthRequest,res)=>{
+app.get('/api/backup/list', requireAuth, async(req:AuthRequest,res)=>{
   try {
     const category = backupCategoryFromValue(req.query.category, 'master');
     if (!canViewBackupCategory(req.user!, category)) return res.status(403).json({ok:false,error:'Permission denied.'});
-    res.json({ok:true,category,backups:listBackupsByCategory(category, { includeLegacy: category === 'master' })});
+    res.json({ok:true,category,backups:await listBackupsByCategory(category, { includeLegacy: category === 'master' })});
   } catch (error) {
     res.status(/category/i.test(safeErrorMessage(error)) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup list failed.')});
   }
@@ -11614,7 +11618,7 @@ app.post('/api/backup/create', requireAuth, async(req:AuthRequest,res)=>{
     if (!canCreateBackupCategory(req.user!, category)) return res.status(403).json({ok:false,error:'Permission denied.'});
     const backup = await createBackup({ category, type: defaultManualBackupType(category), actor: req.user!, notes: `${backupCategoryLabel(category)} created from MCC Settings.` });
     try { audit(req,`${category} backup created`,'backup',backup.id,{backupCategory:backup.category,backupType:backup.type}); } catch (auditError) { console.log(`MCC manual backup audit failed: ${safeErrorMessage(auditError, [], 'Audit failed.')}`); }
-    res.status(201).json({ok:true,backup,status:masterBackupStatus(req.user!),message:`${backupCategoryLabel(category)} created successfully.`});
+    res.status(201).json({ok:true,backup,status:await masterBackupStatus(req.user!),message:`${backupCategoryLabel(category)} created successfully.`});
   } catch (error) {
     const rawMessage = safeErrorMessage(error, [], 'Backup failed.');
     const message = /category|read-only/i.test(rawMessage) ? rawMessage : safeBackupClientError(error, 'Backup failed.');
@@ -11622,12 +11626,12 @@ app.post('/api/backup/create', requireAuth, async(req:AuthRequest,res)=>{
     res.status(/already running/i.test(message) ? 409 : /category|read-only/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.post('/api/backup/verify', requireAuth, (req:AuthRequest,res)=>{
+app.post('/api/backup/verify', requireAuth, async(req:AuthRequest,res)=>{
   try {
     const body = isRecord(req.body) ? req.body : {};
     const category = resolveBackupCategoryForRequest(body.category, body.backupId);
     if (!canViewBackupCategory(req.user!, category)) return res.status(403).json({error:'Permission denied.'});
-    res.json(verifyBackup(category, body.backupId));
+    res.json(await verifyBackup(category, body.backupId));
   } catch (error) {
     const message = safeErrorMessage(error);
     res.status(/not found|missing/i.test(message) ? 404 : /category/i.test(message) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup verification failed.')});
@@ -11646,16 +11650,16 @@ app.post('/api/backup/restore', requireAuth, async(req:AuthRequest,res)=>{
     res.status(/confirm|not found|missing|checksum|category/i.test(message) ? 400 : 500).json({ok:false,error:message});
   }
 });
-app.get('/api/backup/portable', requireAuth, (req:AuthRequest,res)=>{
+app.get('/api/backup/portable', requireAuth, async(req:AuthRequest,res)=>{
   if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
-  const backups = listBackupsByCategory('master').filter(backup=>backup.portableReady);
+  const backups = (await listBackupsByCategory('master')).filter(backup=>backup.portableReady);
   res.json({ok:true,backups,recoveryLocation:recoveryDir,recoveryStorage:recoveryStorageStatus(recoveryDir,recoveryStoragePolicy),importedBackups:listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0')});
 });
 app.get('/api/backup/portable/:backupId/download', requireAuth, async(req:AuthRequest,res)=>{
   if (!canUsePortableRecovery(req.user!)) return res.status(403).json({ok:false,error:'Permission denied.'});
   try {
     const folderPath = backupPathFromId('master', req.params.backupId);
-    const verification = verifyBackup('master', req.params.backupId);
+    const verification = await verifyBackup('master', req.params.backupId);
     if (!verification.ok) throw new Error(verification.message);
     const manifest = readBackupManifest(folderPath);
     const archivePath = portableArchivePathFromManifest(manifest);

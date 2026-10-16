@@ -18,6 +18,11 @@
   overflow-wrap: anywhere;
 }
 
+/* Keep the technician action compact across platform font metrics. */
+:is(.asset-notes-panel, .asset-note-history-modal) .asset-technician-tools button.asset-note-edit-update {
+  padding-inline: 10px;
+}
+
 :is(.asset-notes-panel, .asset-note-history-modal, .asset-note-resolve-pdf-prompt,
     .asset-note-file-viewer, .asset-note-photo-preview-modal, .work-order-export-modal)
   :is(.modal-actions, .glass-modal__actions) {
