@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export type MachineLifecycleAsset = {
@@ -17,10 +17,15 @@ export function MachineLifecycleControls({ asset, canManage, onChanged, onOpenRe
   const [mode, setMode] = useState<'retire' | 'restore' | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const panel = useRef<HTMLElement | null>(null);
-  function close() { setMode(null); requestAnimationFrame(() => {
-    if(opener.current?.isConnected)opener.current.focus();
+  const restoreFocus = useRef(false);
+  function close() { restoreFocus.current = true; setMode(null); }
+  useLayoutEffect(() => {
+    if(mode || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    // Restore only after the committed lifecycle replaces/removes its opener.
+    if(opener.current?.isConnected && !opener.current.matches(':disabled'))opener.current.focus();
     else (panel.current?.querySelector<HTMLElement>('.machine-lifecycle-actions button')??panel.current)?.focus();
-  }); }
+  }, [mode, asset.lifecycleStatus]);
   return <section ref={panel} tabIndex={-1} className="mcc-card glass-panel machine-lifecycle-panel" aria-label="Machine lifecycle">
     <div className="machine-lifecycle-copy"><strong>Lifecycle: {lifecycleLabel(asset.lifecycleStatus)}</strong>
       {asset.retirementReason && <span>Reason: {asset.retirementReason} · {asset.retiredAt ? new Date(asset.retiredAt).toLocaleDateString() : ''}{asset.retiredBy ? ` · ${asset.retiredBy}` : ''}</span>}
@@ -32,7 +37,7 @@ export function MachineLifecycleControls({ asset, canManage, onChanged, onOpenRe
       {asset.lifecycleStatus && asset.lifecycleStatus !== 'active' && <button className="primary-button compact-button" type="button" onClick={event => { opener.current = event.currentTarget; setMode('restore'); }}>Restore Machine</button>}
       <button className="secondary-button compact-button" type="button" onClick={() => onExport(asset)}>Export History</button>
     </div>}
-    {mode && <MachineLifecycleDialog key={`${asset.id}:${mode}`} asset={asset} restore={mode === 'restore'} onClose={close} onChanged={updated => { onChanged(updated); close(); }} onExport={() => onExport(asset)} />}
+    {mode && <MachineLifecycleDialog key={`${asset.id}:${mode}`} asset={asset} restore={mode === 'restore'} onClose={close} onChanged={updated => { onChanged(updated); opener.current = null; close(); }} onExport={() => onExport(asset)} />}
   </section>;
 }
 function MachineLifecycleDialog({ asset, restore, onClose, onChanged, onExport }: {
