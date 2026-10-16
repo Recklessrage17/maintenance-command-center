@@ -1,0 +1,175 @@
+name: MCC isolated native ARM64 validation
+
+on:
+  pull_request:
+    branches: [codex/release-hardening-safe-recovery]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/arm64-release-validation.yml
+      - validation/arm64/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcc-arm64-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compatibility:
+    name: Native ARM64 compatibility and bounded profile
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/arm64-release-validation'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
+      MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
+      MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
+    steps:
+      - name: Set isolated evidence directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcc-arm64-evidence/compatibility"
+          printf 'MCC_ARM64_EVIDENCE=%s/mcc-arm64-evidence/compatibility\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Check out validation package head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: validation-package
+          persist-credentials: false
+      - name: Check out exact PR 201 application candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 87e1605f5bced355c484a90e1bb42b405f16f24e
+          path: candidate
+          persist-credentials: false
+      - name: Check out historical synthetic migration source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b6a230ce22b90ed81add79b5a8d1422d6eb2250f
+          path: legacy-source
+          persist-credentials: false
+      - name: Set up native Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+          architecture: arm64
+      - name: Verify pinned source and native runtime
+        run: |
+          test "$(uname -m)" = aarch64
+          test "$(node -p process.arch)" = arm64
+          node "$MCC_ARM64_PACKAGE/validation/arm64/verify-package.mjs"
+          node "$MCC_ARM64_PACKAGE/validation/arm64/runtime.mjs"
+      - name: Install locked candidate and historical dependencies
+        timeout-minutes: 8
+        run: |
+          npm ci --prefix "$MCC_ARM64_CANDIDATE" --include=dev --no-audit --no-fund
+          npm ci --prefix "$MCC_ARM64_CANDIDATE/frontend" --include=dev --no-audit --no-fund
+          npm ci --prefix "$MCC_ARM64_CANDIDATE/backend" --include=dev --no-audit --no-fund
+          npm ci --prefix "$MCC_ARM64_LEGACY/backend" --include=dev --no-audit --no-fund
+      - name: Production builds
+        timeout-minutes: 6
+        env:
+          NODE_ENV: production
+        run: |
+          npm run build --prefix "$MCC_ARM64_CANDIDATE/frontend" > "$MCC_ARM64_EVIDENCE/frontend-build.log" 2>&1
+          npm run build --prefix "$MCC_ARM64_CANDIDATE/backend" > "$MCC_ARM64_EVIDENCE/backend-build.log" 2>&1
+          npm run build --prefix "$MCC_ARM64_LEGACY/backend" > "$MCC_ARM64_EVIDENCE/legacy-build.log" 2>&1
+      - name: Offline synthetic migration, recovery and authorization suites
+        timeout-minutes: 14
+        run: |
+          sudo -n env -i PATH="$PATH" MCC_ARM64_PACKAGE="$MCC_ARM64_PACKAGE" MCC_ARM64_CANDIDATE="$MCC_ARM64_CANDIDATE" MCC_ARM64_LEGACY="$MCC_ARM64_LEGACY" MCC_ARM64_EVIDENCE="$MCC_ARM64_EVIDENCE" unshare --mount --net --pid --fork --mount-proc --propagation private --kill-child /bin/bash "$MCC_ARM64_PACKAGE/validation/arm64/offline-tests.sh"
+      - name: Retain synthetic summaries and bounded metrics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: arm64-compatibility-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.json
+            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.jsonl
+            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.log
+            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.txt
+          retention-days: 3
+
+  deployment:
+    name: Probe and validate disposable native deployment integration
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/arm64-release-validation'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    env:
+      CI: 'true'
+      MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
+      MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
+      MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
+    steps:
+      - name: Set isolated evidence directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcc-arm64-evidence/deployment"
+          printf 'MCC_ARM64_EVIDENCE=%s/mcc-arm64-evidence/deployment\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Check out validation package head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: validation-package
+          persist-credentials: false
+      - name: Check out exact PR 201 application candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 87e1605f5bced355c484a90e1bb42b405f16f24e
+          path: candidate
+          persist-credentials: false
+      - name: Check out incompatible historical source for refusal test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b6a230ce22b90ed81add79b5a8d1422d6eb2250f
+          path: legacy-source
+          persist-credentials: false
+      - name: Set up native Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+          architecture: arm64
+      - name: Verify pinned inputs and architecture
+        run: |
+          test "$(uname -m)" = aarch64
+          node "$MCC_ARM64_PACKAGE/validation/arm64/verify-package.mjs"
+          node "$MCC_ARM64_PACKAGE/validation/arm64/runtime.mjs"
+      - name: Install locked candidate dependencies and build
+        timeout-minutes: 8
+        run: |
+          npm ci --prefix "$MCC_ARM64_CANDIDATE" --include=dev --no-audit --no-fund
+          npm ci --prefix "$MCC_ARM64_CANDIDATE/frontend" --include=dev --no-audit --no-fund
+          npm ci --prefix "$MCC_ARM64_CANDIDATE/backend" --include=dev --no-audit --no-fund
+          NODE_ENV=production npm run build --prefix "$MCC_ARM64_CANDIDATE" > "$MCC_ARM64_EVIDENCE/build.log" 2>&1
+      - name: Probe real mount and private systemd support before native tests
+        timeout-minutes: 13
+        run: /bin/bash "$MCC_ARM64_PACKAGE/validation/arm64/run-container.sh"
+      - name: Publish explicit verification status
+        if: always()
+        run: |
+          if test -f "$MCC_ARM64_EVIDENCE/deployment-status.json"; then
+            cat "$MCC_ARM64_EVIDENCE/deployment-status.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Deployment integration NOT VERIFIED: see failed setup/test step.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo 'Persistent SSD, reboot, complete updater orchestration and Pi acceptance require separate staging even when container cases pass.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain capability evidence and native test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: arm64-deployment-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.json
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.log
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.txt
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.sh
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/memory-4g/*.json
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/memory-4g/*.jsonl
+            ${{ runner.temp }}/mcc-arm64-evidence/deployment/memory-4g/*.log
+          retention-days: 3
