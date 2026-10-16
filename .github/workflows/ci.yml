@@ -16,7 +16,7 @@ jobs:
   build-and-regression:
     name: Build and focused regressions (Node 22)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CI: 'true'
       NODE_ENV: test
@@ -108,7 +108,7 @@ jobs:
         timeout-minutes: 5
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-focused-results.json
-        run: npx --no-install playwright test tests/warning-issue-lifecycle.spec.ts tests/maintenance-lab-background.spec.ts tests/machine-retirement-archive.spec.mts tests/maintenance-team-roster.spec.ts --grep 'technician controls|long Machine Library|archive, search|roster Escape' --forbid-only --workers=2 --retries=0 --reporter=github,line,json
+        run: npx --no-install playwright test tests/warning-issue-lifecycle.spec.ts tests/maintenance-lab-background.spec.ts tests/machine-retirement-archive.spec.mts tests/maintenance-team-roster.spec.ts tests/user-security-permissions.spec.ts --grep 'technician controls|long Machine Library|archive, search|roster Escape|module badges' --forbid-only --workers=2 --retries=0 --reporter=github,line,json
 
       - name: Verify native keyboard scroll after paint in independent executions
         if: github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'
@@ -118,7 +118,9 @@ jobs:
         run: npx --no-install playwright test tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=3 --forbid-only --workers=1 --retries=0 --reporter=github,line,json
 
       - name: Desktop and mobile browser regressions
-        timeout-minutes: 30
+        # A complete zero-retry run took 28.2 minutes on the hosted runner.
+        # This is orchestration headroom; per-test/assertion deadlines stay intact.
+        timeout-minutes: 40
         env:
           RC_BRANCH: ${{ github.event.pull_request.head.ref }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-results.json
