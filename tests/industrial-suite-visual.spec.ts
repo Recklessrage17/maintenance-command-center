@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const fixedNow = '2026-07-24T14:00:00.000Z';
-const artifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-53');
+const artifactDirectory = resolve(process.env.MCC_PLAYWRIGHT_DIAGNOSTICS!, 'visual', 'issue-53');
 const fullPermissions = [
   'inventory.view', 'inventory.create', 'inventory.edit', 'inventory.delete', 'inventory.import', 'inventory.export', 'inventory.requisition_stage',
   'requisitions.view', 'requisitions.create', 'requisitions.edit', 'requisitions.mark_ordered', 'requisitions.mark_received', 'requisitions.cancel', 'requisitions.delete', 'requisitions.manage_batches', 'requisitions.print_download',

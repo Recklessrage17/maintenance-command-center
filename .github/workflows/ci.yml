@@ -97,21 +97,20 @@ jobs:
       - name: Desktop and mobile browser regressions
         timeout-minutes: 6
         run: >-
-          npx --no-install playwright test
+          npm run test:playwright --
           tests/settings-system-update.spec.ts
           tests/asset-note-modal.spec.ts
           tests/dashboard-tech-notes.spec.ts
           tests/route-code-splitting.spec.ts
-          --forbid-only --workers=2 --retries=0 --max-failures=5 --reporter=github,line
+          --forbid-only --workers=2 --retries=0 --max-failures=5
 
-      - name: Retain browser failure traces and screenshots
-        if: ${{ failure() }}
+      - name: Retain browser diagnostics for review
+        if: ${{ always() }}
         timeout-minutes: 2
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-failures-${{ github.run_attempt }}
           path: |
-            test-results/**/*.zip
-            test-results/**/*.png
-          retention-days: 3
+            diagnostics/playwright/
+          retention-days: 90
           if-no-files-found: ignore

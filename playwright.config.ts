@@ -1,31 +1,39 @@
 import { defineConfig } from '@playwright/test';
 import { resolve } from 'node:path';
 
-const testPort = process.env.MCC_PLAYWRIGHT_PORT ?? '4273';
-const baseURL = `http://localhost:${testPort}`;
-const testStorageRoot = resolve('tmp', `playwright-${process.pid}`);
+if (!process.env.MCC_PLAYWRIGHT_RUN_ID) {
+  throw new Error('Use npm run test:playwright -- <arguments> so runtime cleanup and diagnostics are managed.');
+}
+if (!/^run-\d+-[0-9a-f-]{36}$/.test(process.env.MCC_PLAYWRIGHT_RUN_ID)) throw new Error('Invalid managed run ID');
+const run = { diagnostics: resolve('diagnostics', 'playwright', process.env.MCC_PLAYWRIGHT_RUN_ID) };
+const testPort = process.env.MCC_PLAYWRIGHT_PORT!;
+const baseURL = `http://127.0.0.1:${testPort}`;
+const frontendOnly = process.env.MCC_PLAYWRIGHT_FRONTEND_ONLY === '1';
 
 export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
-  reporter: 'line',
+  outputDir: resolve(run.diagnostics, 'test-results'),
+  reporter: [
+    ['line'],
+    ['json', { outputFile: resolve(run.diagnostics, 'report.json') }],
+    ['html', { outputFolder: resolve(run.diagnostics, 'html'), open: 'never' }],
+  ],
   use: {
     baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: testPort === '4273' ? 'npm start' : `npm run preview --prefix frontend -- --host 127.0.0.1 --port ${testPort}`,
-    url: testPort === '4273' ? `${baseURL}/api/health` : baseURL,
+    command: frontendOnly
+      ? `node frontend/node_modules/vite/bin/vite.js preview frontend --host 127.0.0.1 --port ${testPort} --strictPort`
+      : 'node backend/dist/server/index.js',
+    url: frontendOnly ? baseURL : `${baseURL}/api/health`,
     reuseExistingServer: false,
-    env: {
-      NODE_ENV: 'test',
-      MCC_DATA_DIR: resolve(testStorageRoot, 'data'),
-      MCC_UPLOADS_DIR: resolve(testStorageRoot, 'uploads'),
-      MCC_BACKUPS_DIR: resolve(testStorageRoot, 'backups'),
-    },
+    stdout: 'pipe',
+    stderr: 'pipe',
     timeout: 30_000,
   },
   projects: [

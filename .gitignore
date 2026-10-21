@@ -31,5 +31,8 @@ tmp/
 reference/
 playwright-report/
 test-results/
+diagnostics/playwright/
+blob-report/
+playwright/.cache/
 artifacts/issue-49/
 
