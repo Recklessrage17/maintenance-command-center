@@ -111,10 +111,19 @@ function MccRankBadge({user}:{user:TeamUser}){
   const triggerRef=useRef<HTMLButtonElement>(null);
   const panelRef=useRef<HTMLDivElement>(null);
   const closeTimer=useRef<number>();
-  const pointerStartedOpen=useRef(false);
+  const pinned=useRef(false);
+  const restoringFocus=useRef(false);
   const popoverId=`rank-${useId().replace(/:/g,'')}`;
   const cancelClose=()=>{if(closeTimer.current)window.clearTimeout(closeTimer.current);};
-  const closeSoon=()=>{cancelClose();closeTimer.current=window.setTimeout(()=>setOpen(false),140);};
+  const closeSoon=()=>{cancelClose();closeTimer.current=window.setTimeout(()=>{if(!pinned.current)setOpen(false);},140);};
+  const dismiss=()=>{cancelClose();pinned.current=false;setOpen(false);};
+  const togglePinned=()=>{cancelClose();pinned.current=!pinned.current;setOpen(pinned.current);};
+  const restoreTriggerFocus=()=>{
+    restoringFocus.current=true;
+    triggerRef.current?.focus();
+    restoringFocus.current=false;
+  };
+  useEffect(()=>()=>cancelClose(),[]);
 
   useLayoutEffect(()=>{
     if(!open||!triggerRef.current||!panelRef.current)return;
@@ -130,14 +139,14 @@ function MccRankBadge({user}:{user:TeamUser}){
     const outside=(event:PointerEvent)=>{
       const target=event.target as Node;
       if(triggerRef.current?.contains(target)||panelRef.current?.contains(target))return;
-      setOpen(false);
+      dismiss();
     };
     const escape=(event:globalThis.KeyboardEvent)=>{
       if(event.key!=='Escape')return;
       event.preventDefault();
       event.stopPropagation();
-      setOpen(false);
-      window.requestAnimationFrame(()=>triggerRef.current?.focus());
+      dismiss();
+      window.requestAnimationFrame(restoreTriggerFocus);
     };
     document.addEventListener('pointerdown',outside);
     document.addEventListener('keydown',escape,true);
@@ -145,13 +154,14 @@ function MccRankBadge({user}:{user:TeamUser}){
   },[open]);
 
   function onKeyDown(event:KeyboardEvent<HTMLButtonElement>){
-    if(event.key==='Enter'||event.key===' '){event.preventDefault();setOpen(current=>!current);}
-    if(event.key==='Escape'&&open){event.preventDefault();event.stopPropagation();setOpen(false);}
+    if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePinned();}
+    if(event.key==='Escape'&&open){event.preventDefault();event.stopPropagation();dismiss();}
   }
   function onBlur(event:FocusEvent<HTMLButtonElement>){
     const next=event.relatedTarget as Node|null;
     if(next&&panelRef.current?.contains(next))return;
     window.requestAnimationFrame(()=>{
+      if(pinned.current)return;
       if(triggerRef.current?.matches(':focus, :hover')||panelRef.current?.matches(':focus-within, :hover'))return;
       cancelClose();
       setOpen(false);
@@ -169,10 +179,9 @@ function MccRankBadge({user}:{user:TeamUser}){
       aria-controls={popoverId}
       onMouseEnter={()=>{cancelClose();setOpen(true);}}
       onMouseLeave={closeSoon}
-      onFocus={()=>setOpen(true)}
+      onFocus={()=>{if(!restoringFocus.current)setOpen(true);}}
       onBlur={onBlur}
-      onPointerDown={()=>{pointerStartedOpen.current=open;}}
-      onClick={()=>setOpen(!pointerStartedOpen.current)}
+      onClick={togglePinned}
       onKeyDown={onKeyDown}
     ><RoleBadge role={user.role} isOwnerAdmin={user.isOwnerAdmin} compact /></button>
     {open&&createPortal(
@@ -187,7 +196,7 @@ function MccRankBadge({user}:{user:TeamUser}){
         style={position}
         onMouseEnter={cancelClose}
         onMouseLeave={closeSoon}
-        onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();setOpen(false);triggerRef.current?.focus();}}}
+        onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();dismiss();restoreTriggerFocus();}}}
       >
         <strong>{provenance.currentRank}</strong>
         {provenance.assignmentSourceAvailable?<small>Assigned by: {provenance.assignedBy}</small>:<small>Assignment source unavailable</small>}

@@ -1,6 +1,6 @@
 {
   "name": "maintenance-command-center",
-  "version": "1.5.18",
+  "version": "2.0.0",
   "private": true,
   "description": "Maintenance Command Center website shell.",
   "scripts": {

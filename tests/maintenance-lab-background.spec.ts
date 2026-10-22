@@ -20,6 +20,10 @@ async function mockApp(page:Page) {
 }
 
 async function pressDocumentScrollKey(page:Page,key:string) {
+  // DOM assertions can finish before Chromium commits the new document's
+  // scroll range to its compositor. Exercise the native key after paint;
+  // never replace it with a scripted scroll or relax the edge assertion.
+  await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
   // Reaching an edge can precede Chromium's native keyboard-scroll completion.
   await page.evaluate(()=>{
     const state={ended:false,onEnd:()=>{state.ended=true;}};
@@ -176,7 +180,9 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
   expect(dimensions.workspaceScrollTop).toBe(0);
 
   if(!mobile) {
+    console.log('Document before End',await page.evaluate(()=>({active:document.activeElement?.tagName,focused:document.hasFocus(),y:window.scrollY,h:document.documentElement.scrollHeight,bodyHeight:document.body.scrollHeight,rootOverflow:getComputedStyle(document.documentElement).overflow,bodyOverflow:getComputedStyle(document.body).overflow,scrollingElement:document.scrollingElement?.tagName})));
     await pressDocumentScrollKey(page,'End');
+    console.log('Document after End',await page.evaluate(()=>({active:document.activeElement?.tagName,focused:document.hasFocus(),y:window.scrollY,h:document.documentElement.scrollHeight,bodyHeight:document.body.scrollHeight})));
     await expect.poll(()=>page.evaluate(()=>window.scrollY+window.innerHeight>=document.documentElement.scrollHeight-1)).toBe(true);
     await pressDocumentScrollKey(page,'Control+Home');
     await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(0);

@@ -28,7 +28,7 @@ function readableDate(value:string|null){
   return Number.isNaN(date.getTime())?value:date.toLocaleString();
 }
 
-export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onOpen,onCloseSoon,onBlur,onPointerDown,onToggle,onKeyDown,anchorRef}:{
+export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onOpen,onCloseSoon,onBlur,onToggle,onKeyDown,anchorRef}:{
   group:MccPermissionModuleGroup;
   expanded:boolean;
   popoverId:string;
@@ -36,7 +36,6 @@ export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onO
   onOpen:()=>void;
   onCloseSoon:()=>void;
   onBlur:(event:FocusEvent<HTMLButtonElement>)=>void;
-  onPointerDown:()=>void;
   onToggle:()=>void;
   onKeyDown:(event:KeyboardEvent<HTMLButtonElement>)=>void;
   anchorRef:(element:HTMLButtonElement|null)=>void;
@@ -52,7 +51,6 @@ export function MccPermissionBadge({group,expanded,popoverId,disabledAccount,onO
     onMouseLeave={onCloseSoon}
     onFocus={onOpen}
     onBlur={onBlur}
-    onPointerDown={onPointerDown}
     onClick={onToggle}
     onKeyDown={onKeyDown}
   >{group.shortLabel} {group.grants.length}</button>;
@@ -104,14 +102,18 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false,popoverOwn
   const anchors=useRef(new Map<string,HTMLButtonElement>());
   const panelRef=useRef<HTMLDivElement>(null);
   const closeTimer=useRef<number>();
-  const pointerStartedOpen=useRef(false);
+  const pinnedModule=useRef<string|null>(null);
+  const restoringFocus=useRef(false);
   const groupRef=useRef<HTMLDivElement>(null);
   const popoverId=useId().replace(/:/g,'');
   const openGroup=grouped.find(group=>group.module===openModule);
 
   const cancelClose=()=>{if(closeTimer.current)window.clearTimeout(closeTimer.current);};
-  const closeSoon=()=>{cancelClose();closeTimer.current=window.setTimeout(()=>setOpenModule(null),140);};
-  const open=(module:string)=>{cancelClose();setOpenModule(module);};
+  const dismiss=()=>{cancelClose();pinnedModule.current=null;setOpenModule(null);};
+  const closeSoon=()=>{cancelClose();closeTimer.current=window.setTimeout(()=>{if(!pinnedModule.current)setOpenModule(null);},140);};
+  const open=(module:string)=>{if(restoringFocus.current)return;cancelClose();if(openModule!==module)pinnedModule.current=null;setOpenModule(module);};
+  const toggle=(module:string)=>{cancelClose();pinnedModule.current=pinnedModule.current===module?null:module;setOpenModule(pinnedModule.current);};
+  const restoreAnchorFocus=(module:string)=>{restoringFocus.current=true;anchors.current.get(module)?.focus();restoringFocus.current=false;};
 
   useLayoutEffect(()=>{
     if(!openModule)return;
@@ -137,7 +139,7 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false,popoverOwn
     const outside=(event:PointerEvent)=>{
       const target=event.target as Node;
       if(groupRef.current?.contains(target)||panelRef.current?.contains(target))return;
-      setOpenModule(null);
+      dismiss();
     };
     document.addEventListener('pointerdown',outside);
     return()=>{document.removeEventListener('pointerdown',outside);cancelClose();};
@@ -148,24 +150,26 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false,popoverOwn
       if(event.key!=='Escape')return;
       event.preventDefault();
       event.stopPropagation();
-      setOpenModule(null);
-      window.requestAnimationFrame(()=>anchors.current.get(openModule)?.focus());
+      dismiss();
+      window.requestAnimationFrame(()=>restoreAnchorFocus(openModule));
     };
     document.addEventListener('keydown',escape,true);
     return()=>document.removeEventListener('keydown',escape,true);
   },[openModule]);
 
   function keyDown(event:KeyboardEvent<HTMLButtonElement>,module:string){
-    if(event.key==='Enter'||event.key===' '){event.preventDefault();setOpenModule(current=>current===module?null:module);}
-    if(event.key==='Escape'&&openModule===module){event.preventDefault();event.stopPropagation();setOpenModule(null);}
+    if(event.key==='Enter'||event.key===' '){event.preventDefault();toggle(module);}
+    if(event.key==='Escape'&&openModule===module){event.preventDefault();event.stopPropagation();dismiss();}
   }
   function focusLeft(event:FocusEvent<HTMLButtonElement>,module:string){
     const next=event.relatedTarget as Node|null;
     if(next&&panelRef.current?.contains(next))return;
+    if(!next&&pinnedModule.current===module)return;
     window.requestAnimationFrame(()=>{
       const anchor=anchors.current.get(module);
       if(anchor?.matches(':focus, :hover')||panelRef.current?.matches(':focus-within, :hover'))return;
       cancelClose();
+      if(pinnedModule.current===module)pinnedModule.current=null;
       setOpenModule(current=>current===module?null:current);
     });
   }
@@ -185,8 +189,7 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false,popoverOwn
           onOpen={()=>open(group.module)}
           onCloseSoon={closeSoon}
           onBlur={event=>focusLeft(event,group.module)}
-          onPointerDown={()=>{pointerStartedOpen.current=openModule===group.module;}}
-          onToggle={()=>setOpenModule(pointerStartedOpen.current?null:group.module)}
+          onToggle={()=>toggle(group.module)}
           onKeyDown={event=>keyDown(event,group.module)}
         />;
       })}
@@ -201,7 +204,7 @@ export function MccPermissionBadgeGroup({grants,disabledAccount=false,popoverOwn
         ownerId={popoverOwnerId}
         onMouseEnter={cancelClose}
         onMouseLeave={closeSoon}
-        onEscape={()=>{setOpenModule(null);anchors.current.get(openGroup.module)?.focus();}}
+        onEscape={()=>{dismiss();restoreAnchorFocus(openGroup.module);}}
       />,
       document.body,
     )}

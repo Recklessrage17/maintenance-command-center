@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "appDir": "/opt/maintenance-command-center",
+  "snapshotDir": "/mnt/mcc-ssd/deployment-snapshots",
+  "roots": {
+    "data": "/mnt/mcc-ssd/runtime/data",
+    "uploads": "/mnt/mcc-ssd/runtime/uploads",
+    "documents": "/opt/maintenance-command-center/backend/documents",
+    "files": "/opt/maintenance-command-center/backend/files",
+    "pmWorkOrders": "/mnt/mcc-ssd/runtime/pm-work-orders",
+    "pmExcel": "/mnt/mcc-ssd/runtime/pm-excel",
+    "recovery": "/mnt/mcc-ssd/runtime/recovery",
+    "backups": "/mnt/mcc-ssd/runtime/backups"
+  },
+  "configurationFiles": [
+    "/etc/mcc-update.conf",
+    "/etc/systemd/system/mcc.service",
+    "/etc/systemd/system/mcc-update-runner.service",
+    "/etc/systemd/system/mcc-update-request.service",
+    "/etc/sudoers.d/mcc-update",
+    "/usr/local/lib/mcc-update/deployment-safety.mjs",
+    "/usr/local/lib/mcc-update/write-status.py",
+    "/usr/local/sbin/update-mcc",
+    "/etc/mcc-https.env",
+    "/etc/caddy/Caddyfile"
+  ],
+  "mounts": [
+    { "target": "/", "uuid": "REPLACE_WITH_DISCOVERED_OS_UUID", "fstype": "ext4" },
+    { "target": "/mnt/mcc-ssd", "uuid": "REPLACE_WITH_DISCOVERED_SSD_UUID", "fstype": "ext4" }
+  ]
+}
