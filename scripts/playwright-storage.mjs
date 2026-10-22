@@ -118,7 +118,13 @@ export function cleanupRun(id, { currentRunner = false, apply = false, minimumAg
   const preserve = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const item = path.join(directory, entry.name);
-      if (entry.isDirectory()) preserve(item);
+      if (entry.isDirectory() && entry.name === 'recovery' && fs.readdirSync(item).length) {
+        const target = safePath(diagnosticsRoot, path.join(run.diagnostics, 'runtime-evidence', path.relative(run.directory, item)));
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        if (fs.existsSync(target)) throw new Error('Recovery diagnostics already exist; manual review required');
+        fs.renameSync(item, target);
+      }
+      else if (entry.isDirectory()) preserve(item);
       else if (/\.(log|png|jpe?g|webm|zip)$/i.test(entry.name)) {
         const target = safePath(diagnosticsRoot, path.join(run.diagnostics, 'runtime-evidence', path.relative(run.directory, item)));
         fs.mkdirSync(path.dirname(target), { recursive: true });

@@ -151,3 +151,68 @@ The failing probe is expected to fail internally while its parent check passes.
 | `tests/playwright-cleanup.test.mjs`, `tests/playwright-cleanup-probe.spec.ts` | Cleanup and lifecycle regression checks. |
 | `tests/industrial-suite-visual.spec.ts`, `tests/mcc-login-issue-56.spec.ts`, `tests/settings-system-update.spec.ts`, `tests/machine-asset-specification.spec.ts`, `tests/warning-issue-lifecycle.spec.ts` | Route existing generated evidence into the current run's diagnostics. |
 | `docs/playwright-cleanup.md` | Commands, safety boundaries, migration audit and verification report. |
+
+### MCC 2.0.0 integration verification (2026-10-22)
+
+Integrated `origin/main` at `190ca908a2e676976382a7ab38ccce381edb0ee8`
+(merged release PR #203, candidate `75aa21fb8a2c9e91e2e999a4bd7126d99f03610f`)
+into the existing PR #204 branch with a normal merge. Only `ci.yml` required
+manual conflict resolution. Reviewed the clean automatic merges of
+`package.json`, `.gitignore` and `backend/src/server/index.ts`: all six version
+manifests/locks remain 2.0.0, release backup-readiness behavior is intact, and
+managed backends still avoid workstation `.env` settings. Application,
+deployment and shared source match the release except for that test-only guard.
+
+CI now runs all 57 release browser specs plus the gated cleanup probe through
+the managed runner on both original Chromium projects. Release-focused checks,
+three independent native-keyboard scroll executions, zero retries, the
+40-minute full-suite allowance and individual test/assertion timeouts remain.
+The release's Vite preview mode is explicit; loopback ports are allocated per
+run. Both native ARM64 jobs also accept the cleanup branch, preserving their
+exact-source checks, historical migration input and complete native suites.
+Source/browser evidence and managed diagnostics are retained for 90 days.
+Smoke/API job storage has unique ownership and a guarded finalizer that refuses
+active servers and preserves recovery snapshots. CI does not deploy MCC.
+
+The full-suite review found real-backend browser fixtures that still used
+shared `tmp`/`output` locations. Managed fixture helpers now create their copied
+applications and all writable storage inside the current run, preserve process
+registration, and resolve installed dependencies through a scoped Node loader
+instead of filesystem junctions. Native, non-Playwright fixture behavior stays
+unchanged. Machine archive and PM report artifacts use `testInfo.outputPath()`;
+nested fixture recovery snapshots and backend logs survive runtime cleanup.
+No browser assertions or application behavior were changed.
+
+Local Windows / Node 22.22.3 / Chromium evidence:
+
+- `npm run build`: frontend TypeScript/Vite and backend TypeScript passed.
+- `npm run test:playwright:cleanup-checks`: 8/8 passed, including nested recovery
+  preservation, expected failure, interruption, startup refusal and concurrency.
+  Probe diagnostics include
+  `diagnostics/playwright/run-1792665043246-96c40434-62b9-4847-9f55-b41a16724f03/`.
+- Focused real-backend/version run: 28 passed; two archive cases exposed a
+  missed screenshot-path reference during integration. Corrected that reference;
+  both archive cases then passed with all 10 other release-focused cases
+  (12/12). This gives 40 distinct passing focused cases across both projects.
+  The original failure evidence remains in
+  `diagnostics/playwright/run-1792665034872-f0db266b-34a6-4c77-a909-8ee68cfe3e4e/`;
+  corrected release-focused evidence is in
+  `diagnostics/playwright/run-1792665184050-d26c8261-a6b2-4f6a-a4d8-35b910b1700f/`.
+- Cleanup dry run: no managed stale runs; owned runtime directory is empty.
+- Workflow YAML and inline finalizer JavaScript parse; no unresolved Git merge
+  entries or conflict markers remain. The only tracked deletions relative to
+  main are the exact 26 obsolete screenshots from `6fdc896`.
+- Read-only archive verification: all 7,165 files in 143 directories match
+  recorded SHA-256 hashes and sizes, totaling 620,365,123 bytes. Neither the
+  archive nor its inventory/verification records were modified.
+
+The full browser suite and native ARM64 validation are delegated to GitHub CI
+on the pushed integration commit; prior release results do not substitute for
+that commit's checks. PR #204 remains draft pending explicit merge approval.
+No Pi access, deployment, restart, release creation or production/recovery-data
+modification is authorized by this integration.
+
+Outstanding operational work remains open: a physical replacement-Pi disaster
+recovery rehearsal has not been completed; the unexpected Pi reboot remains
+under investigation; and complete installed updater orchestration has not
+been independently validated. Repository integration does not close these gates.

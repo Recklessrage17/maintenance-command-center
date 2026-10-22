@@ -35,4 +35,5 @@ diagnostics/playwright/
 blob-report/
 playwright/.cache/
 artifacts/issue-49/
+artifacts/release-2.0.0/
 

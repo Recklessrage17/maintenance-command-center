@@ -1,8 +1,7 @@
 # Machine retirement and history preservation
 
-This feature adds a reversible lifecycle to Machine Library assets. It does not
-change the application version (1.5.18), implement permanent deletion, or move
-attachments. Publication and production deployment require separate approval.
+This feature adds a reversible lifecycle to Machine Library assets in MCC 2.0.0.
+It preserves original machine identities, history and attachments. Publication and production deployment require separate approval.
 
 ## Lifecycle and authorization
 

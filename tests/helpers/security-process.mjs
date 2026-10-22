@@ -4,11 +4,27 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readRun, safePath, runsRoot } from '../../scripts/playwright-storage.mjs';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const password = 'Local-Security-Test!9a';
 export const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const ownedProcesses = new Set();
+export function fixtureDirectory(label) {
+  assert.match(label, /^[a-z0-9-]+$/, 'Fixture label must be a safe directory name.');
+  if (!process.env.MCC_PLAYWRIGHT_RUN_ID) return path.join(root, 'tmp', `${label}-${Date.now()}-${process.pid}`);
+  const parent = safePath(runsRoot, path.join(readRun(process.env.MCC_PLAYWRIGHT_RUN_ID).directory, 'runtime'));
+  fs.mkdirSync(parent, { recursive: true });
+  return fs.mkdtempSync(path.join(parent, `${label}-`));
+}
+
+export function managedFixtureEnvironment() {
+  if (!process.env.MCC_PLAYWRIGHT_RUN_ID) return {};
+  readRun(process.env.MCC_PLAYWRIGHT_RUN_ID);
+  assert.ok(process.env.NODE_OPTIONS, 'Managed fixture must retain process registration.');
+  return Object.fromEntries(['MCC_PLAYWRIGHT_RUN_ID', 'MCC_PLAYWRIGHT_DIAGNOSTICS', 'NODE_OPTIONS']
+    .map(key => [key, process.env[key]]));
+}
 process.once('exit', () => {
   for (const child of ownedProcesses) if (child.exitCode === null) child.kill('SIGKILL');
 });
@@ -38,7 +54,7 @@ export function assertFixturePath(fixture, target) {
 
 export async function backendFixture(label, extraEnv = {}, { rootEnvText, observeUploads = false, serveFrontend = false } = {}) {
   assert.match(label, /^[a-z0-9-]+$/, 'Fixture label must be a safe directory name.');
-  const fixture = path.join(root, 'tmp', `${label}-${Date.now()}-${process.pid}`);
+  const fixture = fixtureDirectory(label);
   fs.mkdirSync(fixture, { recursive: true });
   const appRoot = assertFixturePath(fixture, path.join(fixture, 'app'));
   fs.mkdirSync(path.join(appRoot, 'backend'), { recursive: true });
@@ -48,7 +64,7 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
   fs.copyFileSync(path.join(root, 'backend/package.json'), path.join(appRoot, 'backend/package.json'));
   fs.cpSync(path.join(root, 'shared'), path.join(appRoot, 'shared'), { recursive: true });
   if (serveFrontend) fs.cpSync(path.join(root, 'frontend/dist'), path.join(appRoot, 'frontend/dist'), { recursive: true });
-  fs.symlinkSync(path.join(root, 'backend/node_modules'), path.join(appRoot, 'backend/node_modules'), 'junction');
+  if (!process.env.MCC_PLAYWRIGHT_RUN_ID) fs.symlinkSync(path.join(root, 'backend/node_modules'), path.join(appRoot, 'backend/node_modules'), 'junction');
   if (rootEnvText !== undefined) fs.writeFileSync(path.join(appRoot, '.env'), rootEnvText);
   const port = await freePort();
   const fixed = {
@@ -74,6 +90,7 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
     SESSION_SECRET: 'isolated-security-fixture',
     SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASS: '', SMTP_FROM: '',
     ...extraEnv,
+    ...managedFixtureEnvironment(),
   };
   assert.ok(['', 'localhost', '127.0.0.1', '::1'].includes(env.SMTP_HOST), 'SMTP fixtures must use loopback.');
   const eventsPath = assertFixturePath(fixture, path.join(fixture, 'upload-events.jsonl'));

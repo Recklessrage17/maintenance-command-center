@@ -98,6 +98,7 @@ for (const mode of ['pass', 'fail']) {
     assert.ok(files.some(file => file.endsWith('runner.log')));
     assert.ok(files.some(file => file.endsWith('report.json')));
     assert.equal(fs.readFileSync(path.join(diagnostics, 'recovery/probe-snapshot.txt'), 'utf8'), 'preserve recovery evidence');
+    assert.equal(fs.readFileSync(path.join(diagnostics, 'runtime-evidence/runtime/fixture/recovery/snapshot.txt'), 'utf8'), 'preserve nested fixture recovery');
     if (mode === 'fail') {
       assert.ok(files.some(file => file.endsWith('.png')), 'failure screenshot retained');
       assert.ok(files.some(file => file.endsWith('trace.zip')), 'failure trace retained');

@@ -3,11 +3,13 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: create-deployment-rollback --app-dir DIR --backup-dir DIR [--version VERSION] [--replace-old ARCHIVE]
+Usage: create-deployment-rollback --storage-manifest FILE
+       create-deployment-rollback --legacy-checkout-only --app-dir DIR --backup-dir DIR [--version VERSION] [--replace-old ARCHIVE]
        create-deployment-rollback --verify-only ARCHIVE
 
-Create a full deployment rollback snapshot. --replace-old removes only the named
-archive in --backup-dir, and only after the new snapshot passes every check.
+Full snapshots require reviewed external paths, mounts and a stopped mcc.service.
+The explicit legacy mode omits those guarantees. --replace-old removes only the
+named legacy archive, and only after the new legacy archive passes its checks.
 EOF
 }
 
@@ -18,6 +20,13 @@ backup_dir=/var/backups/mcc-deployments
 version=
 old_archive=
 verify_only=
+legacy_checkout_only=false
+if [[ "${1:-}" == "--storage-manifest" ]]; then
+  [[ $# -eq 2 ]] || fail 'Use --storage-manifest FILE for a complete snapshot.'
+  helper="$(dirname -- "${BASH_SOURCE[0]}")/deployment-safety.mjs"
+  [[ -f "$helper" ]] || helper=/usr/local/lib/mcc-update/deployment-safety.mjs
+  exec node "$helper" snapshot --manifest "$2" --service mcc.service --phase manual
+fi
 while (($#)); do
   case "$1" in
     --app-dir|--backup-dir|--version|--replace-old|--verify-only)
@@ -31,6 +40,7 @@ while (($#)); do
       esac
       shift 2 ;;
     --help) usage; exit 0 ;;
+    --legacy-checkout-only) legacy_checkout_only=true; shift ;;
     *) usage >&2; fail "Unknown option: $1" ;;
   esac
 done
@@ -54,6 +64,8 @@ if [[ -n "$verify_only" ]]; then
   echo "Rollback snapshot verified: $verify_only"
   exit 0
 fi
+[[ "$legacy_checkout_only" == true ]] || fail 'A reviewed --storage-manifest is required. --legacy-checkout-only creates an incomplete historical-format archive and is not a lifecycle-safe release rollback.'
+echo 'WARNING: legacy checkout-only snapshot; external runtime/mount coverage and lifecycle-safe rollback are NOT verified.' >&2
 
 app_dir=$(readlink -f -- "$app_dir") || fail "Application directory cannot be resolved"
 [[ -d "$app_dir" && -f "$app_dir/package.json" ]] || fail "Invalid MCC application directory: $app_dir"
