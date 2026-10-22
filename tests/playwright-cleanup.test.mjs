@@ -73,12 +73,36 @@ test('a hard-killed owner cannot authorize stale cleanup while a participant rem
   const id = String(chunk).trim();
   const run = readRun(id);
   registerProcess(run); // This test process stands in for an orphan server.
+  const participants = [];
+  async function participant(argument) {
+    const participantProcess = spawn(process.execPath, ['-e', "console.log('ready');setInterval(()=>{},1000)", argument], {
+      cwd: root, env: { ...process.env, NODE_OPTIONS: '' }, windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const done = once(participantProcess, 'close');
+    const result = { process: participantProcess, done };
+    participants.push(result);
+    await once(participantProcess.stdout, 'data');
+    return result;
+  }
   try {
     child.kill('SIGKILL'); await closed;
     assert.throws(() => cleanupRun(id, { apply: true, minimumAgeMs: 0 }), /still active/);
     assert.equal(fs.existsSync(run.directory), true);
-  } finally {
     fs.unlinkSync(path.join(run.directory, 'processes', `${process.pid}.json`));
+    const profile = await participant(path.join(run.directory, 'runtime', 'browser-profile'));
+    const controller = await participant(id);
+    assert.throws(() => cleanupRun(id, { apply: true, minimumAgeMs: 0 }), /still active/, 'unregistered browser profile still blocks cleanup');
+    profile.process.kill('SIGTERM'); await profile.done;
+    cleanupRun(id, { apply: false, minimumAgeMs: 0 });
+    assert.equal(controller.process.exitCode, null, 'a bare-ID controller is not an orphan browser');
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await closed; }
+    for (const participant of participants) {
+      if (participant.process.exitCode === null && participant.process.signalCode === null) participant.process.kill('SIGTERM');
+      await participant.done;
+    }
+    const registration = path.join(run.directory, 'processes', `${process.pid}.json`);
+    if (fs.existsSync(registration)) fs.unlinkSync(registration);
     cleanupRun(id, { apply: false, minimumAgeMs: 0 });
     assert.equal(fs.existsSync(run.directory), true, 'dry run must not remove anything');
     cleanupRun(id, { apply: true, minimumAgeMs: 0 });

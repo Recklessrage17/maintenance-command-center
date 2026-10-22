@@ -94,8 +94,19 @@ export function activeProcesses(run, allowedPid) {
     if (entry.runId !== run.id || !Number.isSafeInteger(entry.pid) || entry.pid <= 0 || name !== `${entry.pid}.json`) throw new Error('Invalid process registration');
     pids.add(entry.pid);
   }
-  // Also catch orphan browsers (their profile paths contain this run's ID).
-  for (const entry of processSnapshot()) if (entry.pid !== process.pid && entry.command.includes(run.id)) pids.add(entry.pid);
+  // Catch orphan browsers by their owned profile path, not a bare ID: npm and
+  // shell ancestors of `cleanup --run <id>` also contain the ID but own no data.
+  const normalize = value => {
+    const portable = value.replaceAll('\\', '/');
+    return process.platform === 'win32' ? portable.toLowerCase() : portable;
+  };
+  const runtimePath = normalize(run.directory);
+  for (const entry of processSnapshot()) {
+    const command = normalize(entry.command);
+    const index = command.indexOf(runtimePath);
+    if (entry.pid !== process.pid && index !== -1 &&
+        (index + runtimePath.length === command.length || /[\/"'\s]/.test(command[index + runtimePath.length]))) pids.add(entry.pid);
+  }
   return [...pids].filter(pid => pid !== allowedPid && isAlive(pid));
 }
 

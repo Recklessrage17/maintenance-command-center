@@ -115,9 +115,9 @@ jobs:
         timeout-minutes: 5
         run: npm run test:playwright -- tests/warning-issue-lifecycle.spec.ts tests/maintenance-lab-background.spec.ts tests/machine-retirement-archive.spec.mts tests/maintenance-team-roster.spec.ts tests/user-security-permissions.spec.ts --grep 'technician controls|long Machine Library|archive, search|roster Escape|module badges' --forbid-only --workers=2 --retries=0
 
-      - name: Verify native keyboard scroll after paint in independent executions
-        timeout-minutes: 3
-        run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=3 --forbid-only --workers=1 --retries=0
+      - name: Verify native keyboard scroll in independent executions under contention
+        timeout-minutes: 6
+        run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
 
       - name: Desktop and mobile browser regressions
         # A complete zero-retry run took 28.2 minutes on the hosted runner.

@@ -216,3 +216,69 @@ Outstanding operational work remains open: a physical replacement-Pi disaster
 recovery rehearsal has not been completed; the unexpected Pi reboot remains
 under investigation; and complete installed updater orchestration has not
 been independently validated. Repository integration does not close these gates.
+
+### Full CI investigation and keyboard-input precondition (2026-10-22)
+
+On merge commit `7517b6acd9e967e92d5a50a315a4e6e4fd70f2d9`, both jobs in
+[native ARM64 run 39764210023](https://github.com/Recklessrage17/maintenance-command-center/actions/runs/39764210023)
+passed: 17 migration/restore checks, 14 regression suites and 20 disposable
+native deployment/recovery/resource cases. Downloaded artifacts match their
+GitHub SHA-256 digests and remain under
+`diagnostics/playwright/integration-7517b6a/`.
+
+[Browser/build run 39764209975](https://github.com/Recklessrage17/maintenance-command-center/actions/runs/39764209975)
+first timed out downloading Ubuntu browser dependencies. A rerun on the same
+unchanged source passed setup, builds, smoke/authorization regressions, all
+eight cleanup checks, 12 release-focused cases and three scroll executions.
+Its complete zero-retry suite then reported **729 passed, 38 skipped, 1 failed**
+in 29.9 minutes. The skips comprise the original 36 project skips and two
+gated cleanup probes. All 58 specs were selected; no test was excluded.
+
+The sole failure was desktop Chromium's `maintenance-lab-background.spec.ts`
+case "long Machine Library pages and true modals keep document, keyboard,
+pointer, and touch scrolling", at the bottom-edge assertion after native End.
+The trace records 18 rendered cards, BODY/document focus and a scrollend event,
+but scrollY remained zero. Earlier paint waits and isolated repetitions did
+not establish a reliable input precondition in the complete parallel run.
+The full artifact, screenshot, trace and error context remain retained locally
+in `diagnostics/playwright/integration-7517b6a/`; its managed runtime cleanup
+receipt confirms removal. CI's final runtime verification and smoke/API storage
+finalizer also passed.
+
+The test now activates a blank document gutter with a real pointer click after
+the programmatic container probes, then additionally asserts it is still at
+scrollY zero before issuing the original native keys. This establishes an
+explicit scroll-start node: Blink's
+[logical scroll implementation](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/core/input/scroll_manager.h)
+uses focus/last-clicked node state. No scripted scroll substitutes for End,
+Home or PageDown; no existing assertion, project or deadline is weakened.
+Application code is unchanged. The CI stability check is expanded from three
+single-worker executions to 20 independent executions with two workers; only
+that orchestration step's allowance increases from three to six minutes.
+The complete suite retains its 40-minute allowance and zero retries.
+
+The input-precondition change requires exact-head Linux validation; a passing
+focused run alone must not be reported as a passing complete suite.
+
+Locally, all 20 repeated desktop scrolling cases passed with two workers and
+zero retries (1.2 minutes), under
+`diagnostics/playwright/run-1792668148271-1e0f93e7-5ef8-4bdc-b533-f3cfedafd153/`.
+The runner then returned nonzero because Windows reused registered PIDs for
+unrelated live processes. The explicit dry run refused deletion as designed.
+After those PIDs exited, the default dry run became eligible. Inspection also
+found a separate bug in the specific-run CLI: matching a bare run ID in process
+command lines incorrectly classified its npm/shell ancestors as participants.
+Orphan detection now matches the complete owned runtime path (including a path
+boundary), with Windows path/case normalization. All registered PID liveness
+checks remain unchanged and conservative, including PID reuse. The orphan
+check now covers both an unregistered live profile-path process (refused) and
+a bare-ID controller (eligible only after actual participants stop).
+
+The corrected specific-run dry run passed; a subsequent specific-run apply
+removed only
+`tmp/playwright-runs/run-1792668148271-1e0f93e7-5ef8-4bdc-b533-f3cfedafd153/`.
+No unrelated process was stopped, no process registry was edited to authorize
+cleanup, and no stale-run sweep was performed. Its diagnostics remain retained.
+After the orphan-matching correction, all eight cleanup checks passed again,
+including the new unregistered-profile/bare-ID cases. The final dry run reports
+no managed stale runs; no managed runtime from these local checks remains.
