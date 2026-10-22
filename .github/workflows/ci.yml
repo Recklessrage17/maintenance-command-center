@@ -14,13 +14,15 @@ concurrency:
 
 jobs:
   build-and-regression:
-    name: Build and focused regressions (Node 22)
+    name: Build and complete browser regressions (Node 22)
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 60
     env:
       CI: 'true'
       NODE_ENV: test
-      MCC_PLAYWRIGHT_PORT: '4297'
+      # Preserve the release browser harness (mocked APIs served by Vite).
+      # Each managed invocation allocates its own loopback port.
+      MCC_PLAYWRIGHT_FRONTEND_ONLY: '1'
       MCC_BIND_HOST: 127.0.0.1
       MCC_UPDATE_MODE: ''
       MCC_HTTPS_MODE: ''
@@ -57,14 +59,16 @@ jobs:
 
       - name: Prepare isolated test storage
         run: |
-          mkdir -p "$RUNNER_TEMP/mcc-ci"
+          runtime=$(mktemp -d "$RUNNER_TEMP/mcc-ci.XXXXXXXX")
+          printf '%s:%s' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$runtime/owner"
           printf '%s\n' \
-            "MCC_DATA_DIR=$RUNNER_TEMP/mcc-ci/data" \
-            "MCC_UPLOADS_DIR=$RUNNER_TEMP/mcc-ci/uploads" \
-            "MCC_BACKUPS_DIR=$RUNNER_TEMP/mcc-ci/backups" \
-            "MCC_RECOVERY_DIR=$RUNNER_TEMP/mcc-ci/recovery" \
-            "MCC_PM_EXCEL_DIR=$RUNNER_TEMP/mcc-ci/pm-excel" \
-            "MCC_PM_WORK_ORDER_DIR=$RUNNER_TEMP/mcc-ci/pm-work-orders" >> "$GITHUB_ENV"
+            "MCC_CI_RUNTIME=$runtime" \
+            "MCC_DATA_DIR=$runtime/data" \
+            "MCC_UPLOADS_DIR=$runtime/uploads" \
+            "MCC_BACKUPS_DIR=$runtime/backups" \
+            "MCC_RECOVERY_DIR=$runtime/recovery" \
+            "MCC_PM_EXCEL_DIR=$runtime/pm-excel" \
+            "MCC_PM_WORK_ORDER_DIR=$runtime/pm-work-orders" >> "$GITHUB_ENV"
 
       - name: Install locked dependencies
         timeout-minutes: 5
@@ -103,37 +107,67 @@ jobs:
         timeout-minutes: 5
         run: npx --no-install playwright install --with-deps chromium
 
-      - name: Recheck release layout and keyboard failures before full suite
-        if: github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'
-        timeout-minutes: 5
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-focused-results.json
-        run: npx --no-install playwright test tests/warning-issue-lifecycle.spec.ts tests/maintenance-lab-background.spec.ts tests/machine-retirement-archive.spec.mts tests/maintenance-team-roster.spec.ts tests/user-security-permissions.spec.ts --grep 'technician controls|long Machine Library|archive, search|roster Escape|module badges' --forbid-only --workers=2 --retries=0 --reporter=github,line,json
+      - name: Managed Playwright ownership and cleanup safety checks
+        timeout-minutes: 6
+        run: npm run test:playwright:cleanup-checks
 
-      - name: Verify native keyboard scroll after paint in independent executions
-        if: github.event.pull_request.head.ref == 'codex/mcc-2-0-0-release-candidate'
-        timeout-minutes: 3
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-scroll-stability.json
-        run: npx --no-install playwright test tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=3 --forbid-only --workers=1 --retries=0 --reporter=github,line,json
+      - name: Recheck release layout and keyboard failures before full suite
+        timeout-minutes: 5
+        run: npm run test:playwright -- tests/warning-issue-lifecycle.spec.ts tests/maintenance-lab-background.spec.ts tests/machine-retirement-archive.spec.mts tests/maintenance-team-roster.spec.ts tests/user-security-permissions.spec.ts --grep 'technician controls|long Machine Library|archive, search|roster Escape|module badges' --forbid-only --workers=2 --retries=0
+
+      - name: Verify native keyboard scroll in independent executions under contention
+        timeout-minutes: 6
+        run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
 
       - name: Desktop and mobile browser regressions
         # A complete zero-retry run took 28.2 minutes on the hosted runner.
         # This is orchestration headroom; per-test/assertion deadlines stay intact.
         timeout-minutes: 40
-        env:
-          RC_BRANCH: ${{ github.event.pull_request.head.ref }}
-          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/mcc-ci-evidence/browser-results.json
         run: |
-          specs=(tests/settings-system-update.spec.ts tests/asset-note-modal.spec.ts tests/dashboard-tech-notes.spec.ts tests/route-code-splitting.spec.ts)
-          if [[ "$RC_BRANCH" == codex/mcc-2-0-0-release-candidate ]]; then
-            # Select the complete browser suite, excluding node:test modules
-            # whose root/mount fixtures must run in their native harness.
-            mapfile -t specs < <(git ls-files 'tests/*.spec.ts' 'tests/*.spec.mts')
-            test "${#specs[@]}" = 57
-            printf '%s\n' "${specs[@]}" > "$RUNNER_TEMP/mcc-ci-evidence/browser-specs.txt"
-          fi
-          npx --no-install playwright test "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5 --reporter=github,line,json
+          # All 57 release specs plus the gated cleanup probe. Node test modules
+          # keep their native harness; no browser project or release spec is omitted.
+          mapfile -t specs < <(git ls-files 'tests/*.spec.ts' 'tests/*.spec.mts')
+          test "${#specs[@]}" = 58
+          printf '%s\n' "${specs[@]}" > "$RUNNER_TEMP/mcc-ci-evidence/browser-specs.txt"
+          npm run test:playwright -- "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5
+
+      - name: Verify managed runtime cleanup
+        if: always()
+        run: |
+          npm run test:playwright:cleanup
+          node --input-type=module -e "import fs from 'node:fs'; const p='tmp/playwright-runs'; if(fs.existsSync(p) && fs.readdirSync(p).length) throw new Error('Managed runtime retained: inspect diagnostics and processes before explicit cleanup');"
+
+      - name: Finalize owned smoke and API storage
+        if: always() && env.MCC_CI_RUNTIME != ''
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { inspectTree } from './scripts/playwright-storage.mjs';
+          const directory = path.resolve(process.env.MCC_CI_RUNTIME);
+          const parent = fs.realpathSync(process.env.RUNNER_TEMP);
+          if (path.dirname(directory) !== parent || !/^mcc-ci\.[a-zA-Z0-9]+$/.test(path.basename(directory)) ||
+              fs.lstatSync(directory).isSymbolicLink() || fs.realpathSync(directory) !== directory ||
+              fs.readFileSync(path.join(directory, 'owner'), 'utf8') !== `${process.env.GITHUB_RUN_ID}:${process.env.GITHUB_RUN_ATTEMPT}`) {
+            throw new Error('Refusing unowned CI storage cleanup');
+          }
+          for (const pid of fs.readdirSync('/proc').filter(name => /^\d+$/.test(name))) {
+            let command;
+            try { command = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); }
+            catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') continue; throw error; }
+            if (!command.some(arg => /(?:^|\/)backend\/dist\/server\/index\.js$/.test(arg))) continue;
+            let environment;
+            try { environment = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); }
+            catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') continue; throw error; }
+            if (environment.includes(directory)) throw new Error(`Owned server ${pid} is still active; storage retained`);
+          }
+          inspectTree(directory);
+          const recovery = path.join(directory, 'recovery');
+          if (fs.existsSync(recovery) && fs.readdirSync(recovery).length) {
+            fs.renameSync(recovery, path.join(parent, 'mcc-ci-evidence', 'recovery'));
+          }
+          fs.rmSync(directory, { recursive: true });
+          NODE
 
       - name: Retain source and browser results
         if: always()
@@ -141,16 +175,15 @@ jobs:
         with:
           name: exact-source-browser-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mcc-ci-evidence/
-          retention-days: 7
+          retention-days: 90
 
-      - name: Retain browser failure traces and screenshots
-        if: ${{ failure() }}
+      - name: Retain managed browser diagnostics for review
+        if: ${{ always() }}
         timeout-minutes: 2
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-failures-${{ github.run_attempt }}
           path: |
-            test-results/**/*.zip
-            test-results/**/*.png
-          retention-days: 3
+            diagnostics/playwright/
+          retention-days: 90
           if-no-files-found: ignore

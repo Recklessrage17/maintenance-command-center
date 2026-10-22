@@ -2,7 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const artifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-56');
+const artifactDirectory = resolve(process.env.MCC_PLAYWRIGHT_DIAGNOSTICS!, 'visual', 'issue-56');
 const fullPermissions = [
   'inventory.view',
   'vendors.view',

@@ -109,7 +109,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRootPath = path.resolve(__dirname, '../../..');
 const rootEnvPath = path.join(repoRootPath, '.env');
-if (fs.existsSync(rootEnvPath)) {
+// Managed browser tests supply a complete isolated environment; never import
+// workstation SMTP, updater or storage settings from the development .env.
+if (!(process.env.NODE_ENV === 'test' && process.env.MCC_PLAYWRIGHT_RUN_ID) && fs.existsSync(rootEnvPath)) {
   dotenv.populate(process.env, dotenv.parse(fs.readFileSync(rootEnvPath)), { override: false });
 }
 

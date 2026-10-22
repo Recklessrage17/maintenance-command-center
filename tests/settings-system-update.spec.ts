@@ -29,7 +29,7 @@ type UpdateState = {
 };
 
 const timestamp = '2026-07-29T12:00:00.000Z';
-const approvalArtifactDirectory = resolve(process.cwd(), 'artifacts', 'issue-60');
+const approvalArtifactDirectory = resolve(process.env.MCC_PLAYWRIGHT_DIAGNOSTICS!, 'visual', 'issue-60');
 const availableUpdate: UpdateState = {
   ok: true,
   configured: true,

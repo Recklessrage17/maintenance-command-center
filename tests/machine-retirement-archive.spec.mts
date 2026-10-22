@@ -2,7 +2,7 @@ import {expect,test,type Page} from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {owner,password,request,root} from './helpers/security-process.mjs';
+import {owner,password,request} from './helpers/security-process.mjs';
 import {inspectionFixture} from './helpers/inspection-records-fixture.mjs';
 import {seedMachineHistory} from './helpers/machine-archive-data.mjs';
 import JSZip from '../backend/node_modules/jszip/lib/index.js';
@@ -82,15 +82,14 @@ test('archive, search, replacement navigation and restore preserve records with 
     await expect(dialog.getByRole('combobox',{name:'Replacement Machine (optional)',exact:true}).locator('option',{hasText:'ARCHIVE-QA'})).toHaveCount(0);
     await dialog.getByRole('combobox',{name:'Replacement Machine (optional)',exact:true}).selectOption({label:'NEW-QA · Synthetic Replacement'});
     await dialog.getByRole('textbox',{name:'Retirement Notes',exact:true}).fill('Synthetic replacement archive');
-    const screenshotDir=path.join(root,'output/machine-archive/screenshots');fs.mkdirSync(screenshotDir,{recursive:true});
-    await page.screenshot({path:path.join(screenshotDir,`${testInfo.project.name}-retirement-dialog.png`),fullPage:true});
+    await page.screenshot({path:testInfo.outputPath('retirement-dialog.png'),fullPage:true});
     await dialog.getByRole('button',{name:'Confirm Archive',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByText('Lifecycle: Archived',{exact:true})).toBeVisible();
     await page.goto(`${runtime.base}/machine-library`);await page.getByRole('button',{name:'Old Machines Archive',exact:true}).click();
     if(isMobile)await page.getByRole('button',{name:'Search',exact:true}).click();
     await page.getByRole(isMobile?'searchbox':'textbox',{name:'Search assets',exact:true}).fill('Synthetic replacement archive');
     await expect(page.getByRole('button',{name:'View details for ARCHIVE-QA',exact:true})).toBeVisible();
     if(isMobile){await page.getByRole('button',{name:'Machine Library',exact:true}).tap();await expect(page.getByRole('button',{name:'Machine Library',exact:true})).toHaveAttribute('aria-pressed','true');await page.getByRole('button',{name:'Old Machines Archive',exact:true}).tap();await expect(page.getByRole('button',{name:'View details for ARCHIVE-QA',exact:true})).toBeVisible();}
-    await page.screenshot({path:path.join(screenshotDir,`${testInfo.project.name}-archive-search.png`),fullPage:true});
+    await page.screenshot({path:testInfo.outputPath('archive-search.png'),fullPage:true});
     await page.getByRole('button',{name:'View details for ARCHIVE-QA',exact:true}).click();
     await page.getByRole('button',{name:'Replacement: NEW-QA',exact:true}).click();await expect(page.getByText('Lifecycle: Active',{exact:true})).toBeVisible();
     await page.goto(`${runtime.base}/machine-library?asset=${id}`);await expect(page.getByText('Lifecycle: Archived',{exact:true})).toBeVisible();
@@ -132,7 +131,7 @@ test('history ZIP uses save picker, discloses legacy coverage, cancels writes, r
     const progress=page.getByRole('dialog',{name:'Machine History Export',exact:true});await expect(progress.getByText(/ZIP saved/)).toBeVisible();
     const query=new URL((await exportRequest).url()).searchParams;expect(query.get('legacyCount')).toBe('1');expect(query.get('unmappedFiles')).toBe('1');expect(query.get('legacyChecked')).toBe('1');
     const saved=await page.evaluate(()=>(window as any).qaSave);expect(saved.bytes).toBeGreaterThan(1000);expect(saved.closed).toBe(true);expect(saved.activated).toBe(true);expect(saved.suggested).toMatch(/History\.zip$/);
-    await expect(progress.getByText(/browser-only records/)).toBeVisible();await page.screenshot({path:path.join(root,'output/machine-archive/screenshots',`${testInfo.project.name}-export-result.png`),fullPage:true});
+    await expect(progress.getByText(/browser-only records/)).toBeVisible();await page.screenshot({path:testInfo.outputPath('export-result.png'),fullPage:true});
     expect(await progress.locator('.library-upload-progress strong').evaluate(element=>getComputedStyle(element).whiteSpace)).toBe('normal');
     await progress.getByRole('button',{name:'Close',exact:true}).click();
     await expect(retirement.getByRole('textbox',{name:'Explanation *',exact:true})).toHaveValue('Keep retirement draft while exporting');await retirement.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.getByText('Lifecycle: Active',{exact:true})).toBeVisible();
@@ -144,7 +143,7 @@ test('history ZIP uses save picker, discloses legacy coverage, cancels writes, r
     await page.getByRole('button',{name:'Export History',exact:true}).click();await expect(progress.getByRole('alert')).toHaveText(/insufficient temporary storage/);await progress.getByRole('button',{name:'Close',exact:true}).click();await page.unroute('**/history-export.zip?*');
     await page.evaluate(()=>{delete(window as any).showSaveFilePicker;});
     const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Export History',exact:true}).click();const download=await downloadPromise;
-    const zipPath=path.join(root,'output/machine-archive',`${testInfo.project.name}-history.zip`);
+    const zipPath=testInfo.outputPath('history.zip');
     expect(download.suggestedFilename()).toMatch(/History\.zip$/);await download.saveAs(zipPath);expect(await download.failure()).toBeNull();
     const zip=await JSZip.loadAsync(fs.readFileSync(zipPath));const manifest=JSON.parse(await zip.file(Object.keys(zip.files).find(name=>name.endsWith('/MANIFEST.json'))!)!.async('string'));
     expect(manifest.coverage.browserInspectionRecords).toMatchObject({checked:true,recordCount:1,unmappedFiles:1});expect(manifest.coverage.completeAvailableHistory).toBe(false);expect(manifest.entries.some((entry:any)=>entry.originalFilename==='Browser-only.txt'||entry.originalFilename==='Orphan-inspection.txt')).toBe(false);

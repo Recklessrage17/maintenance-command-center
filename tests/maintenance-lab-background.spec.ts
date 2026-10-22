@@ -180,6 +180,13 @@ test('long Machine Library pages and true modals keep document, keyboard, pointe
   expect(dimensions.workspaceScrollTop).toBe(0);
 
   if(!mobile) {
+    // hasFocus()/BODY alone does not establish Chromium's keyboard scroll
+    // starting node. Activate the non-interactive document gutter with real
+    // input after the programmatic container probes, without changing scroll.
+    // Blink starts logical scrolling from focus/last-clicked node:
+    // https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/core/input/scroll_manager.h
+    await page.locator('body').click({position:{x:4,y:100}});
+    await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(0);
     console.log('Document before End',await page.evaluate(()=>({active:document.activeElement?.tagName,focused:document.hasFocus(),y:window.scrollY,h:document.documentElement.scrollHeight,bodyHeight:document.body.scrollHeight,rootOverflow:getComputedStyle(document.documentElement).overflow,bodyOverflow:getComputedStyle(document.body).overflow,scrollingElement:document.scrollingElement?.tagName})));
     await pressDocumentScrollKey(page,'End');
     console.log('Document after End',await page.evaluate(()=>({active:document.activeElement?.tagName,focused:document.hasFocus(),y:window.scrollY,h:document.documentElement.scrollHeight,bodyHeight:document.body.scrollHeight})));

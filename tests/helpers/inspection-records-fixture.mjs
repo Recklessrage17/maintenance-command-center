@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { assertFixturePath, freePort, pause, root } from './security-process.mjs';
+import { assertFixturePath, freePort, pause, root, fixtureDirectory, managedFixtureEnvironment } from './security-process.mjs';
 
 // Inspection references currently resolve against backend/uploads. Reproduce that
 // supported layout inside a disposable app, without changing the application.
 export async function inspectionFixture(label, { serveFrontend = false } = {}) {
   assert.match(label, /^[a-z0-9-]+$/);
-  const fixture = path.join(root, 'tmp', `${label}-${Date.now()}-${process.pid}`);
+  const fixture = fixtureDirectory(label);
   fs.mkdirSync(fixture, { recursive: true });
   const appRoot = assertFixturePath(fixture, path.join(fixture, 'app'));
   fs.mkdirSync(path.join(appRoot, 'backend'), { recursive: true });
@@ -16,7 +16,7 @@ export async function inspectionFixture(label, { serveFrontend = false } = {}) {
   for (const file of ['package.json', 'backend/package.json']) fs.copyFileSync(path.join(root, file), path.join(appRoot, file));
   fs.cpSync(path.join(root, 'shared'), path.join(appRoot, 'shared'), { recursive: true });
   if (serveFrontend) fs.cpSync(path.join(root, 'frontend/dist'), path.join(appRoot, 'frontend/dist'), { recursive: true });
-  fs.symlinkSync(path.join(root, 'backend/node_modules'), path.join(appRoot, 'backend/node_modules'), 'junction');
+  if (!process.env.MCC_PLAYWRIGHT_RUN_ID) fs.symlinkSync(path.join(root, 'backend/node_modules'), path.join(appRoot, 'backend/node_modules'), 'junction');
   const port = await freePort();
   const uploadsDir = path.join(appRoot, 'backend/uploads');
   const fixed = {
@@ -32,7 +32,7 @@ export async function inspectionFixture(label, { serveFrontend = false } = {}) {
   for (const [key, value] of Object.entries(fixed)) if ((key.endsWith('_DIR') && value) || ['TEMP', 'TMP', 'TMPDIR'].includes(key)) assertFixturePath(fixture, value);
   fs.mkdirSync(fixed.TEMP, { recursive: true });
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-    !/^(MCC_|SMTP_|SESSION_SECRET$|NODE_OPTIONS$|NODE_PATH$|NODE_EXTRA_CA_CERTS$|.*_PROXY$)/i.test(key))), ...fixed };
+    !/^(MCC_|SMTP_|SESSION_SECRET$|NODE_OPTIONS$|NODE_PATH$|NODE_EXTRA_CA_CERTS$|.*_PROXY$)/i.test(key))), ...fixed, ...managedFixtureEnvironment() };
   const child = spawn(process.execPath, [path.join(appRoot, 'backend/dist/server/index.js')], {
     cwd: appRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });

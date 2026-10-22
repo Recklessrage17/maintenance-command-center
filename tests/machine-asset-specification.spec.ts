@@ -65,7 +65,7 @@ test('Machine Asset Detail prints and downloads a compact one-page persisted spe
   const parsed = await PDFDocument.load(printPdf);
   expect(parsed.getPageCount()).toBe(1);
   if (process.env.MCC_KEEP_ASSET_SPEC_ARTIFACTS === '1') {
-    const output = path.resolve('output','pdf');
+    const output = path.resolve(process.env.MCC_PLAYWRIGHT_DIAGNOSTICS!, 'pdf');
     fs.mkdirSync(output,{recursive:true});
     fs.writeFileSync(path.join(output,`Press45_Machine_Asset_Specification_2026-07-23_${testInfo.project.name}.pdf`),printPdf);
     await sheet.screenshot({path:path.join(output,`Press45_Machine_Asset_Specification_2026-07-23_${testInfo.project.name}.png`)});
