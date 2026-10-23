@@ -23,6 +23,8 @@ jobs:
       # Preserve the release browser harness (mocked APIs served by Vite).
       # Each managed invocation allocates its own loopback port.
       MCC_PLAYWRIGHT_FRONTEND_ONLY: '1'
+      # Temporary observation-only capture; the complete suite keeps its native inputs.
+      PLAYWRIGHT_PM_INPUT_TELEMETRY: events
       MCC_BIND_HOST: 127.0.0.1
       MCC_UPDATE_MODE: ''
       MCC_HTTPS_MODE: ''
@@ -129,6 +131,7 @@ jobs:
         run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
 
       - name: Desktop and mobile browser regressions
+        id: complete-browser
         # A complete zero-retry run took 28.2 minutes on the hosted runner.
         # This is orchestration headroom; per-test/assertion deadlines stay intact.
         timeout-minutes: 40
@@ -144,6 +147,20 @@ jobs:
           printf '%s\n' "${specs[@]}" | grep -Fxq 'tests/asset-maintenance-record-pdf.spec.ts'
           printf '%s\n' "${specs[@]}" > "$RUNNER_TEMP/mcc-ci-evidence/browser-specs.txt"
           npm run test:playwright -- "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5
+
+      - name: Ubuntu mobile PM baseline repetitions
+        if: ${{ !cancelled() && (steps.complete-browser.outcome == 'success' || steps.complete-browser.outcome == 'failure') }}
+        timeout-minutes: 6
+        env:
+          PLAYWRIGHT_PM_INPUT_TELEMETRY: 'off'
+        run: npm run test:playwright -- tests/dashboard-pm-alerts.spec.ts --project=mobile-chromium --grep 'groups and separates PMs' --repeat-each=20 --workers=2 --retries=0 --forbid-only
+
+      - name: Ubuntu mobile PM native interaction diagnostics
+        if: ${{ !cancelled() && (steps.complete-browser.outcome == 'success' || steps.complete-browser.outcome == 'failure') }}
+        timeout-minutes: 6
+        env:
+          PLAYWRIGHT_PM_INPUT_TELEMETRY: geometry
+        run: npm run test:playwright -- tests/dashboard-pm-alerts.spec.ts --project=mobile-chromium --grep 'groups and separates PMs' --repeat-each=40 --workers=2 --retries=0 --forbid-only --trace=on
 
       - name: Verify managed runtime cleanup
         if: always()

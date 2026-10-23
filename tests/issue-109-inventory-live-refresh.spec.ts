@@ -156,6 +156,8 @@ test('serializes refreshes, preserves Inventory context and active edits, and st
   await page.locator('.inventory-modal').getByRole('button',{name:'Close'}).click();
   await page.getByRole('button',{name:'Back to Command Center'}).click();
   await expect(page.getByRole('heading',{name:'Dashboard'})).toBeVisible();
+  await expect(page.locator('.dashboard-page')).toBeVisible();
+  await expect(page.locator('.inventory-page')).toHaveCount(0);
   const requestsAfterNavigation=requests.summaryRequests();
   await page.waitForTimeout(1_800);
   expect(requests.summaryRequests()).toBe(requestsAfterNavigation);
