@@ -124,10 +124,15 @@ jobs:
         # This is orchestration headroom; per-test/assertion deadlines stay intact.
         timeout-minutes: 40
         run: |
-          # All 57 release specs plus the gated cleanup probe. Node test modules
+          # Discover every tracked browser spec, including the gated cleanup probe. Node test modules
           # keep their native harness; no browser project or release spec is omitted.
           mapfile -t specs < <(git ls-files 'tests/*.spec.ts' 'tests/*.spec.mts')
-          test "${#specs[@]}" = 58
+          # Keep the current coverage floor while allowing future specs to be added.
+          if [ "${#specs[@]}" -lt 59 ]; then
+            printf 'Expected at least 59 browser specs; found %s. Check for lost regression coverage.\n' "${#specs[@]}" >&2
+            exit 1
+          fi
+          printf '%s\n' "${specs[@]}" | grep -Fxq 'tests/asset-maintenance-record-pdf.spec.ts'
           printf '%s\n' "${specs[@]}" > "$RUNNER_TEMP/mcc-ci-evidence/browser-specs.txt"
           npm run test:playwright -- "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5
 
