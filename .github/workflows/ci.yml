@@ -107,6 +107,15 @@ jobs:
         timeout-minutes: 5
         run: npx --no-install playwright install --with-deps chromium
 
+      - name: Install pinned PDF inspection dependency
+        timeout-minutes: 3
+        run: |
+          # Isolate packages inside owned storage without venv symlinks that cleanup rejects.
+          export PYTHONPATH="$MCC_CI_RUNTIME/pdf-python"
+          python3 -m pip install --target "$PYTHONPATH" --no-cache-dir --only-binary=:all: --no-deps PyMuPDF==1.28.0
+          python3 -c "import fitz; assert fitz.VersionBind == '1.28.0'; print('PyMuPDF', fitz.VersionBind)"
+          printf '%s\n' 'PYTHON=python3' "PYTHONPATH=$PYTHONPATH" >> "$GITHUB_ENV"
+
       - name: Managed Playwright ownership and cleanup safety checks
         timeout-minutes: 6
         run: npm run test:playwright:cleanup-checks
