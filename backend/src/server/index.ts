@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createAssetMaintenanceRecordPdf } from './assetMaintenanceRecordPdf.js';
 import { migrateAssetNoteWorkLogs, workLogEntries, publicWorkLogEntry, workLogInput, insertWorkLogEntry, localWorkDate, workLogCompletionEntry, type WorkLogEntry } from './assetNoteWorkLogs.js';
 import { assetNoteUpdateLockAt, assetNoteUpdateWindowOpen, ISSUE_UPDATE_WINDOW_EXPIRED, IssueUpdateWindowExpiredError } from './assetNoteUpdateWindow.js';
 import { spawnSync } from 'node:child_process';
@@ -8078,151 +8079,19 @@ function receiveMachineAssetNote(req: Request,res:Response,next:NextFunction) {
     res.status(400).json({ok:false,error:message});
   });
 }
-function safeMachineAssetNotePdfText(value: unknown) {
-  return String(value ?? '')
-    .replace(/[\u2018\u2019]/g,"'").replace(/[\u201c\u201d]/g,'"').replace(/[\u2013\u2014]/g,'-').replace(/\u2026/g,'...').replace(/\u2022/g,'-')
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x09\x0a\x0d\x20-\x7e]/g,'?');
-}
-function notePdfLines(text: string, font: PDFFont, size: number, maxWidth: number) {
-  const lines: string[] = [];
-  for (const paragraph of safeMachineAssetNotePdfText(text).replace(/\r/g,'').split('\n')) {
-    const rawWords = paragraph.trim().split(/\s+/).filter(Boolean);
-    const words:string[]=[];
-    for (const rawWord of rawWords) {
-      if (font.widthOfTextAtSize(rawWord,size)<=maxWidth) { words.push(rawWord); continue; }
-      let segment='';
-      for (const character of rawWord) {
-        if (segment&&font.widthOfTextAtSize(`${segment}${character}`,size)>maxWidth) { words.push(segment); segment=character; }
-        else segment+=character;
-      }
-      if (segment) words.push(segment);
-    }
-    if (!words.length) { lines.push(''); continue; }
-    let line = '';
-    for (const word of words) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate,size)<=maxWidth) line=candidate;
-      else { if (line) lines.push(line); line=word; }
-    }
-    if (line) lines.push(line);
-  }
-  return lines;
-}
 async function buildMachineAssetNotePdf(note: MachineAssetNoteRow, attachments: MachineAssetNoteAttachmentRow[]) {
-  const pdf = await PDFDocument.create();
-  const regular = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const blue = rgb(0.02,0.3,0.52);
-  const blueDark = rgb(0.04,0.12,0.2);
-  const rule = rgb(0.72,0.77,0.81);
-  const amber = rgb(0.68,0.39,0.02);
-  const ink = rgb(0.07,0.1,0.14);
-  const muted = rgb(0.32,0.4,0.48);
-  const width = 612;
-  const height = 792;
-  const margin = 44;
-  const generatedAt = new Date();
   const library:AssetLibrary=note.asset_library==='equipment'?'equipment':'machine';
   const workOrderPhotoPdfs=attachments.filter(item=>assetNoteAttachmentSource(item)==='work_order_photo'&&item.mime_type==='application/pdf');
-  const labor=publicAssetNoteLabor(library,note.id);const technicians=labor.technicians.length?labor.technicians:[{id:0,userId:note.created_by_user_id,displayName:note.created_by_name||'Unknown user',hours:0,isPrimary:true,order:0}];
-  const primaryTechnician=technicians.find(technician=>technician.isPrimary)??technicians[0];
-  let page: PDFPage;
-  let y = 0;
-  const addPage = () => {
-    page = pdf.addPage([width,height]);
-    const headerAsideWidth=184;const headerGap=20;const headerMainWidth=width-margin*2-headerAsideWidth-headerGap;const headerAsideX=margin+headerMainWidth+headerGap;
-    page.drawText('ASSET MAINTENANCE RECORD',{x:margin,y:height-35,size:10,font:bold,color:blue});
-    page.drawText(truncateToFit(safeMachineAssetNotePdfText(note.title),bold,19,headerMainWidth),{x:margin,y:height-61,size:19,font:bold,color:blueDark});
-    page.drawRectangle({x:headerAsideX-10,y:height-67,width:1,height:34,color:rule});
-    page.drawText('PRIMARY TECHNICIAN',{x:headerAsideX,y:height-43,size:7,font:bold,color:blue});
-    page.drawText(truncateToFit(safeMachineAssetNotePdfText(primaryTechnician.displayName),bold,10.5,headerAsideWidth),{x:headerAsideX,y:height-60,size:10.5,font:bold,color:ink});
-    page.drawRectangle({x:margin,y:height-78,width:width-margin*2,height:1,color:rule});
-    y=height-101;
-    return page;
-  };
-  const ensureSpace = (heightNeeded:number) => { if (y-heightNeeded<52) addPage(); };
-  page=addPage();
-  const assetLabel = `${note.asset_number ?? ''}${note.asset_name ? ` - ${note.asset_name}` : ''}`;
-  const identityLabel=note.asset_library==='equipment'?'Manufacturer / Category':'Brand';
-  const identityValue=note.asset_library==='equipment'?[note.brand,note.category].filter(Boolean).join(' / '):(note.brand||'-');
-  const metadata:string[][] = [
-    ['Asset # / Name',assetLabel || '-'],[identityLabel,identityValue || '-'],['Model',note.model || '-'],['Serial #',note.serial_number || '-'],
-    ['Status',!note.is_warning?'Standard Record':note.issue_status==='resolved'?'Resolved':note.is_on_hold?'On Hold':'Tech Open'],['Location',note.location || '-'],['Opened / Note Date',note.note_date],['Created',new Date(note.created_at).toLocaleString('en-US')],
-  ];
-  if(note.is_warning)metadata.push(['Work Order #',note.work_order_reference||'Not assigned']);
-  if(note.resolved_at)metadata.push(['Resolved',new Date(note.resolved_at).toLocaleString('en-US')],['Resolved By',note.resolved_by_name||'Unknown user']);
-  metadata.forEach(([label,value],index)=>{
-    const column=index%2;
-    const row=Math.floor(index/2);
-    const x=margin+column*262;
-    const top=y-row*48;
-    const warning=label==='Warning / Needs Attention';
-    page.drawText(label.toUpperCase(),{x,y:top,size:7,font:bold,color:warning&&note.is_warning?amber:blue});
-    page.drawText(truncateToFit(safeMachineAssetNotePdfText(value),warning?bold:regular,10,238),{x,y:top-17,size:10,font:warning?bold:regular,color:warning&&note.is_warning?amber:ink});
-  });
-  y-=Math.ceil(metadata.length/2)*48+8;
-  const laborLogHeight=34+technicians.length*21;
-  ensureSpace(laborLogHeight+12);
-  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
-  const laborHeading='TECHS / LABOR HOUR LOGS';const laborHeadingWidth=bold.widthOfTextAtSize(laborHeading,9);
-  page.drawText(laborHeading,{x:(width-laborHeadingWidth)/2,y:y-12,size:9,font:bold,color:blue});
-  y-=34;
-  const laborCenter=width/2;
-  const laborNameLeft=margin+64;const laborNameRight=laborCenter-18;const laborNameWidth=laborNameRight-laborNameLeft;const laborSlash='/';const laborSlashWidth=bold.widthOfTextAtSize(laborSlash,10);const laborSlashX=laborCenter-laborSlashWidth/2;const laborHoursX=laborCenter+18;
-  technicians.forEach((technician,index)=>{
-    const name=truncateToFit(safeMachineAssetNotePdfText(technician.displayName),regular,10,laborNameWidth);const hours=`${technician.hours.toFixed(2)} hr`;
-    const laborNameX=laborNameRight-regular.widthOfTextAtSize(name,10);
-    page.drawText(name,{x:laborNameX,y,size:10,font:regular,color:ink});
-    page.drawText(laborSlash,{x:laborSlashX,y,size:10,font:bold,color:muted});
-    page.drawText(hours,{x:laborHoursX,y,size:10,font:regular,color:ink});
-    if(index<technicians.length-1)page.drawRectangle({x:laborNameLeft,y:y-7,width:width-laborNameLeft*2,height:.4,color:rule,opacity:.55});
-    y-=21;
-  });
-  y-=4;
-  page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});
-  page.drawText(note.is_warning?'ORIGINAL ISSUE':'TECHNICIAN NOTE',{x:margin,y:y-12,size:9,font:bold,color:blue});
-  y-=34;
-  const bodyLines=notePdfLines(note.body,regular,10.5,width-margin*2);
-  for (const line of bodyLines) {
-    ensureSpace(16);
-    if (line) page.drawText(line,{x:margin,y,size:10.5,font:regular,color:ink});
-    y-=15;
-  }
-  if(note.is_warning){
-    const library=note.asset_library==='equipment'?'equipment':'machine';
-    const updates=assetNoteUpdates(library,note.id);
-    y-=12;ensureSpace(54);page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});page.drawText('TECHNICIAN COMMENTS / DAILY WORK LOGS',{x:margin,y:y-12,size:9,font:bold,color:blue});y-=34;
-    if(!updates.length){page.drawText('No maintenance updates recorded.',{x:margin+4,y,size:9.5,font:regular,color:muted});y-=16;}
-    for(const update of updates){
-      ensureSpace(46);page.drawText(truncateToFit(`${new Date(update.created_at).toLocaleString('en-US')} - ${safeMachineAssetNotePdfText(update.created_by_name)}`,bold,9.5,width-margin*2),{x:margin+4,y,size:9.5,font:bold,color:blueDark});y-=16;
-      const entries=workLogEntries(db,update.id);
-      for(const entry of entries){
-        ensureSpace(42);page.drawText(`Date: ${new Date(`${entry.work_date}T12:00:00`).toLocaleDateString('en-US')} / ${entry.labor_hours.toFixed(2)} Hrs`,{x:margin+8,y,size:9,font:bold,color:blueDark});y-=15;
-        for(const line of notePdfLines(entry.body,regular,9.5,width-margin*2-8)){ensureSpace(14);if(line)page.drawText(line,{x:margin+8,y,size:9.5,font:regular,color:ink});y-=14;}
-        y-=5;
-      }
-      ensureSpace(18);page.drawText(`Work log labor: ${entries.reduce((sum,entry)=>sum+entry.labor_hours,0).toFixed(2)} Hrs`,{x:margin+8,y,size:9,font:bold,color:blueDark});y-=16;
-      const updateFiles=assetNoteUpdateAttachments(update.id);for(const attachment of updateFiles){for(const line of notePdfLines(`Attachment: ${attachment.original_filename}`,regular,8.5,width-margin*2-16)){ensureSpace(13);page.drawText(line,{x:margin+12,y,size:8.5,font:regular,color:muted});y-=13;}}
-      y-=8;
-    }
-    if(note.issue_status==='resolved'){
-      ensureSpace(70);page.drawRectangle({x:margin,y:y+8,width:width-margin*2,height:1,color:rule});page.drawText('RESOLUTION',{x:margin,y:y-12,size:9,font:bold,color:blue});y-=34;
-      page.drawText(truncateToFit(`Resolved ${note.resolved_at?new Date(note.resolved_at).toLocaleString('en-US'):'-'} by ${safeMachineAssetNotePdfText(note.resolved_by_name||'Unknown user')}`,bold,9.5,width-margin*2),{x:margin+4,y,size:9.5,font:bold,color:blueDark});y-=17;
-      for(const line of notePdfLines(note.resolution_summary,regular,9.5,width-margin*2-8)){ensureSpace(14);if(line)page.drawText(line,{x:margin+8,y,size:9.5,font:regular,color:ink});y-=14;}
-    }
-  }
-  const summaryPages=[...pdf.getPages()];const embedded=new Set<string>();
+  const labor=publicAssetNoteLabor(library,note.id);
+  const technicians=labor.technicians.length?labor.technicians:[{displayName:note.created_by_name||'Unknown user',hours:0,isPrimary:true}];
+  const updates=note.is_warning?assetNoteUpdates(library,note.id).map(update=>({...update,entries:workLogEntries(db,update.id),attachments:assetNoteUpdateAttachments(update.id)})):[];
+  const {pdf,addFooters}=await createAssetMaintenanceRecordPdf({note,technicians,totalHours:labor.totalHours,updates});
+  const embedded=new Set<string>();
   for(const attachment of workOrderPhotoPdfs){
     const identity=ensureAssetNoteAttachmentHash(library,attachment)||`id:${attachment.id}`;if(embedded.has(identity))continue;embedded.add(identity);
     try{const source=await PDFDocument.load(fs.readFileSync(assetNoteStoredFilePath(library,attachment.stored_file_reference)));const sourcePages=await pdf.copyPages(source,source.getPageIndices());for(const sourcePage of sourcePages)pdf.addPage(sourcePage);}catch{/* Preserve the maintenance record even if a legacy captured PDF is unreadable. */}
   }
-  const pages=pdf.getPages();
-  summaryPages.forEach((item,index)=>{
-    item.drawRectangle({x:margin,y:35,width:width-margin*2,height:1,color:rule});
-    item.drawText(`Generated ${generatedAt.toLocaleString('en-US')}`,{x:margin,y:19,size:7.5,font:regular,color:muted});
-    const pageLabel=`Page ${index+1} of ${pages.length}`;
-    item.drawText(pageLabel,{x:width-margin-regular.widthOfTextAtSize(pageLabel,7.5),y:19,size:7.5,font:regular,color:muted});
-  });
+  addFooters();
   return Buffer.from(await pdf.save());
 }
 async function regenerateMachineAssetNotePdf(noteId:number) {
