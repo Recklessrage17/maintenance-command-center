@@ -63,6 +63,7 @@ const cases = [
   { name: 'empty-optional', changes: { brand:'',model:'',serial_number:'',location:' N/A ',work_order_reference:'' }, expectedPages: 1 },
   { name: 'unicode-formatting', changes: { body:'**Bold inspection** at 650°F ± 5°F.\n\n*Italic note*, ***bold italic*** and `M47`.\nCafé, José, Renée, Müller. 25 µm × 2.\nA literal temperature already stored as 650?F remains 650?F.\nUnmatched ** markers remain visible.\nUnsupported glyph: 漢.', resolution_summary:'__Verified repair__\nParagraph one.\n\nParagraph two with • bullet and 90° angle.' }, expectedPages: 1 },
   { name: 'heading-boundary', changes: { body: Array.from({length:25},(_,i)=>`Inspection line ${i+1}: assembly checked.`).join('\n'), resolution_summary:paragraph.repeat(5) }, minPages: 2 },
+  { name: 'literal-identifiers', changes: { body:'Part BRG_6205_C3, sensor SENSOR_A_B and file maintenance_record_47.pdf.\nDouble BRG__6205__C3 and accented é_SENSOR_A_B.\nCompact formula:3*4*5. Spaced formula:3 * 4 * 5.\n**Bold inspection**, _italic note_ and __verified repair__ remain formatted.', resolution_summary:'Replaced BRG_6205_C3; verified SENSOR_A_B at 3*4*5 cycles.' }, updates:[{created_at:'2026-10-23T12:00:00Z',created_by_name:'Synthetic Technician',body:'',entries:[{work_date:'2026-10-23',labor_hours:.25,body:'Installed BRG__6205__C3 and checked SENSOR_A_B.'}],attachments:[]}], expectedPages: 1 },
 ];
 
 for (const fixture of cases) test(`maintenance PDF: ${fixture.name}`, async ({}, info) => {
@@ -104,6 +105,15 @@ for (const fixture of cases) test(`maintenance PDF: ${fixture.name}`, async ({},
     expect(full).toContain(data.note.title.replace(/\s/g,''));
   }
   if (fixture.name === 'multiple-technicians') for(const tech of technicians) expect(full).toContain(tech.displayName.replace(/\s/g,''));
+  if (fixture.name === 'literal-identifiers') {
+    for (const value of ['BRG_6205_C3','SENSOR_A_B','maintenance_record_47.pdf','BRG__6205__C3','é_SENSOR_A_B','Compactformula:3*4*5','Spacedformula:3*4*5']) expect(full).toContain(value);
+    expect(full).toContain('InstalledBRG__6205__C3andcheckedSENSOR_A_B.');
+    expect(full).toContain('ReplacedBRG_6205_C3;verifiedSENSOR_A_Bat3*4*5cycles.');
+    const spans=result.pages.flatMap(page=>page.spans);
+    expect(spans.find(span=>span.text.includes('Bold inspection'))?.font).toBe('Helvetica-Bold');
+    expect(spans.find(span=>span.text.includes('italic note'))?.font).toBe('Helvetica-Oblique');
+    expect(spans.find(span=>span.text.includes('verified repair'))?.font).toBe('Helvetica-Bold');
+  }
   if (fixture.name === 'unicode-formatting') {
     const spans = result.pages.flatMap(page=>page.spans);
     expect(spans.find(span => span.text.includes('Bold inspection'))?.font).toBe('Helvetica-Bold');

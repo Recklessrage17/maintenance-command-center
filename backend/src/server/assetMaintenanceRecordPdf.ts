@@ -32,12 +32,15 @@ function printable(value: string, font: PDFFont) {
 // The application stores plain textarea content, not HTML. Recognize a small,
 // balanced Markdown subset at export time; unmatched markers remain literal.
 function emphasis(text: string): Span[] {
-  const pattern = /\*\*\*([^*\n]+)\*\*\*|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`\n]+)`/g;
+  // Delimiters inside identifiers or formulas are literal, not emphasis.
+  const pattern = /(?<![\p{L}\p{N}_])(?:\*\*\*([^*\n]+)\*\*\*|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_)(?![\p{L}\p{N}_])|`([^`\n]+)`/gu;
   const spans: Span[] = [];
   let end = 0;
   for (const match of text.matchAll(pattern)) {
+    const value=match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? match[6];
+    if (!match[6] && value !== value.trim()) continue;
     if (match.index! > end) spans.push({ text: text.slice(end, match.index), style: 'regular' });
-    spans.push({ text: match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? match[6],
+    spans.push({ text: value,
       style: match[1] ? 'boldItalic' : match[2] || match[3] ? 'bold' : match[6] ? 'code' : 'italic' });
     end = match.index! + match[0].length;
   }

@@ -1,6 +1,5 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
-import { attachPmInteractions, observePmInteractions } from './helpers/pmInteractionDiagnostics';
 
 type AlertOverrides=Record<string,unknown>;
 function alert(id:number,status:string,overrides:AlertOverrides={}) {
@@ -38,13 +37,8 @@ async function mockDashboard(page:Page,alerts=fixtureAlerts,warningNotes:Record<
 async function activate(locator:Locator,mobile:boolean){if(mobile)await locator.tap();else await locator.click();}
 function pdfPageCount(pdf:Uint8Array){return new TextDecoder('latin1').decode(pdf).match(/\/Type\s*\/Page\b/g)?.length??0;}
 
-test.afterEach(async({page},testInfo)=>{
-  if(testInfo.title.startsWith('groups and separates PMs')&&['events','geometry'].includes(process.env.PLAYWRIGHT_PM_INPUT_TELEMETRY??''))await attachPmInteractions(page,testInfo);
-});
-
 test('groups and separates PMs, manages accordion state, priority sorts overdue tasks, and prints a one-page work order',async({page},testInfo)=>{
   const mobile=testInfo.project.name==='mobile-chromium';
-  if(['events','geometry'].includes(process.env.PLAYWRIGHT_PM_INPUT_TELEMETRY??''))await observePmInteractions(page,process.env.PLAYWRIGHT_PM_INPUT_TELEMETRY==='geometry');
   await mockDashboard(page);
   await page.goto('/');
   const machineSection=page.locator('.dashboard-pm-section--machine');

@@ -26,6 +26,9 @@ or schedule behavior changed.
   together. Long paragraphs and daily entries can continue across pages.
 - Balanced Markdown `**bold**`, `__bold__`, `*italic*`, `_italic_`,
   `***bold italic***`, and inline backticks render with matching font styles.
+  Emphasis delimiters must be at word boundaries and snug against their text.
+  Technical identifiers such as `BRG_6205_C3` and formulas such as `3*4*5`
+  or `3 * 4 * 5` remain literal in issues, daily entries, and resolutions.
   Paragraph breaks and unmatched markers remain visible. Forms store plain
   text, so HTML is not interpreted.
 - The old ASCII sanitizer reproducibly changed `650°F` to `650?F`, removed
