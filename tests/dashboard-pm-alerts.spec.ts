@@ -83,10 +83,17 @@ test('groups and separates PMs, manages accordion state, priority sorts overdue 
   const equipment301=equipmentSection.getByRole('button',{name:/EQ-301 \(Atlas Copco\)/});
   await activate(equipment301,mobile);
   await expect(equipment301).toHaveAttribute('aria-expanded','true');
+  const equipmentGroup=equipmentSection.locator('.dashboard-pm-asset-group');
+  // Wait for the expanding ancestor before scrolling a row inside its clipped grid.
+  await equipmentGroup.scrollIntoViewIfNeeded();
   await activate(equipmentSection.getByRole('button',{name:/Open Drain Inspection preventive maintenance details/}),mobile);
   await expect(page.getByRole('dialog',{name:'Drain Inspection'})).toBeVisible();
   await activate(page.getByRole('dialog',{name:'Drain Inspection'}).getByRole('button',{name:'Close'}).first(),mobile);
+  // Closing the dialog also collapses Equipment; finish that height change before the next tap.
+  await equipmentGroup.scrollIntoViewIfNeeded();
   await activate(press51,mobile);
+  await expect(press51).toHaveAttribute('aria-expanded','true');
+  await machineSection.locator('.dashboard-pm-asset-group.is-open').scrollIntoViewIfNeeded();
   await activate(machineSection.getByRole('button',{name:/Open Machine Greasing preventive maintenance details/}),mobile);
   const dialog=page.getByRole('dialog');
   await expect(dialog).toBeVisible();

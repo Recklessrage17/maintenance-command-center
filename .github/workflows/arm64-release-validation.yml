@@ -10,12 +10,17 @@ on:
         description: Approved immutable 2.0.0 candidate SHA (40 hex characters)
         required: true
         type: string
+      ubuntu_browser_diagnostics:
+        description: Temporary PR205 baseline/candidate browser comparison (does not certify ARM64)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: mcc-arm64-validation-${{ github.event.pull_request.number || inputs.candidate_sha }}
+  group: mcc-arm64-validation-${{ github.event.pull_request.number || inputs.candidate_sha }}-${{ inputs.ubuntu_browser_diagnostics && 'ubuntu-browser' || 'native' }}
   cancel-in-progress: true
 
 defaults:
@@ -23,10 +28,81 @@ defaults:
     shell: bash
 
 jobs:
+  ubuntu-browser-diagnostics:
+    name: Ubuntu browser comparison (${{ matrix.source }})
+    if: github.event_name == 'workflow_dispatch' && inputs.ubuntu_browser_diagnostics == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [baseline, candidate]
+    env:
+      CI: 'true'
+      MCC_PLAYWRIGHT_FRONTEND_ONLY: '1'
+      PLAYWRIGHT_PM_INPUT_TELEMETRY: 'off'
+      EXPECTED_SHA: ${{ matrix.source == 'baseline' && '27a649df2c35448e4d561c110bffa14f9f533d81' || inputs.candidate_sha }}
+    steps:
+      - name: Check out exact comparison source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          persist-credentials: false
+      - name: Record exact comparison identity
+        run: |
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p diagnostics/playwright/comparison-source
+          git rev-parse HEAD > diagnostics/playwright/comparison-source/sha.txt
+          printf '%s\n' 'Ubuntu browser diagnostic only; ARM64 jobs are not executed in this mode.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Set up Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - name: Install locked test dependencies
+        # Dependency/browser caches belong to an explicitly owned setup run too.
+        # The managed test invocation below still allocates its own separate runtime.
+        id: comparison-setup
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {createRun} from './scripts/playwright-storage.mjs';
+          const run=createRun();
+          const values=[`COMPARISON_SETUP_RUN=${run.id}`,`npm_config_cache=${path.join(run.directory,'runtime','npm-cache')}`,`PLAYWRIGHT_BROWSERS_PATH=${path.join(run.directory,'runtime','browsers')}`];
+          fs.appendFileSync(process.env.GITHUB_ENV, values.join(String.fromCharCode(10))+String.fromCharCode(10));
+          NODE
+      - name: Install and build isolated comparison tools
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm ci --prefix frontend --include=dev --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+      - name: Build the comparison frontend
+        run: npm run build --prefix frontend
+      - name: Repeat native mobile PM and maintenance draft cases under contention
+        run: npm run test:playwright -- tests/dashboard-pm-alerts.spec.ts tests/warning-issue-lifecycle.spec.ts --project=mobile-chromium --grep 'groups and separates PMs|daily work draft protects' --repeat-each=20 --workers=2 --retries=0 --forbid-only --trace=on
+      - name: Verify owned runtime cleanup
+        if: always()
+        run: |
+          if [ -n "${COMPARISON_SETUP_RUN:-}" ]; then
+            npm run test:playwright:cleanup -- --run "$COMPARISON_SETUP_RUN"
+            npm run test:playwright:cleanup -- --run "$COMPARISON_SETUP_RUN" --apply
+          fi
+          npm run test:playwright:cleanup
+          node --input-type=module -e "import fs from 'node:fs'; const p='tmp/playwright-runs'; if(fs.existsSync(p) && fs.readdirSync(p).length) throw new Error('Managed runtime retained; inspect before explicit cleanup');"
+      - name: Retain comparison evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ubuntu-browser-${{ matrix.source }}-${{ github.run_attempt }}
+          path: diagnostics/playwright/
+          retention-days: 90
+
   compatibility:
     name: Native ARM64 compatibility and bounded profile
     if: >-
       github.repository == 'Recklessrage17/maintenance-command-center' &&
+      inputs.ubuntu_browser_diagnostics != true &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.pull_request.head.repo.full_name == github.repository &&
         contains(fromJSON('["codex/mcc-2-0-0-release-candidate","chore/remove-old-qa-screenshots-20261021"]'), github.event.pull_request.head.ref)))
@@ -109,6 +185,7 @@ jobs:
     name: Probe and validate disposable native deployment integration
     if: >-
       github.repository == 'Recklessrage17/maintenance-command-center' &&
+      inputs.ubuntu_browser_diagnostics != true &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.pull_request.head.repo.full_name == github.repository &&
         contains(fromJSON('["codex/mcc-2-0-0-release-candidate","chore/remove-old-qa-screenshots-20261021"]'), github.event.pull_request.head.ref)))
