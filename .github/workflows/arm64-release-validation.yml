@@ -74,6 +74,11 @@ jobs:
           NODE
       - name: Install and build isolated comparison tools
         run: |
+          # The first baseline stalled for15 minutes on the Azure package mirror.
+          # Both comparison hosts use the same signed Ubuntu archive instead.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+          fi
           npm ci --include=dev --no-audit --no-fund
           npm ci --prefix frontend --include=dev --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
@@ -85,10 +90,10 @@ jobs:
         if: always()
         run: |
           if [ -n "${COMPARISON_SETUP_RUN:-}" ]; then
-            npm run test:playwright:cleanup -- --run "$COMPARISON_SETUP_RUN"
-            npm run test:playwright:cleanup -- --run "$COMPARISON_SETUP_RUN" --apply
+            node scripts/playwright-cleanup.mjs --run "$COMPARISON_SETUP_RUN"
+            node scripts/playwright-cleanup.mjs --run "$COMPARISON_SETUP_RUN" --apply
           fi
-          npm run test:playwright:cleanup
+          node scripts/playwright-cleanup.mjs
           node --input-type=module -e "import fs from 'node:fs'; const p='tmp/playwright-runs'; if(fs.existsSync(p) && fs.readdirSync(p).length) throw new Error('Managed runtime retained; inspect before explicit cleanup');"
       - name: Retain comparison evidence
         if: always()
