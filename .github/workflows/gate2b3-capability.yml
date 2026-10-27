@@ -1,0 +1,77 @@
+{
+  "name": "MCC Gate 2B3 capability inventory",
+  "on": {
+    "push": {
+      "branches": [
+        "codex/gate2b3-capability-20261027-af16222b"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "concurrency": {
+    "group": "mcc-gate2b3-capability-20261027-af16222b",
+    "cancel-in-progress": false
+  },
+  "defaults": {
+    "run": {
+      "shell": "bash"
+    }
+  },
+  "jobs": {
+    "inventory": {
+      "if": "github.repository == 'Recklessrage17/maintenance-command-center' && github.event_name == 'push' && github.ref == 'refs/heads/codex/gate2b3-capability-20261027-af16222b' && github.event.created == true && github.event.deleted == false && github.run_attempt == 1",
+      "runs-on": "ubuntu-24.04-arm",
+      "timeout-minutes": 15,
+      "env": {
+        "MCC_EVENT_CREATED": "${{ github.event.created }}",
+        "MCC_EVENT_DELETED": "${{ github.event.deleted }}",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "steps": [
+        {
+          "name": "Check exact event identity before checkout",
+          "run": "[[ \"$GITHUB_REPOSITORY\" == Recklessrage17/maintenance-command-center ]]\n[[ \"$GITHUB_EVENT_NAME\" == push && \"$GITHUB_REF\" == refs/heads/codex/gate2b3-capability-20261027-af16222b ]]\n[[ \"$MCC_EVENT_CREATED\" == true && \"$MCC_EVENT_DELETED\" == false && \"$GITHUB_RUN_ATTEMPT\" == 1 && \"$RUNNER_ARCH\" == ARM64 ]]\n[[ \"$GITHUB_SHA\" =~ ^[0-9a-f]{40}$ ]]"
+        },
+        {
+          "name": "Read exact capability package",
+          "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "fetch-depth": 2,
+            "persist-credentials": false,
+            "clean": false,
+            "set-safe-directory": false
+          }
+        },
+        {
+          "name": "Verify approved parent, exact changed paths and package",
+          "run": "python3 -I -S -B validation/gate2b3/probe.py --verify-source"
+        },
+        {
+          "name": "Inventory only",
+          "id": "inventory",
+          "run": "node validation/gate2b3/run.mjs --inventory"
+        },
+        {
+          "name": "Retain only validated public JSON",
+          "if": "${{ always() && steps.inventory.outputs.public_directory != '' }}",
+          "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+          "with": {
+            "name": "gate2b3-capability-${{ github.run_id }}-${{ github.run_attempt }}",
+            "path": "${{ steps.inventory.outputs.public_directory }}",
+            "retention-days": 3,
+            "if-no-files-found": "error",
+            "include-hidden-files": false
+          }
+        },
+        {
+          "name": "State acceptance limits",
+          "if": "always()",
+          "run": "printf '%s\\n' 'Capability inspection only. Gate 2 NOT ACCEPTED.' 'No MCC build, offline install, effective sandbox validation or Debian/Pi compatibility is established.' 'Outbound network isolation is NOT enforced. Branch gates are not permanent single-use enforcement.' >> \"$GITHUB_STEP_SUMMARY\""
+        }
+      ]
+    }
+  }
+}

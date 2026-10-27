@@ -1,0 +1,693 @@
+{
+  "schemaVersion": 2,
+  "mode": "capability-only",
+  "approvedBaseSha": "c69f8cb6c63922c4f415eacf8ee28e7c056a0a1e",
+  "stagingBranch": "codex/gate2b3-capability-20261027-af16222b",
+  "publicationFiles": [
+    ".github/workflows/gate2b3-capability.yml",
+    "validation/gate2b3/probe.py",
+    "validation/gate2b3/run.mjs",
+    "validation/gate2b3/tooling-inputs.json"
+  ],
+  "baseDependencies": {
+    "scripts/playwright-storage.mjs": "9a328d5ec47e5b26510267e74802a3fb10ae72f81d61e98738d6d91fcfd96d33"
+  },
+  "packageSha256": {
+    ".github/workflows/gate2b3-capability.yml": "e94fd468d4684b57c5a1db276ceae1a977f92b16b41275df9fba80643d867c8a",
+    "validation/gate2b3/probe.py": "d8dd1fbe6ef1fd38e7207fc5224db89cdc19a75c56dc5b3e502041235c0ce2e6",
+    "validation/gate2b3/run.mjs": "445e3421bf2dce7acfe7615ab6b80b5b6f8709c99ccdd56eea865a14f9fa1598"
+  },
+  "inventorySchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schemaVersion",
+      "mode",
+      "approvedBaseSha",
+      "status",
+      "observed",
+      "blockers",
+      "errorCode",
+      "assurance"
+    ],
+    "properties": {
+      "schemaVersion": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1
+      },
+      "mode": {
+        "type": "string",
+        "maxLength": 256,
+        "enum": [
+          "capability-only"
+        ]
+      },
+      "approvedBaseSha": {
+        "type": "string",
+        "maxLength": 256,
+        "enum": [
+          "c69f8cb6c63922c4f415eacf8ee28e7c056a0a1e"
+        ]
+      },
+      "status": {
+        "type": "string",
+        "maxLength": 256,
+        "enum": [
+          "INVENTORY_COMPLETE",
+          "INVENTORY_FAILED"
+        ]
+      },
+      "observed": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "required": [
+          "os",
+          "architecture",
+          "node",
+          "npm",
+          "systemd",
+          "namespaces",
+          "cgroup",
+          "filesystem",
+          "account",
+          "tools",
+          "offlineInputs"
+        ],
+        "properties": {
+          "os": {
+            "type": "string",
+            "maxLength": 256,
+            "enum": [
+              "linux",
+              "windows",
+              "other"
+            ]
+          },
+          "architecture": {
+            "type": "string",
+            "maxLength": 256,
+            "enum": [
+              "arm64",
+              "x64",
+              "other"
+            ]
+          },
+          "node": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version",
+              "executable"
+            ],
+            "properties": {
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256,
+                "pattern": "v[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}"
+              },
+              "executable": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256,
+                "pattern": "(?:/usr/(?:bin|local/bin)/(?:node|nodejs)|/opt/hostedtoolcache/node/[0-9]+\\.[0-9]+\\.[0-9]+/(?:arm64|x64)/bin/node)"
+              }
+            }
+          },
+          "npm": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version",
+              "executable"
+            ],
+            "properties": {
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256,
+                "pattern": "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}"
+              },
+              "executable": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256,
+                "pattern": "(?:/usr/(?:bin|local/bin)/npm|/usr/(?:local/lib/node_modules|share/nodejs)/npm/bin/npm-cli\\.js|/opt/hostedtoolcache/node/[0-9]+\\.[0-9]+\\.[0-9]+/(?:arm64|x64)/lib/node_modules/npm/bin/npm-cli\\.js)"
+              }
+            }
+          },
+          "systemd": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "present",
+              "version",
+              "pid1",
+              "systemBusAccessible",
+              "managerState",
+              "sudoNoninteractive"
+            ],
+            "properties": {
+              "present": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 9999
+              },
+              "pid1": {
+                "type": "boolean"
+              },
+              "systemBusAccessible": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "managerState": {
+                "type": "string",
+                "maxLength": 256,
+                "enum": [
+                  "unavailable",
+                  "running",
+                  "degraded",
+                  "starting",
+                  "maintenance",
+                  "initializing",
+                  "stopping",
+                  "offline",
+                  "unknown"
+                ]
+              },
+              "sudoNoninteractive": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "namespaces": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mountAvailable",
+              "networkAvailable",
+              "userAvailable",
+              "seccompMode",
+              "noNewPrivileges"
+            ],
+            "properties": {
+              "mountAvailable": {
+                "type": "boolean"
+              },
+              "networkAvailable": {
+                "type": "boolean"
+              },
+              "userAvailable": {
+                "type": "boolean"
+              },
+              "seccompMode": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  null
+                ],
+                "minimum": 0,
+                "maximum": 2
+              },
+              "noNewPrivileges": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "cgroup": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "v2",
+              "cpu",
+              "memory",
+              "pids",
+              "writableByRunner"
+            ],
+            "properties": {
+              "v2": {
+                "type": "boolean"
+              },
+              "cpu": {
+                "type": "boolean"
+              },
+              "memory": {
+                "type": "boolean"
+              },
+              "pids": {
+                "type": "boolean"
+              },
+              "writableByRunner": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "filesystem": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "readOnly",
+              "freeBytes",
+              "freeInodes"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "maxLength": 256,
+                "enum": [
+                  "unknown",
+                  "ext4",
+                  "xfs",
+                  "overlay",
+                  "btrfs",
+                  "tmpfs",
+                  "other"
+                ]
+              },
+              "readOnly": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "freeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "freeInodes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "account": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "present",
+              "nonRoot",
+              "primaryGroupMatches",
+              "supplementaryGroupsRestricted",
+              "loginDisabled"
+            ],
+            "properties": {
+              "present": {
+                "type": "boolean"
+              },
+              "nonRoot": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "primaryGroupMatches": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "supplementaryGroupsRestricted": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "loginDisabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "python3",
+              "git",
+              "systemctl",
+              "systemd-run",
+              "unshare",
+              "findmnt",
+              "mount",
+              "losetup",
+              "mkfs.ext4",
+              "flock",
+              "make",
+              "gcc",
+              "g++",
+              "tar",
+              "xz",
+              "sudo"
+            ],
+            "properties": {
+              "python3": {
+                "type": "boolean"
+              },
+              "git": {
+                "type": "boolean"
+              },
+              "systemctl": {
+                "type": "boolean"
+              },
+              "systemd-run": {
+                "type": "boolean"
+              },
+              "unshare": {
+                "type": "boolean"
+              },
+              "findmnt": {
+                "type": "boolean"
+              },
+              "mount": {
+                "type": "boolean"
+              },
+              "losetup": {
+                "type": "boolean"
+              },
+              "mkfs.ext4": {
+                "type": "boolean"
+              },
+              "flock": {
+                "type": "boolean"
+              },
+              "make": {
+                "type": "boolean"
+              },
+              "gcc": {
+                "type": "boolean"
+              },
+              "g++": {
+                "type": "boolean"
+              },
+              "tar": {
+                "type": "boolean"
+              },
+              "xz": {
+                "type": "boolean"
+              },
+              "sudo": {
+                "type": "boolean"
+              }
+            }
+          },
+          "offlineInputs": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reviewedRootfsSupplied",
+              "reviewedCacheSupplied",
+              "cacheCompletenessVerified",
+              "missingPackagesKnown"
+            ],
+            "properties": {
+              "reviewedRootfsSupplied": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "reviewedCacheSupplied": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "cacheCompletenessVerified": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "missingPackagesKnown": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              }
+            }
+          }
+        }
+      },
+      "blockers": {
+        "type": "array",
+        "maxItems": 16,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "maxLength": 256,
+          "enum": [
+            "reviewed_rootfs_not_supplied",
+            "reviewed_offline_cache_not_supplied",
+            "native_linux_arm64_required",
+            "target_node_missing_or_different",
+            "target_npm_missing_or_different",
+            "systemd_pid1_required",
+            "system_bus_unavailable",
+            "cgroup_requirements_missing",
+            "worker_account_unavailable",
+            "worker_identity_unproved",
+            "required_tooling_missing",
+            "namespace_prerequisites_missing",
+            "probe_failed"
+          ]
+        }
+      },
+      "errorCode": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 256,
+        "enum": [
+          "PROBE_FAILED",
+          null
+        ]
+      },
+      "assurance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nativeBuildExecuted",
+          "offlineInstallExecuted",
+          "workerIsolationVerified",
+          "serviceTestsExecuted",
+          "debianPiCompatibilityVerified",
+          "outboundNetworkIsolationEnforced",
+          "gate2Accepted"
+        ],
+        "properties": {
+          "nativeBuildExecuted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "offlineInstallExecuted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "workerIsolationVerified": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "serviceTestsExecuted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "debianPiCompatibilityVerified": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "outboundNetworkIsolationEnforced": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "gate2Accepted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        }
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schemaVersion",
+      "mode",
+      "status",
+      "probeStatus",
+      "errorCode",
+      "cleanupAttempted",
+      "cleanupSucceeded",
+      "runtimeRemoved",
+      "assurance"
+    ],
+    "properties": {
+      "schemaVersion": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1
+      },
+      "mode": {
+        "type": "string",
+        "maxLength": 256,
+        "enum": [
+          "capability-only"
+        ]
+      },
+      "status": {
+        "type": "string",
+        "maxLength": 256,
+        "enum": [
+          "COMPLETE",
+          "FAILED"
+        ]
+      },
+      "probeStatus": {
+        "type": "string",
+        "maxLength": 256,
+        "enum": [
+          "INVENTORY_COMPLETE",
+          "INVENTORY_FAILED"
+        ]
+      },
+      "errorCode": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 256,
+        "enum": [
+          "PROCESS_FAILED",
+          "PROCESS_UNCERTAIN",
+          "INVALID_RESULT",
+          "PROBE_FAILED",
+          "CLEANUP_FAILED",
+          null
+        ]
+      },
+      "cleanupAttempted": {
+        "type": "boolean"
+      },
+      "cleanupSucceeded": {
+        "type": "boolean"
+      },
+      "runtimeRemoved": {
+        "type": "boolean"
+      },
+      "assurance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nativeBuildExecuted",
+          "offlineInstallExecuted",
+          "workerIsolationVerified",
+          "serviceTestsExecuted",
+          "debianPiCompatibilityVerified",
+          "outboundNetworkIsolationEnforced",
+          "gate2Accepted"
+        ],
+        "properties": {
+          "nativeBuildExecuted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "offlineInstallExecuted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "workerIsolationVerified": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "serviceTestsExecuted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "debianPiCompatibilityVerified": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "outboundNetworkIsolationEnforced": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "gate2Accepted": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        }
+      }
+    }
+  }
+}
