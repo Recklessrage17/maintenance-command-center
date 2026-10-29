@@ -19,7 +19,7 @@ concurrency:
 jobs:
   native:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -74,7 +74,7 @@ jobs:
           test "$(git rev-parse 'HEAD^{tree}')" = db9b7b2bce37aa1a8c3b420de3227f1ed2c32669
           git diff --exit-code
       - name: Build disposable matching Debian runtime
-        run: docker build -t mcc-manual-native:reviewed validation/manual-native-20261029
+        run: docker build --build-arg RUNNER_UID="$(id -u)" --build-arg RUNNER_GID="$(id -g)" -t mcc-manual-native:reviewed validation/manual-native-20261029
       - name: Execute native validation without production access
         id: validation
         continue-on-error: true
@@ -92,7 +92,7 @@ jobs:
           MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261029 }}
         run: |
           test -d "$RUNNER_TEMP/mcc-evidence"
-          tar -C "$RUNNER_TEMP/mcc-evidence" -czf "$RUNNER_TEMP/mcc-native-results.tar.gz" .
+          tar --exclude='./home' --exclude='./python' -C "$RUNNER_TEMP/mcc-evidence" -czf "$RUNNER_TEMP/mcc-native-results.tar.gz" .
           node validation/manual-native-20261029/envelope.mjs encrypt "$RUNNER_TEMP/mcc-native-results.tar.gz" "$RUNNER_TEMP/mcc-native-results.enc"
           sha256sum "$RUNNER_TEMP/mcc-native-results.enc" > "$RUNNER_TEMP/mcc-native-results.enc.sha256"
       - name: Retain encrypted evidence for local review

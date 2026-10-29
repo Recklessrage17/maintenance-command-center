@@ -1,4 +1,6 @@
 FROM node@sha256:8f96ba6ac643748ef847a961a11459b801308a8cd40ad59cc37363e1301a6567
+ARG RUNNER_UID=1001
+ARG RUNNER_GID=1001
 ENV DEBIAN_FRONTEND=noninteractive
 RUN test "$(dpkg --print-architecture)" = arm64 && . /etc/os-release && test "$VERSION_ID" = 13 \
  && apt-get update \
@@ -12,4 +14,6 @@ RUN test "$(dpkg --print-architecture)" = arm64 && . /etc/os-release && test "$V
     libcups2t64 libxkbcommon0 libatspi2.0-0t64 libx11-6 libxcomposite1 libxdamage1 \
     libxext6 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
  && rm -rf /var/lib/apt/lists/*
+RUN if ! getent group "$RUNNER_GID" >/dev/null; then groupmod -g "$RUNNER_GID" node; fi \
+ && usermod -u "$RUNNER_UID" -g "$RUNNER_GID" -d /evidence/home node
 WORKDIR /work
