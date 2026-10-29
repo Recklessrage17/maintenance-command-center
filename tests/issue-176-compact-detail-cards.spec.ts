@@ -27,6 +27,43 @@ async function openAsset(page:Page,library:'machine'|'equipment',canEdit=true,de
 }
 
 for(const library of ['machine','equipment'] as const) {
+  test(`${library} Patch 2 initial detail is collapsed and every card reveals one panel`,async({page},testInfo)=>{
+    const {grid,writes}=await openAsset(page,library);
+    const panels=grid.locator('.machine-detail-accordion-panel[aria-hidden="false"]');
+    await expect(panels).toHaveCount(0);
+    await expect(grid.locator('.machine-detail-accordion-toggle[aria-expanded="false"]')).toHaveCount(library==='machine'?5:6);
+    for(const width of [1440,768,390,320]) {
+      await page.setViewportSize({width,height:900});
+      await page.emulateMedia({reducedMotion:'reduce'});
+      await page.evaluate(()=>window.scrollTo({top:0,left:0,behavior:'instant'}));
+      await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(0);
+      await page.screenshot({path:testInfo.outputPath(`${library}-initial-${width}.png`),fullPage:true});
+      const toggles=grid.locator('.machine-detail-accordion-toggle');
+      for(let index=0;index<await toggles.count();index++) {
+        const toggle=toggles.nth(index);
+        if(testInfo.project.name==='mobile-chromium')await toggle.tap();
+        else {await toggle.focus();await toggle.press(index%2?'Space':'Enter');}
+        await expect(toggle).toHaveAttribute('aria-expanded','true');
+        await expect(panels).toHaveCount(1);
+        const controlledId=await toggle.getAttribute('aria-controls');
+        await expect(panels).toHaveAttribute('id',controlledId!);
+        await expect(panels).toBeVisible();
+        if(library==='equipment'&&(width===1440||width===390))await panels.screenshot({path:testInfo.outputPath(`equipment-section-${index}-${width}.png`)});
+        expect(await grid.evaluate(el=>{
+          const bottom=Math.max(...Array.from(el.querySelectorAll('.machine-detail-accordion-header')).map(header=>header.getBoundingClientRect().bottom));
+          return el.querySelector('.machine-detail-accordion-panel[aria-hidden="false"]')!.getBoundingClientRect().top-bottom;
+        })).toBeGreaterThanOrEqual(0);
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+        await toggle.click();
+        await expect(panels).toHaveCount(0);
+      }
+    }
+    await grid.getByRole('button',{name:/Asset Document Library/}).click();
+    await page.keyboard.press('Escape');
+    await expect(panels).toHaveCount(0);
+    expect(writes()).toBe(0);
+  });
+
   test(`${library} accepted card selections center the panel without changing focus or horizontal position`,async({page},testInfo)=>{
     const {grid}=await openAsset(page,library);
     await expect(grid.getByRole('button',{name:/Work Orders & Notes/})).toContainText('1 resolved');
@@ -129,6 +166,15 @@ for(const library of ['machine','equipment'] as const) {
     expect(await edit.evaluate(el=>getComputedStyle(el).borderRadius)).toBe('999px');
     const field=library==='machine'?'Asset Name':'Equipment Name *';
     await edit.click();await basic.getByLabel(field,{exact:true}).fill('Cancelled draft');
+    // Another section's Edit action must not discard or replace the active draft.
+    await grid.locator('[data-category-accent="electrical"] .machine-detail-section-actions button').click();
+    await page.keyboard.press('Escape');
+    await expect(basic.getByLabel(field,{exact:true})).toHaveValue('Cancelled draft');
+    await expect(grid.locator('.is-editing')).toHaveCount(1);
+    const back=library==='machine'?page.getByRole('button',{name:'Close',exact:true}).first():page.locator('.asset-detail-back');
+    page.once('dialog',async dialog=>{expect(dialog.message()).toContain('Discard unsaved');await dialog.dismiss();});
+    await back.click();
+    await expect(basic.getByLabel(field,{exact:true})).toHaveValue('Cancelled draft');
     await grid.getByRole('button',{name:/Asset Document Library/}).click();
     await expect(basic.getByLabel(field,{exact:true})).toBeVisible();
     await basic.getByRole('button',{name:'Cancel',exact:true}).click();expect(writes()).toBe(0);

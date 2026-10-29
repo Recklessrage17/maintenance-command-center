@@ -5040,10 +5040,7 @@ type XlsxSheet = {
   row?: (rowNumber: number) => XlsxRow;
 };
 type OfficialPdfChoices = {
-  fob: string;
-  materialCert: string;
   printArea: string;
-  taxExempt: string;
 };
 
 const officialTemplateMaps: Record<RequisitionTemplateKind, OfficialTemplateCellMap> = {
@@ -5217,7 +5214,7 @@ function officialHeaderContactLines(header: Record<string, unknown>) {
 }
 
 function officialComments(header: Record<string, unknown>, notes: string) {
-  const comments = cleanPdfText(textField(header, ['comments'], notes));
+  const comments = textField(header, ['comments'], notes).replace(/\r\n?/g, '\n').trim();
   const priority = cleanPdfText(textField(header, ['priority'])).toLowerCase();
   if (priority !== 'high') return comments;
   const normalized = comments.replace(/^high priority\s*-?\s*/i, '').trim();
@@ -5246,7 +5243,17 @@ function officialWriteHeader(sheet: XlsxSheet, map: OfficialHeaderCellMap, input
   officialSetShrinkCellValue(sheet.cell(map.tsNo), textField(header, ['tsNo']), 30);
   officialSetShrinkCellValue(sheet.cell(map.codeNo), textField(header, ['codeNo']), 30);
   officialSetShrinkCellValue(sheet.cell(map.workOrderNo), textField(header, ['workOrderNo']), 70);
-  officialSetWrappedCellValue(sheet.cell(map.comments), officialComments(header, notes), 72, 2);
+  const comments = officialComments(header, notes);
+  officialSetCellValue(sheet, map.comments, comments);
+  sheet.cell(map.comments).style?.({ fontSize: 8.5, shrinkToFit: false, verticalAlignment: 'top', wrapText: true });
+  const commentLines = officialCountWrappedLines(comments);
+  if (commentLines > 1) {
+    // Merged cells do not auto-fit. Move following signature rows with the
+    // grid; never paint another line over them or shrink the comment font.
+    const row = Number(map.comments.replace(/^[A-Z]+/, ''));
+    const minimumHeight = map.comments === 'C34' ? 15 : 50.25;
+    sheet.row?.(row).height?.(Math.max(minimumHeight, commentLines * 12 + 4));
+  }
   officialSetShrinkCellValue(sheet.cell(map.departmentManager), textField(header, ['departmentManager']), 70);
   officialSetShrinkCellValue(sheet.cell(map.requisitionedBy), textField(header, ['requisitionedBy'], requestedBy), 70);
   officialSetShrinkCellValue(sheet.cell(map.authorizedBy), textField(header, ['authorizedBy']), 70);
@@ -5283,6 +5290,7 @@ function officialWriteLineRow(sheet: XlsxSheet, columns: OfficialLineCellMap, ro
   officialSetCellValue(sheet, quantityCell, quantity);
   officialSetCellValue(sheet, unitCell, item.unitOfMeasure || 'EA');
   const itemNumberLines = officialSetWrappedCellValue(itemNumberCell, item.supplierPartNumber || item.partNumber || '', 18, 2);
+  itemNumberCell.style?.({ horizontalAlignment: 'center', verticalAlignment: 'center' });
   const descriptionLines = officialSetWrappedCellValue(descriptionCell, officialLineDescription(item), 50, 3);
   officialSetCellValue(sheet, dueDateCell, officialParseDateInput(item.dueDate ?? ''));
 
@@ -5532,7 +5540,50 @@ async function officialWorkbookBuffer(input: { header: Record<string, unknown>; 
   officialSetPrintArea(sheet, map);
   officialShiftUnder100TitleRight(sheet, input.type);
   officialUseCompactQuantityHeader(sheet, input.type);
-  return workbookOutputToBuffer(await workbook.outputAsync());
+  sheet.cell(input.type === 'under-100' ? 'B34' : 'C36').style?.({ fontColor: '000000' });
+  if (input.type === 'under-100') sheet.cell(map.header.comments).style?.({ fontColor: 'C00000' });
+  return setOfficialRequisitionCheckboxes(workbookOutputToBuffer(await workbook.outputAsync()), input.type, input.header);
+}
+
+async function setOfficialRequisitionCheckboxes(workbook: Buffer, type: RequisitionTemplateKind, header: Record<string, unknown>) {
+  // The two official templates use the same six controls, with different VML
+  // shape IDs. Persist both OOXML and legacy VML states before either exporter
+  // opens the workbook; LibreOffice does not run the Excel COM control setter.
+  const zip = await JSZip.loadAsync(workbook);
+  const taxYes = textField(header, ['taxExempt', 'tax_exempt'], 'No').toLowerCase() === 'yes';
+  const materialYes = textField(header, ['materialCert', 'material_cert'], 'No').toLowerCase() === 'yes';
+  const origin = textField(header, ['fob'], 'Destination').toLowerCase() === 'origin';
+  const states = [taxYes, !taxYes, materialYes, !materialYes, origin, !origin];
+  const captions = ['YES', 'NO', 'YES', 'NO', 'Origin', 'Destination'];
+  const firstShapeId = type === 'under-100' ? 1025 : 1026;
+  const vmlPath = 'xl/drawings/vmlDrawing1.vml';
+  const vmlFile = zip.file(vmlPath);
+  if (!vmlFile) throw new Error('Official requisition checkbox drawing is missing.');
+  let vml = await vmlFile.async('string');
+  for (const [index, checked] of states.entries()) {
+    const controlPath = `xl/ctrlProps/ctrlProp${index + 1}.xml`;
+    const controlFile = zip.file(controlPath);
+    if (!controlFile) throw new Error('Official requisition checkbox properties are missing.');
+    const control = await controlFile.async('string');
+    if (!/<formControlPr\b[^>]*objectType="CheckBox"[^>]*\/>/.test(control)) throw new Error('Unexpected official requisition control type.');
+    // Excel omits the checked attribute for a cleared control. An explicit
+    // "Unchecked" value makes some Excel versions reject these legacy forms.
+    zip.file(controlPath, control.replace(/<formControlPr\b[^>]*\/>/, tag =>
+      tag.replace(/\schecked="[^"]*"/g, '').replace('/>', checked ? ' checked="Checked"/>' : '/>')));
+    const shape = new RegExp(`<v:shape\\b[^>]*\\bid="_x0000_s${firstShapeId + index}"[\\s\\S]*?</v:shape>`, 'g');
+    let matched = 0;
+    vml = vml.replace(shape, value => {
+      matched += 1;
+      if (!value.includes(`>${captions[index]}</font>`) || !value.includes('ObjectType="Checkbox"') || !value.includes('<x:NoThreeD/>')) {
+        throw new Error('Official requisition checkbox identity changed.');
+      }
+      return value.replace(/<x:Checked>[^<]*<\/x:Checked>/g, '')
+        .replace('<x:NoThreeD/>', `${checked ? '<x:Checked>1</x:Checked>' : ''}<x:NoThreeD/>`);
+    });
+    if (matched !== 1) throw new Error('Official requisition checkbox shape is missing or duplicated.');
+  }
+  zip.file(vmlPath, vml);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
 function officialSafeFileBase(value: string) {
@@ -5557,162 +5608,12 @@ function tryExcelComPdfExport(xlsxPath: string, pdfPath: string, choices: Offici
 param(
   [Parameter(Mandatory=$true)][string]$XlsxPath,
   [Parameter(Mandatory=$true)][string]$PdfPath,
-  [string]$PrintArea = "",
-  [string]$TaxExempt = "",
-  [string]$MaterialCert = "",
-  [string]$Fob = ""
+  [string]$PrintArea = ""
 )
 $excel = $null
 $workbook = $null
 $worksheet = $null
 $workbookClosed = $false
-function Normalize-Choice([string]$value) {
-  if ($null -eq $value) { return "" }
-  return $value.Trim().ToLowerInvariant()
-}
-function Set-FormCheckbox($checkbox, [bool]$checked) {
-  $value = if ($checked) { 1 } else { -4146 }
-  try {
-    $checkbox.Value = $value
-    return $true
-  } catch {}
-  try {
-    $checkbox.ControlFormat.Value = $value
-    return $true
-  } catch {}
-  try {
-    $checkbox.OLEFormat.Object.Value = $checked
-    return $true
-  } catch {}
-  return $false
-}
-function Add-CheckboxControl($items, $seen, [string]$kind, $object, [string]$name, [string]$caption, [double]$left, [double]$top) {
-  $key = if ($name.Trim()) { $name.Trim() } else { "$kind-$left-$top-$caption" }
-  if ($seen.ContainsKey($key)) { return }
-  $seen[$key] = $true
-  $items.Add([PSCustomObject]@{
-    Kind = $kind
-    Object = $object
-    Name = $name
-    Caption = $caption
-    Left = $left
-    Top = $top
-  }) | Out-Null
-}
-function Get-CheckboxControls($worksheet) {
-  $items = New-Object System.Collections.ArrayList
-  $seen = @{}
-  try {
-    foreach ($cb in $worksheet.CheckBoxes()) {
-      $name = ""
-      $caption = ""
-      $left = 0
-      $top = 0
-      try { $name = [string]$cb.Name } catch {}
-      try { $caption = [string]$cb.Caption } catch {}
-      try { $left = [double]$cb.Left } catch {}
-      try { $top = [double]$cb.Top } catch {}
-      Add-CheckboxControl $items $seen "CheckBox" $cb $name $caption $left $top
-    }
-  } catch {}
-  try {
-    foreach ($shape in $worksheet.Shapes) {
-      $name = ""
-      $caption = ""
-      $left = 0
-      $top = 0
-      $type = $null
-      try { $name = [string]$shape.Name } catch {}
-      try { $caption = [string]$shape.TextFrame.Characters().Text } catch {}
-      try { $left = [double]$shape.Left } catch {}
-      try { $top = [double]$shape.Top } catch {}
-      try { $type = $shape.Type } catch {}
-      if ($type -eq 8 -or $name -match "Check|Box|Option" -or $caption -match "YES|NO|Origin|Destination") {
-        Add-CheckboxControl $items $seen "Shape" $shape $name $caption $left $top
-      }
-    }
-  } catch {}
-  return $items.ToArray()
-}
-function Group-CheckboxRows($items, [double]$tolerance) {
-  $rows = @()
-  foreach ($item in ($items | Sort-Object Top, Left)) {
-    $matched = $false
-    foreach ($row in $rows) {
-      if ([Math]::Abs(([double]$row.Top) - ([double]$item.Top)) -le $tolerance) {
-        $row.Items = @($row.Items + $item)
-        $matched = $true
-        break
-      }
-    }
-    if (-not $matched) {
-      $rows += [PSCustomObject]@{
-        Top = [double]$item.Top
-        Items = @($item)
-      }
-    }
-  }
-  foreach ($row in $rows) {
-    $row.Items = @($row.Items | Sort-Object Left)
-  }
-  return @($rows | Sort-Object Top)
-}
-function Get-ExactRowItems($row, [int]$expectedCount) {
-  $items = @($row.Items | Sort-Object Left)
-  if ($items.Count -eq $expectedCount) { return $items }
-  return @()
-}
-function Set-RequisitionCheckboxes($worksheet, [string]$taxExempt, [string]$materialCert, [string]$fob) {
-  $tax = Normalize-Choice $taxExempt
-  $mat = Normalize-Choice $materialCert
-  $fobChoice = Normalize-Choice $fob
-  $checkboxes = @(Get-CheckboxControls $worksheet | Sort-Object Top, Left)
-  if ($checkboxes.Count -lt 4) { return }
-  foreach ($item in $checkboxes) {
-    Set-FormCheckbox $item.Object $false | Out-Null
-  }
-  $headerBoxes = @($checkboxes | Where-Object { $_.Top -lt 260 } | Sort-Object Top, Left)
-  $taxMaterialBoxes = @(
-    $headerBoxes |
-      Where-Object {
-        ($_.Caption -match "YES|NO" -and $_.Left -gt 250 -and $_.Left -lt 540) -or
-        ($_.Left -gt 300 -and $_.Left -lt 520)
-      } |
-      Sort-Object Top, Left
-  )
-  $fobBoxes = @(
-    $headerBoxes |
-      Where-Object {
-        ($_.Caption -match "Origin|Destination") -or
-        ($_.Left -ge 520)
-      } |
-      Sort-Object Top, Left
-  )
-  $taxMaterialRows = @(Group-CheckboxRows $taxMaterialBoxes 8)
-  $fobRows = @(Group-CheckboxRows $fobBoxes 8)
-  if ($taxMaterialRows.Count -ge 2) {
-    $taxRow = @(Get-ExactRowItems $taxMaterialRows[0] 2)
-    $matRow = @(Get-ExactRowItems $taxMaterialRows[1] 2)
-    if ($taxRow.Count -eq 2) {
-      Set-FormCheckbox $taxRow[0].Object ($tax -eq "yes") | Out-Null
-      Set-FormCheckbox $taxRow[1].Object ($tax -ne "yes") | Out-Null
-    }
-    if ($matRow.Count -eq 2) {
-      Set-FormCheckbox $matRow[0].Object ($mat -eq "yes") | Out-Null
-      Set-FormCheckbox $matRow[1].Object ($mat -ne "yes") | Out-Null
-    }
-  }
-  if ($fobRows.Count -ge 2) {
-    $originRow = @(Get-ExactRowItems $fobRows[0] 1)
-    $destinationRow = @(Get-ExactRowItems $fobRows[1] 1)
-    if ($originRow.Count -eq 1) {
-      Set-FormCheckbox $originRow[0].Object ($fobChoice -eq "origin") | Out-Null
-    }
-    if ($destinationRow.Count -eq 1) {
-      Set-FormCheckbox $destinationRow[0].Object ($fobChoice -eq "destination") | Out-Null
-    }
-  }
-}
 try {
   if (-not (Test-Path -LiteralPath $XlsxPath)) { throw "Workbook was not found: $XlsxPath" }
   $excel = New-Object -ComObject Excel.Application
@@ -5723,7 +5624,6 @@ try {
   $workbook = $excel.Workbooks.Open($XlsxPath, 0, $true)
   $worksheet = $workbook.Worksheets.Item(1)
   $worksheet.Activate() | Out-Null
-  try { Set-RequisitionCheckboxes $worksheet $TaxExempt $MaterialCert $Fob } catch {}
   try {
     if ($PrintArea.Trim()) { $worksheet.PageSetup.PrintArea = $PrintArea.Trim() }
     $worksheet.PageSetup.PaperSize = 1
@@ -5756,7 +5656,7 @@ try {
 }`;
   const scriptPath = path.join(path.dirname(xlsxPath), 'export-requisition-pdf.ps1');
   fs.writeFileSync(scriptPath, script);
-  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath,'-PrintArea',choices.printArea,'-TaxExempt',choices.taxExempt,'-MaterialCert',choices.materialCert,'-Fob',choices.fob], {
+  const output = spawnSync('powershell.exe', ['-NoProfile','-ExecutionPolicy','Bypass','-File',scriptPath,'-XlsxPath',xlsxPath,'-PdfPath',pdfPath,'-PrintArea',choices.printArea], {
     encoding: 'utf8',
     timeout: 90_000,
     windowsHide: true,
@@ -5830,6 +5730,62 @@ async function mergeOfficialPdfPages(pdfPages: Buffer[]) {
   return Buffer.from(await mergedPdf.save());
 }
 
+// Comment wrapping is lossless and separate from the deliberately bounded
+// item/header helpers. Keep explicit newlines, and split long tokens without
+// adding an ellipsis. Conservative width leaves room for exporter/font variance.
+async function officialCommentLines(comments: string, type: RequisitionTemplateKind) {
+  const metrics = await PDFDocument.create();
+  const font = await metrics.embedFont(type === 'over-100' ? StandardFonts.HelveticaBold : StandardFonts.Helvetica);
+  const width = (text: string) => Array.from(text).reduce((sum, character) => {
+    try { return sum + font.widthOfTextAtSize(character, 8.5); }
+    catch { return sum + 8.5; } // Workbook exporters retain Unicode; allow a full em.
+  }, 0);
+  const lines: string[] = [];
+  for (const paragraph of comments.split('\n')) {
+    let line = '';
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      if (line && (line.length + word.length + 1 > 72 || width(`${line} ${word}`) > 300)) {
+        lines.push(line); line = '';
+      }
+      if (line) line += ' ';
+      for (const character of Array.from(word)) {
+        const candidate = line + character;
+        if (line && (candidate.length > 72 || width(candidate) > 300)) {
+          lines.push(line); line = '';
+        }
+        line += character;
+      }
+    }
+    lines.push(line.trimEnd());
+  }
+  return lines;
+}
+
+async function officialCommentContinuation(input: { requisitionNumber: string; type: RequisitionTemplateKind; lines: string[]; part: number; count: number }) {
+  // An appendix has no order lines, totals or signature fields. Use the same
+  // workbook exporters so Unicode/fonts do not depend on PDF standard fonts.
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Comments', { pageSetup: {
+    paperSize: 1 as ExcelJS.PaperSize, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 1,
+    margins: { left: 0.25, right: 0.25, top: 0.25, bottom: 0.25, header: 0.1, footer: 0.12 },
+    printArea: 'A1:J40', horizontalCentered: true,
+  } });
+  sheet.columns = Array.from({ length: 10 }, () => ({ width: 10 }));
+  const write = (row: number, value: string, color: string, bold = false) => {
+    sheet.mergeCells(`A${row}:J${row}`);
+    const cell = sheet.getCell(`A${row}`);
+    cell.value = value;
+    cell.font = { name: 'Arial', size: 8.5, color: { argb: color }, bold };
+    cell.alignment = { horizontal: 'left', vertical: 'top', wrapText: false };
+    sheet.getRow(row).height = 14;
+  };
+  write(1, 'REQUISITION COMMENTS - CONTINUED', 'FF000000', true);
+  write(2, `Requisition: ${input.requisitionNumber}`, 'FF000000');
+  write(3, `Comment continuation ${input.part} of ${input.count} (continued from requisition form)`, 'FF000000');
+  input.lines.forEach((line, index) => write(index + 5, line, input.type === 'under-100' ? 'FFC00000' : 'FFFF0000', input.type === 'over-100'));
+  return workbookOutputToBuffer(await workbook.xlsx.writeBuffer());
+}
+
 async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionNumber: string; requestedBy: string; createdAt: string; notes: string; requisitionType?: string; header?: Record<string, unknown>; items: RequisitionPdfItem[] }) {
   const header = isRecord(input.header) ? input.header : {};
   const total = input.items.reduce((sum, item) => sum + (Number(item.unitCost ?? 0) || 0) * (Number(item.quantityRequested ?? 0) || 0), 0);
@@ -5838,16 +5794,18 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
   const chunks = chunkRequisitionItems(input.items, rowsPerPage);
   const printArea = `A1:${officialTemplateMaps[type].printAreaEndColumn}${officialTemplateMaps[type].printAreaEndRow}`;
   const choices = {
-    fob: textField(header, ['fob'], 'Destination'),
-    materialCert: textField(header, ['materialCert','material_cert'], 'No'),
     printArea,
-    taxExempt: textField(header, ['taxExempt','tax_exempt'], 'No'),
   };
+  const comments = officialComments(header, input.notes);
+  const commentLines = comments ? await officialCommentLines(comments, type) : [];
+  const formLineCount = type === 'under-100' ? 2 : 3;
+  const continuations: string[][] = [];
+  for (let index = formLineCount; index < commentLines.length; index += 35) continuations.push(commentLines.slice(index, index + 35));
+  const formComments = [...commentLines.slice(0, formLineCount), ...(continuations.length ? [`Comments continue on page ${chunks.length + 1}.`] : [])].join('\n');
   const pdfPages: Buffer[] = [];
   for (let index = 0; index < chunks.length; index += 1) {
-    const pageHeader = chunks.length > 1
-      ? { ...header, comments: `${textField(header, ['comments'], input.notes).trim() || 'Maintenance inventory restock.'} Page ${index + 1} of ${chunks.length}.` }
-      : header;
+    // Page numbering belongs in the PDF footer, not in employee-entered text.
+    const pageHeader = { ...header, comments: formComments };
     const workbook = await officialWorkbookBuffer({
       header: pageHeader,
       items: chunks[index],
@@ -5859,6 +5817,10 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
     });
     const pageBase = chunks.length > 1 ? `${input.requisitionNumber}-page-${index + 1}` : input.requisitionNumber;
     pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${pageBase}`, choices));
+  }
+  for (const [index, lines] of continuations.entries()) {
+    const workbook = await officialCommentContinuation({ requisitionNumber: input.requisitionNumber, type, lines, part: index + 1, count: continuations.length });
+    pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${input.requisitionNumber}-comments-${index + 1}`, { printArea: 'A1:J40' }));
   }
   return mergeOfficialPdfPages(pdfPages);
 }
@@ -6302,7 +6264,7 @@ async function buildSingleRequisitionPdf(requisition: RequisitionRow) {
   const vendorName = requisitionVendorName(
     requisition.vendor_name && !/^multiple\b/i.test(requisition.vendor_name) ? requisition.vendor_name : vendors[0]
   );
-  const userComments = cleanPdfText(requisition.notes ?? '');
+  const userComments = String(requisition.notes ?? '').replace(/\r\n?/g, '\n').trim();
   const requisitionedByName = requisition.requisitioned_by_name || requisition.requested_by_name;
   return buildRequisitionPdf({
     vendor: vendorName,
@@ -6409,7 +6371,7 @@ function parseRequisitionHeaderInput(input: Record<string, unknown>, actor: User
     confirmedWith: textField(input, ['confirmedWith','confirmed_with']).slice(0, 160),
     fob: normalizeFobField(input.fob),
     materialCert: normalizeYesNoField(input.materialCert ?? input.material_cert, 'Material Cert'),
-    notes: textField(input, ['notes','note']).slice(0, 1000),
+    notes: textField(input, ['notes','note']),
     poInitiator,
     requisitionedByName,
     shipVia: textField(input, ['shipVia','ship_via']).slice(0, 120),

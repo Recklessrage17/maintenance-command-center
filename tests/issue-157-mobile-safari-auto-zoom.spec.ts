@@ -25,13 +25,14 @@ test('phone text controls avoid Safari focus zoom without restricting the viewpo
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
-test('tablet and desktop input typography retain their existing size', async ({ page }) => {
+test('tablet and desktop preserve approved login typography and existing shared input size', async ({ page }) => {
   await page.route('**/api/auth/status', route => route.fulfill({ json: { setupRequired: false, user: null } }));
   for (const width of [768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
     await expect(page.locator('#mcc-login-email')).toBeVisible();
-    expect(await page.locator('#mcc-login-email').evaluate(element => getComputedStyle(element).fontSize)).toBe('15.2px');
+    // Patch 3's owner-approved pill controls use 18px at these viewports.
+    expect(await page.locator('#mcc-login-email').evaluate(element => getComputedStyle(element).fontSize)).toBe('18px');
     expect(await page.evaluate(() => {
       const input = document.createElement('input');
       document.body.append(input);

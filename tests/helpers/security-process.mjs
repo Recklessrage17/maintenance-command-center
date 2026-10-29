@@ -52,7 +52,7 @@ export function assertFixturePath(fixture, target) {
   return target;
 }
 
-export async function backendFixture(label, extraEnv = {}, { rootEnvText, observeUploads = false, serveFrontend = false } = {}) {
+export async function backendFixture(label, extraEnv = {}, { rootEnvText, observeUploads = false, observeRequisitionExports = false, serveFrontend = false } = {}) {
   assert.match(label, /^[a-z0-9-]+$/, 'Fixture label must be a safe directory name.');
   const fixture = fixtureDirectory(label);
   fs.mkdirSync(fixture, { recursive: true });
@@ -95,8 +95,10 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
   assert.ok(['', 'localhost', '127.0.0.1', '::1'].includes(env.SMTP_HOST), 'SMTP fixtures must use loopback.');
   const eventsPath = assertFixturePath(fixture, path.join(fixture, 'upload-events.jsonl'));
   if (observeUploads) env.MCC_TEST_UPLOAD_EVENTS = eventsPath;
+  if (observeRequisitionExports) env.MCC_TEST_REQUISITION_EXPORTS = assertFixturePath(fixture, path.join(fixture, 'requisition-exports'));
   const args = ['--max-old-space-size=256'];
   if (observeUploads) args.push('--import', pathToFileURL(path.join(root, 'tests/helpers/upload-observer.mjs')).href);
+  if (observeRequisitionExports) args.push('--import', pathToFileURL(path.join(root, 'tests/helpers/requisition-export-observer.mjs')).href);
   args.push(path.join(appRoot, 'backend/dist/server/index.js'));
   const child = spawn(process.execPath, args, {
     cwd: appRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],

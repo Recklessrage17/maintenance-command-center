@@ -174,7 +174,7 @@ const blankForm: PartForm = {
 
 function blankRequisitionForm(userFullName = ''): RequisitionHeaderForm {
   return {
-    poInitiator: '',
+    poInitiator: userFullName.trim(),
     requisitionedByName: userFullName,
     taxExempt: '',
     workOrderNumber: '',

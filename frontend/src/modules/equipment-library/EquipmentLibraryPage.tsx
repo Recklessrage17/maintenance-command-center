@@ -124,7 +124,7 @@ function EquipmentCard({asset,onOpen}:{asset:EquipmentAsset;onOpen:()=>void}){
 }
 
 function EquipmentDetail({asset,canEdit,canDelete,canManagePm,performedBy,onBack,onUpdated,onRemoved}:{asset:EquipmentAsset;canEdit:boolean;canDelete:boolean;canManagePm:boolean;performedBy:string;onBack:()=>void;onUpdated:(asset:EquipmentAsset)=>void;onRemoved:()=>void}){
-  const [current,setCurrent]=useState(asset);const [open,setOpen]=useState<EquipmentSection|'pm'|'documents'|'notes'|null>(()=>Number(new URLSearchParams(window.location.search).get('note'))?'notes':'basic');const [notesDirty,setNotesDirty]=useState(false);const [editing,setEditing]=useState<EquipmentSection|null>(null);const [draft,setDraft]=useState(()=>assetToDraft(asset));const saveAction=useActionProgress();const saving=saveAction.active;const [error,setError]=useState('');const [history,setHistory]=useState<HistoryRecord[]>([]);const [historyOpen,setHistoryOpen]=useState(false);
+  const [current,setCurrent]=useState(asset);const [open,setOpen]=useState<EquipmentSection|'pm'|'documents'|'notes'|null>(()=>Number(new URLSearchParams(window.location.search).get('note'))?'notes':null);const [notesDirty,setNotesDirty]=useState(false);const [editing,setEditing]=useState<EquipmentSection|null>(null);const [draft,setDraft]=useState(()=>assetToDraft(asset));const saveAction=useActionProgress();const saving=saveAction.active;const [error,setError]=useState('');const [history,setHistory]=useState<HistoryRecord[]>([]);const [historyOpen,setHistoryOpen]=useState(false);
   function toggleSection(key:EquipmentSection|'pm'|'documents'|'notes'){if(editing)return;if(open==='notes'&&key!=='notes'&&notesDirty&&!window.confirm('Leave unsaved Asset Notes changes in place and switch sections?'))return;setOpen(value=>value===key?null:key);}
   function closeDetail(){
     if(saving)return;
@@ -134,7 +134,15 @@ function EquipmentDetail({asset,canEdit,canDelete,canManagePm,performedBy,onBack
   useLibraryHeaderBack(true, closeDetail);
   useEffect(()=>{setCurrent(asset);setDraft(assetToDraft(asset));},[asset]);
   useEffect(()=>{void api<{records:HistoryRecord[]}>(`/api/equipment-library/assets/${asset.id}/history`).then(data=>setHistory(data.records)).catch(()=>setHistory([]));},[asset.id]);
-  function begin(section:EquipmentSection){if(open==='notes'&&notesDirty&&!window.confirm('Leave unsaved Asset Notes changes in place and edit another section?'))return;saveAction.reset();setEditing(section);setOpen(section);setDraft(assetToDraft(current));setError('');}
+  useEffect(()=>{
+    function onKeyDown(event:KeyboardEvent){
+      if(event.key!=='Escape'||editing)return;
+      setOpen(null);
+    }
+    document.addEventListener('keydown',onKeyDown);
+    return ()=>document.removeEventListener('keydown',onKeyDown);
+  },[editing]);
+  function begin(section:EquipmentSection){if(!canEdit||editing)return;if(open==='notes'&&notesDirty&&!window.confirm('Leave unsaved Asset Notes changes in place and edit another section?'))return;saveAction.reset();setEditing(section);setOpen(section);setDraft(assetToDraft(current));setError('');}
   async function save(section:EquipmentSection){setError('');const result=await saveAction.run(()=>api<{asset:EquipmentAsset}>(`/api/equipment-library/assets/${current.id}`,{method:'PUT',body:JSON.stringify(normalizedEquipmentDraft(draft))}));if(result.status==='duplicate')return;if(result.status==='error'){setError((result.error as Error).message);return;}setCurrent(result.value.asset);setEditing(null);onUpdated(result.value.asset);}
   async function toggleDisabled(){const action=current.status==='disabled'?'enable':'disable';if(!window.confirm(`${action==='disable'?'Disable':'Enable'} ${current.assetNumber}?`))return;try{const data=await api<{asset:EquipmentAsset}>(`/api/equipment-library/assets/${current.id}/${action}`,{method:'POST',body:'{}'});setCurrent(data.asset);onUpdated(data.asset);}catch(value){setError((value as Error).message);}}
   async function remove(){const reason=window.prompt('Reason for removing this equipment asset:')?.trim();if(!reason)return;try{await api(`/api/equipment-library/assets/${current.id}`,{method:'DELETE',body:JSON.stringify({reasonNote:reason})});onRemoved();}catch(value){setError((value as Error).message);}}

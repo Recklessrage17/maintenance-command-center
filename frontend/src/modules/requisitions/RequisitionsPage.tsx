@@ -215,7 +215,7 @@ function stagingFormFromItem(item: StagingItem): StagingForm {
 }
 
 function blankStagingReviewForm(userFullName = ''): StagingReviewForm {
-  return {poInitiator:'',requisitionedByName:userFullName,taxExempt:'',workOrderNumber:'',confirmedWith:'',materialCert:'No',shipVia:'',fob:'Destination',notes:''};
+  return {poInitiator:userFullName.trim(),requisitionedByName:userFullName,taxExempt:'',workOrderNumber:'',confirmedWith:'',materialCert:'No',shipVia:'',fob:'Destination',notes:''};
 }
 
 export function RequisitionsPage({ userRole, effectivePermissions, userFullName = '' }: { userRole: string; effectivePermissions?:string[]; userFullName?: string }) {

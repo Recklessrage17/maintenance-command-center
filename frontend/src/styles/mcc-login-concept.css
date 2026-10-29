@@ -1,0 +1,279 @@
+/* Issue #210 / hash-verified Concept 03. Scoped to sign-in; recovery keeps its layout. */
+.mcc-login.mcc-login--concept {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 32px 46px 26px;
+  color: #e2f3ff;
+  background: #02101d url('../assets/mcc-login-factory.webp') center / cover no-repeat;
+  font-family: var(--mcc-font-body, Arial, sans-serif);
+  color-scheme: dark;
+}
+.mcc-login--concept::before {
+  position: absolute;
+  z-index: -1;
+  background: linear-gradient(180deg, #00101d20, #00101d0d 60%, #00101d80);
+  opacity: 1;
+  mask-image: none;
+}
+.mcc-login--concept::after { display: none; }
+.mcc-login__clock {
+  align-self: flex-end;
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  color: #c9e4f2;
+  font-size: 17px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 8px #000;
+}
+.mcc-login__clock strong { color: #38b9ff; font-size: 28px; }
+.mcc-login__concept-card {
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 auto;
+  width: min(590px, 100%);
+  margin: auto;
+  padding: 42px 54px 30px;
+  border: 2px solid transparent;
+  border-radius: 33px;
+  background:
+    linear-gradient(115deg, #041c30ed, #001123ed 58%, #052825e8) padding-box,
+    linear-gradient(110deg, #30bdff, #1b9aff 28%, #327177 58%, #72ffc0 80%, #3bf46b) border-box;
+  box-shadow: -7px 6px 24px #008cff4a, 8px 4px 28px #28ff6d38, 0 24px 60px #0009;
+  animation: mcc-concept-enter 360ms ease-out both;
+}
+/* Animate only opacity on the glow layer; no continuously animated blur/filter. */
+.mcc-login__concept-card::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: -4px 3px 18px #008cff70, 6px 0 22px #25ff6c66, inset -9px 0 30px #25ff6c18;
+  animation: mcc-concept-breathe 8s ease-in-out infinite;
+}
+.mcc-login__concept-heading { text-align: center; }
+.mcc-login__logo-plate {
+  width: min(282px, 100%);
+  height: 58px;
+  display: flex;
+  align-items: center;
+  margin: 0 auto 15px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+}
+.mcc-login__logo-plate img { display: block; width: 100%; height: auto; }
+.mcc-login__subtitle {
+  margin: 0;
+  color: #c2deee;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .28em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+.mcc-login__accent-line {
+  display: block;
+  width: 90px;
+  height: 2px;
+  margin: 22px auto 18px;
+  background: linear-gradient(90deg, #1b9dff, #27e8b3);
+}
+.mcc-login__welcome { margin: 0 0 28px; color: #d0e4f3; font-size: 16px; line-height: 1.65; }
+.mcc-login--concept .mcc-login__form { gap: 18px; }
+.mcc-login--concept .mcc-login__field { display: block; font-weight: 400; }
+.mcc-login--concept .mcc-login__field input {
+  min-height: 66px;
+  padding: 0 58px 0 68px;
+  border: 2px solid #386078;
+  border-radius: 999px;
+  background: #02182acc;
+  color: #e7f5ff;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: normal;
+  box-shadow: inset 0 2px 10px #0003;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.mcc-login--concept .mcc-login__field:first-child input {
+  border-color: #1ab3ff;
+  box-shadow: 0 0 16px #008cff35, inset 0 0 12px #008cff18;
+}
+.mcc-login--concept .mcc-login__field input::placeholder { color: #9fbdd0; opacity: 1; }
+.mcc-login--concept .mcc-login__field input:hover { border-color: #78d6ff; }
+.mcc-login--concept .mcc-login__field input:focus-visible {
+  border-color: #55d5ff;
+  outline: 2px solid #55d5ff;
+  outline-offset: 4px;
+  box-shadow: 0 0 20px #008cff50;
+}
+.mcc-login--concept .mcc-login__field input[aria-invalid='true'] { border-color: #ffb3ab; }
+.mcc-login--concept .mcc-login__field input:-webkit-autofill {
+  -webkit-text-fill-color: #e7f5ff;
+  box-shadow: inset 0 0 0 100px #08263a;
+}
+.mcc-login--concept .mcc-login__field-icon { left: 25px; width: 26px; height: 26px; color: #e0f1ff; }
+.mcc-login__password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #e0f1ff;
+  cursor: pointer;
+}
+.mcc-login__password-toggle svg, .mcc-login--concept .mcc-login__footer svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mcc-login__password-toggle:hover { background: #30baff20; }
+.mcc-login__password-toggle:disabled { opacity: .55; cursor: progress; }
+.mcc-login__utility { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; }
+.mcc-login__utility > span { color: #afc9d9; }
+.mcc-login--concept .mcc-login__forgot {
+  min-height: 44px;
+  padding: 4px 0 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #39ceff;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.mcc-login--concept .mcc-login__forgot:hover { color: #a5edff; text-decoration: underline; }
+.mcc-login--concept .mcc-login__submit {
+  min-height: 72px;
+  margin: 0;
+  padding: 14px 66px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(105deg, #2088ff, #2bb9df 43%, #39f866);
+  box-shadow: 0 4px 22px #008cff33;
+  color: #031d30;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+.mcc-login--concept .mcc-login__submit::before,
+.mcc-login--concept .mcc-login__submit::after { display: none; animation: none; }
+.mcc-login--concept .mcc-login__submit:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.08); box-shadow: 0 6px 26px #1dbbff55; }
+.mcc-login--concept .mcc-login__submit:active:not(:disabled) { transform: translateY(1px); }
+.mcc-login--concept .mcc-login__submit:disabled { opacity: .75; cursor: progress; }
+.mcc-login--concept .mcc-login__submit--success { background: linear-gradient(100deg, #39bce8, #52f79a); }
+.mcc-login--concept .mcc-login__submit-arrow {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #002332;
+  color: #fff;
+  font-size: 26px;
+  letter-spacing: normal;
+}
+.mcc-login--concept .mcc-login__error { margin: 0; color: #ffe2de; background: #5c1f2bd9; border-color: #ce857e; }
+.mcc-login--concept .mcc-login__footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #49768740;
+  color: #a4d6db;
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.mcc-login--concept .mcc-login__footer svg { color: #28f09d; }
+.mcc-login__product-bar {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  max-width: 100%;
+  min-height: 66px;
+  padding: 16px 24px;
+  border: 1px solid #5d90a65e;
+  border-radius: 20px;
+  background: #021b2dbd;
+  color: #b8d7e7;
+  font-size: 14px;
+}
+.mcc-login__product-bar strong { color: #e0f0fa; font-weight: 600; }
+.mcc-login__product-bar > span:last-child { padding-left: 18px; border-left: 1px solid #5d90a6; }
+.mcc-login__product-mark { width: 12px; height: 12px; border-radius: 4px; background: linear-gradient(135deg, #21a8ff, #38ed9b); }
+.mcc-login__visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.mcc-login--concept button:focus-visible { outline: 2px solid #a2edff; outline-offset: 4px; }
+@keyframes mcc-concept-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes mcc-concept-breathe { 0%, 100% { opacity: .35; } 50% { opacity: .85; } }
+@media (min-height: 821px) and (min-width: 601px) {
+  .mcc-login__concept-card { top: -24px; }
+}
+@media (max-height: 820px) and (min-width: 601px) {
+  .mcc-login.mcc-login--concept { padding: 20px 32px; gap: 16px; }
+  .mcc-login__clock { font-size: 14px; }
+  .mcc-login__clock strong { font-size: 24px; }
+  .mcc-login__concept-card { width: min(500px, 100%); padding: 28px 42px 22px; }
+  .mcc-login__logo-plate { width: 228px; margin-bottom: 10px; }
+  .mcc-login__subtitle { font-size: 11px; }
+  .mcc-login__accent-line { margin: 16px auto; }
+  .mcc-login__welcome { margin-bottom: 24px; font-size: 14px; }
+  .mcc-login--concept .mcc-login__field input { min-height: 56px; font-size: 16px; }
+  .mcc-login--concept .mcc-login__form { gap: 14px; }
+  .mcc-login--concept .mcc-login__submit { min-height: 60px; font-size: 14px; }
+  .mcc-login--concept .mcc-login__footer { margin-top: 18px; padding-top: 14px; }
+  .mcc-login__product-bar { min-height: 50px; padding: 12px 20px; font-size: 12px; }
+}
+@media (max-width: 600px) {
+  .mcc-login.mcc-login--concept { padding: 20px 18px; gap: 24px; background-position: 48% center; }
+  .mcc-login__clock { font-size: 12px; }
+  .mcc-login__clock strong { font-size: 22px; }
+  .mcc-login__concept-card { padding: 28px 22px 22px; border-radius: 26px; }
+  .mcc-login__logo-plate { width: 224px; }
+  .mcc-login__subtitle { font-size: 10px; letter-spacing: .2em; }
+  .mcc-login__welcome { font-size: 14px; margin-bottom: 26px; }
+  .mcc-login__desktop-break { display: none; }
+  .mcc-login--concept .mcc-login__field input { min-height: 58px; padding-left: 50px; padding-right: 54px; font-size: 16px; }
+  .mcc-login--concept .mcc-login__field-icon { left: 18px; width: 22px; height: 22px; }
+  .mcc-login__password-toggle { right: 8px; }
+  .mcc-login__utility { gap: 4px; font-size: 12px; }
+  .mcc-login--concept .mcc-login__forgot { font-size: 13px; }
+  .mcc-login--concept .mcc-login__submit { min-height: 62px; padding-inline: 42px; font-size: 13px; letter-spacing: .1em; }
+  .mcc-login--concept .mcc-login__submit-arrow { width: 34px; height: 34px; right: 12px; font-size: 22px; }
+  .mcc-login__product-bar { gap: 10px; padding: 14px; font-size: 11px; min-height: 50px; }
+  .mcc-login__product-bar > span:last-child { padding-left: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mcc-login--concept *, .mcc-login--concept *::before, .mcc-login--concept *::after { animation: none !important; transition: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mcc-login__concept-card { background: linear-gradient(#041c30, #041c30) padding-box, linear-gradient(110deg, #30bdff, #3bf46b) border-box; }
+  .mcc-login__product-bar { background: #041c30; }
+}

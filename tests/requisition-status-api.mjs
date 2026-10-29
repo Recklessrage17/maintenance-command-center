@@ -1,3 +1,4 @@
+import {fixtureDirectory} from './helpers/security-process.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ import pdfLib from '../backend/node_modules/pdf-lib/cjs/index.js';
 
 const {PDFDocument}=pdfLib;
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const fixture=path.join(root,'tmp',`requisition-status-api-${Date.now()}-${process.pid}`);
+const fixture=fixtureDirectory('requisition-status-api');
 const dataDir=path.join(fixture,'data');
 const uploadsDir=path.join(fixture,'uploads');
 const backupsDir=path.join(fixture,'backups');
@@ -39,7 +40,7 @@ function writePdfQaArtifact(filename,bytes){
   fs.writeFileSync(path.join(outputDir,filename),bytes);
 }
 async function freePort(){return new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});}
-async function start(port){const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',MCC_BIND_HOST:'127.0.0.1',MCC_RECOVERY_DIR:path.join(fixture,'recovery'),SESSION_SECRET:'requisition-status-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<100;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
+async function start(port){const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',MCC_BIND_HOST:'127.0.0.1',MCC_RECOVERY_DIR:path.join(fixture,'recovery'),SESSION_SECRET:'requisition-status-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});server=child;let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<100;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
 async function request(base,pathname,{method='GET',cookie='',body}={}){const response=await fetch(`${base}${pathname}`,{method,headers:{...(cookie?{Cookie:cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({}));return {response,data,cookie:response.headers.get('set-cookie')?.split(';')[0]||''};}
 
 function createLegacyFixture(){
@@ -123,4 +124,4 @@ async function run(){
   console.log(`Requisition API/status-transition tests passed: ${assertions} assertions with isolated legacy migration, conservative fallbacks, edit preservation, Requested → Ordered → Received/Canceled lifecycle, and representative PDF=1 page.`);
 }
 
-try{await run();}finally{if(server&&server.exitCode===null){server.kill();await Promise.race([new Promise(resolve=>server.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(process.env.MCC_KEEP_TEST_ARTIFACTS!=='1'&&resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
+try{await run();}finally{if(server&&server.exitCode===null){const exited=new Promise(resolve=>server.once('exit',resolve));server.kill();await Promise.race([exited,new Promise(resolve=>setTimeout(resolve,3000))]);if(server.exitCode===null){server.kill('SIGKILL');await exited;}}const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(!process.env.MCC_PLAYWRIGHT_RUN_ID&&process.env.MCC_KEEP_TEST_ARTIFACTS!=='1'&&resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}

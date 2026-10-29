@@ -8,6 +8,7 @@ import './styles/mcc-industrial-primitives.css';
 import './styles/mcc-industrial-modules.css';
 import './styles/dashboard.css';
 import './styles/mcc-login.css';
+import './styles/mcc-login-concept.css';
 import './styles/mobile-safari-inputs.css';
 import './styles/pm-complete.css';
 import './styles/mcc-date-input.css';

@@ -8,11 +8,12 @@ const now='2026-07-24T12:00:00Z';
 function batch(id:number,name:string,isGeneral=false):Batch{return {id,name,description:`${name} fixture`,assetMachine:'Press 51',workOrderNumber:'WO-44',neededByDate:'2026-08-15',status:'Open',isGeneral,itemCount:0,openItemCount:0,convertedItemCount:0,requisitions:[],createdBy:'Layout Tester',createdAt:now,convertedAt:''};}
 function item(id:number,batchId:number,partNumber:string):Item{return {id,batchId,inventoryPartId:id,partNumber,description:`${partNumber} fixture description`,vendor:'Fixture Vendor',supplierPartNumber:`SUP-${id}`,quantityRequested:2,unitCost:5,location:'Stores',assetMachine:'Press 51',workOrderNumber:'WO-44',priority:'Normal',notes:'',requestedBy:'Layout Tester',dateAdded:now,neededByDate:'2026-08-15',status:'Need to Order'};}
 
-async function mockStaging(page:Page){
+async function mockStaging(page:Page, fullName='Layout Tester', authReady=Promise.resolve()){
   const batches=[batch(1,'General / Unassigned',true),batch(2,'Press 51 Repair'),batch(3,'Secondary Batch')];
   const items=[item(101,2,'STG-A1'),item(102,2,'STG-A2'),item(103,3,'STG-B1')];
   let nextBatchId=10;
   let previewItemIds:number[]=[];
+  const previewBodies:Array<Record<string,unknown>>=[];
   const refreshCounts=()=>{
     for(const entry of batches){
       const entries=items.filter(candidate=>candidate.batchId===entry.id);
@@ -23,7 +24,7 @@ async function mockStaging(page:Page){
   };
   refreshCounts();
 
-  await page.route('**/api/auth/status',route=>route.fulfill({json:{setupRequired:false,user:{id:1,fullName:'Layout Tester',email:'layout@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false}}}));
+  await page.route('**/api/auth/status',async route=>{await authReady;await route.fulfill({json:{setupRequired:false,user:{id:1,fullName,email:'layout@example.com',role:'Admin',isOwnerAdmin:true,forcePasswordChange:false}}});});
   await page.route(/\/api\/inventory\/native\/parts$/,route=>route.fulfill({json:{ok:true,parts:[]}}));
   await page.route(/\/api\/requisitions\/summary$/,route=>route.fulfill({json:{ok:true,requestedCount:0,orderedCount:0,receivedCount:0,canceledCount:0,activeCount:0}}));
   await page.route(/\/api\/requisition-batches(?:\?.*)?$/,async route=>{
@@ -58,6 +59,7 @@ async function mockStaging(page:Page){
     refreshCounts();await route.fulfill({json:{ok:true,movedCount:body.itemIds.length,mergedCount:0}});
   });
   await page.route(/\/api\/requisition-staging\/preview$/,async route=>{
+    previewBodies.push(route.request().postDataJSON());
     previewItemIds=(route.request().postDataJSON() as {stagingItemIds:number[]}).stagingItemIds;
     await route.fulfill({json:{ok:true,token:'preview-44',previews:[{id:1,vendorName:'Fixture Vendor',lineCount:previewItemIds.length,total:10,pdfUrl:'/api/requisition-staging/previews/1/pdf'}]}});
   });
@@ -76,13 +78,53 @@ async function mockStaging(page:Page){
     const url=new URL(route.request().url());const batchId=Number(url.searchParams.get('batchId'));
     route.fulfill({json:{ok:true,items:items.filter(entry=>entry.batchId===batchId)}});
   });
-  return {batches,items};
+  return {batches,items,previewBodies};
 }
 
 async function openBatch(page:Page,name='Press 51 Repair'){
   await page.locator('.requisition-batch-card').filter({hasText:name}).click();
   await expect(page.locator('.active-requisition-batch-heading')).toContainText(name);
 }
+
+for(const creator of ['Synthetic Creator One','Synthetic Creator Two']) test(`Patch 1 defaults initiator after delayed authentication for ${creator} and preserves review edits`,async({page},info)=>{
+  let ready!:()=>void;
+  const authReady=new Promise<void>(resolve=>{ready=resolve;});
+  const state=await mockStaging(page,creator,authReady);
+  await page.goto('/requisitions');
+  await expect(page.getByRole('button',{name:'Preview Requisition',exact:true})).toHaveCount(0);
+  ready();
+  await openBatch(page);
+  await page.getByRole('button',{name:'Select Visible'}).click();
+  await page.getByRole('button',{name:'Preview Requisition',exact:true}).click();
+  const review=page.locator('form.staging-review-modal');
+  await expect(review.getByLabel('P.O. Initiator')).toHaveValue(creator);
+  await expect(review.getByLabel('Requisitioned By')).toHaveValue(creator);
+  await review.getByLabel('P.O. Initiator').fill('Authorized Edited Initiator');
+  await review.getByLabel('Tax Exempt').selectOption('Yes');
+  await page.screenshot({path:info.outputPath('initiator-review.png'),fullPage:true});
+  await review.getByRole('button',{name:'Generate PDF Preview'}).click();
+  await review.getByRole('button',{name:'Back / Edit'}).click();
+  await expect(review.getByLabel('P.O. Initiator')).toHaveValue('Authorized Edited Initiator');
+  await expect(review.getByLabel('Tax Exempt')).toHaveValue('Yes');
+  await page.setViewportSize({width:820,height:900});
+  await expect(review.getByLabel('P.O. Initiator')).toHaveValue('Authorized Edited Initiator');
+  await review.getByRole('button',{name:'Generate PDF Preview'}).click();
+  expect(state.previewBodies).toHaveLength(2);
+  for(const body of state.previewBodies){expect(body.poInitiator).toBe('Authorized Edited Initiator');expect(body.taxExempt).toBe('Yes');expect(body.stagingItemIds).toEqual([101,102]);}
+  await review.getByRole('button',{name:'Confirm & Create Requisition'}).click();
+  await expect(review.getByText('Official requisitions created')).toBeVisible();
+});
+
+test('Patch 1 leaves a missing authoritative name blank and keeps required validation',async({page})=>{
+  await mockStaging(page,'');await page.goto('/requisitions');await openBatch(page);
+  await page.getByRole('button',{name:'Select Visible'}).click();
+  await page.getByRole('button',{name:'Preview Requisition',exact:true}).click();
+  const review=page.locator('form.staging-review-modal');
+  await expect(review.getByLabel('P.O. Initiator')).toHaveValue('');
+  await review.getByLabel('Tax Exempt').selectOption('No');
+  await review.getByRole('button',{name:'Generate PDF Preview'}).click();
+  await expect(review.getByText('P.O. Initiator, Requisitioned By, and Tax Exempt are required.')).toBeVisible();
+});
 
 async function layoutSnapshot(page:Page){
   return page.evaluate(()=>{

@@ -1,3 +1,4 @@
+import {fixtureDirectory} from './helpers/security-process.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const fixture=path.join(root,'tmp',`inventory-obsolete-api-${Date.now()}-${process.pid}`);
+const fixture=fixtureDirectory('inventory-obsolete-api');
 const dataDir=path.join(fixture,'data');
 const uploadsDir=path.join(fixture,'uploads');
 const backupsDir=path.join(fixture,'backups');
@@ -18,8 +19,8 @@ let assertions=0;
 function check(actual,expected,message){assertions+=1;assert.equal(actual,expected,message);}
 function ok(value,message){assertions+=1;assert.ok(value,message);}
 async function freePort(){return new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});}
-async function start(){const port=await freePort();const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',MCC_BIND_HOST:'127.0.0.1',MCC_RECOVERY_DIR:path.join(fixture,'recovery'),SESSION_SECRET:'inventory-obsolete-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<300;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
-async function stop(child){if(!child||child.exitCode!==null)return;child.kill();await Promise.race([new Promise(resolve=>child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}
+async function start(){const port=await freePort();const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',MCC_BIND_HOST:'127.0.0.1',MCC_RECOVERY_DIR:path.join(fixture,'recovery'),SESSION_SECRET:'inventory-obsolete-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});server=child;let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<300;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
+async function stop(child){if(!child||child.exitCode!==null)return;const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await Promise.race([exited,new Promise(resolve=>setTimeout(resolve,3000))]);if(child.exitCode===null){child.kill('SIGKILL');await exited;}}
 async function request(base,pathname,{method='GET',cookie='',body}={}){const response=await fetch(`${base}${pathname}`,{method,headers:{...(cookie?{Cookie:cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});const data=await response.json().catch(()=>({}));return {response,data,cookie:response.headers.get('set-cookie')?.split(';')[0]||''};}
 async function uploadCsv(base,cookie,content,filename){const body=new FormData();body.append('file',new Blob([content],{type:'text/csv'}),filename);const response=await fetch(`${base}/api/inventory/native/import`,{method:'POST',headers:{Cookie:cookie},body});const data=await response.json().catch(()=>({}));return{response,data};}
 async function login(base){const result=await request(base,'/api/auth/login',{method:'POST',body:{email:'inventory-owner@example.com',password}});check(result.response.status,200,result.data.error);return result.cookie;}
@@ -77,4 +78,4 @@ async function run(){
   console.log(`Inventory obsolete API tests passed: ${assertions} assertions covering migration/defaults, mark/unmark, search, restart persistence, backward-compatible PATCH/import, focused backup round-trip, and history preservation.`);
 }
 
-try{await run();}finally{await stop(server);const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(process.env.MCC_KEEP_TEST_ARTIFACTS!=='1'&&resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
+try{await run();}finally{await stop(server);const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(!process.env.MCC_PLAYWRIGHT_RUN_ID&&process.env.MCC_KEEP_TEST_ARTIFACTS!=='1'&&resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}

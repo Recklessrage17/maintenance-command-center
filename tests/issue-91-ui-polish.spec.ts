@@ -38,7 +38,7 @@ async function mockIssue91(page:Page,{initiallyAuthenticated=false,failVerificat
   };
 }
 
-async function signIn(page:Page){await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password').fill('Issue-91!Password');await page.getByRole('button',{name:'ENTER COMMAND CENTER'}).click();}
+async function signIn(page:Page){await page.getByLabel('Email address').fill(user.email);await page.getByLabel('Password', {exact:true}).fill('Issue-91!Password');await page.getByRole('button',{name:'SIGN IN TO MCC'}).click();}
 
 test('login readiness reaches 100%, resets stale routes, and logout cannot restore them',async({page},testInfo)=>{
   test.skip(testInfo.project.name!=='desktop-chromium','Desktop session-flow audit');
