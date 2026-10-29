@@ -1,190 +1,112 @@
-name: MCC isolated native ARM64 validation
-
+name: MCC exact-candidate Debian 13 ARM64 validation
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Approved immutable 2.0.0 candidate SHA (40 hex characters)
+        description: Exact unchanged manual candidate commit
         required: true
         type: string
-
+        default: 73819e48432dcbb1ff84898fabc71efc9d6939e9
+      validation_package_sha:
+        description: Reviewed immutable validation branch commit
+        required: true
+        type: string
 permissions:
   contents: read
-
 concurrency:
-  group: mcc-arm64-validation-${{ github.event.pull_request.number || inputs.candidate_sha }}
-  cancel-in-progress: true
-
-defaults:
-  run:
-    shell: bash
-
+  group: mcc-manual-native-validation-20261029
+  cancel-in-progress: false
 jobs:
-  compatibility:
-    name: Native ARM64 compatibility and bounded profile
-    if: >-
-      github.repository == 'Recklessrage17/maintenance-command-center' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        contains(fromJSON('["codex/mcc-2-0-0-release-candidate","chore/remove-old-qa-screenshots-20261021"]'), github.event.pull_request.head.ref)))
+  native:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
-    env:
-      CI: 'true'
-      MCC_ARM64_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
-      MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
-      MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
-      MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
+    timeout-minutes: 60
     steps:
-      - name: Set isolated evidence directory
-        run: |
-          mkdir -p "$RUNNER_TEMP/mcc-arm64-evidence/compatibility"
-          printf 'MCC_ARM64_EVIDENCE=%s/mcc-arm64-evidence/compatibility\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - name: Check out validation package head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
-          fetch-depth: 0
-          path: validation-package
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Check out exact approved 2.0.0 candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
-          fetch-depth: 0
-          path: candidate
-          persist-credentials: false
-      - name: Check out historical synthetic migration source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 3929a957d4f633d8129997ed1eec818e2e3efbdb
-          path: legacy-source
-          persist-credentials: false
-      - name: Set up native Node.js 22
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: '22'
+          node-version: 22.23.1
           architecture: arm64
-      - name: Verify pinned source and native runtime
-        run: |
-          test "$(uname -m)" = aarch64
-          test "$(node -p process.arch)" = arm64
-          node "$MCC_ARM64_PACKAGE/validation/arm64/verify-package.mjs"
-          node "$MCC_ARM64_PACKAGE/validation/arm64/runtime.mjs"
-      - name: Install locked candidate and historical dependencies
-        timeout-minutes: 8
-        run: |
-          npm ci --prefix "$MCC_ARM64_CANDIDATE" --include=dev --no-audit --no-fund
-          npm ci --prefix "$MCC_ARM64_CANDIDATE/frontend" --include=dev --no-audit --no-fund
-          npm ci --prefix "$MCC_ARM64_CANDIDATE/backend" --include=dev --no-audit --no-fund
-          npm ci --prefix "$MCC_ARM64_LEGACY/backend" --include=dev --no-audit --no-fund
-      - name: Production builds
-        timeout-minutes: 6
+      - name: Verify reviewed dispatch and package
         env:
-          NODE_ENV: production
+          EXPECTED_PACKAGE: ${{ inputs.validation_package_sha }}
+          EXPECTED_CANDIDATE: ${{ inputs.candidate_sha }}
         run: |
-          npm run build --prefix "$MCC_ARM64_CANDIDATE/frontend" > "$MCC_ARM64_EVIDENCE/frontend-build.log" 2>&1
-          npm run build --prefix "$MCC_ARM64_CANDIDATE/backend" > "$MCC_ARM64_EVIDENCE/backend-build.log" 2>&1
-          npm run build --prefix "$MCC_ARM64_LEGACY/backend" > "$MCC_ARM64_EVIDENCE/legacy-build.log" 2>&1
-      - name: Offline synthetic migration, recovery and authorization suites
-        timeout-minutes: 14
-        run: |
-          sudo -n env -i PATH="$PATH" MCC_ARM64_CANDIDATE_SHA="$MCC_ARM64_CANDIDATE_SHA" MCC_ARM64_PACKAGE="$MCC_ARM64_PACKAGE" MCC_ARM64_CANDIDATE="$MCC_ARM64_CANDIDATE" MCC_ARM64_LEGACY="$MCC_ARM64_LEGACY" MCC_ARM64_EVIDENCE="$MCC_ARM64_EVIDENCE" unshare --mount --net --pid --fork --mount-proc --propagation private --kill-child /bin/bash "$MCC_ARM64_PACKAGE/validation/arm64/offline-tests.sh"
-      - name: Retain synthetic summaries and bounded metrics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: arm64-compatibility-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.json
-            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.jsonl
-            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.log
-            ${{ runner.temp }}/mcc-arm64-evidence/compatibility/*.txt
-          retention-days: 3
-
-  deployment:
-    name: Probe and validate disposable native deployment integration
-    if: >-
-      github.repository == 'Recklessrage17/maintenance-command-center' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        contains(fromJSON('["codex/mcc-2-0-0-release-candidate","chore/remove-old-qa-screenshots-20261021"]'), github.event.pull_request.head.ref)))
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 25
-    env:
-      CI: 'true'
-      MCC_ARM64_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
-      MCC_ARM64_PACKAGE: ${{ github.workspace }}/validation-package
-      MCC_ARM64_CANDIDATE: ${{ github.workspace }}/candidate
-      MCC_ARM64_LEGACY: ${{ github.workspace }}/legacy-source
-    steps:
-      - name: Set isolated evidence directory
-        run: |
-          mkdir -p "$RUNNER_TEMP/mcc-arm64-evidence/deployment"
-          printf 'MCC_ARM64_EVIDENCE=%s/mcc-arm64-evidence/deployment\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - name: Check out validation package head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
-          fetch-depth: 0
-          path: validation-package
-          persist-credentials: false
-      - name: Check out exact approved 2.0.0 candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha }}
-          fetch-depth: 0
-          path: candidate
-          persist-credentials: false
-      - name: Check out incompatible historical source for refusal test
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 3929a957d4f633d8129997ed1eec818e2e3efbdb
-          path: legacy-source
-          persist-credentials: false
-      - name: Set up native Node.js 22
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: '22'
-          architecture: arm64
-      - name: Verify pinned inputs and architecture
-        run: |
+          test "$GITHUB_SHA" = "$EXPECTED_PACKAGE"
+          test "$EXPECTED_CANDIDATE" = 73819e48432dcbb1ff84898fabc71efc9d6939e9
           test "$(uname -m)" = aarch64
-          node "$MCC_ARM64_PACKAGE/validation/arm64/verify-package.mjs"
-          node "$MCC_ARM64_PACKAGE/validation/arm64/runtime.mjs"
-      - name: Install locked candidate dependencies and build
-        timeout-minutes: 8
+          cd validation/manual-native-20261029
+          sha256sum -c PUBLICATION-SHA256.txt
+      - name: Decrypt exact private source package
+        env:
+          MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261029 }}
         run: |
-          npm ci --prefix "$MCC_ARM64_CANDIDATE" --include=dev --no-audit --no-fund
-          npm ci --prefix "$MCC_ARM64_CANDIDATE/frontend" --include=dev --no-audit --no-fund
-          npm ci --prefix "$MCC_ARM64_CANDIDATE/backend" --include=dev --no-audit --no-fund
-          NODE_ENV=production npm run build --prefix "$MCC_ARM64_CANDIDATE" > "$MCC_ARM64_EVIDENCE/build.log" 2>&1
-      - name: Probe real mount and private systemd support before native tests
-        timeout-minutes: 13
-        run: /bin/bash "$MCC_ARM64_PACKAGE/validation/arm64/run-container.sh"
-      - name: Publish explicit verification status
+          mkdir -p "$RUNNER_TEMP/mcc-input" "$RUNNER_TEMP/mcc-evidence"
+          node validation/manual-native-20261029/envelope.mjs decrypt validation/manual-native-20261029/native-input.enc "$RUNNER_TEMP/mcc-input.zip"
+          python3 - "$RUNNER_TEMP/mcc-input.zip" "$RUNNER_TEMP/mcc-input" <<'PY'
+          import zipfile,pathlib,sys
+          allowed={'candidate-source-private.zip','candidate-source-inventory.json','candidate-exact-source.bundle','native-source-pin.json'}
+          with zipfile.ZipFile(sys.argv[1])as z:
+              assert len(z.namelist())==len(allowed)and set(z.namelist())==allowed
+              for name in allowed:(pathlib.Path(sys.argv[2])/name).write_bytes(z.read(name))
+          PY
+          python3 validation/manual-native-20261029/verify-source.py "$RUNNER_TEMP/mcc-input/candidate-source-private.zip" "$RUNNER_TEMP/mcc-input/candidate-source-inventory.json" "$RUNNER_TEMP/mcc-candidate"
+      - name: Attach exact source provenance without changing tested bytes
+        run: |
+          cd "$RUNNER_TEMP/mcc-candidate"
+          git init -q
+          git config core.autocrlf input
+          git fetch --no-tags https://github.com/Recklessrage17/maintenance-command-center.git c69f8cb6c63922c4f415eacf8ee28e7c056a0a1e
+          echo 'a200f49b96c8e0eee861efa21c2098f57adde7f8ec85985a7a2c640b617ba20c  '"$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle" | sha256sum -c -
+          git bundle verify "$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle"
+          git fetch "$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle" refs/codex/release-candidates/mcc-manual-20261029-commit
+          git read-tree 73819e48432dcbb1ff84898fabc71efc9d6939e9
+          git update-ref HEAD 73819e48432dcbb1ff84898fabc71efc9d6939e9
+          python3 - <<'PY'
+          import subprocess,os
+          for entry in subprocess.check_output(['git','ls-files','--stage','-z']).decode().split('\0'):
+              if not entry:continue
+              metadata,name=entry.split('\t',1)
+              if metadata.split()[0]=='100755':os.chmod(name,0o755)
+          PY
+          test "$(git rev-parse 'HEAD^{tree}')" = db9b7b2bce37aa1a8c3b420de3227f1ed2c32669
+          git diff --exit-code
+      - name: Build disposable matching Debian runtime
+        run: docker build -t mcc-manual-native:reviewed validation/manual-native-20261029
+      - name: Execute native validation without production access
+        id: validation
+        continue-on-error: true
+        run: |
+          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            --memory=10g --cpus=3 --pids-limit=2048 --shm-size=1g --tmpfs /tmp:rw,exec,size=512m \
+            --user "$(id -u):$(id -g)" \
+            -v "$RUNNER_TEMP/mcc-candidate:/work" \
+            -v "$RUNNER_TEMP/mcc-evidence:/evidence" \
+            -v "$GITHUB_WORKSPACE/validation/manual-native-20261029:/harness:ro" \
+            mcc-manual-native:reviewed bash /harness/native-run.sh
+      - name: Encrypt private evidence and build outputs
         if: always()
+        env:
+          MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261029 }}
         run: |
-          if test -f "$MCC_ARM64_EVIDENCE/deployment-status.json"; then
-            cat "$MCC_ARM64_EVIDENCE/deployment-status.json" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Deployment integration NOT VERIFIED: see failed setup/test step.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo 'Persistent SSD, reboot, complete updater orchestration and Pi acceptance require separate staging even when container cases pass.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Retain capability evidence and native test results
+          test -d "$RUNNER_TEMP/mcc-evidence"
+          tar -C "$RUNNER_TEMP/mcc-evidence" -czf "$RUNNER_TEMP/mcc-native-results.tar.gz" .
+          node validation/manual-native-20261029/envelope.mjs encrypt "$RUNNER_TEMP/mcc-native-results.tar.gz" "$RUNNER_TEMP/mcc-native-results.enc"
+          sha256sum "$RUNNER_TEMP/mcc-native-results.enc" > "$RUNNER_TEMP/mcc-native-results.enc.sha256"
+      - name: Retain encrypted evidence for local review
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: arm64-deployment-${{ github.run_attempt }}
+          name: mcc-manual-native-encrypted-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.json
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.log
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.txt
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/*.sh
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/memory-4g/*.json
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/memory-4g/*.jsonl
-            ${{ runner.temp }}/mcc-arm64-evidence/deployment/memory-4g/*.log
-          retention-days: 3
+            ${{ runner.temp }}/mcc-native-results.enc
+            ${{ runner.temp }}/mcc-native-results.enc.sha256
+          retention-days: 7
+          if-no-files-found: error
+      - name: Fail closed on native validation failures
+        if: always()
+        env:
+          NATIVE_OUTCOME: ${{ steps.validation.outcome }}
+        run: test "$NATIVE_OUTCOME" = success
