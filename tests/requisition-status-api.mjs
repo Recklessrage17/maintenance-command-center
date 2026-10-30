@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import zlib from 'node:zlib';
+import {execFileSync} from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
 import pdfLib from '../backend/node_modules/pdf-lib/cjs/index.js';
@@ -20,24 +20,10 @@ let server;
 let assertions=0;
 function check(actual,expected,message){assertions+=1;assert.equal(actual,expected,message);}
 function ok(value,message){assertions+=1;assert.ok(value,message);}
-function inflatedPdfStreams(bytes){
-  const streams=[];
-  for(let index=0;index<bytes.length-8;index+=1){
-    if(bytes[index]!==0x78)continue;
-    for(const inflate of [zlib.inflateSync,zlib.inflateRawSync]){
-      try{
-        const value=inflate(bytes.subarray(index)).toString('latin1');
-        if(/\bT[Jj]\b/.test(value))streams.push(value);
-      }catch{}
-    }
-  }
-  return streams.join('\n');
-}
 function writePdfQaArtifact(filename,bytes){
-  if(!process.env.MCC_PDF_QA_DIR)return;
-  const outputDir=path.resolve(process.env.MCC_PDF_QA_DIR);
+  const outputDir=path.resolve(process.env.MCC_PDF_QA_DIR||path.join(fixture,'pdf'));
   fs.mkdirSync(outputDir,{recursive:true});
-  fs.writeFileSync(path.join(outputDir,filename),bytes);
+  const file=path.join(outputDir,filename);fs.writeFileSync(file,bytes);return file;
 }
 async function freePort(){return new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});}
 async function start(port){const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',MCC_BIND_HOST:'127.0.0.1',MCC_RECOVERY_DIR:path.join(fixture,'recovery'),SESSION_SECRET:'requisition-status-test',MCC_DATA_DIR:dataDir,MCC_UPLOADS_DIR:uploadsDir,MCC_BACKUPS_DIR:backupsDir},stdio:['ignore','pipe','pipe']});server=child;let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);const base=`http://127.0.0.1:${port}`;for(let attempt=0;attempt<100;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return {child,base};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Backend did not start.\n${output}`);}
@@ -108,9 +94,10 @@ async function run(){
   check(requisitionDocument.getPageCount(),1,'Representative single-line requisition must be exactly one page.');
   const requisitionPageSize=requisitionDocument.getPage(0).getSize();
   ok(requisitionPageSize.width>requisitionPageSize.height,'Representative requisition PDF must remain landscape.');
-  const requisitionPdfText=inflatedPdfStreams(requisitionPdfBytes);
-  ok(/\[\(QT\).*?\(Y\)\]\s*TJ/s.test(requisitionPdfText),'Requisition PDF quantity header must render as centered QTY.');
-  ok(!/\(Quantity\)/.test(requisitionPdfText),'Requisition PDF must not retain the cramped Quantity header.');
+  const inspectPdf=(filename,bytes)=>JSON.parse(execFileSync(process.env.PYTHON||'python',['-B','tests/helpers/inspect-requisition-pdf.py',writePdfQaArtifact(filename,bytes),'--assert-quantity'],{cwd:root,encoding:'utf8',windowsHide:true,maxBuffer:16*1024*1024}));
+  const inspected=inspectPdf('requisition.pdf',requisitionPdfBytes);
+  ok(inspected.pages.every(page=>page.quantityHeader?.text==='QTY'),'Requisition PDF quantity header must render visibly centered as QTY inside the actual cell.');
+  ok(inspected.pages.every(page=>! /\bQuantity\b/.test(page.text)),'Requisition PDF must not retain the cramped Quantity header.');
   const inlinePdf=await fetch(`${base}/api/requisitions/1/pdf?preview=true`,{headers:{Cookie:cookie}});
   check(inlinePdf.status,200,'Inline requisition PDF preview must be generated.');
   ok(/^inline;/i.test(inlinePdf.headers.get('content-disposition')||''),'Inline requisition PDF preview must use inline disposition.');
@@ -118,8 +105,8 @@ async function run(){
   check(inlineDocument.getPageCount(),1,'Inline requisition PDF preview must remain exactly one page.');
   const inlinePageSize=inlineDocument.getPage(0).getSize();
   ok(inlinePageSize.width>inlinePageSize.height,'Inline requisition PDF preview must remain landscape.');
-  ok(/\[\(QT\).*?\(Y\)\]\s*TJ/s.test(inflatedPdfStreams(inlinePdfBytes)),'Inline requisition PDF preview must render the centered QTY header.');
-  writePdfQaArtifact('requisition.pdf',requisitionPdfBytes);
+  ok(inspectPdf('requisition-inline.pdf',inlinePdfBytes).pages.every(page=>page.quantityHeader?.text==='QTY'),'Inline requisition PDF preview must render visibly centered QTY inside the actual cell.');
+
 
   console.log(`Requisition API/status-transition tests passed: ${assertions} assertions with isolated legacy migration, conservative fallbacks, edit preservation, Requested → Ordered → Received/Canceled lifecycle, and representative PDF=1 page.`);
 }

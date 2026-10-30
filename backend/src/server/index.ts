@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {restoreLibreOfficeRequisitionFooter} from './requisitionPdfFooter.js';
 import { createAssetMaintenanceRecordPdf } from './assetMaintenanceRecordPdf.js';
 import { migrateAssetNoteWorkLogs, workLogEntries, publicWorkLogEntry, workLogInput, insertWorkLogEntry, localWorkDate, workLogCompletionEntry, type WorkLogEntry } from './assetNoteWorkLogs.js';
 import { assetNoteUpdateLockAt, assetNoteUpdateWindowOpen, ISSUE_UPDATE_WINDOW_EXPIRED, IssueUpdateWindowExpiredError } from './assetNoteUpdateWindow.js';
@@ -5040,6 +5041,7 @@ type XlsxSheet = {
   row?: (rowNumber: number) => XlsxRow;
 };
 type OfficialPdfChoices = {
+  templateKind?: RequisitionTemplateKind;
   printArea: string;
 };
 
@@ -5687,20 +5689,21 @@ function tryLibreOfficePdfExport(xlsxPath: string, pdfPath: string, outputDir: s
   return false;
 }
 
-function convertOfficialWorkbookToPdf(workbook: Buffer, fileNameBase: string, choices: OfficialPdfChoices) {
+async function convertOfficialWorkbookToPdf(workbook: Buffer, fileNameBase: string, choices: OfficialPdfChoices) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcc-requisition-'));
   try {
     const safeBase = officialSafeFileBase(fileNameBase);
     const xlsxPath = path.join(tempDir, `${safeBase}.xlsx`);
     const pdfPath = path.join(tempDir, `${safeBase}.pdf`);
     fs.writeFileSync(xlsxPath, workbook);
-    const converted = tryExcelComPdfExport(xlsxPath, pdfPath, choices) || tryLibreOfficePdfExport(xlsxPath, pdfPath, tempDir);
+    const excelConverted = tryExcelComPdfExport(xlsxPath, pdfPath, choices);
+    const converted = excelConverted || tryLibreOfficePdfExport(xlsxPath, pdfPath, tempDir);
     if (!converted || !fs.existsSync(pdfPath)) {
       throw new Error('Official requisition PDF export failed. Microsoft Excel or LibreOffice could not convert the official workbook template.');
     }
     const pdf = fs.readFileSync(pdfPath);
     if (!pdf.length) throw new Error('Official requisition PDF export failed. The generated PDF was empty.');
-    return pdf;
+    return !excelConverted && choices.templateKind ? await restoreLibreOfficeRequisitionFooter(pdf, choices.templateKind) : pdf;
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -5794,6 +5797,7 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
   const chunks = chunkRequisitionItems(input.items, rowsPerPage);
   const printArea = `A1:${officialTemplateMaps[type].printAreaEndColumn}${officialTemplateMaps[type].printAreaEndRow}`;
   const choices = {
+    templateKind: type,
     printArea,
   };
   const comments = officialComments(header, input.notes);
@@ -5816,11 +5820,11 @@ async function buildOfficialRequisitionPdf(input: { vendor: string; requisitionN
       vendor: input.vendor,
     });
     const pageBase = chunks.length > 1 ? `${input.requisitionNumber}-page-${index + 1}` : input.requisitionNumber;
-    pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${pageBase}`, choices));
+    pdfPages.push(await convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${pageBase}`, choices));
   }
   for (const [index, lines] of continuations.entries()) {
     const workbook = await officialCommentContinuation({ requisitionNumber: input.requisitionNumber, type, lines, part: index + 1, count: continuations.length });
-    pdfPages.push(convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${input.requisitionNumber}-comments-${index + 1}`, { printArea: 'A1:J40' }));
+    pdfPages.push(await convertOfficialWorkbookToPdf(workbook, `MCC_Requisition_${input.requisitionNumber}-comments-${index + 1}`, { printArea: 'A1:J40' }));
   }
   return mergeOfficialPdfPages(pdfPages);
 }

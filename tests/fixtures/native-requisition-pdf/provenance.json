@@ -1,0 +1,44 @@
+[
+  {
+    "file": "over-0f095.pdf",
+    "sha256": "4e495b790d0215b78a017e7cba56c42de37902bb9aae884055daafd6e3cb0963",
+    "native_run": 40947195665,
+    "origin_case": "issue-208-requisition-pdf--0f095-ough-preview-create-reprint-desktop-chromium",
+    "source": "Retained synthetic LibreOffice 25.2.3.2 ARM64 output; immutable regression input."
+  },
+  {
+    "file": "under-1786e.pdf",
+    "sha256": "c7f24e5dbfbfeba638de27a57f8654b9e2e1bf3f9d569369cb11b8c07ea3bf0d",
+    "native_run": 40947195665,
+    "origin_case": "issue-208-requisition-pdf--1786e-ough-preview-create-reprint-desktop-chromium",
+    "source": "Retained synthetic LibreOffice 25.2.3.2 ARM64 output; immutable regression input."
+  },
+  {
+    "file": "under-25996.pdf",
+    "sha256": "d09937b8873ea81f16a7db2bcfab49be33419a9f2c1009991e265692012e9863",
+    "native_run": 40947195665,
+    "origin_case": "issue-208-requisition-pdf--25996-ough-preview-create-reprint-desktop-chromium",
+    "source": "Retained synthetic LibreOffice 25.2.3.2 ARM64 output; immutable regression input."
+  },
+  {
+    "file": "under-29178.pdf",
+    "sha256": "dafaf5251899c79fb2aa798e3d366880377ebf5a74d50220f8be3a45e09a2c11",
+    "native_run": 40947195665,
+    "origin_case": "issue-208-requisition-pdf--29178-ough-preview-create-reprint-desktop-chromium",
+    "source": "Retained synthetic LibreOffice 25.2.3.2 ARM64 output; immutable regression input."
+  },
+  {
+    "file": "over-8d5fa.pdf",
+    "sha256": "acdb48caec95b6d724e76e0c29cd7e0d952e86cda31d5193842ce3224ff553c5",
+    "native_run": 40947195665,
+    "origin_case": "issue-208-requisition-pdf--8d5fa-ough-preview-create-reprint-desktop-chromium",
+    "source": "Retained synthetic LibreOffice 25.2.3.2 ARM64 output; immutable regression input."
+  },
+  {
+    "file": "over-cea32.pdf",
+    "sha256": "108dc411be33b23c49b28e3c6bce982a7a5c2348e8f8e7178dec37bf61e902c9",
+    "native_run": 40947195665,
+    "origin_case": "issue-208-requisition-pdf--cea32-ough-preview-create-reprint-desktop-chromium",
+    "source": "Retained synthetic LibreOffice 25.2.3.2 ARM64 output; immutable regression input."
+  }
+]

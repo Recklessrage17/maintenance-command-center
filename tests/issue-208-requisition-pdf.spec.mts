@@ -43,6 +43,8 @@ for (const kind of ['under', 'over']) for (const scenario of [{tax:'Yes',count:1
         expect(page.width).toBeGreaterThan(page.height);
         expect(page.text).toContain('Local Security Owner');
         expect(page.text.replace(/\s/g,'')).toContain(kind==='under'?'Under$100.00':'ACTPRC01_02H');
+        expect(page.text).toContain(kind==='under'?'ACTPRC01_03B':'ACTPRC01_02H');
+        expect(page.text).toContain(kind==='under'?'01/28/04':'05/03/06');
         const comments = page.spans.find(s=>s.text.trim()==='COMMENTS:');
         expect(comments).toBeDefined();
         expect(comments!.color).toBe(0);
