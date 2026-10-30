@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 mkdir -p /evidence/home
-export HOME=/evidence/home PYTHON=/harness/python-native-wrapper PYTHONPATH=/evidence/python
+export HOME=/evidence/home PYTHON=python3 PYTHONPATH=/evidence/python
 export XDG_CONFIG_HOME=/evidence/home/.config XDG_CACHE_HOME=/evidence/home/.cache
 export MCC_PLAYWRIGHT_FRONTEND_ONLY=1 CI=true
 test "$(uname -m)" = aarch64
@@ -15,6 +15,20 @@ libreoffice --version | grep -F '25.2.3.2'
 dpkg-query -W > /evidence/debian-packages.txt
 fc-list > /evidence/fonts.txt
 node --version > /evidence/node-version.txt
+verify_source() {
+ LABEL="$1" python3 - <<'PY'
+import pathlib,json,hashlib,os
+manifest=pathlib.Path('/evidence/source-inventory.json')
+assert hashlib.sha256(manifest.read_bytes()).hexdigest()=='4500f67938e83cf2143e5b0aef094a94fa6d5330deb7c84a0ee00a95fe39266a'
+inventory=json.loads(manifest.read_bytes())
+assert inventory['candidate_tree']=='9d4280aef25d511e5e6a636bc2a374b6daeb3893'and len(inventory['files'])==476
+for entry in inventory['files']:
+ p=pathlib.Path('/work')/entry['path']
+ assert p.is_file()and hashlib.sha256(p.read_bytes()).hexdigest()==entry['sha256'],entry['path']
+pathlib.Path('/evidence/source-check-'+os.environ['LABEL']+'.json').write_text(json.dumps({'files':476,'candidate':'b8d13033baaf181a519b067db3f98556a260c88e','tree':'9d4280aef25d511e5e6a636bc2a374b6daeb3893','all_hashes_match':True}))
+PY
+}
+verify_source before
 for directory in . frontend backend; do
  npm ci --prefix "$directory" --include=dev --no-audit --no-fund > "/evidence/install-${directory//\//_}.log" 2>&1
 done
@@ -39,13 +53,36 @@ npm run test:playwright -- tests/issue-208-requisition-pdf.spec.mts tests/issue-
 pdf=$?
 npm run test:playwright -- tests/issue-208-requisition-workflow.spec.mts --project=desktop-chromium --workers=1 --forbid-only --retries=0 > /evidence/native-workflows.log 2>&1
 flows=$?
+npm run test:playwright -- tests/issue-208-native-footer-replay.spec.mts --project=desktop-chromium --workers=1 --forbid-only --retries=0 > /evidence/native-footer-replay.log 2>&1
+replays=$?
 set -e
 npm run test:playwright:cleanup > /evidence/cleanup.log 2>&1
 test -z "$(find tmp/playwright-runs -mindepth 1 -maxdepth 1 -print -quit)"
 cp -a diagnostics /evidence/diagnostics
-printf '{"api_exit":%s,"pdf_exit":%s,"workflow_exit":%s,"source_tree":"db9b7b2bce37aa1a8c3b420de3227f1ed2c32669"}\n' "$api" "$pdf" "$flows" > /evidence/native-result.json
+set +e
+python3 - <<'PY'
+import pathlib,json
+records=[]
+for p in pathlib.Path('diagnostics/playwright').glob('*/report.json'):
+ j=json.loads(p.read_text());cases=[]
+ def visit(s):
+  for spec in s.get('specs',[]):
+   for test in spec['tests']:cases.append({'title':spec['title'],'status':test['status'],'attempts':len(test['results']),'results':[a['status']for a in test['results']]})
+  for child in s.get('suites',[]):visit(child)
+ visit(j);records.append({'run':p.parent.name,'stats':j['stats'],'cases':cases})
+cases=[c for r in records for c in r['cases']]
+summary={'reports':records,'reports_count':len(records),'total':len(cases),'passed':sum(c['status']=='expected'for c in cases),'failed':sum(c['status']=='unexpected'for c in cases),'skipped':sum(c['status']=='skipped'for c in cases),'retry_attempts':sum(max(0,c['attempts']-1)for c in cases),'expected_total':25}
+pathlib.Path('/evidence/selected-case-results.json').write_text(json.dumps(summary,indent=2))
+assert len(records)==4 and len(cases)==25 and summary['skipped']==0 and summary['retry_attempts']==0
+assert all(c['attempts']==1 for c in cases)
+PY
+selection=$?
+set -e
+verify_source after
+git diff --exit-code > /evidence/source-git-diff.log
+printf '{"api_exit":%s,"pdf_exit":%s,"workflow_exit":%s,"replay_exit":%s,"selection_exit":%s,"source_tree":"9d4280aef25d511e5e6a636bc2a374b6daeb3893","source_commit":"b8d13033baaf181a519b067db3f98556a260c88e"}\n' "$api" "$pdf" "$flows" "$replays" "$selection" > /evidence/native-result.json
 # Seal build outputs only after every native check passes. Source is unchanged.
-if ((api==0&&pdf==0&&flows==0));then
+if ((api==0&&pdf==0&&flows==0&&replays==0&&selection==0));then
  mkdir -p /evidence/reviewed-native-build
  for directory in frontend/dist backend/dist backend/templates shared;do
   mkdir -p "/evidence/reviewed-native-build/$(dirname "$directory")"
@@ -56,4 +93,4 @@ if ((api==0&&pdf==0&&flows==0));then
  # Production dependency sealing and installation rehearsal remain separate.
  find /evidence/reviewed-native-build -type f -print0 | sort -z | xargs -0 sha256sum > /evidence/native-build-sha256.txt
 fi
-exit "$((api!=0||pdf!=0||flows!=0))"
+exit "$((api!=0||pdf!=0||flows!=0||replays!=0||selection!=0))"

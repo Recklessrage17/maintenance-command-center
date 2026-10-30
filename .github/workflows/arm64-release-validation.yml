@@ -1,12 +1,12 @@
-name: MCC exact-candidate Debian 13 ARM64 validation
+name: MCC final requisition PDF Debian 13 ARM64 validation
 on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Exact unchanged manual candidate commit
+        description: Exact reviewed PDF correction candidate commit
         required: true
         type: string
-        default: 73819e48432dcbb1ff84898fabc71efc9d6939e9
+        default: b8d13033baaf181a519b067db3f98556a260c88e
       validation_package_sha:
         description: Reviewed immutable validation branch commit
         required: true
@@ -35,13 +35,13 @@ jobs:
           EXPECTED_CANDIDATE: ${{ inputs.candidate_sha }}
         run: |
           test "$GITHUB_SHA" = "$EXPECTED_PACKAGE"
-          test "$EXPECTED_CANDIDATE" = 73819e48432dcbb1ff84898fabc71efc9d6939e9
+          test "$EXPECTED_CANDIDATE" = b8d13033baaf181a519b067db3f98556a260c88e
           test "$(uname -m)" = aarch64
           cd validation/manual-native-20261029
           sha256sum -c PUBLICATION-SHA256.txt
       - name: Decrypt exact private source package
         env:
-          MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261029 }}
+          MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261030 }}
         run: |
           mkdir -p "$RUNNER_TEMP/mcc-input" "$RUNNER_TEMP/mcc-evidence"
           node validation/manual-native-20261029/envelope.mjs decrypt validation/manual-native-20261029/native-input.enc "$RUNNER_TEMP/mcc-input.zip"
@@ -53,17 +53,19 @@ jobs:
               for name in allowed:(pathlib.Path(sys.argv[2])/name).write_bytes(z.read(name))
           PY
           python3 validation/manual-native-20261029/verify-source.py "$RUNNER_TEMP/mcc-input/candidate-source-private.zip" "$RUNNER_TEMP/mcc-input/candidate-source-inventory.json" "$RUNNER_TEMP/mcc-candidate"
+          cp "$RUNNER_TEMP/mcc-input/candidate-source-inventory.json" "$RUNNER_TEMP/mcc-evidence/source-inventory.json"
+          cp "$RUNNER_TEMP/mcc-input/native-source-pin.json" "$RUNNER_TEMP/mcc-evidence/source-pin.json"
       - name: Attach exact source provenance without changing tested bytes
         run: |
           cd "$RUNNER_TEMP/mcc-candidate"
           git init -q
           git config core.autocrlf input
           git fetch --no-tags https://github.com/Recklessrage17/maintenance-command-center.git c69f8cb6c63922c4f415eacf8ee28e7c056a0a1e
-          echo 'a200f49b96c8e0eee861efa21c2098f57adde7f8ec85985a7a2c640b617ba20c  '"$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle" | sha256sum -c -
+          echo 'f3b00c4a64469ced8b871d7103e0aa5abe04c6232592feacaa69703c7017981b  '"$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle" | sha256sum -c -
           git bundle verify "$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle"
-          git fetch "$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle" refs/codex/release-candidates/mcc-manual-20261029-commit
-          git read-tree 73819e48432dcbb1ff84898fabc71efc9d6939e9
-          git update-ref HEAD 73819e48432dcbb1ff84898fabc71efc9d6939e9
+          git fetch "$RUNNER_TEMP/mcc-input/candidate-exact-source.bundle" refs/codex/release-candidates/mcc-arm64-pdf-20261030
+          git read-tree b8d13033baaf181a519b067db3f98556a260c88e
+          git update-ref HEAD b8d13033baaf181a519b067db3f98556a260c88e
           python3 - <<'PY'
           import subprocess,os
           for entry in subprocess.check_output(['git','ls-files','--stage','-z']).decode().split('\0'):
@@ -71,7 +73,7 @@ jobs:
               metadata,name=entry.split('\t',1)
               if metadata.split()[0]=='100755':os.chmod(name,0o755)
           PY
-          test "$(git rev-parse 'HEAD^{tree}')" = db9b7b2bce37aa1a8c3b420de3227f1ed2c32669
+          test "$(git rev-parse 'HEAD^{tree}')" = 9d4280aef25d511e5e6a636bc2a374b6daeb3893
           git diff --exit-code
       - name: Build disposable matching Debian runtime
         run: docker build --build-arg RUNNER_UID="$(id -u)" --build-arg RUNNER_GID="$(id -g)" -t mcc-manual-native:reviewed validation/manual-native-20261029
@@ -89,7 +91,7 @@ jobs:
       - name: Encrypt private evidence and build outputs
         if: always()
         env:
-          MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261029 }}
+          MCC_NATIVE_VALIDATION_KEY: ${{ secrets.MCC_MANUAL_NATIVE_KEY_20261030 }}
         run: |
           test -d "$RUNNER_TEMP/mcc-evidence"
           tar --exclude='./home' --exclude='./python' -C "$RUNNER_TEMP/mcc-evidence" -czf "$RUNNER_TEMP/mcc-native-results.tar.gz" .
@@ -99,7 +101,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: mcc-manual-native-encrypted-${{ github.run_id }}
+          name: mcc-final-pdf-native-encrypted-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/mcc-native-results.enc
             ${{ runner.temp }}/mcc-native-results.enc.sha256

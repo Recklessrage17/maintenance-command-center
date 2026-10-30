@@ -1,7 +1,0 @@
-#!/bin/bash
-set -Eeuo pipefail
-if [[ "${1:-}" == -B && "${2:-}" == tests/helpers/inspect-requisition-pdf.py ]]; then
-  shift 2
-  exec python3 -B /harness/inspect-native-requisition-pdf.py "$@"
-fi
-exec python3 "$@"
