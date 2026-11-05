@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { validWorkDate } from './assetNoteWorkLogs.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Transform } from 'node:stream';
+import { Transform, Readable, type Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createInflateRaw, crc32 } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
@@ -838,7 +838,26 @@ export async function extractAndImportPortableArchive(input: {
   }
 }
 
-async function extractArchiveEntry(archivePath: string, entry: CentralDirectoryEntry, centralDirectoryOffset: number, targetPath: string) {
+// Stream every ZIP payload through the same CRC/local-header checks as import,
+// then compare it with the verified local package, including the manifest itself.
+export async function verifyPortableArchiveMatchesPackage(archivePath: string, packagePath: string, manifest: PortablePackageManifest) {
+  const inspection = inspectPortableArchive(archivePath);
+  if (inspection.rootName !== manifest.portableArchive.packageRoot) throw new Error('Portable archive ownership mismatch.');
+  const expected: Record<string,string> = { ...manifest.fileChecksums, 'manifest.json': sha256FileSync(path.join(packagePath, 'manifest.json')) };
+  const seen = new Set<string>();
+  for (const entry of inspection.entries) {
+    if (entry.directory) continue;
+    const relative = entry.name.slice(inspection.rootName.length + 1);
+    if (!Object.hasOwn(expected, relative)) throw new Error('Portable archive contains an unverified payload.');
+    const hash = crypto.createHash('sha256');
+    await extractArchiveEntry(archivePath, entry, inspection.centralDirectoryOffset, hash);
+    if (hash.digest('hex') !== expected[relative]) throw new Error(`Portable archive payload mismatch: ${relative}`);
+    seen.add(relative);
+  }
+  if (seen.size !== Object.keys(expected).length) throw new Error('Portable archive is missing verified payloads.');
+}
+
+async function extractArchiveEntry(archivePath: string, entry: CentralDirectoryEntry, centralDirectoryOffset: number, targetPath: string | Writable) {
   const descriptor = fs.openSync(archivePath, 'r');
   let dataOffset = 0;
   try {
@@ -867,12 +886,13 @@ async function extractArchiveEntry(archivePath: string, entry: CentralDirectoryE
   }
   if (entry.compressedSize === 0) {
     if (entry.uncompressedSize !== 0 || entry.crc32 !== 0) throw new Error(`Portable archive entry integrity check failed: ${entry.name}`);
-    fs.writeFileSync(targetPath, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
+    if (typeof targetPath === 'string') fs.writeFileSync(targetPath, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
+    else await pipeline(Readable.from([]), targetPath);
     return;
   }
   const source = fs.createReadStream(archivePath, { start: dataOffset, end: dataOffset + entry.compressedSize - 1 });
   const integrity = new ZipEntryIntegrity(entry);
-  const output = fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 });
+  const output = typeof targetPath === 'string' ? fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 }) : targetPath;
   try {
     if (entry.compressionMethod === 8) await pipeline(source, createInflateRaw(), integrity, output);
     else await pipeline(source, integrity, output);
@@ -1279,8 +1299,8 @@ export function validateSqliteDatabase(databasePath: string) {
   }
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
-    const quickCheck = database.prepare('PRAGMA quick_check').get() as Record<string, unknown> | undefined;
-    const result = String(quickCheck?.quick_check ?? Object.values(quickCheck ?? {})[0] ?? '');
+    const integrityCheck = database.prepare('PRAGMA integrity_check').get() as Record<string, unknown> | undefined;
+    const result = String(integrityCheck?.integrity_check ?? Object.values(integrityCheck ?? {})[0] ?? '');
     if (result.toLowerCase() !== 'ok') throw new Error(`Portable package database integrity check failed: ${result || 'unknown error'}`);
     const tables = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name));
     for (const required of ['users', 'app_settings']) if (!tables.has(required)) throw new Error(`Portable package database schema is incompatible: missing ${required}.`);

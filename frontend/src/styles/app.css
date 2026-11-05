@@ -859,6 +859,11 @@ th { color: #44d7ff; font-size: .78rem; text-transform: uppercase; }
 .backup-health-detail { padding: 9px 10px; border: 1px solid rgba(85, 191, 236, 0.14); border-radius: 9px; background: rgba(6, 67, 98, 0.14); color: #aac4d2; font-size: .82rem; line-height: 1.38; }
 .backup-action-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .backup-action-row .compact-button { width: auto; white-space: nowrap; }
+.settings-page .master-retention-card .backup-action-row .compact-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .settings-page .master-retention-card .backup-action-row { grid-template-columns: minmax(0, 1fr); }
+  .settings-page .master-retention-card .backup-action-row .compact-button { width: 100%; min-height: 44px; }
+}
 .backup-portable-panel { display: grid; gap: 14px; padding: 15px; border: 1px solid rgba(68, 215, 255, .3); border-radius: 14px; background: linear-gradient(145deg, rgba(6, 55, 82, .38), rgba(4, 18, 34, .62)); }
 .backup-portable-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .backup-portable-heading span:first-child, .backup-portable-card > span { color: #83cfea; font-size: .72rem; font-weight: 950; text-transform: uppercase; }

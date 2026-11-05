@@ -52,7 +52,8 @@ export function assertFixturePath(fixture, target) {
   return target;
 }
 
-export async function backendFixture(label, extraEnv = {}, { rootEnvText, observeUploads = false, observeRequisitionExports = false, serveFrontend = false } = {}) {
+export async function backendFixture(label, extraEnv = {}, { rootEnvText, observeUploads = false, observeRequisitionExports = false, observeBackupFaults = false, serveFrontend = false, lifetimeMs = 90_000 } = {}) {
+  assert.ok(Number.isFinite(lifetimeMs)&&lifetimeMs>0&&lifetimeMs<=180_000,'Fixture lifetime must be bounded.');
   assert.match(label, /^[a-z0-9-]+$/, 'Fixture label must be a safe directory name.');
   const fixture = fixtureDirectory(label);
   fs.mkdirSync(fixture, { recursive: true });
@@ -97,6 +98,10 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
   if (observeUploads) env.MCC_TEST_UPLOAD_EVENTS = eventsPath;
   if (observeRequisitionExports) env.MCC_TEST_REQUISITION_EXPORTS = assertFixturePath(fixture, path.join(fixture, 'requisition-exports'));
   const args = ['--max-old-space-size=256'];
+  if (observeBackupFaults) {
+    env.MCC_TEST_BACKUP_FAULTS = assertFixturePath(fixture,path.join(fixture,'backup-faults.json'));
+    args.push('--import',pathToFileURL(path.join(root,'tests/helpers/master-backup-faults.mjs')).href);
+  }
   if (observeUploads) args.push('--import', pathToFileURL(path.join(root, 'tests/helpers/upload-observer.mjs')).href);
   if (observeRequisitionExports) args.push('--import', pathToFileURL(path.join(root, 'tests/helpers/requisition-export-observer.mjs')).href);
   args.push(path.join(appRoot, 'backend/dist/server/index.js'));
@@ -108,7 +113,7 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
   let output = '';
   child.stdout.on('data', chunk => output += chunk);
   child.stderr.on('data', chunk => output += chunk);
-  const deadline = setTimeout(() => child.kill('SIGKILL'), 90_000);
+  const deadline = setTimeout(() => child.kill('SIGKILL'), lifetimeMs);
   const base = `http://127.0.0.1:${port}`;
   async function close() {
     clearTimeout(deadline);
@@ -133,13 +138,13 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
   return { fixture, appRoot, env, eventsPath, base, child, close, output: () => output };
 }
 
-export async function request(base, pathname, { method = 'GET', cookie = '', body, headers = {} } = {}) {
+export async function request(base, pathname, { method = 'GET', cookie = '', body, headers = {}, timeoutMs = 3_000 } = {}) {
   const form = body instanceof FormData || Buffer.isBuffer(body);
   const response = await fetch(`${base}${pathname}`, {
     method, headers: { ...(cookie ? { Cookie: cookie } : {}),
       ...(body !== undefined && !form ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: body === undefined ? undefined : form ? body : JSON.stringify(body),
-    signal: AbortSignal.timeout(3_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await response.text();
   let data;

@@ -58,7 +58,7 @@
     "test:issue-136": "node scripts/playwright-run.mjs tests/issue-136-work-order-pdf-history.spec.ts",
     "test:pm-workflow-upgrade": "npm run build --prefix backend && node tests/pm-workflow-upgrade.mjs",
     "test:issue-125": "node scripts/playwright-run.mjs tests/pm-excel-ui.spec.ts --grep \"keeps the destructive warning badge centered\"",
-    "test:portable-master-backup": "npm run build --prefix backend && node tests/portable-master-backup.mjs",
+    "test:portable-master-backup": "npm run build --prefix backend && node scripts/playwright-run.mjs tests/master-backup-regression.spec.ts --project=desktop-chromium --grep portable-master-backup",
     "test:issue-111-uploads": "npm run build --prefix backend && node tests/issue-111-large-library-upload.mjs",
     "test:folder-export": "npm run build --prefix backend && node tests/library-folder-export.mjs",
     "test:issue-127": "npm run build && node tests/issue-127-resumable-master-export.mjs && node tests/issue-111-large-library-upload.mjs && node tests/library-folder-export.mjs",

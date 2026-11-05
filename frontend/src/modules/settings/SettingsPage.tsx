@@ -134,6 +134,7 @@ type RecoveryStorageStatus = {
   atCapacity: boolean;
 };
 type BackupGroupStatus = {
+  retention?: { limit: number; verifiedCount: number; excludedCount: number; pendingCount: number; latestVerified: string | null } | null;
   category: BackupCategory;
   categoryLabel: string;
   visible: boolean;
@@ -148,6 +149,8 @@ type BackupGroupStatus = {
   nextScheduledBackupAt: string | null;
 };
 type ProtectedAreaStatus = 'protected' | 'ready' | 'pending';
+type MasterCleanupSet = { id:string; createdAt:string; type:string; sizeBytes:number; archive:string; verified:true };
+type MasterCleanupPreview = { token:string; preview:{ keep:MasterCleanupSet[]; candidates:MasterCleanupSet[]; excluded:{id:string;reason:string}[]; pending:{id:string;journal:string}[] } };
 type ProtectedArea = {
   key: string;
   label: string;
@@ -559,6 +562,7 @@ function emptyBackupGroup(category: Exclude<BackupCategory, 'legacy'>): BackupGr
 function normalizeBackupGroup(value: unknown, category: Exclude<BackupCategory, 'legacy'>): BackupGroupStatus {
   const data = asRecord(value);
   return {
+    retention: data.retention ? data.retention as BackupGroupStatus['retention'] : null,
     category,
     categoryLabel: String(data.categoryLabel ?? backupCategoryLabel(category)),
     visible: Boolean(data.visible),
@@ -851,6 +855,8 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
   const [links,setLinks]=useState<NetworkLinks|null>(null);
   const [mobileQrOpen,setMobileQrOpen]=useState(false);
   const [backupStatus,setBackupStatus]=useState<BackupStatus|null>(null);
+  const [masterCleanup,setMasterCleanup]=useState<MasterCleanupPreview|null>(null);
+  const [cleanupConfirmation,setCleanupConfirmation]=useState('');
   const [backupClock,setBackupClock]=useState(()=>Date.now());
   const [backupLists,setBackupLists]=useState<Partial<Record<BackupCategory, BackupSummary[]>>>({});
   const [visibleBackupList,setVisibleBackupList]=useState<Exclude<BackupCategory, 'legacy'>|null>(null);
@@ -1092,6 +1098,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     if (manualBackupProgress.state === 'running') return;
     setBackupLoading(true);
     setMsg('');
+    setMasterCleanup(null);
     setManualBackupProgress({state:'running',activeStep:0,message:`Creating ${backupCategoryLabel(category)}`});
     try {
       const data = await api('/api/backup/create',{method:'POST',body:JSON.stringify({category})});
@@ -1099,8 +1106,9 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
       setBackupStatus(nextStatus);
       const message = String(data.message ?? (data.ok === false ? 'Backup failed.' : 'Manual backup created successfully.'));
       if (data.ok === false) throw new Error(message);
-      setManualBackupProgress({state:'success',activeStep:backupStepLabels.length - 1,message,completedAt:new Date().toISOString()});
-      setLastManualBackupResult({ok:true,message:'Last backup succeeded.',createdAt:new Date().toISOString()});
+      const complete=nextStatus.lastBackupResult.ok;
+      setManualBackupProgress({state:complete?'success':'error',activeStep:backupStepLabels.length - 1,message,completedAt:new Date().toISOString()});
+      setLastManualBackupResult({ok:complete,message,createdAt:new Date().toISOString()});
       setMsg(message);
       await loadBackupStatus({quiet:true});
       if (visibleBackupList === category) await loadBackups(category,{quiet:true});
@@ -1117,6 +1125,24 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
     } finally {
       setBackupLoading(false);
     }
+  }
+
+  async function previewMasterCleanup() {
+    setBackupLoading(true); setMasterCleanup(null); setCleanupConfirmation('');
+    try { setMasterCleanup(await api('/api/backup/master/cleanup/preview',{method:'POST',body:'{}'}) as MasterCleanupPreview); }
+    catch(error) { setMsg((error as Error).message); }
+    finally { setBackupLoading(false); }
+  }
+  async function confirmMasterCleanup() {
+    if (!masterCleanup) return;
+    setBackupLoading(true);
+    try {
+      const ids=[...masterCleanup.preview.pending.map(item=>item.id),...masterCleanup.preview.candidates.map(item=>item.id)];
+      const result=await api('/api/backup/master/cleanup',{method:'POST',body:JSON.stringify({token:masterCleanup.token,ids,confirmation:cleanupConfirmation})});
+      setMsg(String(result.message)); setMasterCleanup(null); setCleanupConfirmation('');
+      await loadBackups('master',{quiet:true}); await loadBackupStatus({quiet:true});
+    } catch(error) { setMsg((error as Error).message); setMasterCleanup(null); }
+    finally { setBackupLoading(false); }
   }
 
   function verifyBackup(backup: BackupSummary) {
@@ -1761,7 +1787,7 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
               const cardBackups = backupLists[card.category] ?? [];
               const latest = card.status.latestBackup;
               return (
-                <section className="backup-tier-card" key={card.category}>
+                <section className={`backup-tier-card${card.category==='master'?' master-retention-card':''}`} key={card.category}>
                   <div className="backup-tier-heading">
                     <div>
                       <span>{card.title}</span>
@@ -1779,6 +1805,12 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
                   </div>
 
                   <p className="backup-health-detail">{card.status.health.message}</p>
+                  {card.category==='master'&&<div className="backup-health-detail" aria-live="polite">
+                    <strong>Retention: Keep newest 3 verified Master backups</strong>
+                    <p>{card.status.retention ? `${card.status.retention.verifiedCount} verified local sets · ${card.status.retention.excludedCount} protected/excluded · ${card.status.retention.pendingCount} pending cleanups` : 'Verification count unavailable; refresh status.'}</p>
+                    {card.status.retention?.latestVerified&&<p>Latest verified: {formatDateTime(card.status.retention.latestVerified)}</p>}
+                    <p>Manual and scheduled Masters share this limit. Safety, legacy, imported and external backups are protected.</p>
+                  </div>}
 
                   <div className="backup-action-row">
                     <button className="secondary-button compact-button" type="button" onClick={()=>void loadBackups(card.category)} disabled={backupLoading}>{listVisible ? 'Refresh' : 'View Backups'}</button>
@@ -1790,6 +1822,16 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
 
                   {listVisible&&(
                     <div className="backup-list tiered-backup-list">
+                      {card.category==='master'&&backupPermissions.canConfigureExternalBackup&&<button className="secondary-button compact-button" type="button" onClick={()=>void previewMasterCleanup()} disabled={backupLoading}>Preview Cleanup</button>}
+                      {card.category==='master'&&masterCleanup&&backupPermissions.canConfigureExternalBackup&&<section className="backup-external-card" aria-label="Master cleanup preview">
+                        <h3>Master cleanup preview</h3>
+                        <p>Keep {masterCleanup.preview.keep.length} verified sets. Remove {masterCleanup.preview.candidates.length} older sets; resume {masterCleanup.preview.pending.length} interrupted cleanups. Each set includes its exact linked local ZIP and checksum sidecar.</p>
+                        {(['keep','candidates'] as const).map(kind=><div key={kind}><strong>{kind==='keep'?'Keep':'Deletion candidates'}</strong>{masterCleanup.preview[kind].map(item=><p key={item.id} style={{overflowWrap:'anywhere'}}><code>{item.id}</code><br/>{formatDateTime(item.createdAt)} · {item.type} · {formatBytes(item.sizeBytes)} · Verified<br/>{item.archive} + .sha256</p>)}</div>)}
+                        {masterCleanup.preview.pending.map(item=><p key={item.id} style={{overflowWrap:'anywhere'}}>Interrupted cleanup (signed file allowlist will be rechecked): {item.id}</p>)}
+                        {masterCleanup.preview.excluded.map(item=><p key={item.id} style={{overflowWrap:'anywhere'}}>Protected: {item.id} — {item.reason}</p>)}
+                        <label className="form-field"><span>Type DELETE {masterCleanup.preview.candidates.length+masterCleanup.preview.pending.length} MASTER BACKUPS to confirm these IDs</span><input value={cleanupConfirmation} onChange={event=>setCleanupConfirmation(event.target.value)} disabled={backupLoading}/></label>
+                        <div className="backup-action-row"><button className="danger-button compact-button" type="button" disabled={backupLoading||masterCleanup.preview.keep.length!==3||masterCleanup.preview.candidates.length+masterCleanup.preview.pending.length===0||cleanupConfirmation!==`DELETE ${masterCleanup.preview.candidates.length+masterCleanup.preview.pending.length} MASTER BACKUPS`} onClick={()=>void confirmMasterCleanup()}>Confirm Master Cleanup</button><button className="secondary-button compact-button" type="button" onClick={()=>setMasterCleanup(null)} disabled={backupLoading}>Cancel cleanup</button></div>
+                      </section>}
                       {cardBackups.map(backup=>(
                         <section className="backup-list-row" key={`${backup.category}-${backup.id}`}>
                           <div>

@@ -14,16 +14,17 @@ const require=createRequire(import.meta.url);
 const ExcelJS=require('../backend/node_modules/exceljs');
 const JSZip=require('../backend/node_modules/jszip');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const fixture=path.join(os.tmpdir(),`mcc-portable-master-backup-${Date.now()}-${process.pid}`);
-const externalFixture=path.join(os.tmpdir(),`mcc-portable-external-${Date.now()}-${process.pid}`);
+if(!process.env.MCC_PLAYWRIGHT_RUN_ID)throw new Error('Use npm run test:portable-master-backup for managed storage and process cleanup.');
+const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'p-'));
+const externalFixture=fs.mkdtempSync(path.join(os.tmpdir(),'e-'));
 const password='Portable-Backup-Test!9a';
-const source={root:path.join(fixture,'source')};
-const target={root:path.join(fixture,'target')};
+const source={root:path.join(fixture,'s')};
+const target={root:path.join(fixture,'t')};
 for(const runtime of [source,target]){
   runtime.data=path.join(runtime.root,'data');
   runtime.uploads=path.join(runtime.root,'uploads');
   runtime.backups=path.join(runtime.root,'backups');
-  runtime.recovery=path.join(runtime.root,'recovery');
+  runtime.recovery=path.join(runtime.root,'r');
   runtime.pmExcel=path.join(runtime.root,'pm-excel');
   runtime.workOrders=path.join(runtime.root,'pm-work-orders');
 }
@@ -43,14 +44,19 @@ function directoryDigest(folder){
 }
 async function freePort(){return new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();probe.close(error=>error?reject(error):resolve(address.port));});});}
 async function start(runtime){
+  const appRoot=path.join(runtime.root,'app');
+  fs.mkdirSync(path.join(appRoot,'backend'),{recursive:true});
+  fs.cpSync(path.join(root,'backend/dist'),path.join(appRoot,'backend/dist'),{recursive:true});
+  fs.cpSync(path.join(root,'shared'),path.join(appRoot,'shared'),{recursive:true});
+  for(const filename of ['package.json','backend/package.json'])fs.copyFileSync(path.join(root,filename),path.join(appRoot,filename));
   const port=await freePort();
-  const child=spawn(process.execPath,['backend/dist/server/index.js'],{cwd:root,env:{...process.env,PORT:String(port),NODE_ENV:'test',SESSION_SECRET:`portable-${path.basename(runtime.root)}`,MCC_DATA_DIR:runtime.data,MCC_UPLOADS_DIR:runtime.uploads,MCC_BACKUPS_DIR:runtime.backups,MCC_RECOVERY_DIR:runtime.recovery,MCC_PM_EXCEL_DIR:runtime.pmExcel,MCC_PM_WORK_ORDER_DIR:runtime.workOrders,MCC_PORTABLE_BACKUP_MAX_MB:'128',MCC_RECOVERY_QUOTA_MB:'128',MCC_RECOVERY_MAX_PACKAGES:'1'},stdio:['ignore','pipe','pipe']});
+  const child=spawn(process.execPath,[path.join(appRoot,'backend/dist/server/index.js')],{cwd:appRoot,env:{...process.env,PORT:String(port),NODE_ENV:'test',SESSION_SECRET:`portable-${path.basename(runtime.root)}`,MCC_DATA_DIR:runtime.data,MCC_UPLOADS_DIR:runtime.uploads,MCC_BACKUPS_DIR:runtime.backups,MCC_RECOVERY_DIR:runtime.recovery,MCC_PM_EXCEL_DIR:runtime.pmExcel,MCC_PM_WORK_ORDER_DIR:runtime.workOrders,MCC_PORTABLE_BACKUP_MAX_MB:'128',MCC_RECOVERY_QUOTA_MB:'128',MCC_RECOVERY_MAX_PACKAGES:'1'},windowsHide:true,stdio:['ignore','pipe','pipe']});
   let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
   const base=`http://127.0.0.1:${port}`;
   for(let attempt=0;attempt<180;attempt+=1){if(child.exitCode!==null)throw new Error(`Backend exited.\n${output}`);try{if((await fetch(`${base}/api/health`)).ok)return{child,base,output:()=>output};}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
-  child.kill();throw new Error(`Backend did not start.\n${output}`);
+  await stop(child);throw new Error(`Backend did not start.\n${output}`);
 }
-async function stop(child){if(!child||child.exitCode!==null)return;child.kill();await Promise.race([new Promise(resolve=>child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,4000))]);}
+async function stop(child){if(!child||child.exitCode!==null)return;const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await Promise.race([exited,new Promise(resolve=>setTimeout(resolve,4000))]);if(child.exitCode===null){child.kill('SIGKILL');await exited;}}
 async function request(base,url,{method='GET',cookie='',body,headers={}}={}){
   const multipart=body instanceof FormData;
   const response=await fetch(`${base}${url}`,{method,headers:{...(cookie?{Cookie:cookie}:{}),...(body!==undefined&&!multipart?{'Content-Type':'application/json'}:{}),...headers},body:body===undefined?undefined:multipart?body:JSON.stringify(body)});
@@ -185,7 +191,7 @@ async function run(){
   const facilityWorkbook=new ExcelJS.Workbook();await facilityWorkbook.xlsx.readFile(path.join(packageDir,'excel','MCC_Facility_Info.xlsx'));assert.ok(facilityWorkbook.getWorksheet('Facility Areas'));assert.ok(facilityWorkbook.getWorksheet('Facility Folders'));const facilityFilesSheet=facilityWorkbook.getWorksheet('Facility Files');assert.ok(facilityFilesSheet);const facilityFileHeaders=facilityFilesSheet.getRow(1).values.map(value=>String(value??''));assert.equal(facilityFilesSheet.getRow(2).getCell(facilityFileHeaders.indexOf('folder_path')).text,'Toyo Manuals / Training');
   for(const [relative,metadata] of Object.entries(issue111Fixture.files)){const packaged=path.join(packageDir,'files','uploads',...relative.split('/'));assert.ok(fs.existsSync(packaged),`missing Issue #111 library payload ${relative}`);assert.equal(fs.statSync(packaged).size,metadata.size);assert.equal(fileDigest(packaged),metadata.sha256);assert.equal(manifest.fileChecksums[`files/uploads/${relative}`],metadata.sha256);}
   if(process.env.MCC_XLSX_QA_DIR){fs.mkdirSync(process.env.MCC_XLSX_QA_DIR,{recursive:true});fs.copyFileSync(equipmentWorkbookPath,path.join(process.env.MCC_XLSX_QA_DIR,'MCC_Equipment_List.xlsx'));}
-  const externalArchive=path.join(externalSuccess,backup.portableArchiveFilename);assert.ok(fs.existsSync(externalArchive));const sourceArchiveHash=fileDigest(externalArchive);const originalReadFileSync=fs.readFileSync;fs.readFileSync=function(filename,...args){if(path.resolve(String(filename))===path.resolve(externalArchive))throw new Error('full archive buffering is forbidden');return originalReadFileSync.call(fs,filename,...args);};try{const inspection=portableModule.inspectPortableArchive(externalArchive,{maxArchiveBytes:128*1024*1024});assert.ok(inspection.entries.length>0);assert.ok(inspection.expandedSizeBytes>0);const streamingRecovery=path.join(fixture,'streaming-recovery');const streamed=await portableModule.extractAndImportPortableArchive({archivePath:externalArchive,recoveryRoot:streamingRecovery,currentAppVersion:JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url))).version,limits:{maxArchiveBytes:128*1024*1024},storagePolicy:{quotaBytes:128*1024*1024,maxPackages:1}});assert.equal(streamed.checkedFileCount,Object.keys(manifest.fileChecksums).length);assert.equal(fileDigest(path.join(streamingRecovery,'imported',streamed.id,'files','uploads',`machine-library/asset-${machineFixture.assetId}/documents/${machineFixture.storedDocument}`)),machineFixture.files[`machine-library/asset-${machineFixture.assetId}/documents/${machineFixture.storedDocument}`].sha256);}finally{fs.readFileSync=originalReadFileSync;}const archiveBuffer=fs.readFileSync(externalArchive);const archive=await JSZip.loadAsync(archiveBuffer);const archiveRoot=manifest.portableArchive.packageRoot;
+  const externalArchive=path.join(externalSuccess,backup.portableArchiveFilename);assert.ok(fs.existsSync(externalArchive));const sourceArchiveHash=fileDigest(externalArchive);const originalReadFileSync=fs.readFileSync;fs.readFileSync=function(filename,...args){if(path.resolve(String(filename))===path.resolve(externalArchive))throw new Error('full archive buffering is forbidden');return originalReadFileSync.call(fs,filename,...args);};try{const inspection=portableModule.inspectPortableArchive(externalArchive,{maxArchiveBytes:128*1024*1024});assert.ok(inspection.entries.length>0);assert.ok(inspection.expandedSizeBytes>0);const streamingRecovery=path.join(fixture,'r');const streamed=await portableModule.extractAndImportPortableArchive({archivePath:externalArchive,recoveryRoot:streamingRecovery,currentAppVersion:JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url))).version,limits:{maxArchiveBytes:128*1024*1024},storagePolicy:{quotaBytes:128*1024*1024,maxPackages:1}});assert.equal(streamed.checkedFileCount,Object.keys(manifest.fileChecksums).length);assert.equal(fileDigest(path.join(streamingRecovery,'imported',streamed.id,'files','uploads',`machine-library/asset-${machineFixture.assetId}/documents/${machineFixture.storedDocument}`)),machineFixture.files[`machine-library/asset-${machineFixture.assetId}/documents/${machineFixture.storedDocument}`].sha256);}finally{fs.readFileSync=originalReadFileSync;}const archiveBuffer=fs.readFileSync(externalArchive);const archive=await JSZip.loadAsync(archiveBuffer);const archiveRoot=manifest.portableArchive.packageRoot;
   for(const relative of ['manifest.json','RECOVERY_README.txt','database/mcc.sqlite','excel/MCC_History.xlsx','recovery/restore-manifest.json'])assert.ok(archive.file(`${archiveRoot}/${relative}`),`archive missing ${relative}`);
   assert.deepEqual(await archive.file(`${archiveRoot}/database/mcc.sqlite`).async('nodebuffer'),fs.readFileSync(localDatabase));
 

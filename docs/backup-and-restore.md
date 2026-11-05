@@ -18,6 +18,84 @@ The current tiered types are:
 
 Local verified backups remain primary. A portable-archive or external-copy failure does not delete, corrupt, or invalidate a completed local package, and no operation writes to the source ZIP.
 
+## Master retention: newest three verified sets
+
+**Retention: Keep newest 3 verified Master backups.** Normal manual
+(`master_manual`) and monthly scheduled (`master_scheduled`) Masters share one
+limit. A set means its package directory, manifest-linked local portable ZIP,
+checksum sidecar, and (for new sets) small completion receipt. It is not a file
+count. Ordering uses validated manifest UTC creation time, then descending ID
+for ties; filesystem modification time is ignored.
+
+Starting with three verified sets, the next successful manual **or** scheduled
+Master creates and fully verifies a fourth, publishes its completion receipt,
+then removes only the oldest eligible set. Three remain. Snapshot, payload,
+SQLite `integrity_check`, ZIP headers/CRC/payload hashes, sidecar, and publication
+must all pass before rotation. Failed attempts never trigger pruning and are
+protected from automatic deletion. Their local packages remain available for
+supervised verification/recovery. A failed portable archive returns a failure;
+an enabled external-copy failure preserves the existing successful-local-create
+response with a clear warning, marks backup health as needing attention, excludes
+that attempt from retention, and prunes nothing. External copies are never deleted.
+
+Settings > Backup Center shows verified local count, protected/excluded count,
+pending cleanup count, and latest fully verified date. Creation reports the
+backup ID/time and pruned/retained/skipped/failed counts. Counting requires full
+verification and can take longer for large packages or backlogs.
+
+Administrators and Owner Admins can open **MCC Master Backup > View Backups >
+Preview Cleanup**. The preview is read-only: it lists the exact kept sets,
+eligible deletion candidates with date/type/size/verification, protected entries
+with reasons, and interrupted cleanups. To apply, type the displayed
+`DELETE N MASTER BACKUPS` phrase. Confirmation binds to those immutable IDs and
+a user-specific, one-use preview token valid for ten minutes. Any inventory
+change requires another preview. Every candidate and all three survivors are
+revalidated immediately before deletion. Manager/technician accounts cannot
+preview or apply cleanup; existing read/download/import rights are unchanged.
+
+Historical backlogs require this deliberate preview/confirmation to reduce to
+three in one operation. Automatic rotation removes at most one eligible oldest
+set per successful creation; it does not sweep the backlog on upgrade/startup.
+Unverified or anomalous sets never count toward the three and are never swept.
+Daily/Weekly retain their existing independent behavior. Master retention never
+deletes pre-restore, startup, legacy/unknown, imported recovery, external,
+deployment rollback or full-Pi recovery data. Pre-restore creation/restore remains
+independent and its older per-type automatic pruning is disabled.
+
+Deletion accepts only recognized direct children of the configured Master root
+and specifically linked ZIP/sidecar children of its local portable root. It
+rejects traversal, symlinks/junctions (including ancestors), hard links, mismatched
+IDs/dates/types/archive manifests, shared ZIP ownership, and changed/unlisted
+payloads. There is no recursive sweep: cleanup unlinks an exact verified file
+allowlist and removes only now-empty directories. Backup/restore history is
+retained, with audit events for automatic and administrator cleanup.
+
+### Interrupted cleanup and recovery
+
+Before removing anything, MCC flushes a signed `.master-retention-*.json` file
+allowlist in the Master root. If unlink or directory removal fails, the result
+reports a failed/pending cleanup, preserves the journal, and stops further
+deletions. Later automatic rotations stop while cleanup is pending. After a
+restart, **Preview Cleanup** displays the interrupted work; administrator
+confirmation rechecks three surviving valid sets and every remaining file/hash
+before resuming. Already missing allowlisted files are treated idempotently.
+Changed or extra files, altered journals, unsafe paths, or fewer than three
+verified survivors stop recovery for operator review. Never manually remove a
+journal to make an error disappear.
+
+New `.master-published-<backup-id>.json` receipts and pending journals use the
+configured `SESSION_SECRET` for authentication. Keep that secret stable across
+restarts. If it is changed/lost (or absent and regenerated), previously signed
+receipts/journals require supervised review; MCC conservatively excludes them
+instead of deleting anything. These small metadata files stay beside local
+packages; the portable ZIP remains self-contained and does not need the secret
+for download/import/restore. Normal rotation removes the matching receipt too.
+
+This three-Master policy and imported recovery package quotas are independent.
+Neither replaces a tested off-device recovery copy or a full Raspberry Pi
+OS/configuration/deployment recovery plan. No deployment or production cleanup
+is part of enabling this feature in development.
+
 ## Portable package structure
 
 Each new Master Backup, including `pre_restore`, uses this stable logical structure:
@@ -71,7 +149,7 @@ For a full pre-release deployment rollback archive on Raspberry Pi, use the
 [`create-deployment-rollback` helper](admin-one-click-updater.md#full-deployment-rollback-snapshot-for-pi-releases).
 This archive includes the live database and uploads but excludes MCC's own
 `backend/backups` history and reinstallable dependencies. The MCC daily/master/portable
-backup workflow described here is separate and remains untouched.
+backup workflow described here is separate from deployment rollback snapshots.
 
 Use persistent paths for production. MCC resolves restore destinations from the current installation's environment:
 
