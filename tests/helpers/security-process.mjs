@@ -117,24 +117,25 @@ export async function backendFixture(label, extraEnv = {}, { rootEnvText, observ
   const base = `http://127.0.0.1:${port}`;
   async function close() {
     clearTimeout(deadline);
-    if (child.exitCode === null) {
+    if (child.exitCode === null && child.signalCode === null) {
       const exited = new Promise(resolve => child.once('exit', resolve));
       child.kill();
       await Promise.race([exited, pause(2_000)]);
-      if (child.exitCode === null) { child.kill('SIGKILL'); await exited; }
+      if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; }
     }
     fs.writeFileSync(assertFixturePath(fixture, path.join(fixture, 'backend.log')), output);
+    if (process.env.MCC_PLAYWRIGHT_DIAGNOSTICS) fs.writeFileSync(path.join(process.env.MCC_PLAYWRIGHT_DIAGNOSTICS,`backend-${path.basename(fixture)}.log`),output);
     // Retain isolated fixtures and logs for failed or later-reviewed runs.
   }
   try {
     const started = Date.now();
-    while (Date.now() - started < 10_000) {
+    while (Date.now() - started < 30_000) {
       assert.equal(child.exitCode, null, `Backend exited during startup: ${output}`);
       try { if ((await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) })).ok) break; } catch {}
       await pause(100);
     }
     assert.equal((await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1_000) })).status, 200);
-  } catch (error) { await close(); throw error; }
+  } catch (error) { await close(); throw new Error(`Isolated backend startup failed: ${error.message}\n${output}`); }
   return { fixture, appRoot, env, eventsPath, base, child, close, output: () => output };
 }
 

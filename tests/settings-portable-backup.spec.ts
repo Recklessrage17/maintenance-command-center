@@ -151,3 +151,13 @@ test('an incomplete external copy is shown as needing attention after local crea
   await expect(page.locator('.backup-progress-panel.error')).toContainText(message);
   await expect(page.locator('.backup-result-panel.error')).toContainText(message);
 });
+
+test('Master status distinguishes previous verification, unknown sets and missing signing configuration',async({page})=>{
+  await mockSettings(page,'admin',()=>({master:{...group('master',true),retention:{limit:3,verifiedCount:2,excludedCount:1,pendingCount:0,unknownCount:1,latestVerified:'2026-11-05T12:00:00.000Z',verificationInProgress:true,secretConfigured:false}}}));
+  await page.goto('/settings');const master=page.locator('.master-retention-card');
+  await expect(master).toContainText('Status uses previous verification and file metadata');
+  await expect(master).toContainText('1 sets await fresh verification');
+  await expect(master).toContainText('Integrity verification in progress; showing previous results.');
+  await expect(master).toContainText('Persistent SESSION_SECRET is missing. Automatic retention is disabled.');
+  await expect(master).toContainText('Last integrity verification:');
+});

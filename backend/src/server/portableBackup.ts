@@ -66,7 +66,7 @@ export type ImportedPortablePackage = {
   archiveSha256: string;
   importedAt: string;
   checkedFileCount: number;
-  safeToDisconnect: true;
+  safeToDisconnect: boolean;
   alreadyImported?: boolean;
 };
 
@@ -1323,7 +1323,7 @@ function parseVersion(value: string) {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] as const : null;
 }
 
-export function listImportedPortablePackages(recoveryRoot: string, currentAppVersion: string) {
+export function listImportedPortablePackages(recoveryRoot: string, currentAppVersion: string, metadataOnly = false) {
   const importedRoot = path.join(recoveryRoot, 'imported');
   const archivesRoot = path.join(recoveryRoot, 'archives');
   if (!fs.existsSync(importedRoot)) return [] as ImportedPortablePackage[];
@@ -1331,10 +1331,17 @@ export function listImportedPortablePackages(recoveryRoot: string, currentAppVer
   for (const entry of fs.readdirSync(importedRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^MCC_Master_Backup_/.test(entry.name)) continue;
     try {
-      const validation = validatePortablePackage(path.join(importedRoot, entry.name), currentAppVersion);
+      const packagePath = path.join(importedRoot, entry.name);
+      // Status inventory is not restore authorization. Restore/import still use
+      // full validation; polling must not rehash imported payloads either.
+      const validation = metadataOnly
+        ? { packagePath, manifest: JSON.parse(fs.readFileSync(path.join(packagePath,'manifest.json'),'utf8')), checkedFileCount:0 } as PortablePackageValidation
+        : validatePortablePackage(packagePath, currentAppVersion);
+      if (typeof validation.manifest.createdAt!=='string' || !Number.isFinite(Date.parse(validation.manifest.createdAt))) continue;
       const archivePath = path.join(archivesRoot, `${entry.name}.zip`);
       if (!fs.existsSync(archivePath)) continue;
-      const result = importedSummary(validation, archivePath, sha256FileSync(archivePath), false);
+      const result = importedSummary(validation, archivePath, metadataOnly ? '' : sha256FileSync(archivePath), false);
+      if (metadataOnly) result.safeToDisconnect = false;
       const sidecarPath = path.join(importedRoot, `${entry.name}.import.json`);
       if (fs.existsSync(sidecarPath)) {
         try {

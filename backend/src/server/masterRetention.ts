@@ -13,7 +13,8 @@ export type RetentionPreview = {
   limit: number; verifiedCount: number; keep: MasterSet[]; candidates: MasterSet[];
   excluded: { id: string; reason: string }[]; pending: { id: string; journal: string; fingerprint: string }[]; fingerprint: string;
 };
-type Options = { masterRoot: string; portableRoot: string; appVersion: string; secret: string };
+export type MasterRetentionOptions = { masterRoot: string; portableRoot: string; appVersion: string; secret: string };
+export type MasterRetentionStatus = { limit: number; verifiedCount: number; excludedCount: number; pendingCount: number; unknownCount: number; latestVerified: string | null; checkedAt: string | null; verificationInProgress: boolean; secretConfigured: boolean; sets: MasterSet[] };
 
 function digest(value: string) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function fail(message: string): never { throw new Error(message); }
@@ -69,9 +70,46 @@ function tree(root: string) {
 }
 
 export class MasterRetention {
-  constructor(private readonly options: Options) {}
+  private readonly verified = new Map<string, { set: MasterSet; stamp: string; checkedAt: string }>();
+  constructor(private readonly options: MasterRetentionOptions) {}
+
+  // Metadata only: detects ordinary replacement/edit/removal, never authorizes
+  // deletion. Content hashes, SQLite and ZIP validation remain in verify().
+  private stamp(set: MasterSet) {
+    const entries: unknown[] = [];
+    const visit = (filename: string) => {
+      const stat = fs.lstatSync(filename, { bigint: true });
+      if (stat.isSymbolicLink()) fail('Linked status entry.');
+      if (stat.nlink !== 1n && !stat.isDirectory()) fail('Hard-linked status entry.');
+      entries.push([filename, String(stat.dev), String(stat.ino), String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]);
+      if (stat.isDirectory()) for (const name of fs.readdirSync(filename).sort()) visit(path.join(filename,name));
+      else if (!stat.isFile()) fail('Unsupported status entry.');
+    };
+    visit(child(this.options.masterRoot,set.id));
+    visit(child(this.options.portableRoot,set.archive));
+    visit(child(this.options.portableRoot,`${set.archive}.sha256`));
+    if (set.publication) visit(child(this.options.masterRoot,set.publication));
+    return JSON.stringify(entries);
+  }
+
+  status(): MasterRetentionStatus {
+    noLinks(this.options.masterRoot); noLinks(this.options.portableRoot);
+    const names = fs.readdirSync(this.options.masterRoot);
+    const pendingCount = names.filter(name=>name.startsWith('.master-retention-')).length;
+    const normal = names.filter(name=>idPattern.test(name));
+    for (const [id, saved] of this.verified) {
+      try { if (!normal.includes(id) || this.stamp(saved.set)!==saved.stamp) this.verified.delete(id); }
+      catch { this.verified.delete(id); }
+    }
+    const saved = [...this.verified.values()].sort((a,b)=>b.set.createdAt.localeCompare(a.set.createdAt));
+    const receipts = new Set(normal.map(id=>`.master-published-${id}.json`));
+    return {limit:3,verifiedCount:saved.length,excludedCount:names.filter(name=>!idPattern.test(name)&&!name.startsWith('.master-retention-')&&!receipts.has(name)).length,
+      pendingCount,unknownCount:normal.length-saved.length,latestVerified:saved.map(item=>item.checkedAt).sort().at(-1)??null,
+      checkedAt:new Date().toISOString(),verificationInProgress:false,secretConfigured:Boolean(this.options.secret),sets:saved.map(item=>item.set)};
+  }
 
   async verify(id: string, publishing = false): Promise<MasterSet> {
+    this.verified.delete(id);
     const match = idPattern.exec(id);
     if (!match) fail('Unrecognized normal Master backup ID; protected.');
     const folder = child(this.options.masterRoot, id);
@@ -120,12 +158,16 @@ export class MasterRetention {
       const receipt=JSON.parse(fs.readFileSync(child(this.options.masterRoot,publication),'utf8'));
       if (receipt.fingerprint!==fingerprint || receipt.signature!==this.publicationSignature(id,fingerprint)) fail('Master publication receipt mismatch; protected.');
     }
-    return { id, createdAt: manifest.createdAt, type: manifest.backupType, sizeBytes, archive, fingerprint, verified: true, ...(publication?{publication}:{}) };
+    const set: MasterSet = { id, createdAt: manifest.createdAt, type: manifest.backupType, sizeBytes, archive, fingerprint, verified: true, ...(publication?{publication}:{}) };
+    if (!publishing) this.verified.set(id,{set,stamp:this.stamp(set),checkedAt:new Date().toISOString()});
+    return set;
   }
 
-  private publicationSignature(id:string,fingerprint:string) { return crypto.createHmac('sha256',this.options.secret).update(`mcc-master-published-v1:${id}:${fingerprint}`).digest('hex'); }
+  private requireSecret() { if (!this.options.secret) fail('A persistent SESSION_SECRET is required for Master retention; backups are protected.'); }
+  private publicationSignature(id:string,fingerprint:string) { this.requireSecret(); return crypto.createHmac('sha256',this.options.secret).update(`mcc-master-published-v1:${id}:${fingerprint}`).digest('hex'); }
 
   async publish(id:string) {
+    this.requireSecret();
     const set=await this.verify(id,true);
     if (!set.publication) fail('New Master package requires a publication receipt.');
     const folder=child(this.options.masterRoot,id);
@@ -139,6 +181,7 @@ export class MasterRetention {
     try {fs.writeFileSync(descriptor,JSON.stringify({fingerprint:set.fingerprint,signature:this.publicationSignature(id,set.fingerprint)}));fs.fsyncSync(descriptor);}
     finally {fs.closeSync(descriptor);}
     syncDirectory(this.options.masterRoot);
+    this.verified.set(id,{set,stamp:this.stamp(set),checkedAt:new Date().toISOString()});
     return set;
   }
 
@@ -152,7 +195,7 @@ export class MasterRetention {
     return { plan: saved.plan, fingerprint: digest(raw), filename };
   }
 
-  private sign(plan: Journal) { return crypto.createHmac('sha256', this.options.secret).update(`mcc-master-retention-v1:${JSON.stringify(plan)}`).digest('hex'); }
+  private sign(plan: Journal) { this.requireSecret(); return crypto.createHmac('sha256', this.options.secret).update(`mcc-master-retention-v1:${JSON.stringify(plan)}`).digest('hex'); }
 
   async preview(): Promise<RetentionPreview> {
     noLinks(this.options.masterRoot); noLinks(this.options.portableRoot);
@@ -219,6 +262,7 @@ export class MasterRetention {
   }
 
   async cleanup(input: { preview: RetentionPreview; automaticNewId?: string }) {
+    this.requireSecret();
     const current = await this.preview();
     if (current.fingerprint !== input.preview.fingerprint) fail('Backup inventory changed. Preview cleanup again.');
     const removed: string[] = []; const failed: { id: string; reason: string }[] = [];
@@ -252,7 +296,7 @@ export class MasterRetention {
         this.executeJournal(name); removed.push(entry.id);
       } catch (error) { failed.push({id:entry.id,reason:error instanceof Error?error.message:'Cleanup failed.'}); break; }
     }
-    const final = await this.preview();
+    const final = removed.length || failed.length ? await this.preview() : current;
     return { removed, failed, retained:final.verifiedCount, skipped:final.excluded.length, pending:final.pending.length, preview:final };
   }
 }

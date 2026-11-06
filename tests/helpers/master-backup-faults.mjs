@@ -1,8 +1,18 @@
 // Loaded only by an isolated test child, never by application code.
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { isMainThread } from 'node:worker_threads';
 const read = fs.readFileSync;
 const fault = () => { try { return JSON.parse(read(process.env.MCC_TEST_BACKUP_FAULTS,'utf8')).fault; } catch { return ''; } };
+let heldVerification=false;
+fs.readFileSync=function(filename,...args) {
+  if (!isMainThread && !heldVerification && fault()==='slow_verification' && String(filename).endsWith('manifest.json')) {
+    heldVerification=true;
+    fs.writeFileSync(`${process.env.MCC_TEST_BACKUP_FAULTS}.started`,'worker-verification');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,3000);
+  }
+  return read.call(this,filename,...args);
+};
 // Advance the calendar only inside this disposable child when the test asks the
 // actual monthly timer to run. No production scheduling hooks are introduced.
 const NativeDate=Date;
@@ -37,6 +47,7 @@ DatabaseSync.prototype.exec = function(sql) {
   return result;
 };
 for (const [method,stage,predicate] of [
+  ['openSync','status_io',p=>/\.zip(?:\.sha256)?$/.test(p)||p.includes('MCC Master back up')&&!p.endsWith('.json')],
   ['writeFileSync','manifest',p=>p.endsWith('manifest.json')&&p.includes('MCC_Master_Backup_')],
   ['createWriteStream','zip',p=>p.includes('.zip.partial-')],
   ['linkSync','publication',p=>p.includes('.zip.partial-')],

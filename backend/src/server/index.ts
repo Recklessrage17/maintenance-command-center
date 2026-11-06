@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { MasterRetention, type RetentionPreview } from './masterRetention.js';
+import { type RetentionPreview, type MasterRetentionStatus } from './masterRetention.js';
+import { MasterRetentionService } from './masterRetentionService.js';
 import {restoreLibreOfficeRequisitionFooter} from './requisitionPdfFooter.js';
 import { createAssetMaintenanceRecordPdf } from './assetMaintenanceRecordPdf.js';
 import { migrateAssetNoteWorkLogs, workLogEntries, publicWorkLogEntry, workLogInput, insertWorkLogEntry, localWorkDate, workLogCompletionEntry, type WorkLogEntry } from './assetNoteWorkLogs.js';
@@ -2923,7 +2924,7 @@ let nextWeeklyBackupAt: string | null = null;
 let nextMasterBackupAt: string | null = null;
 let lastBackupResult: BackupOperationResult = { ok: true, message: 'No tiered backup has run yet.' };
 let backupInProgress = false;
-const masterRetention = new MasterRetention({ masterRoot: masterFullBackupDir, portableRoot: portableBackupDir, appVersion: applicationVersion ?? '0.0.0', secret: sessionSecret });
+const masterRetention = new MasterRetentionService({ masterRoot: masterFullBackupDir, portableRoot: portableBackupDir, appVersion: applicationVersion ?? '0.0.0', secret: process.env.SESSION_SECRET || '' });
 const masterCleanupPreviews = new Map<number, { token: string; expiresAt: number; preview: RetentionPreview }>();
 
 type ExternalBackupSettings = {
@@ -3201,7 +3202,7 @@ function readBackupManifest(folderPath: string): BackupManifest | null {
     return null;
   }
 }
-async function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCategory): Promise<BackupSummary | null> {
+async function summaryFromBackupFolder(folderPath: string, fallbackCategory: BackupCategory, statusOnly = false): Promise<BackupSummary | null> {
   const name = path.basename(folderPath);
   const manifest = readBackupManifest(folderPath);
   const category = fallbackCategory === 'legacy' ? 'legacy' : manifestBackupCategory(manifest?.backupCategory, fallbackCategory);
@@ -3210,7 +3211,7 @@ async function summaryFromBackupFolder(folderPath: string, fallbackCategory: Bac
   const portableArchivePath = portableArchivePathFromManifest(manifest);
   let portableReady = false;
   let portableError = '';
-  if (portableArchivePath && fs.existsSync(portableArchivePath)) {
+  if (!statusOnly && portableArchivePath && fs.existsSync(portableArchivePath)) {
     try {
       await verifyPortableReadiness(portableArchivePath, portableUploadMaxBytes);
       portableReady = true;
@@ -3226,7 +3227,7 @@ async function summaryFromBackupFolder(folderPath: string, fallbackCategory: Bac
     type,
     typeLabel: backupTypeLabel(type),
     createdAt: manifest?.createdAt ?? stat.birthtime.toISOString(),
-    sizeBytes: folderSizeBytes(folderPath),
+    sizeBytes: statusOnly ? Number(manifest?.databaseSizeBytes ?? 0) : folderSizeBytes(folderPath),
     databaseSizeBytes: manifest?.databaseSizeBytes ?? (fs.existsSync(dbFile) ? fs.statSync(dbFile).size : 0),
     includedPaths: manifest?.includedPaths ?? (fs.existsSync(dbFile) ? ['mcc.sqlite'] : []),
     includedFolders: manifest?.includedFolders ?? (manifest?.includedPaths ?? []).filter(value=>value.endsWith('/')),
@@ -3243,20 +3244,20 @@ async function summaryFromBackupFolder(folderPath: string, fallbackCategory: Bac
     portableReady,
   };
 }
-async function listBackupDirectory(category: BackupCategory) {
+async function listBackupDirectory(category: BackupCategory, statusOnly = false) {
   const root = backupDirectory(category);
   if (!fs.existsSync(root)) return [];
   const summaries: (BackupSummary | null)[] = [];
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name.startsWith(backupPrefix(category))) summaries.push(await summaryFromBackupFolder(path.join(root, entry.name), category));
+    if (entry.isDirectory() && entry.name.startsWith(backupPrefix(category))) summaries.push(await summaryFromBackupFolder(path.join(root, entry.name), category, statusOnly));
   }
   return summaries
     .filter((backup): backup is BackupSummary => Boolean(backup))
     .sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
 }
-async function listBackupsByCategory(category: BackupCategory, options: { includeLegacy?: boolean } = {}) {
-  const backups = await listBackupDirectory(category);
-  if (category === 'master' && options.includeLegacy) return [...backups, ...await listBackupDirectory('legacy')].sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
+async function listBackupsByCategory(category: BackupCategory, options: { includeLegacy?: boolean; statusOnly?: boolean } = {}) {
+  const backups = await listBackupDirectory(category, options.statusOnly);
+  if (category === 'master' && options.includeLegacy) return [...backups, ...await listBackupDirectory('legacy', options.statusOnly)].sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
   return backups;
 }
 function listMasterBackupsInternal() {
@@ -3292,7 +3293,7 @@ function defaultManualBackupType(category: CreatableBackupCategory): BackupType 
   return 'master_manual';
 }
 async function createBackup(input: { category: CreatableBackupCategory; type?: BackupType; actor?: User | null; notes?: string }) {
-  if (backupInProgress) throw new Error('Another backup is already running.');
+  if (backupInProgress || masterRetention.busy) throw new Error('Another backup or Master verification is already running.');
   backupInProgress = true;
   const category = input.category;
   const type = input.type ?? defaultManualBackupType(category);
@@ -3501,6 +3502,21 @@ function scheduleAutoBackup(reason: string, actor?: User | null) {
 async function verifyBackup(category: BackupCategory, id: unknown) {
   const folderPath = backupPathFromId(category, id);
   if (!fs.existsSync(folderPath)) throw new Error('Backup not found.');
+  const manifestForMaster = readBackupManifest(folderPath);
+  if (category==='master' && manifestForMaster?.packageVersion===PORTABLE_PACKAGE_VERSION && ['master_manual','master_scheduled'].includes(manifestForMaster.backupType)) {
+    if (backupInProgress || masterRetention.busy) throw new Error('Another backup or Master verification is already running.');
+    const summary = await summaryFromBackupFolder(folderPath,category,true);
+    if (!summary?.restorable) throw new Error('Backup database file is missing.');
+    try {
+      // Recovery still works without the signing key, but cannot seed retention status.
+      try { await masterRetention.verify(String(id)); }
+      catch (error) {
+        if (!/receipt|SESSION_SECRET|ENOENT.*master-published/.test(safeErrorMessage(error))) throw error;
+        await masterRetention.verify(String(id),true);
+      }
+      return {ok:true,backup:summary,checksumSha256:manifestForMaster.checksumSha256,missingOrChangedFiles:[],message:'Backup verified.'};
+    } catch (error) { return {ok:false,backup:summary,checksumSha256:manifestForMaster.checksumSha256,missingOrChangedFiles:[],message:safeErrorMessage(error)}; }
+  }
   const summary = await summaryFromBackupFolder(folderPath, category);
   if (!summary?.restorable) throw new Error('Backup database file is missing.');
   const manifest = readBackupManifest(folderPath);
@@ -3699,10 +3715,8 @@ function hiddenBackupGroup(category: BackupCategory) {
     nextScheduledBackupAt: null,
   };
 }
-async function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, actor: User) {
+async function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, actor: User, backups: BackupSummary[], retention: MasterRetentionStatus | null = null) {
   if (!canViewBackupCategory(actor, category)) return hiddenBackupGroup(category);
-  const backups = await listBackupsByCategory(category, { includeLegacy: category === 'master' });
-  const retention = category === 'master' ? await masterRetention.preview() : null;
   return {
     category,
     categoryLabel: backupCategoryLabel(category),
@@ -3710,8 +3724,8 @@ async function backupGroupStatus(category: Exclude<BackupCategory, 'legacy'>, ac
     latestBackup: backups[0] ?? null,
     lastAutoBackup: category === 'daily' ? backups.find(backup=>backup.type === 'daily_auto' || backup.type === 'auto') ?? null : null,
     count: backups.length,
-    health: retention && (!retention.verifiedCount || retention.pending.length || retention.excluded.some(item=>item.id.startsWith('.master-retention-'))) ? {ok:false,label:'Needs Attention',message:retention.pending.length||retention.excluded.some(item=>item.id.startsWith('.master-retention-'))?'Interrupted Master cleanup needs administrator review.':'No fully verified normal Master sets found.'} as BackupHealth : backupGroupHealth(category, backups),
-    retention: retention ? { limit:retention.limit,verifiedCount:retention.verifiedCount,excludedCount:retention.excluded.length,pendingCount:retention.pending.length,latestVerified:retention.keep[0]?.createdAt??null } : null,
+    health: retention && (!retention.verifiedCount || retention.pendingCount || retention.unknownCount || retention.verificationInProgress || !retention.secretConfigured) ? {ok:false,label:'Needs Attention',message:!retention.secretConfigured?'Persistent SESSION_SECRET required; automatic retention disabled.':retention.verificationInProgress?'Master verification in progress; showing previous results.':retention.pendingCount?'Interrupted Master cleanup needs administrator review.':'Some Master sets need fresh verification. Use Verify or administrator Preview Cleanup.'} as BackupHealth : backupGroupHealth(category, backups),
+    retention: retention ? {...retention,sets:undefined} : null,
     folderLabel: backupFolderLabel(category),
     folderPath: backupFolderLabel(category),
     autoBackupPending: category === 'daily' ? Boolean(autoBackupTimer) : false,
@@ -3750,20 +3764,25 @@ async function masterBackupStatus(actor?: User) {
   ensureBackupDirs();
   const visibleBackups: BackupSummary[] = [];
   if (actor) {
-    for (const category of ['daily','weekly','master'] as const) if (canViewBackupCategory(actor, category)) visibleBackups.push(...await listBackupsByCategory(category, {includeLegacy:category === 'master'}));
-  } else visibleBackups.push(...await listMasterBackupsInternal());
+    for (const category of ['daily','weekly','master'] as const) if (canViewBackupCategory(actor, category)) visibleBackups.push(...await listBackupsByCategory(category, {includeLegacy:category === 'master',statusOnly:true}));
+  } else visibleBackups.push(...await listBackupsByCategory('master',{includeLegacy:true,statusOnly:true}));
   const backups = visibleBackups.sort((left,right)=>right.createdAt.localeCompare(left.createdAt));
   const latestBackup = backups[0] ?? null;
   const dbStat = fs.existsSync(dbPath) ? fs.statSync(dbPath) : null;
   const health = databaseQuickCheck();
-  const daily = actor ? await backupGroupStatus('daily', actor) : hiddenBackupGroup('daily');
-  const weekly = actor ? await backupGroupStatus('weekly', actor) : hiddenBackupGroup('weekly');
-  const master = actor ? await backupGroupStatus('master', actor) : hiddenBackupGroup('master');
+  const retention = actor && canViewBackupCategory(actor,'master') ? await masterRetention.status() : null;
+  for (const backup of backups) {
+    const verified = retention?.sets.find(set=>set.id===backup.id);
+    if (verified) { backup.portableReady=true; backup.sizeBytes=verified.sizeBytes; }
+  }
+  const daily = actor ? await backupGroupStatus('daily', actor, backups.filter(item=>item.category==='daily')) : hiddenBackupGroup('daily');
+  const weekly = actor ? await backupGroupStatus('weekly', actor, backups.filter(item=>item.category==='weekly')) : hiddenBackupGroup('weekly');
+  const master = actor ? await backupGroupStatus('master', actor, backups.filter(item=>item.category==='master'||item.category==='legacy'),retention) : hiddenBackupGroup('master');
   const portableBackups = actor && canUsePortableRecovery(actor)
-    ? (await listBackupsByCategory('master')).filter(backup=>backup.portableReady).slice(0, 20)
+    ? backups.filter(backup=>backup.category==='master'&&backup.portableReady).slice(0, 20)
     : [];
   const importedRecoveryBackups = actor && canUsePortableRecovery(actor)
-    ? listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0').map(item=>({
+    ? listImportedPortablePackages(recoveryDir, applicationVersion ?? '0.0.0', true).map(item=>({
         id:item.id,name:item.name,createdAt:item.createdAt,appVersion:item.appVersion,backupType:item.backupType,
         archiveFilename:item.archiveFilename,archiveSizeBytes:item.archiveSizeBytes,importedAt:item.importedAt,
         checkedFileCount:item.checkedFileCount,safeToDisconnect:item.safeToDisconnect,
@@ -3795,7 +3814,7 @@ async function masterBackupStatus(actor?: User) {
     nextWeeklyBackupAt,
     nextMasterBackupAt,
     databaseSize: dbStat?.size ?? 0,
-    backupHealth: !lastBackupResult.ok ? `Needs attention: ${lastBackupResult.message}` : health.ok ? 'Healthy' : `Needs attention: ${health.message}`,
+    backupHealth: !lastBackupResult.ok ? `Needs attention: ${lastBackupResult.message}` : master.visible && !master.health.ok ? `Needs attention: ${master.health.message}` : health.ok ? 'Healthy' : `Needs attention: ${health.message}`,
     autoBackupDelaySeconds: Math.round(autoBackupDelayMs / 1000),
     scheduledBackupIntervalMinutes: null,
     permissions: actor ? backupPermissionStatus(actor) : undefined,
@@ -11474,7 +11493,7 @@ app.get('/api/backup/list', requireAuth, async(req:AuthRequest,res)=>{
 });
 app.post('/api/backup/master/cleanup/preview', requireAuth, async(req:AuthRequest,res)=>{
   if (!canConfigureExternalBackups(req.user!)) return res.status(403).json({ok:false,error:'Administrator only.'});
-  if (backupInProgress) return res.status(409).json({ok:false,error:'Another backup or cleanup is already running.'});
+  if (backupInProgress || masterRetention.busy) return res.status(409).json({ok:false,error:'Another backup or cleanup is already running.'});
   backupInProgress = true;
   try {
     ensureBackupDirs();
@@ -11487,7 +11506,7 @@ app.post('/api/backup/master/cleanup/preview', requireAuth, async(req:AuthReques
 });
 app.post('/api/backup/master/cleanup', requireAuth, async(req:AuthRequest,res)=>{
   if (!canConfigureExternalBackups(req.user!)) return res.status(403).json({ok:false,error:'Administrator only.'});
-  if (backupInProgress) return res.status(409).json({ok:false,error:'Another backup or cleanup is already running.'});
+  if (backupInProgress || masterRetention.busy) return res.status(409).json({ok:false,error:'Another backup or cleanup is already running.'});
   const saved = masterCleanupPreviews.get(req.user!.id);
   const body = isRecord(req.body) ? req.body : {};
   const ids = saved ? [...saved.preview.pending.map(item=>item.id),...saved.preview.candidates.map(item=>item.id)] : [];
@@ -11527,7 +11546,7 @@ app.post('/api/backup/verify', requireAuth, async(req:AuthRequest,res)=>{
     res.json(await verifyBackup(category, body.backupId));
   } catch (error) {
     const message = safeErrorMessage(error);
-    res.status(/not found|missing/i.test(message) ? 404 : /category/i.test(message) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup verification failed.')});
+    res.status(/already running/i.test(message) ? 409 : /not found|missing/i.test(message) ? 404 : /category/i.test(message) ? 400 : 500).json({ok:false,error:safeErrorMessage(error, [], 'Backup verification failed.')});
   }
 });
 app.post('/api/backup/restore', requireAuth, async(req:AuthRequest,res)=>{

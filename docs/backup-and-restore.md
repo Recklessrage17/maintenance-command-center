@@ -275,3 +275,93 @@ Release approval requires this rehearsal to pass without using production runtim
 ## Portable archive readiness hardening
 
 Creation now runs the same import inspector before publication. Entries rejected only for exceptional compression are rebuilt with ZIP STORE and inspected again; untrusted imports retain ratio/size/entry/path/ZIP64 defenses. A failed archive leaves its verified local package intact, is not advertised as portable-ready, and reports a smaller-package or supervised-recovery remedy. Existing ZIPs are also inspected before being listed as ready or downloaded. See [deployment recovery hardening](release-deployment-safety.md) for complete external snapshots and guarded lifecycle-aware recovery. A full deployment snapshot also preserves PM Excel source/backups, recovery/backup histories and OS configuration that a Master package does not replace.
+
+
+### Status polling versus integrity verification (PR #213 follow-up)
+
+Backup Center polling reads manifests and file metadata, not ZIP contents or backup
+payloads. The Master counter is explicitly the **last successful integrity result**
+whose file identities, sizes, change times and modification times still match.
+It is not a fresh integrity certificate. A newly discovered, changed or restarted
+set is shown as awaiting verification. Use **Verify**, or an administrator's
+**Preview Cleanup**, to perform a fresh check. After restart no previous in-memory
+verification is assumed; signed publication receipts remain on disk for the fresh
+check. Unknown sets remain protected. During a check the UI shows previous results
+and an in-progress/attention state. Imported recovery entries in routine status are
+metadata only; selecting restore still invokes full validation.
+
+Deep Master verification, publication and retention run in one worker thread.
+Concurrent deep requests are rejected instead of starting overlapping scans. Status
+polling can return during a scan without waiting for its ZIP hashing/decompression.
+Cleanup never consumes the status cache: preview, inventory comparison, three
+survivors, candidate checks and signed interruption journals retain fresh validation.
+The live database health check remains separate from backup integrity verification.
+
+### Persistent signing configuration and read-only Pi preflight
+
+The application reads its repository-root `.env` using dotenv without overriding
+variables already supplied by its service environment. Authentication retains its
+existing behavior: an absent SESSION_SECRET gets a temporary random session key.
+Master retention deliberately does **not** use that temporary key. Without a
+configured SESSION_SECRET, publication/deletion fail closed and existing sets stay
+on disk. Changing a configured secret makes old publication/journal signatures
+untrusted; do not edit receipts, re-sign journals or automatically prune them.
+Portable recovery verification remains available independently of receipt trust.
+Keep the configured secret stable across application and service restarts, out of
+Git, and in the operator's existing protected configuration backup. This change
+neither generates a production key nor rotates an existing one.
+
+The following is a **read-only operator procedure**, not executed as part of this
+PR. No restart, credential edit, backup mutation or service stop is needed. Never
+paste `.env`, `systemctl show Environment`, `/proc/.../environ`, or a key into a chat.
+
+1. Confirm the service and accepted source without changing them:
+   `systemctl is-active mcc.service` and
+   `git -C /opt/maintenance-command-center rev-parse HEAD`.
+2. For the repository-root `.env` configuration, run the following from the accepted
+   application directory. It prints only booleans and fails if the effective key
+   cannot be established safely. Adjust the application path only after confirming
+   the actual service working directory. It does not import/start the MCC server.
+
+```sh
+cd /opt/maintenance-command-center
+sudo node --input-type=module <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+const require = createRequire(path.resolve('backend/package.json'));
+const dotenv = require('dotenv');
+const value = key => execFileSync('systemctl', ['show','mcc.service',`--property=${key}`,'--value'], {encoding:'utf8'}).trim();
+try {
+  const pid = Number(value('MainPID'));
+  if (!pid) throw new Error();
+  const filename = path.resolve('.env');
+  const stat = fs.lstatSync(filename);
+  const configured = dotenv.parse(fs.readFileSync(filename)).SESSION_SECRET;
+  const initial = Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`,'utf8').split('\0').filter(Boolean).map(item => {
+    const i=item.indexOf('='); return [item.slice(0,i),item.slice(i+1)];
+  }));
+  const started = Date.parse(value('ExecMainStartTimestamp'));
+  const journal = execFileSync('journalctl',['-u','mcc.service','--since',value('ExecMainStartTimestamp'),'--no-pager','-o','cat'],{encoding:'utf8',maxBuffer:8*1024*1024});
+  const checks = {
+    persistentFileHasKey:Boolean(configured && configured!=='replace-with-a-long-random-secret'),
+    regularProtectedFile:stat.isFile() && !stat.isSymbolicLink() && (stat.mode & 0o077)===0,
+    unchangedSinceServiceStart:Number.isFinite(started) && stat.mtimeMs<=started,
+    serviceEnvironmentCompatible:!initial.SESSION_SECRET || initial.SESSION_SECRET===configured,
+    applicationReportedConfigured:journal.includes('SESSION_SECRET configured: yes'),
+  };
+  console.log(JSON.stringify(checks));
+  if (!Object.values(checks).every(Boolean)) process.exitCode=1;
+} catch { console.log('PREFLIGHT_UNRESOLVED: configuration could not be verified without exposing values.'); process.exitCode=1; }
+NODE
+```
+
+3. If the service uses an EnvironmentFile, credential provider, wrapper or a
+   different working directory instead of this `.env`, this procedure is not proof
+   of its persistence. Have the operator privately compare its effective key with
+   the persistent provider and verify the provider survives restart. Do not print
+   values or hashes. Any failed/unknown check is a release preflight blocker, not
+   permission to change credentials. Stable-key restart and changed/missing-key
+   behavior are automated in disposable development fixtures; production persistence
+   and physical ARM64/storage performance remain operator validation boundaries.

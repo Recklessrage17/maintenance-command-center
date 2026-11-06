@@ -13,6 +13,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Keep the original assertion and exact production source in the same hosted
+  # environment as the candidate while investigating PR #213's keyboard failure.
+  # This diagnostic comparison is scoped to this PR, not future releases.
+  baseline-keyboard-comparison:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 213
+    name: Exact b8d1303 keyboard comparison (Node 22)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      MCC_PLAYWRIGHT_FRONTEND_ONLY: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b8d13033baaf181a519b067db3f98556a260c88e
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - name: Build exact baseline and install Chromium
+        run: |
+          test "$(git rev-parse HEAD)" = b8d13033baaf181a519b067db3f98556a260c88e
+          npm ci --include=dev --no-audit --no-fund
+          npm ci --prefix frontend --include=dev --no-audit --no-fund
+          npm run build --prefix frontend
+          npx --no-install playwright install --with-deps chromium
+      - name: Repeat unchanged baseline keyboard assertion under contention
+        run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
+      - name: Verify baseline runtime cleanup
+        if: always()
+        run: |
+          npm run test:playwright:cleanup
+          node --input-type=module -e "import fs from 'node:fs'; const p='tmp/playwright-runs'; if(fs.existsSync(p) && fs.readdirSync(p).length) throw new Error('Baseline runtime retained; inspect diagnostics before explicit cleanup');"
+      - name: Retain baseline comparison evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: b8d1303-keyboard-comparison-${{ github.run_attempt }}
+          path: diagnostics/playwright/
+          retention-days: 90
+
   build-and-regression:
     name: Build and complete browser regressions (Node 22)
     runs-on: ubuntu-24.04

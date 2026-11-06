@@ -134,7 +134,7 @@ type RecoveryStorageStatus = {
   atCapacity: boolean;
 };
 type BackupGroupStatus = {
-  retention?: { limit: number; verifiedCount: number; excludedCount: number; pendingCount: number; latestVerified: string | null } | null;
+  retention?: { limit: number; verifiedCount: number; excludedCount: number; pendingCount: number; unknownCount?: number; verificationInProgress?: boolean; secretConfigured?: boolean; latestVerified: string | null } | null;
   category: BackupCategory;
   categoryLabel: string;
   visible: boolean;
@@ -1808,7 +1808,11 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
                   {card.category==='master'&&<div className="backup-health-detail" aria-live="polite">
                     <strong>Retention: Keep newest 3 verified Master backups</strong>
                     <p>{card.status.retention ? `${card.status.retention.verifiedCount} verified local sets · ${card.status.retention.excludedCount} protected/excluded · ${card.status.retention.pendingCount} pending cleanups` : 'Verification count unavailable; refresh status.'}</p>
-                    {card.status.retention?.latestVerified&&<p>Latest verified: {formatDateTime(card.status.retention.latestVerified)}</p>}
+                    <p>Status uses previous verification and file metadata; polling does not recheck backup contents.</p>
+                    {Boolean(card.status.retention?.unknownCount)&&<p>{card.status.retention?.unknownCount} sets await fresh verification (including after restart).</p>}
+                    {card.status.retention?.verificationInProgress&&<p>Integrity verification in progress; showing previous results.</p>}
+                    {card.status.retention?.secretConfigured===false&&<p>Persistent SESSION_SECRET is missing. Automatic retention is disabled.</p>}
+                    {card.status.retention?.latestVerified&&<p>Last integrity verification: {formatDateTime(card.status.retention.latestVerified)}</p>}
                     <p>Manual and scheduled Masters share this limit. Safety, legacy, imported and external backups are protected.</p>
                   </div>}
 
@@ -1900,14 +1904,14 @@ export function SettingsPage({isOwnerAdmin=false,canViewSystemVersion=false}:{is
 
               <section className="backup-imported-list">
                 <div className="backup-protection-heading">
-                  <div><span>Verified local recovery archive</span><strong>{backupStatus?.importedRecoveryBackups.length??0} imported backup{(backupStatus?.importedRecoveryBackups.length??0)===1?'':'s'}</strong></div>
+                  <div><span>Imported local recovery archive</span><strong>{backupStatus?.importedRecoveryBackups.length??0} imported backup{(backupStatus?.importedRecoveryBackups.length??0)===1?'':'s'}</strong></div>
                   <span className={`backup-area-badge ${backupStatus?.recoveryStorage?.atCapacity?'pending':'protected'}`}>{backupStatus?.recoveryStorage?.atCapacity?'Limit reached':'Local copy'}</span>
                 </div>
                 {(backupStatus?.importedRecoveryBackups??[]).map(backup=>(
                   <div className="backup-portable-row" key={backup.id}>
                     <div>
                       <strong>{backup.name}</strong>
-                      <small>MCC {backup.appVersion} · {formatDateTime(backup.createdAt)} · {backup.checkedFileCount} verified files</small>
+                      <small>MCC {backup.appVersion} · {formatDateTime(backup.createdAt)} · {backup.checkedFileCount ? `${backup.checkedFileCount} verified files` : 'Inventory only; restore performs fresh verification'}</small>
                       {backup.safeToDisconnect&&<em>Backup safely copied to this MCC drive. External backup drive may now be disconnected.</em>}
                     </div>
                     {backupPermissions.canRestoreMaster
