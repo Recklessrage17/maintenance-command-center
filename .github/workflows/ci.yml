@@ -277,6 +277,17 @@ jobs:
             --grep 'Patch 1 under blank native Chromium PDF' \
             --forbid-only --workers=1 --retries=0
 
+      # Validate both desktop/mobile integrated record-print scenarios
+      # before the costly complete suite; all native print assertions remain
+      # required with zero retries and an actual Xvfb display.
+      - name: Verify integrated native machine and equipment print previews
+        timeout-minutes: 8
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1200x24" npm run test:playwright -- \
+            tests/release-integration-native-print.spec.mts \
+            --project=desktop-chromium --project=mobile-chromium \
+            --forbid-only --workers=1 --retries=0
+
       # Run the exact legacy attachment-restore regression independently
       # before the 970-test suite, so a backend 500 yields focused diagnostics.
       # This remains a hard zero-retry gate; it does not mock or bypass restore.
