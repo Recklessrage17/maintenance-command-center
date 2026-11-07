@@ -39,8 +39,23 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
     const separator=cookie.indexOf('=');
     await context.addCookies([{name:cookie.slice(0,separator),value:cookie.slice(separator+1),url:runtime.base,httpOnly:true,sameSite:'Lax'}]);
     const page=context.pages()[0];
-    await page.goto(`${runtime.base}/api/requisitions/${created.data.requisition.id}/pdf?preview=true`);
-    await page.waitForTimeout(1500); // Allow the native PDF plugin to paint.
+    const pdfResponse=await page.goto(`${runtime.base}/api/requisitions/${created.data.requisition.id}/pdf?preview=true`);
+    expect(pdfResponse?.status()).toBe(200);
+    expect(pdfResponse?.headers()['content-type']).toMatch(/^application\\/pdf\\b/);
+    // Chromium loads the PDF in its built-in extension (a separate frame).
+    // Navigation 'load' alone is not proof the PDF plugin finished rendering.
+    // Wait for the viewer's real document-load state, not a fixed sleep.
+    await expect.poll(async()=>{
+      const frame=page.frames().find(f=>f.url().startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html'));
+      if(!frame)return false;
+      return frame.evaluate(()=>{
+        const viewer=document.querySelector('pdf-viewer') as any;
+        return viewer?.getLoadSucceededForTesting?.()===true;
+      }).catch(()=>false);
+    },{timeout:15000,message:'Native Chromium PDF viewer must finish loading its document'}).toBe(true);
+    const pdfViewerFrame=page.frames().find(f=>f.url().startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html'))!;
+    // Let the loaded document complete two composited frames before capture.
+    await pdfViewerFrame.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
     await page.screenshot({path:info.outputPath('native-pdf-viewer.png')});
     await page.evaluate(()=>{setTimeout(()=>window.print(),0);});
     const cdp=await context.newCDPSession(page);
