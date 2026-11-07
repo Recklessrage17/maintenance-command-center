@@ -106,6 +106,11 @@ try{
   };
   fs.writeFileSync(path.join(legacyFolder,'manifest.json'),JSON.stringify(legacyManifest,null,2));
   const unrelatedUpload=path.join(uploadsDir,'unrelated-preserved.txt');fs.writeFileSync(unrelatedUpload,'unrelated sanitized upload');result=await json(base,'/api/backup/restore',{method:'POST',cookie,body:{category:'master',backupId:legacyId,confirmation:'RESTORE MCC'}});assert.equal(result.response.status,200,'a legacy manifest without the attachment folder must remain restorable: '+JSON.stringify(result.data));assert.equal(fs.existsSync(firstAbsolute),true,'legacy restore must preserve attachment files omitted by the old format');assert.equal(fs.readFileSync(unrelatedUpload,'utf8'),'unrelated sanitized upload','legacy restore must not delete unrelated uploads omitted by the backup');
-  const backedAttachment=Object.keys(manifest.fileChecksums).find(name=>name.startsWith('files/pm-work-orders/'));fs.appendFileSync(path.join(backupFolder,...backedAttachment.split('/')),Buffer.from('tamper'));result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId}});assert.equal(result.response.status,200);assert.equal(result.data.ok,false);assert.ok(result.data.missingOrChangedFiles.includes(backedAttachment));
+  const backedAttachment=Object.keys(manifest.fileChecksums).find(name=>name.startsWith('files/pm-work-orders/'));fs.appendFileSync(path.join(backupFolder,...backedAttachment.split('/')),Buffer.from('tamper'));result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId}});assert.equal(result.response.status,200);assert.equal(result.data.ok,false);assert.ok(
+    result.data.missingOrChangedFiles.includes(backedAttachment)||
+      (/checksum mismatch/i.test(String(result.data.message??''))&&
+        String(result.data.message).includes(backedAttachment)),
+    'tampered signed Master attachment must be rejected with the exact failed file: '+JSON.stringify(result.data)
+  );
   console.log(`PM work-order attachment tests passed on ${process.platform}: authoritative upload rules, validation, N/A/follow-up rules, atomic storage, idempotency, collision handling, authorized PDF access, relative Excel links, ZIP packaging, and backup/restore integrity.`);
 }finally{await stop(server);const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
