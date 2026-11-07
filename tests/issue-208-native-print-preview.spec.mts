@@ -100,19 +100,19 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
     const ciPrintDestination=process.env.CI_PRINT_TEST_PRINTER;
     if(ciPrintDestination){
       await send('Runtime.evaluate',{expression:`(()=>{
-        const settings=document.querySelector('print-preview-app')?.shadowRoot?.querySelector('print-preview-destination-settings');
+        const settings=document.querySelector('print-preview-app')?.shadowRoot?.querySelector('print-preview-sidebar')?.shadowRoot?.querySelector('print-preview-destination-settings');
         settings?.getDestinationStoreForTest?.()?.startLoadAllDestinations();
       })()`});
       await expect.poll(async()=>{
         const result=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
-          const settings=document.querySelector('print-preview-app')?.shadowRoot?.querySelector('print-preview-destination-settings');
+          const settings=document.querySelector('print-preview-app')?.shadowRoot?.querySelector('print-preview-sidebar')?.shadowRoot?.querySelector('print-preview-destination-settings');
           const store=settings?.getDestinationStoreForTest?.();
           return Boolean(store?.destinations().some(d=>d.id===${JSON.stringify(ciPrintDestination)}));
         })()`});
         return result.result.value;
       },{timeout:15000,message:'CI color-capable CUPS printer must be discovered by native Chromium'}).toBe(true);
       const selected=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
-        const settings=document.querySelector('print-preview-app').shadowRoot.querySelector('print-preview-destination-settings');
+        const settings=document.querySelector('print-preview-app').shadowRoot.querySelector('print-preview-sidebar').shadowRoot.querySelector('print-preview-destination-settings');
         const store=settings.getDestinationStoreForTest();
         const destination=store.destinations().find(d=>d.id===${JSON.stringify(ciPrintDestination)});
         store.selectDestination(destination);
