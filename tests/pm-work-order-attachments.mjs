@@ -60,21 +60,24 @@ try{
 
   result=await json(base,'/api/backup/create',{method:'POST',cookie,body:{category:'master'}});assert.equal(result.response.status,201);const backupId=result.data.backup.id;assert.equal(result.data.backup.workOrderAttachments.attachmentCount,2);const backupFolder=path.join(backupsDir,'MCC Master back up',backupId);const manifest=JSON.parse(fs.readFileSync(path.join(backupFolder,'manifest.json'),'utf8'));assert.equal(manifest.workOrderAttachments.attachmentCount,2);assert.ok(Object.keys(manifest.fileChecksums).some(name=>name.startsWith('files/pm-work-orders/')));
   const firstAbsolute=path.join(workOrderDir,...stored[0].stored_relative_path.split('/').slice(1));fs.rmSync(firstAbsolute);assert.equal(fs.existsSync(firstAbsolute),false);result=await json(base,'/api/backup/restore',{method:'POST',cookie,body:{category:'master',backupId,confirmation:'RESTORE MCC'}});assert.equal(result.response.status,200);assert.equal(fs.existsSync(firstAbsolute),true,'restore must recover a backed-up work-order PDF');assert.equal(crypto.createHash('sha256').update(fs.readFileSync(firstAbsolute)).digest('hex'),stored[0].sha256);
-  // A copied signed Master backup is NOT a legacy backup: tampering with its
-  // manifest and removing payloads must fail the authoritative verifier.
-  const tamperedId=`${backupId}_tampered-signature`;
-  const tamperedFolder=path.join(backupsDir,'MCC Master back up',tamperedId);
-  fs.cpSync(backupFolder,tamperedFolder,{recursive:true});
-  const tamperedManifestPath=path.join(tamperedFolder,'manifest.json');
-  const tamperedManifest=JSON.parse(fs.readFileSync(tamperedManifestPath,'utf8'));
-  delete tamperedManifest.workOrderAttachments;
-  tamperedManifest.fileChecksums=Object.fromEntries(Object.entries(tamperedManifest.fileChecksums??{}).filter(([name])=>!name.startsWith('files/pm-work-orders/')&&!name.startsWith('files/uploads/')));
-  fs.writeFileSync(tamperedManifestPath,JSON.stringify(tamperedManifest,null,2));
-  fs.rmSync(path.join(tamperedFolder,'files','pm-work-orders'),{recursive:true,force:true});
-  fs.rmSync(path.join(tamperedFolder,'files','uploads'),{recursive:true,force:true});
-  result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId:tamperedId}});
-  assert.equal(result.response.status,200,'tampered signed Master verification must report a definitive result');
-  assert.equal(result.data.ok,false,'a current signed Master package must reject removed payloads and changed checksums');
+  // Tamper with the ACTUAL signed, valid-ID Master package, not a renamed
+  // copy that the verifier could reject just for an unrecognized backup ID.
+  // Preserve the original signed manifest byte-for-byte after the test.
+  const signedManifestPath=path.join(backupFolder,'manifest.json');
+  const signedManifestBytes=fs.readFileSync(signedManifestPath);
+  try {
+    const alteredManifest=JSON.parse(signedManifestBytes.toString('utf8'));
+    delete alteredManifest.workOrderAttachments;
+    fs.writeFileSync(signedManifestPath,JSON.stringify(alteredManifest,null,2));
+    result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId}});
+    assert.equal(result.response.status,200,'signed Master tampering must return a verification result');
+    assert.equal(result.data.ok,false,'a valid-ID signed Master package must reject changed manifest metadata');
+  } finally {
+    fs.writeFileSync(signedManifestPath,signedManifestBytes);
+  }
+  result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId}});
+  assert.equal(result.response.status,200,'restored signed manifest must be verifiable');
+  assert.equal(result.data.ok,true,'restoring original signed bytes must restore legitimate verification');
 
   // Build a truly legacy-shaped fixture independently: historical backups have
   // a root mcc.sqlite and no portable recovery package, receipt, signing or
