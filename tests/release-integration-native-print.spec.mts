@@ -2,6 +2,7 @@
 // reviewed requisition native viewer/print harness; never sends a paper job.
 import {test,expect,chromium} from '@playwright/test';
 import fs from 'node:fs';
+import path from 'node:path';
 import {backendFixture,owner,request,fixtureDirectory} from './helpers/security-process.mjs';
 
 for(const library of ['machine','equipment'])test(`integrated ${library} native Chromium maintenance-record print preview`,async({},info)=>{
@@ -21,7 +22,20 @@ for(const library of ['machine','equipment'])test(`integrated ${library} native 
     for(const [key,value]of Object.entries({title:'Synthetic native print record',noteDate:'2026-01-15',body:'Synthetic maintenance verification only.',warning:'true',workOrder:'QA-NATIVE-PRINT'}))form.append(key,value);
     const created=(await post(`/api/${library}-library/assets/${asset.id}/notes`,form)).note;
     const note=(await post(`/api/${library}-library/asset-notes/${created.id}/resolve`,{resolutionSummary:'Repair verified at 650\u00b0F and returned to service.'})).note;
-    context=await chromium.launchPersistentContext(fixtureDirectory('native-print-profile'),{channel:'chromium',headless:false,viewport:{width:1440,height:1000}});
+    // CI's managed runtime lives under a long checkout path; Chromium's
+    // Unix-domain SingletonSocket must instead be created below RUNNER_TEMP.
+    // Keep the persistent profile inside the run-owned fixture for cleanup.
+    const useShortTemp=process.platform==='linux'&&process.env.GITHUB_ACTIONS==='true';
+    const runnerTemp=useShortTemp?process.env.RUNNER_TEMP:undefined;
+    if(useShortTemp&&(!runnerTemp||!path.isAbsolute(runnerTemp)||
+        fs.realpathSync(runnerTemp)!==path.resolve(runnerTemp)||
+        Buffer.byteLength(path.join(runnerTemp,'org.chromium.Chromium.XXXXXX','SingletonSocket'))>=108)){
+      throw new Error('GitHub runner temporary directory is unsuitable for Chromium singleton socket.');
+    }
+    context=await chromium.launchPersistentContext(fixtureDirectory('native-print-profile'),{
+      channel:'chromium',headless:false,viewport:{width:1440,height:1000},
+      ...(runnerTemp?{env:{...process.env,TMPDIR:runnerTemp}}:{}),
+    });
     const separator=cookie.indexOf('=');
     await context.addCookies([{name:cookie.slice(0,separator),value:cookie.slice(separator+1),url:runtime.base,httpOnly:true,sameSite:'Lax'}]);
     const page=context.pages()[0];
