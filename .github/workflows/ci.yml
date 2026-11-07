@@ -277,6 +277,13 @@ jobs:
             --grep 'Patch 1 under blank native Chromium PDF' \
             --forbid-only --workers=1 --retries=0
 
+      # Run the exact legacy attachment-restore regression independently
+      # before the 970-test suite, so a backend 500 yields focused diagnostics.
+      # This remains a hard zero-retry gate; it does not mock or bypass restore.
+      - name: Verify legacy PM attachment backup restore
+        timeout-minutes: 6
+        run: npm run test:playwright -- tests/release-integration-api.spec.mts --project=desktop-chromium --grep 'integrated native regression: pm-work-order-attachments.mjs' --forbid-only --workers=1 --retries=0
+
       - name: Desktop and mobile browser regressions
         # A complete zero-retry run took 28.2 minutes on the hosted runner.
         # This is orchestration headroom; per-test/assertion deadlines stay intact.
