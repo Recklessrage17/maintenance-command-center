@@ -41,7 +41,7 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
     const page=context.pages()[0];
     const pdfResponse=await page.goto(`${runtime.base}/api/requisitions/${created.data.requisition.id}/pdf?preview=true`);
     expect(pdfResponse?.status()).toBe(200);
-    expect(pdfResponse?.headers()['content-type']).toMatch(/^application\\/pdf\\b/);
+    expect(pdfResponse?.headers()['content-type']).toMatch(/^application\/pdf\b/);
     // Chromium loads the PDF in its built-in extension (a separate frame).
     // Navigation 'load' alone is not proof the PDF plugin finished rendering.
     // Wait for the viewer's real document-load state, not a fixed sleep.
