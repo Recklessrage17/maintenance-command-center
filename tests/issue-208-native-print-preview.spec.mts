@@ -95,6 +95,36 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
       await send('Runtime.evaluate',{awaitPromise:true,expression:
         'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'});
     };
+    // The stock "Save as PDF" destination has no visible Color setting for
+    // an existing PDF. In GitHub CI use the real color-capable CUPS test queue.
+    const ciPrintDestination=process.env.CI_PRINT_TEST_PRINTER;
+    if(ciPrintDestination){
+      await send('Runtime.evaluate',{expression:`(()=>{
+        const settings=document.querySelector('print-preview-app')?.shadowRoot?.querySelector('print-preview-destination-settings');
+        settings?.getDestinationStoreForTest?.()?.startLoadAllDestinations();
+      })()`});
+      await expect.poll(async()=>{
+        const result=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
+          const settings=document.querySelector('print-preview-app')?.shadowRoot?.querySelector('print-preview-destination-settings');
+          const store=settings?.getDestinationStoreForTest?.();
+          return Boolean(store?.destinations().some(d=>d.id===${JSON.stringify(ciPrintDestination)}));
+        })()`});
+        return result.result.value;
+      },{timeout:15000,message:'CI color-capable CUPS printer must be discovered by native Chromium'}).toBe(true);
+      const selected=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
+        const settings=document.querySelector('print-preview-app').shadowRoot.querySelector('print-preview-destination-settings');
+        const store=settings.getDestinationStoreForTest();
+        const destination=store.destinations().find(d=>d.id===${JSON.stringify(ciPrintDestination)});
+        store.selectDestination(destination);
+        return store.selectedDestination.id;
+      })()`});
+      expect(selected.result.value).toBe(ciPrintDestination);
+      await expect.poll(async()=>{
+        const result=await send('Runtime.evaluate',{returnByValue:true,expression:
+          "document.querySelector('print-preview-app').shadowRoot.querySelector('print-preview-preview-area').getLastTicketForTest()?.deviceName"});
+        return result.result.value;
+      },{timeout:15000}).toBe(ciPrintDestination);
+    }
     await waitForPreview();
     const pageSettings=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
       const roots=[document];
@@ -107,18 +137,29 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
     fs.writeFileSync(info.outputPath('native-print-preview.png'),Buffer.from(screenshot.data,'base64'));
     await info.attach('native print preview',{path:info.outputPath('native-print-preview.png'),contentType:'image/png'});
     const initialTicket=await send('Runtime.evaluate',{returnByValue:true,expression:"document.querySelector('print-preview-app').shadowRoot.querySelector('print-preview-preview-area').getLastTicketForTest().requestID"});
-    const grayscale=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
-      const roots=[document];
-      for(let i=0;i<roots.length;i++){
-        for(const element of roots[i].querySelectorAll('*'))if(element.shadowRoot)roots.push(element.shadowRoot);
-        for(const select of roots[i].querySelectorAll('select')){
-          const option=[...select.options].find(option=>/black|gray/i.test(option.textContent));
-          if(option){select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true,composed:true}));return true;}
-        }
-      }
-      return false;
-    })()`});
-    expect(grayscale.result.value).toBe(true);
+    // Change the *visible* Color select for the selected physical-capability
+    // destination. Searching all hidden select tags can change a dormant
+    // template, which never fires the real Chromium preview update.
+    const selectPrintColor=async(color:boolean)=>{
+      const result=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
+        const roots=[document];
+        for(let i=0;i<roots.length;i++)
+          for(const element of roots[i].querySelectorAll('*'))if(element.shadowRoot)roots.push(element.shadowRoot);
+        const widget=roots.flatMap(root=>[...root.querySelectorAll('print-preview-color-settings')])[0];
+        const select=widget?.shadowRoot?.querySelector('select');
+        const option=select&&[...select.options].find(option=>
+          ${color?'/^color$/i':'/black|gray/i'}.test(option.textContent.trim()));
+        if(!select||!option||!select.getClientRects().length)
+          return {changed:false,reason:'Color/Black and white must be a visible available printer setting'};
+        if(select.value===option.value)
+          return {changed:false,reason:'Requested printer color mode is already selected'};
+        select.value=option.value;
+        select.dispatchEvent(new Event('change',{bubbles:true,composed:true}));
+        return {changed:true,selected:option.textContent.trim()};
+      })()`});
+      expect(result.result.value).toMatchObject({changed:true});
+    };
+    await selectPrintColor(false);
     // Settings can debounce a new ticket. The old loaded preview must not be
     // captured as grayscale before Chromium requests its replacement.
     await expect.poll(async()=>{
@@ -141,16 +182,7 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
       };
       const setColor=async(color:boolean)=>{
         const previous=(await ticket()).requestID;
-        const changed=await send('Runtime.evaluate',{returnByValue:true,expression:`(()=>{
-          const roots=[document];
-          for(let i=0;i<roots.length;i++)for(const element of roots[i].querySelectorAll('*'))if(element.shadowRoot)roots.push(element.shadowRoot);
-          for(const root of roots)for(const select of root.querySelectorAll('select')){
-            const option=[...select.options].find(option=>${color?'/^color$/i':'/black|gray/i'}.test(option.textContent.trim()));
-            if(option){select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true,composed:true}));return true;}
-          }
-          return false;
-        })()`});
-        expect(changed.result.value).toBe(true);
+        await selectPrintColor(color);
         await advance(previous);
       };
       for(const pageNumber of [2,3]){
