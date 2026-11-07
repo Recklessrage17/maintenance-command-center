@@ -60,20 +60,49 @@ try{
 
   result=await json(base,'/api/backup/create',{method:'POST',cookie,body:{category:'master'}});assert.equal(result.response.status,201);const backupId=result.data.backup.id;assert.equal(result.data.backup.workOrderAttachments.attachmentCount,2);const backupFolder=path.join(backupsDir,'MCC Master back up',backupId);const manifest=JSON.parse(fs.readFileSync(path.join(backupFolder,'manifest.json'),'utf8'));assert.equal(manifest.workOrderAttachments.attachmentCount,2);assert.ok(Object.keys(manifest.fileChecksums).some(name=>name.startsWith('files/pm-work-orders/')));
   const firstAbsolute=path.join(workOrderDir,...stored[0].stored_relative_path.split('/').slice(1));fs.rmSync(firstAbsolute);assert.equal(fs.existsSync(firstAbsolute),false);result=await json(base,'/api/backup/restore',{method:'POST',cookie,body:{category:'master',backupId,confirmation:'RESTORE MCC'}});assert.equal(result.response.status,200);assert.equal(fs.existsSync(firstAbsolute),true,'restore must recover a backed-up work-order PDF');assert.equal(crypto.createHash('sha256').update(fs.readFileSync(firstAbsolute)).digest('hex'),stored[0].sha256);
-  const legacyId=`${backupId}_legacy-no-attachment-folder`;const legacyFolder=path.join(backupsDir,'MCC Master back up',legacyId);fs.cpSync(backupFolder,legacyFolder,{recursive:true});const legacyManifestPath=path.join(legacyFolder,'manifest.json');const legacyManifest=JSON.parse(fs.readFileSync(legacyManifestPath,'utf8'));delete legacyManifest.workOrderAttachments;legacyManifest.includedPaths=(legacyManifest.includedPaths??[]).filter(value=>!/(?:^|\/)pm-work-orders\/$/.test(value)&&value!=='files/uploads/');legacyManifest.includedFolders=(legacyManifest.includedFolders??[]).filter(value=>!/(?:^|\/)pm-work-orders\/$/.test(value)&&value!=='files/uploads/');legacyManifest.fileChecksums=Object.fromEntries(Object.entries(legacyManifest.fileChecksums??{}).filter(([name])=>!name.startsWith('files/pm-work-orders/')&&!name.startsWith('files/uploads/')));fs.writeFileSync(legacyManifestPath,JSON.stringify(legacyManifest,null,2));fs.rmSync(path.join(legacyFolder,'files','pm-work-orders'),{recursive:true,force:true});fs.rmSync(path.join(legacyFolder,'files','uploads'),{recursive:true,force:true});
-// A CURRENT signed Master backup must reject this manifest/file tampering.
-// Test that before converting the isolated fixture to an actual legacy shape.
-result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId:legacyId}});
-assert.equal(result.response.status,200,'tampered signed Master verification must report a definitive result');
-assert.equal(result.data.ok,false,'a current signed Master package must reject removed payloads and changed checksums');
-// Historical manifests predate portable package signatures and the PM attachment
-// folder. Model those missing version/signature fields explicitly instead of
-// relabeling a tampered CURRENT package as an acceptable old backup.
-for(const field of ['masterRetentionVersion','packageVersion','schemaVersion','portableArchive','excelExports','payloadSizeBytes','workOrderRecords'])delete legacyManifest[field];
-legacyManifest.backupId=legacyId;
-legacyManifest.backupType='legacy';
-fs.writeFileSync(legacyManifestPath,JSON.stringify(legacyManifest,null,2));
-const unrelatedUpload=path.join(uploadsDir,'unrelated-preserved.txt');fs.writeFileSync(unrelatedUpload,'unrelated sanitized upload');result=await json(base,'/api/backup/restore',{method:'POST',cookie,body:{category:'master',backupId:legacyId,confirmation:'RESTORE MCC'}});assert.equal(result.response.status,200,'a legacy manifest without the attachment folder must remain restorable: '+JSON.stringify(result.data));assert.equal(fs.existsSync(firstAbsolute),true,'legacy restore must preserve attachment files omitted by the old format');assert.equal(fs.readFileSync(unrelatedUpload,'utf8'),'unrelated sanitized upload','legacy restore must not delete unrelated uploads omitted by the backup');
+  // A copied signed Master backup is NOT a legacy backup: tampering with its
+  // manifest and removing payloads must fail the authoritative verifier.
+  const tamperedId=`${backupId}_tampered-signature`;
+  const tamperedFolder=path.join(backupsDir,'MCC Master back up',tamperedId);
+  fs.cpSync(backupFolder,tamperedFolder,{recursive:true});
+  const tamperedManifestPath=path.join(tamperedFolder,'manifest.json');
+  const tamperedManifest=JSON.parse(fs.readFileSync(tamperedManifestPath,'utf8'));
+  delete tamperedManifest.workOrderAttachments;
+  tamperedManifest.fileChecksums=Object.fromEntries(Object.entries(tamperedManifest.fileChecksums??{}).filter(([name])=>!name.startsWith('files/pm-work-orders/')&&!name.startsWith('files/uploads/')));
+  fs.writeFileSync(tamperedManifestPath,JSON.stringify(tamperedManifest,null,2));
+  fs.rmSync(path.join(tamperedFolder,'files','pm-work-orders'),{recursive:true,force:true});
+  fs.rmSync(path.join(tamperedFolder,'files','uploads'),{recursive:true,force:true});
+  result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId:tamperedId}});
+  assert.equal(result.response.status,200,'tampered signed Master verification must report a definitive result');
+  assert.equal(result.data.ok,false,'a current signed Master package must reject removed payloads and changed checksums');
+
+  // Build a truly legacy-shaped fixture independently: historical backups have
+  // a root mcc.sqlite and no portable recovery package, receipt, signing or
+  // attachment directory. This is not a downgraded signed Master package.
+  const legacyId=`${backupId}_legacy-no-attachment-folder`;
+  const legacyFolder=path.join(backupsDir,'MCC Master back up',legacyId);
+  fs.mkdirSync(legacyFolder);
+  const legacyDbPath=path.join(legacyFolder,'mcc.sqlite');
+  fs.copyFileSync(path.join(backupFolder,...manifest.databaseFile.split('/')),legacyDbPath);
+  const legacyManifest={
+    appName:manifest.appName,
+    backupId:legacyId,
+    backupCategory:'master',
+    backupType:'legacy',
+    createdAt:manifest.createdAt,
+    createdBy:manifest.createdBy,
+    appVersion:manifest.appVersion,
+    databaseFile:'mcc.sqlite',
+    databaseSizeBytes:fs.statSync(legacyDbPath).size,
+    includedPaths:['mcc.sqlite'],
+    includedFolders:[],
+    recordCounts:manifest.recordCounts,
+    checksumSha256:crypto.createHash('sha256').update(fs.readFileSync(legacyDbPath)).digest('hex'),
+    fileChecksums:{},
+    notes:'Synthetic legacy package without attachment folder',
+  };
+  fs.writeFileSync(path.join(legacyFolder,'manifest.json'),JSON.stringify(legacyManifest,null,2));
+  const unrelatedUpload=path.join(uploadsDir,'unrelated-preserved.txt');fs.writeFileSync(unrelatedUpload,'unrelated sanitized upload');result=await json(base,'/api/backup/restore',{method:'POST',cookie,body:{category:'master',backupId:legacyId,confirmation:'RESTORE MCC'}});assert.equal(result.response.status,200,'a legacy manifest without the attachment folder must remain restorable: '+JSON.stringify(result.data));assert.equal(fs.existsSync(firstAbsolute),true,'legacy restore must preserve attachment files omitted by the old format');assert.equal(fs.readFileSync(unrelatedUpload,'utf8'),'unrelated sanitized upload','legacy restore must not delete unrelated uploads omitted by the backup');
   const backedAttachment=Object.keys(manifest.fileChecksums).find(name=>name.startsWith('files/pm-work-orders/'));fs.appendFileSync(path.join(backupFolder,...backedAttachment.split('/')),Buffer.from('tamper'));result=await json(base,'/api/backup/verify',{method:'POST',cookie,body:{category:'master',backupId}});assert.equal(result.response.status,200);assert.equal(result.data.ok,false);assert.ok(result.data.missingOrChangedFiles.includes(backedAttachment));
   console.log(`PM work-order attachment tests passed on ${process.platform}: authoritative upload rules, validation, N/A/follow-up rules, atomic storage, idempotency, collision handling, authorized PDF access, relative Excel links, ZIP packaging, and backup/restore integrity.`);
 }finally{await stop(server);const resolved=path.resolve(fixture);const allowed=path.resolve(root,'tmp');if(resolved.startsWith(`${allowed}${path.sep}`)&&fs.existsSync(resolved))fs.rmSync(resolved,{recursive:true,force:true});}
