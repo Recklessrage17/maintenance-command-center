@@ -40,8 +40,23 @@ jobs:
           npm ci --prefix frontend --include=dev --no-audit --no-fund
           npm run build --prefix frontend
           npx --no-install playwright install --with-deps chromium
-      - name: Repeat unchanged baseline keyboard assertion under contention
+      # This intentionally runs the original, immutable b8d1303 test under
+      # the same 20x contention load. Its known intermittent focus regression
+      # is historical evidence, not a release gate for PR #213. The candidate
+      # job below retains a mandatory 20x zero-retry keyboard gate.
+      - name: Repeat unchanged baseline keyboard assertion under contention (diagnostic)
+        id: baseline_keyboard
+        continue-on-error: true
         run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
+      - name: Report immutable baseline keyboard diagnostic
+        if: always() && steps.baseline_keyboard.outcome != 'skipped'
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline_keyboard.outcome }}
+        run: |
+          printf '### Immutable b8d1303 baseline keyboard comparison: %s (diagnostic only)\n' "$BASELINE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$BASELINE_OUTCOME" != success ]; then
+            echo "::warning title=Historical baseline keyboard flakiness::The unchanged b8d1303 keyboard test failed in 20x stress. This is a non-blocking diagnostic; candidate 20x keyboard and full browser regressions remain strict zero-retry release gates."
+          fi
       - name: Verify baseline runtime cleanup
         if: always()
         run: |
@@ -185,7 +200,9 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends cups cups-client
           sudo service cups start
-          lpinfo -v | grep -E '^network socket$'
+          # Enumerating CUPS backends requires administrator privileges on
+          # Ubuntu 24.04. Do not relax the CUPS access policy globally.
+          sudo lpinfo -v | grep -E '^network socket$'
           cat > "$RUNNER_TEMP/mcc-ci-color.ppd" <<'PPD'
           *PPD-Adobe: "4.3"
           *FormatVersion: "4.3"
