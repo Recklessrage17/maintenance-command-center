@@ -149,6 +149,17 @@ jobs:
         timeout-minutes: 5
         run: npx --no-install playwright install --with-deps chromium
 
+      # Requisition PDF API tests spawn soffice/libreoffice to convert real PDFs.
+      # PyMuPDF (below) inspects PDFs but cannot replace the converter.
+      - name: Install and verify LibreOffice requisition PDF converter
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-writer
+          command -v soffice
+          command -v libreoffice
+          soffice --headless --version
+
       - name: Install pinned PDF inspection dependency
         timeout-minutes: 3
         run: |
