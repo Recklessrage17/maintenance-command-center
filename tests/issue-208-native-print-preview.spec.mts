@@ -21,7 +21,21 @@ for(const kind of ['under','over'])for(const scenario of scenarios)test(`Patch 1
     expect(part.response.status).toBe(201);
     const created=await request(runtime.base,'/api/requisitions',{method:'POST',cookie,body:{poInitiator:'Local Security Owner',requisitionedByName:'Local Security Owner',taxExempt,notes,items:[{inventoryPartId:Number(part.data.part.id),quantityRequested:1}]}});
     expect(created.response.status).toBe(201);
-    context=await chromium.launchPersistentContext(fixtureDirectory('native-print-profile'),{channel:'chromium',headless:false,viewport:{width:1440,height:1000}});
+    // The managed run's long TMPDIR exceeds Linux's Unix socket path limit
+    // for Chromium's org.chromium.Chromium.*/SingletonSocket. Only Chromium's
+    // child process uses GitHub's short, job-owned temporary directory; the
+    // persistent browser profile stays in the managed fixture for safe cleanup.
+    const useShortTemp = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true';
+    const runnerTemp = useShortTemp ? process.env.RUNNER_TEMP : undefined;
+    if(useShortTemp && (!runnerTemp || !path.isAbsolute(runnerTemp) ||
+        fs.realpathSync(runnerTemp) !== path.resolve(runnerTemp) ||
+        Buffer.byteLength(path.join(runnerTemp,'org.chromium.Chromium.XXXXXX','SingletonSocket')) >= 108)){
+      throw new Error('GitHub runner temporary directory is unsuitable for Chromium singleton socket.');
+    }
+    context=await chromium.launchPersistentContext(fixtureDirectory('native-print-profile'),{
+      channel:'chromium',headless:false,viewport:{width:1440,height:1000},
+      ...(runnerTemp ? {env:{...process.env,TMPDIR:runnerTemp}} : {}),
+    });
     const separator=cookie.indexOf('=');
     await context.addCookies([{name:cookie.slice(0,separator),value:cookie.slice(separator+1),url:runtime.base,httpOnly:true,sameSite:'Lax'}]);
     const page=context.pages()[0];
