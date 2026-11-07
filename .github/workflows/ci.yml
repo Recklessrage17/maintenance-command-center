@@ -166,6 +166,15 @@ jobs:
           test -s "$smoke_dir/requisition-under-100.pdf"
           printf 'XLSX-to-PDF smoke conversion passed; output size: %s bytes\n' "$(wc -c < "$smoke_dir/requisition-under-100.pdf")"
 
+      # Native Chromium print-preview tests require a virtual X display on Ubuntu.
+      # Installation alone does not enable the display; xvfb-run is configured separately.
+      - name: Install virtual display for headed Chromium
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+          command -v Xvfb
+          command -v xvfb-run
+
       - name: Install pinned PDF inspection dependency
         timeout-minutes: 3
         run: |
