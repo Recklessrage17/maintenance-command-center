@@ -149,16 +149,22 @@ jobs:
         timeout-minutes: 5
         run: npx --no-install playwright install --with-deps chromium
 
-      # Requisition PDF API tests spawn soffice/libreoffice to convert real PDFs.
-      # PyMuPDF (below) inspects PDFs but cannot replace the converter.
-      - name: Install and verify LibreOffice requisition PDF converter
+      # Requisition PDFs are converted from XLSX, which requires LibreOffice Calc.
+      # Writer alone provides soffice but lacks the spreadsheet import filter.
+      # PyMuPDF below inspects PDF output; it does not perform XLSX conversion.
+      - name: Install LibreOffice Calc and verify actual requisition XLSX conversion
         timeout-minutes: 10
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-writer
+          sudo apt-get install -y --no-install-recommends libreoffice-calc libreoffice-writer
           command -v soffice
           command -v libreoffice
           soffice --headless --version
+          smoke_dir=$(mktemp -d "$RUNNER_TEMP/mcc-requisition-convert.XXXXXXXX")
+          trap 'rm -rf "$smoke_dir"' EXIT
+          soffice -env:UserInstallation="file://$smoke_dir/profile" --headless --convert-to pdf --outdir "$smoke_dir" backend/templates/requisition-under-100.xlsx
+          test -s "$smoke_dir/requisition-under-100.pdf"
+          printf 'XLSX-to-PDF smoke conversion passed; output size: %s bytes\n' "$(wc -c < "$smoke_dir/requisition-under-100.pdf")"
 
       - name: Install pinned PDF inspection dependency
         timeout-minutes: 3
