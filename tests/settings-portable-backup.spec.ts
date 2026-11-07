@@ -115,3 +115,49 @@ test('Portable restore failure keeps the last real percentage and safely enables
 });
 
 test('Maintenance Tech 3 cannot see portable recovery controls',async({page})=>{await mockSettings(page,'tech3');await page.goto('/settings');await expect(page.getByRole('region',{name:'Portable Master Backup and Recovery'})).toHaveCount(0);});
+
+test('Master retention preview requires exact confirmation and reports resulting count',async({page},testInfo)=>{
+  let count=4;let deleted=false;
+  const set=(n:number)=>({id:`MCC_Master_Backup_2026-11-0${n}T12-00-00-000Z_master_manual`,createdAt:`2026-11-0${n}T12:00:00.000Z`,type:'master_manual',sizeBytes:4096,archive:`MCC_Master_Backup_2026-11-0${n}_12-00-00.zip`,verified:true});
+  await mockSettings(page,'admin',()=>({master:{...group('master',true),count,retention:{limit:3,verifiedCount:count,excludedCount:1,pendingCount:0,latestVerified:set(4).createdAt}}}));
+  await page.route('**/api/backup/list?category=master',route=>route.fulfill({json:{ok:true,backups:[]}}));
+  await page.route('**/api/backup/master/cleanup/preview',route=>route.fulfill({json:{ok:true,token:'immutable-preview',preview:{keep:[set(4),set(3),set(2)],candidates:[set(1)],excluded:[{id:'legacy-protected',reason:'No verified manifest; protected.'}],pending:[]}}}));
+  await page.route('**/api/backup/master/cleanup',async route=>{
+    expect(route.request().postDataJSON()).toEqual({token:'immutable-preview',ids:[set(1).id],confirmation:'DELETE 1 MASTER BACKUPS'});
+    deleted=true;count=3;await route.fulfill({json:{ok:true,message:'1 Master sets removed; 3 verified sets retained; 0 failures; 0 pending cleanups.'}});
+  });
+  await page.goto('/settings');const master=page.locator('.backup-tier-card').nth(2);
+  await expect(master.getByText('Retention: Keep newest 3 verified Master backups')).toBeVisible();
+  await expect(master.getByText(/4 verified local sets/)).toBeVisible();
+  await master.getByRole('button',{name:'View Backups'}).click();await master.getByRole('button',{name:'Preview Cleanup'}).click();
+  const preview=page.getByRole('region',{name:'Master cleanup preview'});await expect(preview).toContainText('legacy-protected');
+  const confirm=preview.getByRole('button',{name:'Confirm Master Cleanup'});await expect(confirm).toBeDisabled();
+  await preview.getByLabel(/Type DELETE/).fill('DELETE 2 MASTER BACKUPS');await expect(confirm).toBeDisabled();
+  for(const button of await master.getByRole('button').all()) {
+    const width=await button.evaluate(element=>({scroll:element.scrollWidth,client:element.clientWidth}));expect(width.scroll).toBeLessThanOrEqual(width.client+1);
+  }
+  await master.screenshot({path:testInfo.outputPath('master-before-cleanup.jpg'),type:'jpeg',quality:80,scale:'css'});
+  await preview.getByLabel(/Type DELETE/).fill('DELETE 1 MASTER BACKUPS');await confirm.click();
+  await expect(master.getByText(/3 verified local sets/)).toBeVisible();expect(deleted).toBe(true);await expect(preview).toHaveCount(0);
+  await master.screenshot({path:testInfo.outputPath('master-after-cleanup.jpg'),type:'jpeg',quality:80,scale:'css'});
+  const widths=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));expect(widths.scroll).toBeLessThanOrEqual(widths.client);
+});
+
+test('an incomplete external copy is shown as needing attention after local creation',async({page})=>{
+  await mockSettings(page,'admin');
+  const message='Local package created. External copy failed. No prior Master backups were pruned.';
+  await page.route('**/api/backup/create',route=>route.fulfill({status:201,json:{ok:true,message,status:{lastBackupResult:{ok:false,message}}}}));
+  await page.goto('/settings');await page.getByRole('button',{name:'Create Master Backup Now'}).click();
+  await expect(page.locator('.backup-progress-panel.error')).toContainText(message);
+  await expect(page.locator('.backup-result-panel.error')).toContainText(message);
+});
+
+test('Master status distinguishes previous verification, unknown sets and missing signing configuration',async({page})=>{
+  await mockSettings(page,'admin',()=>({master:{...group('master',true),retention:{limit:3,verifiedCount:2,excludedCount:1,pendingCount:0,unknownCount:1,latestVerified:'2026-11-05T12:00:00.000Z',verificationInProgress:true,secretConfigured:false}}}));
+  await page.goto('/settings');const master=page.locator('.master-retention-card');
+  await expect(master).toContainText('Status uses previous verification and file metadata');
+  await expect(master).toContainText('1 sets await fresh verification');
+  await expect(master).toContainText('Integrity verification in progress; showing previous results.');
+  await expect(master).toContainText('Persistent SESSION_SECRET is missing. Automatic retention is disabled.');
+  await expect(master).toContainText('Last integrity verification:');
+});

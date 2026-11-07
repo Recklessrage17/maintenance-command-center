@@ -13,6 +13,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Keep the original assertion and exact production source in the same hosted
+  # environment as the candidate while investigating PR #213's keyboard failure.
+  # This diagnostic comparison is scoped to this PR, not future releases.
+  baseline-keyboard-comparison:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 213
+    name: Exact b8d1303 keyboard comparison (Node 22)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      MCC_PLAYWRIGHT_FRONTEND_ONLY: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b8d13033baaf181a519b067db3f98556a260c88e
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - name: Build exact baseline and install Chromium
+        run: |
+          test "$(git rev-parse HEAD)" = b8d13033baaf181a519b067db3f98556a260c88e
+          npm ci --include=dev --no-audit --no-fund
+          npm ci --prefix frontend --include=dev --no-audit --no-fund
+          npm run build --prefix frontend
+          npx --no-install playwright install --with-deps chromium
+      # This intentionally runs the original, immutable b8d1303 test under
+      # the same 20x contention load. Its known intermittent focus regression
+      # is historical evidence, not a release gate for PR #213. The candidate
+      # job below retains a mandatory 20x zero-retry keyboard gate.
+      - name: Repeat unchanged baseline keyboard assertion under contention (diagnostic)
+        id: baseline_keyboard
+        continue-on-error: true
+        run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
+      - name: Report immutable baseline keyboard diagnostic
+        if: always() && steps.baseline_keyboard.outcome != 'skipped'
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline_keyboard.outcome }}
+        run: |
+          printf '### Immutable b8d1303 baseline keyboard comparison: %s (diagnostic only)\n' "$BASELINE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$BASELINE_OUTCOME" != success ]; then
+            echo "::warning title=Historical baseline keyboard flakiness::The unchanged b8d1303 keyboard test failed in 20x stress. This is a non-blocking diagnostic; candidate 20x keyboard and full browser regressions remain strict zero-retry release gates."
+          fi
+      - name: Verify baseline runtime cleanup
+        if: always()
+        run: |
+          npm run test:playwright:cleanup
+          node --input-type=module -e "import fs from 'node:fs'; const p='tmp/playwright-runs'; if(fs.existsSync(p) && fs.readdirSync(p).length) throw new Error('Baseline runtime retained; inspect diagnostics before explicit cleanup');"
+      - name: Retain baseline comparison evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: b8d1303-keyboard-comparison-${{ github.run_attempt }}
+          path: diagnostics/playwright/
+          retention-days: 90
+
   build-and-regression:
     name: Build and complete browser regressions (Node 22)
     runs-on: ubuntu-24.04
@@ -107,6 +164,87 @@ jobs:
         timeout-minutes: 5
         run: npx --no-install playwright install --with-deps chromium
 
+      # Requisition PDFs are converted from XLSX, which requires LibreOffice Calc.
+      # Writer alone provides soffice but lacks the spreadsheet import filter.
+      # PyMuPDF below inspects PDF output; it does not perform XLSX conversion.
+      - name: Install LibreOffice Calc and verify actual requisition XLSX conversion
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-calc libreoffice-writer
+          command -v soffice
+          command -v libreoffice
+          soffice --headless --version
+          smoke_dir=$(mktemp -d "$RUNNER_TEMP/mcc-requisition-convert.XXXXXXXX")
+          trap 'rm -rf "$smoke_dir"' EXIT
+          soffice -env:UserInstallation="file://$smoke_dir/profile" --headless --convert-to pdf --outdir "$smoke_dir" backend/templates/requisition-under-100.xlsx
+          test -s "$smoke_dir/requisition-under-100.pdf"
+          printf 'XLSX-to-PDF smoke conversion passed; output size: %s bytes\n' "$(wc -c < "$smoke_dir/requisition-under-100.pdf")"
+
+      # Native Chromium print-preview tests require a virtual X display on Ubuntu.
+      # Installation alone does not enable the display; xvfb-run is configured separately.
+      - name: Install virtual display for headed Chromium
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+          command -v Xvfb
+          command -v xvfb-run
+
+      # Save as PDF is not a color-capable printer and its PDF preview has
+      # no Color / Black-and-white control. Install one disposable CUPS queue
+      # so the native Chromium test exercises a real visible printer setting.
+      # The backend points to a closed loopback port: CI only previews; it
+      # never submits a physical print job.
+      - name: Provision color-capable CI-only printer
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y --no-install-recommends cups cups-client
+          sudo service cups start
+          # Enumerating CUPS backends requires administrator privileges on
+          # Ubuntu 24.04. Do not relax the CUPS access policy globally.
+          sudo lpinfo -v | grep -E '^network socket$'
+          cat > "$RUNNER_TEMP/mcc-ci-color.ppd" <<'PPD'
+          *PPD-Adobe: "4.3"
+          *FormatVersion: "4.3"
+          *FileVersion: "1.0"
+          *LanguageVersion: English
+          *LanguageEncoding: ISOLatin1
+          *PCFileName: "MCCCOLOR.PPD"
+          *Manufacturer: "MCC CI"
+          *Product: "(MCC Virtual PostScript)"
+          *ModelName: "MCC CI Color Printer"
+          *ShortNickName: "MCC CI Color"
+          *NickName: "MCC CI Color Printer"
+          *PSVersion: "(3010.000) 0"
+          *LanguageLevel: "3"
+          *ColorDevice: True
+          *DefaultColorSpace: RGB
+          *FileSystem: False
+          *Throughput: "1"
+          *HWMargins: "0 0 0 0"
+          *OpenUI *PageSize/Page Size: PickOne
+          *DefaultPageSize: Letter
+          *PageSize Letter/US Letter: "<</PageSize[612 792]>>setpagedevice"
+          *CloseUI: *PageSize
+          *OpenUI *PageRegion/Page Region: PickOne
+          *DefaultPageRegion: Letter
+          *PageRegion Letter/US Letter: "<</PageSize[612 792]>>setpagedevice"
+          *CloseUI: *PageRegion
+          *ImageableArea Letter: "0 0 612 792"
+          *PaperDimension Letter: "612 792"
+          *OpenUI *ColorModel/Color Mode: PickOne
+          *OrderDependency: 10 AnySetup *ColorModel
+          *DefaultColorModel: RGB
+          *ColorModel RGB/Color: "<</ProcessColorModel /DeviceRGB>>setpagedevice"
+          *ColorModel Gray/Black and White: "<</ProcessColorModel /DeviceGray>>setpagedevice"
+          *CloseUI: *ColorModel
+          PPD
+          sudo lpadmin -p MCC_CI_COLOR -E -v socket://127.0.0.1:19999 -P "$RUNNER_TEMP/mcc-ci-color.ppd"
+          sudo lpadmin -d MCC_CI_COLOR
+          lpstat -p MCC_CI_COLOR
+          lpoptions -p MCC_CI_COLOR -l | grep -E 'ColorModel.*RGB.*Gray'
+          printf '%s\n' 'CI_PRINT_TEST_PRINTER=MCC_CI_COLOR' >> "$GITHUB_ENV"
+
       - name: Install pinned PDF inspection dependency
         timeout-minutes: 3
         run: |
@@ -128,6 +266,39 @@ jobs:
         timeout-minutes: 6
         run: npm run test:playwright -- tests/maintenance-lab-background.spec.ts --project=desktop-chromium --grep 'long Machine Library' --repeat-each=20 --forbid-only --workers=2 --retries=0
 
+      # Native Chromium print preview runs headed; validate one real scenario
+      # inside a virtual display before running all desktop/mobile regressions.
+      - name: Verify native Chromium print preview under Xvfb
+        timeout-minutes: 10
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1200x24" npm run test:playwright -- \
+            tests/issue-208-native-print-preview.spec.mts \
+            --project=desktop-chromium \
+            --grep 'Patch 1 under blank native Chromium PDF' \
+            --forbid-only --workers=1 --retries=0
+
+      # Validate both desktop/mobile integrated record-print scenarios
+      # before the costly complete suite; all native print assertions remain
+      # required with zero retries and an actual Xvfb display.
+      - name: Verify integrated native machine and equipment print previews
+        timeout-minutes: 8
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1200x24" npm run test:playwright -- \
+            tests/release-integration-native-print.spec.mts \
+            --project=desktop-chromium --project=mobile-chromium \
+            --forbid-only --workers=1 --retries=0
+
+      # Run the exact legacy attachment-restore regression independently
+      # before the 970-test suite, so a backend 500 yields focused diagnostics.
+      # This remains a hard zero-retry gate; it does not mock or bypass restore.
+      - name: Verify legacy PM attachment backup restore
+        timeout-minutes: 6
+        run: |
+          npm run test:playwright -- tests/release-integration-api.spec.mts \
+            --project=desktop-chromium \
+            --grep 'integrated native regression: pm-work-order-attachments.mjs' \
+            --forbid-only --workers=1 --retries=0
+
       - name: Desktop and mobile browser regressions
         # A complete zero-retry run took 28.2 minutes on the hosted runner.
         # This is orchestration headroom; per-test/assertion deadlines stay intact.
@@ -143,7 +314,7 @@ jobs:
           fi
           printf '%s\n' "${specs[@]}" | grep -Fxq 'tests/asset-maintenance-record-pdf.spec.ts'
           printf '%s\n' "${specs[@]}" > "$RUNNER_TEMP/mcc-ci-evidence/browser-specs.txt"
-          npm run test:playwright -- "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5
+          xvfb-run -a -s "-screen 0 1920x1200x24" npm run test:playwright -- "${specs[@]}" --forbid-only --workers=2 --retries=0 --max-failures=5
 
       - name: Verify managed runtime cleanup
         if: always()
