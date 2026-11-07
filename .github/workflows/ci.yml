@@ -175,6 +175,58 @@ jobs:
           command -v Xvfb
           command -v xvfb-run
 
+      # Save as PDF is not a color-capable printer and its PDF preview has
+      # no Color / Black-and-white control. Install one disposable CUPS queue
+      # so the native Chromium test exercises a real visible printer setting.
+      # The backend points to a closed loopback port: CI only previews; it
+      # never submits a physical print job.
+      - name: Provision color-capable CI-only printer
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y --no-install-recommends cups-daemon cups-client
+          sudo service cups start
+          cat > "$RUNNER_TEMP/mcc-ci-color.ppd" <<'PPD'
+          *PPD-Adobe: "4.3"
+          *FormatVersion: "4.3"
+          *FileVersion: "1.0"
+          *LanguageVersion: English
+          *LanguageEncoding: ISOLatin1
+          *PCFileName: "MCCCOLOR.PPD"
+          *Manufacturer: "MCC CI"
+          *Product: "(MCC Virtual PostScript)"
+          *ModelName: "MCC CI Color Printer"
+          *ShortNickName: "MCC CI Color"
+          *NickName: "MCC CI Color Printer"
+          *PSVersion: "(3010.000) 0"
+          *LanguageLevel: "3"
+          *ColorDevice: True
+          *DefaultColorSpace: RGB
+          *FileSystem: False
+          *Throughput: "1"
+          *HWMargins: "0 0 0 0"
+          *OpenUI *PageSize/Page Size: PickOne
+          *DefaultPageSize: Letter
+          *PageSize Letter/US Letter: "<</PageSize[612 792]>>setpagedevice"
+          *CloseUI: *PageSize
+          *OpenUI *PageRegion/Page Region: PickOne
+          *DefaultPageRegion: Letter
+          *PageRegion Letter/US Letter: "<</PageSize[612 792]>>setpagedevice"
+          *CloseUI: *PageRegion
+          *ImageableArea Letter: "0 0 612 792"
+          *PaperDimension Letter: "612 792"
+          *OpenUI *ColorModel/Color Mode: PickOne
+          *OrderDependency: 10 AnySetup *ColorModel
+          *DefaultColorModel: RGB
+          *ColorModel RGB/Color: "<</ProcessColorModel /DeviceRGB>>setpagedevice"
+          *ColorModel Gray/Black and White: "<</ProcessColorModel /DeviceGray>>setpagedevice"
+          *CloseUI: *ColorModel
+          PPD
+          sudo lpadmin -p MCC_CI_COLOR -E -v socket://127.0.0.1:19999 -P "$RUNNER_TEMP/mcc-ci-color.ppd"
+          sudo lpadmin -d MCC_CI_COLOR
+          lpstat -p MCC_CI_COLOR
+          lpoptions -p MCC_CI_COLOR -l | grep -E 'ColorModel.*RGB.*Gray'
+          printf '%s\n' 'CI_PRINT_TEST_PRINTER=MCC_CI_COLOR' >> "$GITHUB_ENV"
+
       - name: Install pinned PDF inspection dependency
         timeout-minutes: 3
         run: |
